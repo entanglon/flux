@@ -14,18 +14,37 @@ struct FeaturedCarousel: View {
             if !items.isEmpty {
                 let item = items[currentIndex]
                 
-                // 1. Hero Image
+                // 1. Hero Image / Backdrop Selection
                 GeometryReader { geo in
-                    AsyncImage(url: item.heroURL ?? item.imageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
-                        default:
-                            Rectangle().fill(Color.gray.opacity(0.1))
+                    ZStack {
+                        // Logic: Only use backdrop/hero (landscape). Never stretch a poster.
+                        if let heroURL = item.heroURL ?? item.backdropURL {
+                            CachedImage(url: heroURL.highQuality(), maxDimension: 1920) { phase in
+                                if let image = phase.image {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: geo.size.width, height: geo.size.height)
+                                        .clipped()
+                                } else {
+                                    Rectangle().fill(Color.gray.opacity(0.1))
+                                }
+                            }
+                        } else {
+                            // High-quality fallback for items without backdrops (e.g. some Stremio catalogs)
+                            // Use a premium glass/gradient background instead of a blurry stretched poster.
+                            LinearGradient(
+                                colors: [.blue.opacity(0.3), .purple.opacity(0.3), .black],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .overlay(
+                                Circle()
+                                    .fill(Color.white.opacity(0.05))
+                                    .frame(width: 800, height: 800)
+                                    .blur(radius: 100)
+                                    .offset(x: 200, y: -200)
+                            )
                         }
                     }
                 }

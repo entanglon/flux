@@ -17,9 +17,9 @@ struct WatchProvider: Identifiable, Hashable, Codable {
 
 struct MediaItem: Identifiable, Hashable, Codable {
     let id: String
-    let title: String
-    let description: String
-    let imageURL: URL? // Fallback/Main image
+    var title: String
+    var description: String
+    var imageURL: URL? // Fallback/Main image
     var posterURL: URL?
     var backdropURL: URL?
     var heroURL: URL?

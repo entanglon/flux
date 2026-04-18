@@ -3,7 +3,7 @@ import Foundation
 struct Episode: Identifiable, Codable, Hashable {
     let id: Int
     let name: String
-    let overview: String
+    var overview: String
     let stillURL: URL?
     let heroURL: URL? // High-quality image for Hero background
     let episodeNumber: Int

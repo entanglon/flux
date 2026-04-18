@@ -19,79 +19,64 @@ class TraktManager: ObservableObject {
         self.isAuthenticated = !accessToken.isEmpty
     }
     
-    // MARK: - Auth Logic
+    // MARK: - Auth Logic (PIN Flow)
     
-    struct DeviceCodeResponse: Codable {
-        let device_code: String
-        let user_code: String
-        let verification_url: String
-        let expires_in: Int
-        let interval: Int
+    var authorizationURL: URL? {
+        let urlString = "https://trakt.tv/oauth/authorize?response_type=code&client_id=\(Secrets.traktClientId)&redirect_uri=\(redirectURI)"
+        return URL(string: urlString)
     }
     
-    func generateDeviceCode() async throws -> DeviceCodeResponse {
-        let url = URL(string: "\(baseURL)/oauth/device/code")!
+    struct TokenResponse: Codable {
+        let access_token: String
+        let refresh_token: String
+        let created_at: Int
+        let expires_in: Int
+        let scope: String
+        let token_type: String
+    }
+    
+    func exchangePINForToken(pin: String) async throws {
+        let cleanedPin = pin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = URL(string: "\(baseURL)/oauth/token")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("2", forHTTPHeaderField: "trakt-api-version")
         request.addValue(Secrets.traktClientId, forHTTPHeaderField: "trakt-api-key")
         
-        let body: [String: String] = ["client_id": Secrets.traktClientId]
+        let body: [String: String] = [
+            "code": cleanedPin,
+            "client_id": Secrets.traktClientId,
+            "client_secret": Secrets.traktClientSecret,
+            "redirect_uri": redirectURI,
+            "grant_type": "authorization_code"
+        ]
+        
         request.httpBody = try JSONEncoder().encode(body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
-        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
-        return try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
-    }
-    
-    struct TokenResponse: Codable {
-        let access_token: String
-        let refresh_token: String
-    }
-    
-    func pollForToken(deviceCode: String, interval: Int, expiresIn: Int) async throws {
-        let url = URL(string: "\(baseURL)/oauth/device/token")!
-        let expireDate = Date().addingTimeInterval(TimeInterval(expiresIn))
         
-        while Date() < expireDate {
-            try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("2", forHTTPHeaderField: "trakt-api-version")
-            request.addValue(Secrets.traktClientId, forHTTPHeaderField: "trakt-api-key")
-            
-            let body: [String: String] = [
-                "code": deviceCode,
-                "client_id": Secrets.traktClientId,
-                "client_secret": Secrets.traktClientSecret
-            ]
-            request.httpBody = try JSONEncoder().encode(body)
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 200 {
-                    let tokenData = try JSONDecoder().decode(TokenResponse.self, from: data)
-                    await MainActor.run {
-                        self.accessToken = tokenData.access_token
-                        self.refreshToken = tokenData.refresh_token
-                        self.isAuthenticated = true
-                    }
-                    // Initial sync
-                    try? await syncHistory()
-                    return
-                } else if httpResponse.statusCode == 400 {
-                    continue // Keep polling (Pending)
-                } else {
-                    throw URLError(.userAuthenticationRequired)
-                }
+        if httpResponse.statusCode == 200 {
+            let tokenData = try JSONDecoder().decode(TokenResponse.self, from: data)
+            await MainActor.run {
+                self.accessToken = tokenData.access_token
+                self.refreshToken = tokenData.refresh_token
+                self.isAuthenticated = true
+                self.errorMessage = nil
             }
+            // Initial sync
+            try? await syncHistory()
+        } else {
+             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown Error"
+             print("[Trakt] Auth Error \(httpResponse.statusCode): \(errorBody)")
+             await MainActor.run {
+                 self.errorMessage = "Trakt Error: \(errorBody)"
+             }
+             throw URLError(.userAuthenticationRequired)
         }
-        throw URLError(.timedOut)
     }
     
     func logout() {

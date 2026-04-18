@@ -1,30 +1,31 @@
-# Flux Project Handover - Restoration Complete
+# Flux Project Handover - Restoration & Polishing Complete
 
-The application has been successfully restored to its stable, Stremio-native state following a significant codebase regression.
+> [!CAUTION]
+> **STRICT UI PRESERVATION WARNING**: Never modify existing UI components, card layouts, or premium aesthetics without explicit user permission. The current design has been meticulously tuned for a "premium" feel. 
 
-## Current State
-- **Architecture**: Strictly Stremio-native. All metadata and streams are fetched via the Stremio Addon Protocol.
-- **Models**: `MediaItem` uses String-based IDs (IMDb/Stremio) and contains all necessary metadata fields.
-- **Build**: Successfully buildable on macOS (arm64). Common compiler timeout issues and missing dependency errors have been resolved.
-- **Services**:
-    - `StremioService.swift`: Core logic for Cinemeta and addon catalogs.
-    - `StreamManager.swift`: Parallel stream aggregation with metadata parsing (Quality, Size, Language).
-    - `Secrets.swift`: Central location for bridge URLs and API keys.
+The application has been successfully restored to its stable, Stremio-native state and deeply polished with rich metadata and high-fidelity visuals.
 
-## Restored Features
-- [x] **JustWatch Bridge**: "Where to Watch" button in `DetailView`.
-- [x] **Cast Initials**: Initials-based avatar fallback in `DetailView`.
-- [x] **Performance**: `LazyVStack` in player stream lists to prevent lag.
-- [x] **Search**: Aggregated search across movies and TV shows using Cinemeta.
+## Recent Milestones (April 18-19)
+- **Trakt Integration**: Successfully implemented Device OAuth flow (`8 digit PIN`). History now syncs correctly.
+- **Episode UI Restoration**: Full restoration of the premium landscape design (380x214 glass overlays) with context-aware scrolling chevrons.
+- **Metadata Enrichment**:
+    - **Episode Overviews**: Implemented a per-season fetch from TMDB to fill in missing descriptions.
+    - **Original Quality Banners**: Upgraded hero backdrops and episode stills to TMDB `original` resolution for sharp 4K visuals.
+- **Hero Carousel Refined**: Content is now filtered for "Latest" (2024+) and "Upcoming" releases, sorted by overall popularity.
+- **Trakt Thumbnail Bridge**: Fixed the "loading wheel" bug whereTrakt IMDb IDs (`tt...`) failed to resolve episode thumbnails.
 
-## Pending Tasks (Roadmap)
-1. **Adaptive Homepage**: Refactor `HomeView` to dynamically iterate through all `enabledAddons` and display their catalogs, rather than relying on hardcoded defaults.
-2. **Metadata Toggle Settings**: Add a toggle in `SettingsView` to enable/hide Cast and external sources. Rich TMDB metadata (including photos) should be an optional, user-configured feature requiring a TMDB API key.
-3. **Trakt Integration**: Finalize the Trakt device auth flow and history syncing without Firebase.
-4. **Player Improvements**: Support for addon-provided subtitles and refined stream racing logic.
+## Current Architecture
+- **Stremio-Native Core**: Primary metadata source is Cinemeta; streams aggregated via Addon protocol.
+- **Optional TMDB Layer**: Enrichment for Cast, Providers, Backdrops, and Episode Overviews (Toggled via `enableRichMetadata`).
+- **Persistence**: `UserDataService` manages local history and watchlist, synced with Trakt.
 
 ## Critical Notes for Future Edits
-- **Do not re-introduce `TMDBClient` or `TMDBEnricher`** as core dependencies. Any TMDB enrichment must be handled as an optional, opt-in layer.
-- **Maintain String IDs** throughout the persistence and view layers to remain compatible with Stremio IDs.
+- **STRICT UI LOCK**: Do NOT change layouts, aspect ratios, or typography of cards (`EpisodeCard`, `LiquidEpisodeCard`, `ContinueWatchingCard`).
+- **Maintain String IDs**: IMDb/Stremio IDs must remain strings for compatibility.
 
-*Last Updated: April 18, 2026*
+## Pending Tasks (Next Session)
+1. **Adaptive Homepage**: Refactor `HomeView` to dynamically iterate through all `enabledAddons`.
+2. **Player Refinements**: Support for external subtitle files and stream racing optimizations.
+3. **Download Manager**: Implement background downloading for offline viewing.
+
+*Last Updated: April 19, 2026 (01:20 AM)*

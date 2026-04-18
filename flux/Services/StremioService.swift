@@ -23,6 +23,7 @@ struct StremioMetaPreview: Codable {
 struct StremioVideo: Codable {
     let id: String
     let title: String?
+    let name: String?
     let released: String? // "YYYY-MM-DD"
     let season: Int?
     let episode: Int?
@@ -188,7 +189,7 @@ extension StremioMetaPreview {
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             releaseDate: self.releaseInfo,
-            voteAverage: Double(self.imdbRating ?? "0")
+            voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil
         )
     }
 }
@@ -210,7 +211,7 @@ extension StremioMetaDetail {
                 let epId = vid.id
                 return Episode(
                     id: Int(epId.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? epId.hashValue,
-                    name: vid.title ?? "Episode \(en)",
+                    name: vid.name ?? vid.title ?? "Episode \(en)",
                     overview: "", // Cinemeta doesn't provide episode descriptions in 'videos' array
                     stillURL: vid.thumbnail != nil ? URL(string: vid.thumbnail!) : nil,
                     heroURL: nil,
@@ -257,7 +258,7 @@ extension StremioMetaDetail {
             runtime: self.runtime,
             genres: self.genres,
             releaseDate: self.releaseInfo,
-            voteAverage: Double(self.imdbRating ?? "0"),
+            voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil,
             episodes: episodesArray
         )
     }

@@ -196,11 +196,19 @@ struct ContinueWatchingCard: View {
                let episode = item.lastEpisode,
                fetchedImage == nil {
                 
-                // We need the TMDB ID for this call. 
-                // If it's not already numerical, we can't do much without a reverse lookup,
-                // but usually Continue Watching items come from a known source.
+                var tmdbIDToUse: String? = nil
+                
+                // Case 1: ID is already numerical (TMDB ID)
                 if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
-                    if let stillURL = await TMDBEnricher.shared.fetchEpisodeStill(tmdbID: item.id, season: season, episode: episode) {
+                    tmdbIDToUse = item.id
+                } 
+                // Case 2: ID is IMDb ID (Trakt Sync)
+                else if item.id.starts(with: "tt") {
+                    tmdbIDToUse = await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: "tv")
+                }
+                
+                if let id = tmdbIDToUse {
+                    if let stillURL = await TMDBEnricher.shared.fetchEpisodeStill(tmdbID: id, season: season, episode: episode) {
                         await MainActor.run {
                             self.fetchedImage = stillURL
                         }

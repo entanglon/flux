@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseAuth
 
 struct ProfileView: View {
     @ObservedObject var authManager = AuthManager.shared

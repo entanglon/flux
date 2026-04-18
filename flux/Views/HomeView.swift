@@ -138,17 +138,44 @@ struct HomeView: View {
     private func loadData() async {
         do {
             // Load Hero content (Featured Carousel)
-            // Prioritize the top catalog of the first enabled addon (after Cinemeta) if available
-            if let firstAddon = AddonManager.shared.enabledAddons.first,
-               let firstCatalog = firstAddon.catalogs?.first(where: { $0.type == "movie" }),
-               let items = try? await StremioService.shared.fetchCatalog(type: firstCatalog.type, id: firstCatalog.id, baseURL: firstAddon.url),
-               !items.isEmpty {
-                self.heroContent = items.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            var rawHero: [MediaItem] = []
+            
+            if enableTMDBHomePage {
+                 // Use TMDB 'Now Playing' and 'Upcoming' for the Hero Carousel
+                 let latestMovies = (try? await TMDBEnricher.shared.fetchLatestMovies()) ?? []
+                 let latestTV = (try? await TMDBEnricher.shared.fetchLatestTV()) ?? []
+                 rawHero = latestMovies + latestTV
             } else {
-                // Fallback to Cinemeta defaults
-                let heroTrending = try await StremioService.shared.fetchTrendingMovies()
-                self.heroContent = heroTrending.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+                // Fallback to Stremio but filter for RECENT items only (2024+)
+                let items = (try? await StremioService.shared.fetchTrendingMovies()) ?? []
+                rawHero = items.filter { item in
+                    if let year = item.releaseDateYear, let yearInt = Int(year) {
+                        return yearInt >= 2024
+                    }
+                    return true // Include if year is missing (often the case for upcoming)
+                }
             }
+            
+            // Sort by popularity (descending) to show the most popular items among newest releases
+            rawHero = rawHero.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            
+            // NEW: Background Enrichment for Carousel
+            // We only need high-res backdrops for the first 5-6 items shown in the carousel.
+            var enrichedHero: [MediaItem] = []
+            let candidates = Array(rawHero.prefix(10))
+            
+            await withTaskGroup(of: MediaItem.self) { group in
+                for item in candidates {
+                    group.addTask {
+                        return await TMDBEnricher.shared.enrichMediaItem(item)
+                    }
+                }
+                for await enriched in group {
+                    enrichedHero.append(enriched)
+                }
+            }
+            
+            self.heroContent = enrichedHero.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
             
             // Generate dynamic catalogs
             await fetchDynamicCatalogs()

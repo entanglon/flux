@@ -102,8 +102,7 @@ struct StreamingSettingsView: View {
 struct TraktSettingsView: View {
     @ObservedObject var traktManager = TraktManager.shared
     
-    @State private var deviceCode: String? = nil
-    @State private var verificationUrl: String? = nil
+    @State private var pinCode: String = ""
     @State private var isActivating: Bool = false
     @State private var errorMessage: String? = nil
     
@@ -134,30 +133,36 @@ struct TraktSettingsView: View {
                                 .scaleEffect(0.5)
                         }
                     }
-                } else if isActivating, let code = deviceCode, let urlStr = verificationUrl, let url = URL(string: urlStr) {
+                } else if isActivating {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Activation Required")
+                        Text("Finish Linking Trakt")
                             .font(.headline)
-                        Text("1. Go to \(urlStr)")
-                        Text("2. Enter the code below:")
+                        Text("1. A browser window should have opened. Log in and Approve Flux.")
+                        Text("2. Copy the PIN code provided by Trakt and paste it below.")
+                        
+                        TextField("Enter PIN Code", text: $pinCode)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
                         
                         HStack {
-                            Text(code)
-                                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                                .textSelection(.enabled)
-                            Spacer()
-                            Link(destination: url) {
-                                Text("Open Link")
+                            Button("Submit PIN") {
+                                submitPin()
                             }
+                            .disabled(pinCode.isEmpty)
+                            .buttonStyle(.borderedProminent)
+                            
+                            Button("Cancel") {
+                                isActivating = false
+                                pinCode = ""
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
                         }
-                        
-                        ProgressView("Waiting for authorization...")
-                            .padding(.top, 8)
                     }
                     .padding(.vertical, 8)
                 } else {
                     Button("Connect to Trakt") {
-                        startDeviceFlow()
+                        startPinFlow()
                     }
                 }
                 
@@ -171,31 +176,28 @@ struct TraktSettingsView: View {
         .formStyle(.grouped)
     }
     
-    private func startDeviceFlow() {
-        isActivating = true
-        errorMessage = nil
-        
+    private func startPinFlow() {
+        if let url = traktManager.authorizationURL {
+            NSWorkspace.shared.open(url)
+            isActivating = true
+            errorMessage = nil
+            pinCode = ""
+        } else {
+            errorMessage = "Failed to generate authorization URL."
+        }
+    }
+    
+    private func submitPin() {
         Task {
             do {
-                let response = try await traktManager.generateDeviceCode()
-                await MainActor.run {
-                    self.deviceCode = response.user_code
-                    self.verificationUrl = response.verification_url
-                }
-                
-                try await traktManager.pollForToken(
-                    deviceCode: response.device_code,
-                    interval: response.interval,
-                    expiresIn: response.expires_in
-                )
-                
+                try await traktManager.exchangePINForToken(pin: pinCode)
                 await MainActor.run {
                     self.isActivating = false
+                    self.pinCode = ""
                 }
             } catch {
                 await MainActor.run {
-                    self.errorMessage = "Failed to connect: \(error.localizedDescription)"
-                    self.isActivating = false
+                    self.errorMessage = "Authentication failed. Please check your PIN and try again."
                 }
             }
         }

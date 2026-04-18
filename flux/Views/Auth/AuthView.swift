@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseAuth
 
 struct AuthView: View {
     @State private var email = ""

@@ -35,19 +35,30 @@ struct DetailView: View {
                     // MARK: - 1. Immersive Hero (60% Height)
                     ZStack(alignment: .bottomLeading) {
                         // Background Image
-                        CachedImage(url: heroEpisode?.heroURL ?? displayItem.heroURL ?? displayItem.backdropURL ?? displayItem.imageURL, maxDimension: 1920) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: geo.size.width, height: geo.size.height * 0.80)
-                                    .clipped()
-                            default:
-                                Rectangle().fill(Color(white: 0.1))
-                                    .frame(width: geo.size.width, height: geo.size.height * 0.80)
+                        ZStack {
+                            // 1. Initial/Fallback Background (Small/Blurry)
+                            CachedImage(url: item.heroURL ?? item.backdropURL ?? item.imageURL, maxDimension: 600) { phase in
+                                if let image = phase.image {
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } else {
+                                    Rectangle().fill(Color(white: 0.1))
+                                }
+                            }
+                            
+                            // 2. High-Res Enriched Background (Fade-In)
+                            if let enrichedURL = heroEpisode?.heroURL ?? displayItem.heroURL ?? displayItem.backdropURL {
+                                CachedImage(url: enrichedURL, maxDimension: 3840) { phase in // Increased to 4K resolution
+                                    if let image = phase.image {
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .transition(.opacity.animation(.easeInOut(duration: 0.5)))
+                                    }
+                                }
                             }
                         }
+                        .frame(width: geo.size.width, height: geo.size.height * 0.80)
+                        .clipped()
                         
                         // Gradient Mesh Overlay
                         ZStack {
@@ -98,9 +109,11 @@ struct DetailView: View {
                                 Text("•")
                                 Text(displayItem.genres?.prefix(2).joined(separator: ", ") ?? "Genre")
                                 Text("•")
-                                HStack(spacing: 2) {
-                                    Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
-                                    Text(String(format: "%.1f", displayItem.voteAverage ?? 0))
+                                if let voteAvg = displayItem.voteAverage, voteAvg > 0 {
+                                    HStack(spacing: 2) {
+                                        Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
+                                        Text(String(format: "%.1f", voteAvg))
+                                    }
                                 }
                                 TechBadge(text: "4K")
                                 TechBadge(text: "DOLBY VISION")
@@ -208,7 +221,7 @@ struct DetailView: View {
                                     }
                                 }
                                 
-                                DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 230) { episode in
+                                DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
                                     Button(action: {
                                         PlayerManager.shared.play(displayItem, season: selectedSeason?.seasonNumber, episode: episode.episodeNumber, episodeImage: episode.stillURL)
                                         openWindow(id: "player", value: displayItem.id)
@@ -463,6 +476,14 @@ struct DetailView: View {
             if type == "series" {
                 if let seasons = detailedItem.seasons, let first = seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first {
                     selectedSeason = first
+                    
+                    // Track TMDB ID for sub-enrichment (episodes)
+                    if let imdbID = detailedItem.id.starts(with: "tt") ? detailedItem.id : nil {
+                        if let tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: imdbID, type: "tv") {
+                             UserDefaults.standard.set(tmdbID, forKey: "activeTMDBID")
+                        }
+                    }
+                    
                     await loadEpisodes(for: first)
                 }
             }
@@ -478,9 +499,33 @@ struct DetailView: View {
     
     private func loadEpisodes(for season: Season) async {
         guard let allEpisodes = fullItem?.episodes else { return }
-        self.episodes = allEpisodes.filter { $0.seasonNumber == season.seasonNumber }
+        let currentSeasonEpisodes = allEpisodes.filter { $0.seasonNumber == season.seasonNumber }
             .sorted { $0.episodeNumber < $1.episodeNumber }
-        if let first = self.episodes.first { heroEpisode = first }
+        
+        // Initial set to show something immediately
+        await MainActor.run {
+            self.episodes = currentSeasonEpisodes
+            if let first = currentSeasonEpisodes.first { heroEpisode = first }
+        }
+        
+        // Background Enrichment: Fetch descriptions if enabled
+        if UserDefaults.standard.bool(forKey: "enableRichMetadata"),
+           let tmdbID = UserDefaults.standard.string(forKey: "activeTMDBID") {
+            
+            let enrichedOverviews = await TMDBEnricher.shared.fetchSeasonEnrichment(tvId: tmdbID, seasonNumber: season.seasonNumber)
+            
+            if !enrichedOverviews.isEmpty {
+                await MainActor.run {
+                    self.episodes = currentSeasonEpisodes.map { episode in
+                        var enriched = episode
+                        if let overview = enrichedOverviews[episode.episodeNumber], !overview.isEmpty {
+                            enriched.overview = overview
+                        }
+                        return enriched
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -518,74 +563,213 @@ struct InfoDetailBlock: View {
     }
 }
 
-// MARK: - Detail Specific Components
-struct DetailRail<T: Identifiable, Content: View>: View {
-    let items: [T]
-    let idPath: KeyPath<T, T.ID>? = nil // Re-using standard Identifiable
-    let itemWidth: CGFloat
-    let itemHeight: CGFloat
-    let content: (T) -> Content
-    
-    // Explicitly using standard ForEach which works on Identifiable
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 24) {
-                ForEach(items) { item in
-                    content(item)
-                }
-            }
-            .padding(.horizontal, 60)
-        }
-    }
-}
-
-extension DetailRail where T: Identifiable {
-    init(items: [T], idPath: KeyPath<T, T.ID>, itemWidth: CGFloat, itemHeight: CGFloat, @ViewBuilder content: @escaping (T) -> Content) {
-        self.items = items
-        self.itemWidth = itemWidth
-        self.itemHeight = itemHeight
-        self.content = content
-    }
-}
-
 struct LiquidEpisodeCard: View {
     let episode: Episode
-    let progress: Double
+    let progress: Double // 0.0 to 1.0
+    @State private var isHovering = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Thumbnail
-            ZStack(alignment: .bottomLeading) {
-                CachedImage(url: episode.stillURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    default:
-                        Rectangle().fill(Color.gray.opacity(0.2))
-                    }
-                }
-                .frame(width: 380, height: 214)
-                .clipped()
-                .cornerRadius(12)
-                
-                // Progress Bar
-                if progress > 0 {
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.3)).frame(height: 4)
-                        Capsule().fill(Color.red).frame(width: 380 * progress, height: 4)
-                    }
-                }
+        ZStack(alignment: .bottomLeading) {
+            // 1. Background Image
+            AsyncImage(url: episode.stillURL) { img in
+                img.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.1))
             }
+            .frame(width: 380, height: 214)
+            .clipped()
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(episode.episodeNumber). \(episode.name)")
-                    .font(.headline)
+            // 2. Liquid Glass Overlay
+            LinearGradient(colors: [
+                .black.opacity(0.1),
+                .black.opacity(0.4),
+                .black.opacity(0.8),
+                .black.opacity(0.95)
+            ], startPoint: .top, endPoint: .bottom)
+            
+            // 3. Content
+            VStack(alignment: .leading, spacing: 6) {
+                Spacer()
+                
+                Text("EPISODE \(episode.episodeNumber)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .tracking(1)
+                
+                Text(episode.name)
+                    .font(.system(size: 22, weight: .bold, design: .default))
                     .foregroundStyle(.white)
-                Text(episode.airDate ?? "Unknown Date")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                
+                Text(episode.overview)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(3)
+                    .lineSpacing(2)
+                    .frame(height: 60, alignment: .topLeading)
+                
+                // Bottom Row
+                HStack(spacing: 12) {
+                    if progress > 0 && progress < 0.95 {
+                        // Progress Bar (Unfinished)
+                         ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.3)).frame(height: 4)
+                            Capsule().fill(Color.white).frame(width: 40 * 2, height: 4) // Restoring proportional width
+                        }
+                        .frame(width: 80)
+                    } else {
+                        // Play Icon (Default)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white)
+                    }
+                    
+                    Text("\(episode.runtime ?? 50)m")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                    
+                    Spacer()
+                    
+                    Menu {
+                        Button {} label: { Label("Download", systemImage: "arrow.down.circle") }
+                        Button {} label: { Label("Share Episode", systemImage: "square.and.arrow.up") }
+                        Button {} label: { Label("Share Show", systemImage: "square.and.arrow.up.on.square") }
+                        Button {
+                            // TODO: Implement Mark Watched
+                        } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 20)) // Slightly larger touch target
+                            .foregroundStyle(.white.opacity(0.8))
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 8)
             }
+            .padding(20)
         }
-        .frame(width: 380)
+        .frame(width: 380, height: 214)
+        .background(Color(white: 0.1))
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(isHovering ? 0.5 : 0.1), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 5)
+        .scaleEffect(isHovering ? 1.02 : 1.0)
+        .animation(.spring(duration: 0.3), value: isHovering)
+        .onHover { isHovering = $0 }
+    }
+}
+
+// Generic Rail
+struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: View where Data.Element: Identifiable {
+    let items: Data
+    let idPath: KeyPath<Data.Element, ID>
+    let itemWidth: CGFloat
+    let itemHeight: CGFloat
+    let content: (Data.Element) -> Content
+    
+    @State private var scrollPosition: CGFloat = 0
+    @State private var contentWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    
+    // Missing properties restored
+    @State private var isHovering: Bool = false
+    private let scrollStep = 3
+    
+    // Threshold to consider "scrolled"
+    private let tolerance: CGFloat = 10 
+    
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 24) { // Switched to HStack for accurate contentSize
+                    ForEach(Array(items.enumerated()), id: \.offset) { enumeration in
+                        content(enumeration.element)
+                            .id(enumeration.offset)
+                    }
+                }
+                .padding(.horizontal, 60)
+                .padding(.top, 10) // Reduced top padding
+                .padding(.bottom, 30) // Keep bottom for shadow
+                .background(GeometryReader { geo in
+                    Color.clear
+                        .preference(key: ScrollOffsetKey.self, value: geo.frame(in: .named("scrollContainer")).minX)
+                        .onAppear { contentWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, newValue in contentWidth = newValue }
+                })
+            }
+            .coordinateSpace(name: "scrollContainer")
+            .onPreferenceChange(ScrollOffsetKey.self) { value in
+                if let value = value {
+                    self.scrollPosition = value
+                }
+            }
+            .background(GeometryReader { geo in
+                Color.clear.onAppear { containerWidth = geo.size.width }
+                           .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+            })
+            // Left Arrow
+            .overlay(alignment: .leading) {
+                // Only show if we have scrolled past start (negative offset)
+                if isHovering && scrollPosition < -tolerance {
+                    Button(action: { scrollLeft(proxy: proxy) }) { arrowButton("left") }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 20)
+                        .transition(.opacity)
+                }
+            }
+            // Right Arrow
+            .overlay(alignment: .trailing) {
+                // Show if content extends beyond current view
+                // (scrollPosition is negative, so we add contentWidth to see where the end is)
+                // If end > containerWidth, we have more to see.
+                if isHovering && (scrollPosition + contentWidth > containerWidth + tolerance) {
+                   Button(action: { scrollRight(proxy: proxy) }) { arrowButton("right") }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 20)
+                        .transition(.opacity)
+                }
+            }
+            .onHover { isHovering = $0 }
+        }
+    }
+    
+    private func arrowButton(_ direction: String) -> some View {
+        Image(systemName: "chevron.\(direction)")
+            .font(.system(size: 20, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 64)
+            .background(.ultraThinMaterial)
+            .cornerRadius(32)
+            .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+            .shadow(radius: 10)
+    }
+    
+    // Update scroll logic to deduce index from visual estimation if needed, 
+    // but simple scrollTo relative to current index is safer. 
+    // We need to track `firstVisibleIndex` roughly.
+    // For now, let's just increment/decrement a reliable state or find the item closest to -scrollPosition.
+    private func scrollRight(proxy: ScrollViewProxy) {
+        // Simple heuristic: Move +3
+        let currentIdx = Int(abs(scrollPosition - 60) / (itemWidth + 24)) // 60 is padding
+        let nextIndex = min(currentIdx + scrollStep, items.count - 1)
+        withAnimation { proxy.scrollTo(nextIndex, anchor: .leading) }
+    }
+    
+    private func scrollLeft(proxy: ScrollViewProxy) {
+        let currentIdx = Int(abs(scrollPosition - 60) / (itemWidth + 24))
+        let nextIndex = max(currentIdx - scrollStep, 0)
+        withAnimation { proxy.scrollTo(nextIndex, anchor: .leading) }
+    }
+}
+
+struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = value ?? nextValue()
     }
 }

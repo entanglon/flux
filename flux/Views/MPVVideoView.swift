@@ -278,7 +278,12 @@ final class MPVOGLView: NSOpenGLView {
         mpv_set_option_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         mpv_set_option_string(mpv, "referrer", "https://flux.app/")
         
-        // 6. Terminal/Log Output
+        // 6. Subtitle Styling (Premium scaling)
+        mpv_set_option_string(mpv, "sub-font-size", "45") // Balanced size for desktop/TV
+        mpv_set_option_string(mpv, "sub-border-size", "2") // Cleaner outlines
+        mpv_set_option_string(mpv, "sub-margin-y", "40") // Slightly off the bottom edge
+        
+        // 7. Terminal/Log Output
         mpv_set_option_string(mpv, "terminal", "yes")
         
         // 7. Language Preferences
