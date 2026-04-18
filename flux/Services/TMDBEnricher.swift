@@ -69,6 +69,16 @@ class TMDBEnricher {
         return enriched
     }
     
+    // MARK: - Specific Asset Fetching
+    func fetchEpisodeStill(tmdbID: String, season: Int, episode: Int) async -> URL? {
+        let urlString = "\(baseURL)/tv/\(tmdbID)/season/\(season)/episode/\(episode)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString), 
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let response = try? JSONDecoder().decode(TMDBEpisode.self, from: data) else { return nil }
+        
+        return response.stillURL
+    }
+    
     // MARK: - Catalog Fetching (HomeView Override)
     func fetchTrending(type: String) async throws -> [MediaItem] {
         let mediaType = type.contains("movie") ? "movie" : "tv"

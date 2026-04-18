@@ -188,5 +188,25 @@ struct ContinueWatchingCard: View {
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
         .onHover { isHovering = $0 }
+        .task {
+            // If it's a TV show and we need an episode still
+            if UserDefaults.standard.bool(forKey: "enableRichMetadata"),
+               item.category == "TV Show",
+               let season = item.lastSeason,
+               let episode = item.lastEpisode,
+               fetchedImage == nil {
+                
+                // We need the TMDB ID for this call. 
+                // If it's not already numerical, we can't do much without a reverse lookup,
+                // but usually Continue Watching items come from a known source.
+                if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
+                    if let stillURL = await TMDBEnricher.shared.fetchEpisodeStill(tmdbID: item.id, season: season, episode: episode) {
+                        await MainActor.run {
+                            self.fetchedImage = stillURL
+                        }
+                    }
+                }
+            }
+        }
     }
 }
