@@ -1,5 +1,5 @@
 import Foundation
-// import FirebaseAuth
+import FirebaseAuth
 import Combine
 
 class AuthManager: ObservableObject {
