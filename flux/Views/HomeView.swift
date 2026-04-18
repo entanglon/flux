@@ -19,6 +19,7 @@ struct HomeView: View {
     
     @State private var heroContent: [MediaItem] = []
     @State private var dynamicSections: [CatalogSection] = []
+    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
     @State private var genres: [Genre] = Genre.allGenres
 
     @State private var isLoading = true
@@ -136,9 +137,18 @@ struct HomeView: View {
     @MainActor
     private func loadData() async {
         do {
-            // Load Cinemeta defaults for the Hero carousel
-            let heroTrending = try await StremioService.shared.fetchTrendingMovies()
-            self.heroContent = heroTrending.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            // Load Hero content (Featured Carousel)
+            // Prioritize the top catalog of the first enabled addon (after Cinemeta) if available
+            if let firstAddon = AddonManager.shared.enabledAddons.first,
+               let firstCatalog = firstAddon.catalogs?.first(where: { $0.type == "movie" }),
+               let items = try? await StremioService.shared.fetchCatalog(type: firstCatalog.type, id: firstCatalog.id, baseURL: firstAddon.url),
+               !items.isEmpty {
+                self.heroContent = items.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            } else {
+                // Fallback to Cinemeta defaults
+                let heroTrending = try await StremioService.shared.fetchTrendingMovies()
+                self.heroContent = heroTrending.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            }
             
             // Generate dynamic catalogs
             await fetchDynamicCatalogs()
@@ -156,6 +166,17 @@ struct HomeView: View {
         let addons = AddonManager.shared.enabledAddons
         var fetchedSections: [CatalogSection] = []
         
+        // 1. Add TMDB Overrides if enabled
+        if enableTMDBHomePage {
+            if let trendingMovies = try? await TMDBEnricher.shared.fetchTrending(type: "movie") {
+                fetchedSections.append(CatalogSection(addonName: "TMDB", title: "TMDB - Trending Movies", type: "movie", items: trendingMovies))
+            }
+            if let trendingTV = try? await TMDBEnricher.shared.fetchTrending(type: "tv") {
+                fetchedSections.append(CatalogSection(addonName: "TMDB", title: "TMDB - Trending TV Shows", type: "series", items: trendingTV))
+            }
+        }
+        
+        // 2. Fetch from Stremio Addons
         await withTaskGroup(of: [CatalogSection].self) { group in
             for addon in addons {
                 guard let catalogs = addon.catalogs, !catalogs.isEmpty else {
@@ -167,7 +188,7 @@ struct HomeView: View {
                     var localSections: [CatalogSection] = []
                     // Limit to 3 catalogs per addon to avoid overloading
                     for catalog in catalogs.prefix(3) {
-                        guard let items = try? await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id) else { continue }
+                        guard let items = try? await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url) else { continue }
                         if items.isEmpty { continue }
                         
                         let catalogName = catalog.name ?? catalog.id.capitalized
@@ -190,7 +211,11 @@ struct HomeView: View {
         }
         
         await MainActor.run {
-            self.dynamicSections = fetchedSections.sorted { $0.addonName < $1.addonName }
+            self.dynamicSections = fetchedSections.sorted { s1, s2 in
+                if s1.addonName == "Cinemeta" { return true }
+                if s2.addonName == "Cinemeta" { return false }
+                return s1.addonName < s2.addonName
+            }
         }
     }
     
