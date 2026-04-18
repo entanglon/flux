@@ -76,7 +76,7 @@ class TMDBEnricher {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(TMDBEpisode.self, from: data) else { return nil }
         
-        return response.stillURL
+        return response.toEpisode().stillURL
     }
     
     // MARK: - Catalog Fetching (HomeView Override)
