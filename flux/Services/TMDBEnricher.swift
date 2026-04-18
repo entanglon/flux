@@ -55,12 +55,23 @@ class TMDBEnricher {
                 }
             }
             
-            // 2. Fetch Watch Providers
+            // 2. Fetch Watch Providers (JustWatch data)
             group.addTask {
-                if let providers = await self.fetchWatchProviders(id: item.id, type: type) {
-                    await MainActor.run {
-                        // Logic to convert TMDB providers to JustWatch bridge format
-                        // (Simplified for now, could be further refined)
+                if let response = await self.fetchWatchProviders(id: item.id, type: type) {
+                    // Try to get US results, fallback to others
+                    let region = response.results["US"] ?? response.results.first?.value
+                    let combined = (region?.flatrate ?? []) + (region?.buy ?? []) + (region?.rent ?? [])
+                    
+                    if !combined.isEmpty {
+                        await MainActor.run {
+                            enriched.watchProviders = Array(NSOrderedSet(array: combined.map { provider in
+                                WatchProvider(
+                                    name: provider.provider_name,
+                                    logoURL: provider.logoURL,
+                                    displayPriority: 0 // Priority not explicitly needed for display
+                                )
+                            })).compactMap { $0 as? WatchProvider }
+                        }
                     }
                 }
             }

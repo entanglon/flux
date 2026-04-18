@@ -264,38 +264,77 @@ struct DetailView: View {
                         Divider().background(Color.white.opacity(0.1))
 
                         // Where to Watch (JustWatch Bridge)
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Where to Watch")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.white)
-                            
-                            Link(destination: URL(string: "https://www.justwatch.com/us/search?q=\(displayItem.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!) {
-                                HStack(spacing: 16) {
-                                    Image(systemName: "magnifyingglass.circle.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundStyle(.blue)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Find on JustWatch")
-                                            .font(.headline)
-                                            .foregroundStyle(.white)
-                                        Text("Check region-specific availability and providers")
-                                            .font(.caption)
+                        if let providers = displayItem.watchProviders, !providers.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Where to Watch")
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.white)
+                                
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 20) {
+                                        ForEach(providers) { provider in
+                                            VStack(spacing: 8) {
+                                                CachedImage(url: provider.logoURL) { phase in
+                                                    if let image = phase.image {
+                                                        image
+                                                            .resizable()
+                                                            .aspectRatio(contentMode: .fill)
+                                                            .frame(width: 60, height: 60)
+                                                            .cornerRadius(12)
+                                                    } else {
+                                                        RoundedRectangle(cornerRadius: 12)
+                                                            .fill(Color.gray.opacity(0.3))
+                                                            .frame(width: 60, height: 60)
+                                                    }
+                                                }
+                                                
+                                                Text(provider.name)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(width: 80)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 60)
+                        } else {
+                            // Fallback to Search Link
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Where to Watch")
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.white)
+                                
+                                Link(destination: URL(string: "https://www.justwatch.com/us/search?q=\(displayItem.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!) {
+                                    HStack(spacing: 16) {
+                                        Image(systemName: "magnifyingglass.circle.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(.blue)
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Find on JustWatch")
+                                                .font(.headline)
+                                                .foregroundStyle(.white)
+                                            Text("Check region-specific availability and providers")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.up.forward.app")
                                             .foregroundStyle(.secondary)
                                     }
-                                    Spacer()
-                                    Image(systemName: "arrow.up.forward.app")
-                                        .foregroundStyle(.secondary)
+                                    .padding(20)
+                                    .background(Color(white: 0.12))
+                                    .cornerRadius(16)
+                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
                                 }
-                                .padding(20)
-                                .background(Color(white: 0.12))
-                                .cornerRadius(16)
-                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, 60)
                         }
-                        .padding(.horizontal, 60)
 
                         VStack(alignment: .leading, spacing: 16) {
                             Text("About")

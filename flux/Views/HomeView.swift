@@ -179,15 +179,23 @@ struct HomeView: View {
         // 2. Fetch from Stremio Addons
         await withTaskGroup(of: [CatalogSection].self) { group in
             for addon in addons {
-                guard let catalogs = addon.catalogs, !catalogs.isEmpty else {
-                    // Try to fetch fallback from Cinemeta? No, only use typed catalogs
+                let hasCatalogResource = addon.resources?.contains("catalog") ?? false
+                let catalogs = addon.catalogs ?? []
+                
+                if !hasCatalogResource && catalogs.isEmpty {
                     continue
                 }
                 
                 group.addTask {
                     var localSections: [CatalogSection] = []
+                    
+                    // If catalogs are empty but resource is present, try a standard fallback
+                    let catalogsToFetch = catalogs.isEmpty ? 
+                        [StremioCatalog(type: "movie", id: "top", name: "Popular"), 
+                         StremioCatalog(type: "series", id: "top", name: "Popular")] : 
+                        Array(catalogs.prefix(3))
                     // Limit to 3 catalogs per addon to avoid overloading
-                    for catalog in catalogs.prefix(3) {
+                    for catalog in catalogsToFetch {
                         guard let items = try? await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url) else { continue }
                         if items.isEmpty { continue }
                         

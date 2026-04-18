@@ -7,6 +7,13 @@ struct CastMember: Identifiable, Hashable, Codable {
     let imageURL: URL?
 }
 
+struct WatchProvider: Identifiable, Hashable, Codable {
+    var id: String { name }
+    let name: String
+    let logoURL: URL?
+    let displayPriority: Int
+}
+
 
 struct MediaItem: Identifiable, Hashable, Codable {
     let id: String
@@ -34,6 +41,7 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var originCountry: String? // e.g. "United States"
     var voteAverage: Double? // e.g. 7.8
     var episodes: [Episode]? // To store all Stremio videos
+    var watchProviders: [WatchProvider]?
     
     var releaseDateYear: String? {
         guard let date = releaseDate else { return nil }
