@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct Subtitle: Identifiable, Hashable {
     let id: String
@@ -6,7 +7,7 @@ struct Subtitle: Identifiable, Hashable {
     let language: String
 }
 
-class SubtitleManager {
+class SubtitleManager: ObservableObject {
     static let shared = SubtitleManager()
     private init() {}
     

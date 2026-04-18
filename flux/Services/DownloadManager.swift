@@ -1,6 +1,7 @@
 import Foundation
+import Combine
 
-class DownloadManager {
+class DownloadManager: ObservableObject {
     static let shared = DownloadManager()
     private init() {}
     
