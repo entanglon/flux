@@ -228,21 +228,44 @@ struct PlayerView: View {
                 .foregroundColor(.white)
             
             ScrollView {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                     ForEach(playerManager.availableStreams) { stream in
                         Button(action: {
                             playerManager.selectStream(stream)
                         }) {
                             HStack {
-                                // Quality Badge
-                                Text(stream.quality)
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(qualityColor(stream.quality))
-                                    .foregroundColor(.white)
-                                    .cornerRadius(6)
+                                HStack(spacing: 6) {
+                                    Text(stream.quality)
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(qualityColor(stream.quality))
+                                        .foregroundColor(.white)
+                                        .cornerRadius(6)
+                                        
+                                    if let lang = stream.language {
+                                        Text(lang)
+                                            .font(.caption)
+                                            .fontWeight(.bold)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.blue.opacity(0.8))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(6)
+                                    }
+                                    
+                                    if let size = stream.size {
+                                        Text(size)
+                                            .font(.caption)
+                                            .fontWeight(.bold)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.gray.opacity(0.8))
+                                            .foregroundColor(.white)
+                                            .cornerRadius(6)
+                                    }
+                                }
                                 
                                 VStack(alignment: .leading) {
                                     Text(stream.title)
@@ -293,16 +316,8 @@ struct PlayerView: View {
     
     func getSubtitle() -> String {
         if let season = PlayerManager.shared.currentSeason, let episode = PlayerManager.shared.currentEpisode {
-            // If we have season/episode, show that first
-            // Ideally we'd have the episode title, but we don't store it in PlayerManager yet.
-            // We can just show S:E and the series description or just S:E
             return "S\(season):E\(episode)"
         }
         return item?.description ?? "No description"
     }
-}
-
-#Preview {
-    PlayerView(item: MockData.sampleMedia.first)
-        .frame(width: 800, height: 450)
 }

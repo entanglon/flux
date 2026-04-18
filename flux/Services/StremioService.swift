@@ -23,8 +23,6 @@ struct StremioMetaPreview: Codable {
 struct StremioVideo: Codable {
     let id: String
     let title: String?
-    let name: String?
-    let description: String?
     let released: String? // "YYYY-MM-DD"
     let season: Int?
     let episode: Int?
@@ -56,9 +54,8 @@ class StremioService {
     private init() {}
     
     // MARK: - Catalogs Fetching
-    func fetchCatalog(baseURL: String? = nil, type: String, id: String, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0) async throws -> [MediaItem] {
-        let base = baseURL ?? cinemetaURL
-        var urlString = "\(base)/catalog/\(type)/\(id)"
+    func fetchCatalog(type: String, id: String, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0) async throws -> [MediaItem] {
+        var urlString = "\(cinemetaURL)/catalog/\(type)/\(id)"
         
         if let genre = genre, let encodedGenre = genre.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
             urlString += "/genre=\(encodedGenre)"
@@ -141,7 +138,7 @@ extension StremioMetaPreview {
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             releaseDate: self.releaseInfo,
-            voteAverage: (Double(self.imdbRating ?? "") ?? 0.0) > 0.0 ? Double(self.imdbRating ?? "") : nil
+            voteAverage: Double(self.imdbRating ?? "0")
         )
     }
 }
@@ -157,15 +154,14 @@ extension StremioMetaDetail {
         var seasonsArray: [Season]? = nil
         
         if self.type == "series", let vids = self.videos, !vids.isEmpty {
-            episodesArray = vids.compactMap { vid -> Episode? in
+            episodesArray = vids.compactMap { vid in
                 guard let sn = vid.season, let en = vid.episode else { return nil }
-                let epName = vid.name ?? vid.title ?? "Episode \(en)"
-                // Make sure id maps to an Int, if vid.id is string, we can hash it
-                let epId = Int(vid.id.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? vid.id.hashValue
+                // Use a consistent hashing for ID if it's not a number
+                let epId = vid.id
                 return Episode(
-                    id: epId,
-                    name: epName,
-                    overview: vid.description ?? "",
+                    id: Int(epId.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? epId.hashValue,
+                    name: vid.title ?? "Episode \(en)",
+                    overview: "", // Cinemeta doesn't provide episode descriptions in 'videos' array
                     stillURL: vid.thumbnail != nil ? URL(string: vid.thumbnail!) : nil,
                     heroURL: nil,
                     episodeNumber: en,
@@ -211,7 +207,7 @@ extension StremioMetaDetail {
             runtime: self.runtime,
             genres: self.genres,
             releaseDate: self.releaseInfo,
-            voteAverage: (Double(self.imdbRating ?? "") ?? 0.0) > 0.0 ? Double(self.imdbRating ?? "") : nil,
+            voteAverage: Double(self.imdbRating ?? "0"),
             episodes: episodesArray
         )
     }

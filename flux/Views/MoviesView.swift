@@ -16,8 +16,8 @@ struct MoviesView: View {
                 } else {
                     // Featured Movie
                     if let featured = popularMovies.first {
-                        HeroView(item: featured)
-                            .frame(height: 500)
+                        FeaturedCarousel(items: Array(popularMovies.prefix(5)))
+                            .frame(height: 600)
                     }
                     
                     // Popular Movies Grid
@@ -29,7 +29,7 @@ struct MoviesView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                                 ForEach(popularMovies) { item in
                                     NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait)
+                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -47,7 +47,7 @@ struct MoviesView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                                 ForEach(topRatedMovies) { item in
                                     NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait)
+                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -67,21 +67,19 @@ struct MoviesView: View {
     
     private func loadData() async {
         do {
-            async let popular = TMDBService.shared.fetchPopularMovies()
-            async let topRated = TMDBService.shared.fetchTopRatedMovies()
+            async let popular = StremioService.shared.fetchPopularMovies()
+            async let topRated = StremioService.shared.fetchTrendingMovies() // Using trending as top rated for now
             
             let (p, t) = try await (popular, topRated)
             
-            popularMovies = p.map { $0.toMediaItem() }
-            topRatedMovies = t.map { $0.toMediaItem() }
-            isLoading = false
+            await MainActor.run {
+                self.popularMovies = p
+                self.topRatedMovies = t
+                self.isLoading = false
+            }
         } catch {
             print("Error fetching movies: \(error)")
-            isLoading = false
+            await MainActor.run { isLoading = false }
         }
     }
-}
-
-#Preview {
-    MoviesView()
 }

@@ -65,7 +65,7 @@ struct ProfileView: View {
                             buildRow(title: "Name", value: user.displayName ?? "Not Set")
                             buildRow(title: "Email", value: user.email ?? "Not Set")
                             
-                            if let creationDate = user.metadata.creationDate {
+                            if let creationDate = user.creationDate {
                                 buildRow(title: "Joined", value: creationDate.formatted(date: .abbreviated, time: .omitted))
                             }
                         }

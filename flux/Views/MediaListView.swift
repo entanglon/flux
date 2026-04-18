@@ -7,17 +7,8 @@ struct MediaListView: View {
         case topRatedMovies
         case trendingTV
         case popularTV
-        case kDrama
-        case chineseMovies
-        case bollywoodMovies
-        case genre(id: Int)
-        case provider(id: Int)
-        case newReleases
-        case upcoming
-        case topTen
-        case forYou
-        case trending
-        case fixed(title: String, items: [MediaItem]) // For fixed/passed items (e.g. Home For You)
+        case genre(id: Int) // TMDB genre ID maps to our static list
+        case fixed(title: String, items: [MediaItem])
         
         var title: String {
             switch self {
@@ -27,15 +18,6 @@ struct MediaListView: View {
             case .trendingTV: return "Trending TV Shows"
             case .popularTV: return "Popular TV Shows"
             case .genre: return "Genre"
-            case .kDrama: return "K-Drama"
-            case .chineseMovies: return "Chinese Movies"
-            case .bollywoodMovies: return "Bollywood Movies"
-            case .provider: return "Content"
-            case .newReleases: return "New Releases"
-            case .upcoming: return "Coming Soon"
-            case .topTen: return "Top 10 on Flux"
-            case .forYou: return "For You"
-            case .trending: return "Trending Now"
             case .fixed(let title, _): return title
             }
         }
@@ -45,7 +27,7 @@ struct MediaListView: View {
     let type: ListType
     @State private var items: [MediaItem] = []
     @State private var isLoading = false
-    @State private var currentPage = 1
+    @State private var skipCount = 0
     @State private var canLoadMore = true
     
     init(title: String? = nil, type: ListType) {
@@ -64,27 +46,16 @@ struct MediaListView: View {
             }
             .padding(40)
         }
-        .background(Color.black.opacity(0.9)) // Dark background for contrast
+        .background(Color.black.opacity(0.9))
         .task {
-            // Set loading explicitly for first load to avoid empty flash if possible, 
-            // though loadData handles it too. 
-            // Actually, we rely on loadData setting it true.
             await loadData()
         }
         .navigationTitle(title)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(title)
-                    .font(.headline)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-            }
-        }
     }
     
     @ViewBuilder
     private var content: some View {
-        if isLoading && items.isEmpty { // Only full screen loader if no items
+        if isLoading && items.isEmpty {
             ProgressView()
                 .controlSize(.large)
                 .frame(maxWidth: .infinity, minHeight: 200)
@@ -92,10 +63,9 @@ struct MediaListView: View {
             LazyVGrid(columns: columns, spacing: 40) {
                 ForEach(items) { item in
                     NavigationLink(value: item) {
-                        GlassCard(item: item, aspectRatio: aspectRatio)
+                        GlassCard(item: item, aspectRatio: aspectRatio, showTitle: false)
                     }
                     .buttonStyle(.plain)
-                    .focusEffectDisabled()
                     .onAppear {
                         if item == items.last {
                             Task { await loadData() }
@@ -114,7 +84,7 @@ struct MediaListView: View {
     
     private var aspectRatio: CardAspectRatio {
         switch type {
-        case .trendingTV, .popularTV, .kDrama:
+        case .trendingTV, .popularTV:
             return .landscape
         default:
             return .portrait
@@ -124,144 +94,51 @@ struct MediaListView: View {
     private func loadData(reset: Bool = false) async {
         if reset {
             items = []
-            currentPage = 1
+            skipCount = 0
             canLoadMore = true
         }
         
         guard canLoadMore, !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
         
-        // Loop to fetch pages until we find items or hit a limit (max 5 empty pages to prevent infinite loop)
-        var emptyPageCount = 0
-        var foundItems = false
-        
-        while !foundItems && canLoadMore && emptyPageCount < 5 {
-            do {
-                var newItems: [MediaItem] = []
-                
-                switch type {
-                case .trendingMovies:
-                    let movies = try await TMDBService.shared.fetchTrendingMovies(page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .popularMovies:
-                    let movies = try await TMDBService.shared.fetchPopularMovies(page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .topRatedMovies:
-                    let movies = try await TMDBService.shared.fetchTopRatedMovies(page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .trendingTV:
-                    let tv = try await TMDBService.shared.fetchTrendingTVShows(page: currentPage)
-                    newItems = tv.map { $0.toMediaItem() }
-                case .popularTV:
-                    let tv = try await TMDBService.shared.fetchPopularTVShows(page: currentPage)
-                    newItems = tv.map { $0.toMediaItem() }
-                case .genre(let id):
-                    let movies = try await TMDBService.shared.fetchMoviesByGenre(genreId: id, page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .kDrama:
-                    let tv = try await TMDBService.shared.fetchKDrama(page: currentPage)
-                    newItems = tv.map { $0.toMediaItem() }
-                case .chineseMovies:
-                    let movies = try await TMDBService.shared.fetchChineseMovies(page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .bollywoodMovies:
-                    let movies = try await TMDBService.shared.fetchBollywoodMovies(page: currentPage)
-                    newItems = movies.map { $0.toMediaItem() }
-                case .provider(let id):
-                    async let movies = TMDBService.shared.fetchMovies(byProviderId: id, page: currentPage)
-                    async let tv = TMDBService.shared.fetchTV(byProviderId: id, page: currentPage)
-                    let (m, t) = try await (movies, tv)
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() }).shuffled()
-                case .newReleases:
-                    async let movies = TMDBService.shared.fetchNowPlayingMovies(page: currentPage)
-                    async let tv = TMDBService.shared.fetchAiringTodayTV(page: currentPage)
-                    let (m, t) = try await (movies, tv)
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() })
-                        .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
-                case .upcoming:
-                    async let movies = TMDBService.shared.fetchUpcomingMovies(page: currentPage)
-                    async let tv = TMDBService.shared.fetchOnTheAirTV(page: currentPage)
-                    let (m, t) = try await (movies, tv)
-                    
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateFormat = "yyyy-MM-dd"
-                    let today = Date()
-                    
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() })
-                        .filter { item in
-                            guard let dateString = item.releaseDate,
-                                  let date = dateFormatter.date(from: dateString) else { return false }
-                            return date >= today
-                        }
-                        .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) } // Popularity Descending
-                case .topTen:
-                    async let movies = TMDBService.shared.fetchTrendingMovies(page: currentPage)
-                    async let tv = TMDBService.shared.fetchTrendingTVShows(page: currentPage)
-                    let (m, t) = try await (movies, tv)
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() })
-                        .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
-                case .forYou:
-                    async let trM = TMDBService.shared.fetchTopRatedMovies(page: currentPage)
-                    async let popT = TMDBService.shared.fetchPopularTVShows(page: currentPage)
-                    let (m, t) = try await (trM, popT)
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() }).shuffled()
-                case .trending:
-                    async let movies = TMDBService.shared.fetchTrendingMovies(page: currentPage)
-                    async let tv = TMDBService.shared.fetchTrendingTVShows(page: currentPage)
-                    let (m, t) = try await (movies, tv)
-                    newItems = (m.map { $0.toMediaItem() } + t.map { $0.toMediaItem() })
-                        .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
-                case .fixed(_, let fixedItems):
-                    if currentPage == 1 { newItems = fixedItems }
-                    canLoadMore = false
+        do {
+            var newItems: [MediaItem] = []
+            
+            switch type {
+            case .trendingMovies:
+                newItems = try await StremioService.shared.fetchTrendingMovies()
+            case .popularMovies:
+                newItems = try await StremioService.shared.fetchPopularMovies()
+            case .topRatedMovies:
+                newItems = try await StremioService.shared.fetchTrendingMovies() // Placeholder
+            case .trendingTV:
+                newItems = try await StremioService.shared.fetchTrendingTVShows()
+            case .popularTV:
+                newItems = try await StremioService.shared.fetchPopularTVShows()
+            case .genre(let id):
+                if let genreName = Genre.allGenres.first(where: { $0.id == id })?.name {
+                    newItems = try await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: genreName, skip: skipCount)
                 }
-                
-                // Deduplicate
-                let existingIDs = Set(items.map { $0.id })
-                let uniqueItems = newItems.filter { !existingIDs.contains($0.id) }
-                
-                if !uniqueItems.isEmpty {
-                    items.append(contentsOf: uniqueItems)
-                    foundItems = true
-                } else {
-                    // If we fetched data but it was all filtered out (e.g. upcoming),
-                    // we count it as an empty page but CONTINUE trying (increment page)
-                    // only if it wasn't a "Fixed" list which logic handles above.
-                    if case .fixed = type {
-                        foundItems = true // Break loop
-                    } else if newItems.isEmpty {
-                        // Truly end of results from API?
-                        // If API returned 0 results, we stop.
-                        // But we don't know easily if API returned 0 or if we filtered 20 -> 0.
-                        // For mixed lists (movie+tv), it's harder to know.
-                        // Heuristic: If we are in .upcoming and filtered everything, keep going.
-                        // Ideally we'd check if `m` and `t` were empty from API.
-                        // For now, we assume if we filtered everything, we try next page.
-                         emptyPageCount += 1
-                    } else {
-                         // IDs were just invalid/duplicates, try next page
-                         emptyPageCount += 1
-                    }
-                }
-                
-                if foundItems || emptyPageCount < 5 {
-                     currentPage += 1
-                } else {
-                    canLoadMore = false
-                }
-                
-            } catch {
-                print("Error fetching list data: \(error)")
-                canLoadMore = false // Stop on error
-                foundItems = true // Break loop
+            case .fixed(_, let fixedItems):
+                newItems = fixedItems
+                canLoadMore = false
             }
+            
+            await MainActor.run {
+                if newItems.isEmpty {
+                    canLoadMore = false
+                } else {
+                    // Deduplicate
+                    let existingIDs = Set(items.map { $0.id })
+                    let uniqueItems = newItems.filter { !existingIDs.contains($0.id) }
+                    items.append(contentsOf: uniqueItems)
+                    skipCount += 20 // Standard Cinemeta skip
+                }
+                isLoading = false
+            }
+        } catch {
+            print("Error loading list: \(error)")
+            await MainActor.run { isLoading = false }
         }
-        
-        isLoading = false
     }
-}
-
-#Preview {
-    MediaListView(title: "Action", type: .genre(id: 28))
 }

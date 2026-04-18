@@ -7,11 +7,6 @@ struct CastMember: Identifiable, Hashable, Codable {
     let imageURL: URL?
 }
 
-struct WatchProvider: Identifiable, Hashable, Codable {
-    let id: Int
-    let name: String
-    let logoURL: URL?
-}
 
 struct MediaItem: Identifiable, Hashable, Codable {
     let id: String
@@ -26,7 +21,6 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var progress: Double? // 0.0 to 1.0
     var trailerURL: URL?
     var cast: [CastMember]?
-    var watchProviders: [WatchProvider]?
     var director: String?
     
     // New Fields

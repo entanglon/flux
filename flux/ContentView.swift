@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseAuth
 
 struct ContentView: View {
     @State private var selectedCategory: SidebarItem? = .home
@@ -19,27 +18,8 @@ struct ContentView: View {
                     selectedCategory = newValue
                 }
             )) {
-                Section {
-                    NavigationLink(value: SidebarItem.search) {
-                        Label("Search", systemImage: SidebarItem.search.icon)
-                    }
-                }
-                
-                Section("Browse") {
-                    ForEach([SidebarItem.home, .movies, .tvShows, .trending], id: \.self) { item in
-                        NavigationLink(value: item) {
-                            Label(item.rawValue, systemImage: item.icon)
-                        }
-                    }
-                }
-                
-                Section("Library") {
-                    ForEach([SidebarItem.watchlist, .history, .downloads], id: \.self) { item in
-                        NavigationLink(value: item) {
-                            Label(item.rawValue, systemImage: item.icon)
-                        }
-                    }
-                }
+                browseSection
+                librarySection
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
@@ -55,8 +35,6 @@ struct ContentView: View {
                     
                     if let selected = selectedCategory {
                         // Change content based on selection.
-                        // Note: Because the stack path is cleared below on selection change,
-                        // this acts as the "root" of the new stack.
                         switch selected {
                         case .search:
                             SearchView()
@@ -69,7 +47,6 @@ struct ContentView: View {
                         case .trending:
                             TrendingView()
                         case .watchlist:
-                            // We pass binding to allow the view to switch tabs (e.g. "Find something")
                             WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
                         case .history:
                             HistoryView()
@@ -84,15 +61,7 @@ struct ContentView: View {
                     DetailView(item: item)
                 }
                 .navigationDestination(for: GenreNavigation.self) { genreNav in
-                    if genreNav.id == -1 {
-                        MediaListView(title: genreNav.name, type: .kDrama)
-                    } else if genreNav.id == -2 {
-                        MediaListView(title: genreNav.name, type: .chineseMovies)
-                    } else if genreNav.id == -3 {
-                        MediaListView(title: genreNav.name, type: .bollywoodMovies)
-                    } else {
-                        MediaListView(title: genreNav.name, type: .genre(id: genreNav.id))
-                    }
+                    MediaListView(title: genreNav.name, type: .genre(id: genreNav.id))
                 }
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)
@@ -105,11 +74,28 @@ struct ContentView: View {
             path = NavigationPath()
         }
     }
+
+    private var browseSection: some View {
+        Section("Browse") {
+            NavigationLink(value: SidebarItem.search) { Label("Search", systemImage: "magnifyingglass") }
+            NavigationLink(value: SidebarItem.home) { Label("Home", systemImage: "house") }
+            NavigationLink(value: SidebarItem.movies) { Label("Movies", systemImage: "film") }
+            NavigationLink(value: SidebarItem.tvShows) { Label("TV Shows", systemImage: "tv") }
+            NavigationLink(value: SidebarItem.trending) { Label("Trending", systemImage: "flame") }
+        }
+    }
+    
+    private var librarySection: some View {
+        Section("Library") {
+            NavigationLink(value: SidebarItem.watchlist) { Label("Watchlist", systemImage: "bookmark") }
+            NavigationLink(value: SidebarItem.history) { Label("History", systemImage: "clock") }
+            NavigationLink(value: SidebarItem.downloads) { Label("Downloads", systemImage: "arrow.down.circle") }
+        }
+    }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(AuthManager.shared)
 }
 
 struct UserProfileFooter: View {
@@ -118,11 +104,7 @@ struct UserProfileFooter: View {
     
     var body: some View {
         Button(action: {
-            if authManager.currentUser != nil {
-                 showingAuth = true
-            } else {
-                showingAuth = true
-            }
+            showingAuth = true
         }) {
             HStack(spacing: 12) {
                 if let user = authManager.currentUser {

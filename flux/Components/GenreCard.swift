@@ -1,26 +1,5 @@
 import SwiftUI
 
-struct Genre: Identifiable, Hashable {
-    let id: Int
-    let name: String
-    var imageURL: String? // Unsplash URL
-    var representativeImageURL: URL?
-    
-    static let allGenres: [Genre] = [
-        Genre(id: 28, name: "Action", imageURL: "https://unsplash.com/photos/r1SwcagHVG0/download?force=true"),
-        Genre(id: 12, name: "Adventure", imageURL: "https://unsplash.com/photos/HVWVERp33tQ/download?force=true"),
-        Genre(id: 878, name: "Sci-Fi", imageURL: "https://unsplash.com/photos/RgkpHQtcrAE/download?force=true"),
-        Genre(id: 35, name: "Comedy", imageURL: "https://unsplash.com/photos/ohbfKsIEbJQ/download?force=true"),
-        Genre(id: 18, name: "Drama", imageURL: "https://unsplash.com/photos/65UK3Fa_yIg/download?force=true"),
-        Genre(id: 53, name: "Thriller", imageURL: "https://unsplash.com/photos/wmTmcpeHzrI/download?force=true"),
-        Genre(id: 27, name: "Horror", imageURL: "https://unsplash.com/photos/uFUQ55RuMrs/download?force=true"),
-        Genre(id: 10749, name: "Romance", imageURL: "https://unsplash.com/photos/w5hhoYM_JsU/download?force=true"),
-        Genre(id: 14, name: "Fantasy", imageURL: "https://unsplash.com/photos/facU72FcKBI/download?force=true"),
-        Genre(id: 16, name: "Animation", imageURL: "https://unsplash.com/photos/JINPheIkUek/download?force=true"),
-        Genre(id: 80, name: "Crime", imageURL: "https://unsplash.com/photos/W1J8mMlkmXY/download?force=true"),
-        Genre(id: 99, name: "Documentary", imageURL: "https://unsplash.com/photos/9EW7VkfJkSg/download?force=true")
-    ]
-}
 
 struct GenreCard: View {
     let genre: Genre

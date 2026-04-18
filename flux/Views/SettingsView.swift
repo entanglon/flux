@@ -258,5 +258,4 @@ struct AdvancedSettingsView: View {
 
 #Preview {
     SettingsView()
-        .environmentObject(AuthManager.shared)
 }

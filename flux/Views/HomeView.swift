@@ -135,14 +135,6 @@ struct HomeView: View {
     
     @MainActor
     private func loadData() async {
-        let enableTMDB = UserDefaults.standard.bool(forKey: "enableRichMetadata")
-        if enableTMDB {
-            // TMDB handles both Hero content and sections in `fetchTMDBCatalogs`
-            await fetchDynamicCatalogs()
-            isLoading = false
-            return
-        }
-        
         do {
             // Load Cinemeta defaults for the Hero carousel
             let heroTrending = try await StremioService.shared.fetchTrendingMovies()
@@ -161,11 +153,6 @@ struct HomeView: View {
     }
     
     private func fetchDynamicCatalogs() async {
-        let showTMDBLists = UserDefaults.standard.bool(forKey: "enableRichMetadata")
-        if showTMDBLists {
-            await fetchTMDBCatalogs()
-            return
-        }
         let addons = AddonManager.shared.enabledAddons
         var fetchedSections: [CatalogSection] = []
         
@@ -180,7 +167,7 @@ struct HomeView: View {
                     var localSections: [CatalogSection] = []
                     // Limit to 3 catalogs per addon to avoid overloading
                     for catalog in catalogs.prefix(3) {
-                        guard let items = try? await StremioService.shared.fetchCatalog(baseURL: addon.url, type: catalog.type, id: catalog.id) else { continue }
+                        guard let items = try? await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id) else { continue }
                         if items.isEmpty { continue }
                         
                         let catalogName = catalog.name ?? catalog.id.capitalized
@@ -207,30 +194,7 @@ struct HomeView: View {
         }
     }
     
-    private func fetchTMDBCatalogs() async {
-        do {
-            async let trendingM = TMDBClient.shared.fetchTrendingMovies()
-            async let trendingTV = TMDBClient.shared.fetchTrendingTVShows()
-            async let popularM = TMDBClient.shared.fetchPopularMovies()
-            async let popularTV = TMDBClient.shared.fetchPopularTVShows()
-            
-            let (tm, tTV, pm, pt) = try await (trendingM, trendingTV, popularM, popularTV)
-            
-            let sections = [
-                CatalogSection(addonName: "TMDB", title: "Trending Movies", type: "movie", items: tm.map { $0.toMediaItem() }),
-                CatalogSection(addonName: "TMDB", title: "Trending TV Shows", type: "series", items: tTV.map { $0.toMediaItem() }),
-                CatalogSection(addonName: "TMDB", title: "Popular Movies", type: "movie", items: pm.map { $0.toMediaItem() }),
-                CatalogSection(addonName: "TMDB", title: "Popular TV Shows", type: "series", items: pt.map { $0.toMediaItem() })
-            ]
-            
-            await MainActor.run {
-                self.heroContent = sections.first?.items ?? []
-                self.dynamicSections = sections
-            }
-        } catch {
-            print("Failed to fetch TMDB Catalogs: \(error)")
-        }
-    }
+
 }
 
 #Preview {

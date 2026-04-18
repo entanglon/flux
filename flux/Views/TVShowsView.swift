@@ -14,10 +14,10 @@ struct TVShowsView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 500)
                 } else {
-                    // Featured Show
-                    if let featured = popularShows.first {
-                        HeroView(item: featured)
-                            .frame(height: 500)
+                    // Featured Carousel
+                    if !popularShows.isEmpty {
+                        FeaturedCarousel(items: Array(popularShows.prefix(5)))
+                            .frame(height: 600)
                     }
                     
                     // Popular Shows Grid
@@ -29,7 +29,7 @@ struct TVShowsView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
                                 ForEach(popularShows) { item in
                                     NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .landscape)
+                                        GlassCard(item: item, aspectRatio: .landscape, showTitle: false)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -47,7 +47,7 @@ struct TVShowsView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
                                 ForEach(trendingShows) { item in
                                     NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .landscape)
+                                        GlassCard(item: item, aspectRatio: .landscape, showTitle: false)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -67,21 +67,19 @@ struct TVShowsView: View {
     
     private func loadData() async {
         do {
-            async let popular = TMDBService.shared.fetchPopularTVShows()
-            async let trending = TMDBService.shared.fetchTrendingTVShows()
+            async let popular = StremioService.shared.fetchPopularTVShows()
+            async let trending = StremioService.shared.fetchTrendingTVShows()
             
             let (p, t) = try await (popular, trending)
             
-            popularShows = p.map { $0.toMediaItem() }
-            trendingShows = t.map { $0.toMediaItem() }
-            isLoading = false
+            await MainActor.run {
+                self.popularShows = p
+                self.trendingShows = t
+                self.isLoading = false
+            }
         } catch {
             print("Error fetching TV shows: \(error)")
-            isLoading = false
+            await MainActor.run { isLoading = false }
         }
     }
-}
-
-#Preview {
-    TVShowsView()
 }

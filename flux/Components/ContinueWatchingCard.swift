@@ -52,37 +52,6 @@ struct ContinueWatchingCard: View {
             }
             .frame(width: 280, height: 157.5) // 16:9 Aspect Ratio
             .clipped()
-            .task {
-                // Ensure TMDB Enriched Image for TV Shows
-                if item.category == "TV Show",
-                   let season = item.lastSeason,
-                   let episode = item.lastEpisode {
-                    do {
-                        // Check if we already have it in history nicely
-                        // Need to fetch TMDB ID
-                        if let enriched = await TMDBEnricher.shared.enrichContent(imdbID: item.id, category: item.category),
-                           let tmdbId = enriched.tmdbID {
-                            let details = try await TMDBClient.shared.fetchSeasonDetails(tvId: tmdbId, seasonNumber: season)
-                            if let ep = details.episodes.first(where: { $0.episodeNumber == episode }),
-                               let path = ep.stillPath {
-                                fetchedImage = URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
-                            } else if let backdrop = enriched.heroURL {
-                                fetchedImage = backdrop
-                            }
-                        }
-                    } catch {
-                        print("Failed to fetch episode still: \(error)")
-                    }
-                } else if item.category == "Movie" {
-                    // For movies, prioritize hero backdrop
-                    do {
-                        if let enriched = await TMDBEnricher.shared.enrichContent(imdbID: item.id, category: item.category),
-                           let backdrop = enriched.heroURL {
-                            fetchedImage = backdrop
-                        }
-                    } catch { }
-                }
-            }
             
             // Gradient Overlay
             LinearGradient(
