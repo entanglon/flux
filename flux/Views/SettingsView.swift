@@ -100,7 +100,7 @@ struct StreamingSettingsView: View {
 
 // MARK: - Trakt Settings
 struct TraktSettingsView: View {
-    @ObservedObject var traktService = TraktService.shared
+    @ObservedObject var traktManager = TraktManager.shared
     
     @State private var deviceCode: String? = nil
     @State private var verificationUrl: String? = nil
@@ -109,35 +109,27 @@ struct TraktSettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: Text("API Credentials")) {
-                Text("Trakt requires a Client ID & Secret to allow device authentication.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                SecureField("Client ID", text: $traktService.clientId)
-                SecureField("Client Secret", text: $traktService.clientSecret)
-            }
-            
             Section(header: Text("Account")) {
-                if traktService.isAuthenticated {
+                if traktManager.isAuthenticated {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Text("Connected to Trakt")
                         Spacer()
                         Button("Disconnect") {
-                            traktService.logout()
+                            traktManager.logout()
                         }
                     }
                     
                     HStack {
                         Button("Sync History Now") {
                             Task {
-                                try? await traktService.syncHistory()
+                                try? await traktManager.syncHistory()
                             }
                         }
-                        .disabled(traktService.isSyncing)
+                        .disabled(traktManager.isSyncing)
                         
-                        if traktService.isSyncing {
+                        if traktManager.isSyncing {
                             ProgressView()
                                 .scaleEffect(0.5)
                         }
@@ -167,12 +159,6 @@ struct TraktSettingsView: View {
                     Button("Connect to Trakt") {
                         startDeviceFlow()
                     }
-                    .disabled(!traktService.canAttemptAuth)
-                    if !traktService.canAttemptAuth {
-                        Text("Please enter a Client ID and Secret to connect.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
                 }
                 
                 if let error = errorMessage {
@@ -188,25 +174,28 @@ struct TraktSettingsView: View {
     private func startDeviceFlow() {
         isActivating = true
         errorMessage = nil
+        
         Task {
             do {
-                let response = try await traktService.generateDeviceCode()
+                let response = try await traktManager.generateDeviceCode()
                 await MainActor.run {
                     self.deviceCode = response.user_code
                     self.verificationUrl = response.verification_url
                 }
                 
-                // Automatically polls
-                try await traktService.pollForToken(deviceCode: response.device_code, interval: response.interval, expiresIn: response.expires_in)
+                try await traktManager.pollForToken(
+                    deviceCode: response.device_code,
+                    interval: response.interval,
+                    expiresIn: response.expires_in
+                )
                 
                 await MainActor.run {
                     self.isActivating = false
-                    self.deviceCode = nil
                 }
             } catch {
                 await MainActor.run {
-                    self.isActivating = false
                     self.errorMessage = "Failed to connect: \(error.localizedDescription)"
+                    self.isActivating = false
                 }
             }
         }
