@@ -1,5 +1,5 @@
 import SwiftUI
-import FirebaseCore
+// import FirebaseCore
 
 @main
 struct fluxApp: App {
@@ -7,9 +7,9 @@ struct fluxApp: App {
     @StateObject private var authManager = AuthManager.shared
     
     init() {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
+        // if FirebaseApp.app() == nil {
+        //     FirebaseApp.configure()
+        // }
     }
     
     var body: some Scene {
