@@ -291,7 +291,7 @@ struct DetailView: View {
                                                 .fontWeight(.bold)
                                                 .foregroundStyle(.white)
                                                 .multilineTextAlignment(.center)
-                                            Text(member.role)
+                                            Text(member.role ?? "")
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                                 .multilineTextAlignment(.center)
@@ -445,7 +445,9 @@ struct DetailView: View {
                 Spacer()
             }
             ToolbarItem(placement: .primaryAction) {
-                ShareLink(item: URL(string: "https://www.themoviedb.org/\(displayItem.category == "TV Show" ? "tv" : "movie")/\(displayItem.tmdbID ?? 0)")!) {
+                let typeStr = displayItem.category == "TV Show" ? "tv" : "movie"
+                let idStr = displayItem.id ?? ""
+                ShareLink(item: URL(string: "https://www.themoviedb.org/\(typeStr)/\(idStr)")!) {
                     Image(systemName: "square.and.arrow.up")
                         .foregroundStyle(.white)
                 }
@@ -482,7 +484,7 @@ struct DetailView: View {
     }
     
     private func loadDetails() async {
-        guard let id = item.tmdbID else { return }
+        guard let id = Int(item.id) else { return }
         do {
             let type = item.category == "TV Show" ? "tv" : "movie"
             
@@ -499,7 +501,7 @@ struct DetailView: View {
                 }
                 
                 var newItem = details.toMediaItem()
-                newItem.cast = credits.cast.map { CastMember(id: $0.id, name: $0.name, role: $0.character, imageURL: $0.profileURL) }
+                newItem.cast = credits.cast.map { CastMember(name: $0.name, role: $0.character, imageURL: $0.profileURL) }
                 fullItem = newItem
                 relatedItems = related.map { $0.toMediaItem() }
                 
@@ -520,7 +522,7 @@ struct DetailView: View {
                 }
                 
                 var newItem = details.toMediaItem()
-                newItem.cast = credits.cast.map { CastMember(id: $0.id, name: $0.name, role: $0.character, imageURL: $0.profileURL) }
+                newItem.cast = credits.cast.map { CastMember(name: $0.name, role: $0.character, imageURL: $0.profileURL) }
                 fullItem = newItem
                 relatedItems = related.map { $0.toMediaItem() }
             }
@@ -530,7 +532,7 @@ struct DetailView: View {
     }
     
     private func loadEpisodes(for season: Season) async {
-        guard let tvID = item.tmdbID else { return }
+        guard let tvID = Int(item.id) else { return }
         do {
             let seasonDetails = try await TMDBService.shared.fetchSeasonDetails(tvId: tvID, seasonNumber: season.seasonNumber)
             self.episodes = seasonDetails.episodes.map { $0.toEpisode() }

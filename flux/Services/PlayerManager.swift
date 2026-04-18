@@ -38,7 +38,8 @@ class PlayerManager: ObservableObject {
         self.resetPreloadState()
         
         // 1. Instant Replay Check
-        if let id = item.tmdbID {
+        let id = item.id
+        if true {
             let key = item.category == "TV Show" ? "\(id):\(season ?? 1):\(episode ?? 1)" : "\(id)"
             
             if let cached = lastPlayedStreams[key] {
@@ -203,7 +204,8 @@ class PlayerManager: ObservableObject {
     }
     
     private func saveLastPlayedStream(url: URL) {
-        guard let item = currentItem, let id = item.tmdbID else { return }
+        guard let item = currentItem else { return }
+        let id = item.id
         let key = item.category == "TV Show" ? "\(id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(id)"
         lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date())
         print("[PlayerManager] Saved Instant Replay URL for \(key)")
@@ -272,7 +274,7 @@ class PlayerManager: ObservableObject {
     }
     
     func playNextEpisode() {
-        guard let next = nextEpisodeInfo, let item = currentItem, let tmdbID = item.tmdbID else { return }
+        guard let next = nextEpisodeInfo, let item = currentItem, let tmdbID = Int(item.id) else { return }
         print("Playing Next Episode: S\(next.season):E\(next.episode)")
         
         AsyncTask {

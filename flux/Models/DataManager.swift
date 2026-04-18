@@ -4,7 +4,7 @@ import Combine
 class DataManager: ObservableObject {
     static let shared = DataManager()
     
-    @Published var watchlist: Set<Int> = [] // Changed to Int for TMDB ID
+    @Published var watchlist: Set<String> = [] // Changed to String for id
     @Published var allMedia: [MediaItem] = MockData.sampleMedia
     
     private let watchlistKey = "user_watchlist_ids"
@@ -14,7 +14,7 @@ class DataManager: ObservableObject {
     }
     
     func toggleWatchlist(item: MediaItem) {
-        guard let id = item.tmdbID else { return }
+        let id = item.id
         
         if watchlist.contains(id) {
             watchlist.remove(id)
@@ -25,7 +25,7 @@ class DataManager: ObservableObject {
     }
     
     func isInWatchlist(item: MediaItem) -> Bool {
-        guard let id = item.tmdbID else { return false }
+        let id = item.id
         return watchlist.contains(id)
     }
     
@@ -35,7 +35,7 @@ class DataManager: ObservableObject {
     }
     
     private func loadWatchlist() {
-        if let array = UserDefaults.standard.array(forKey: watchlistKey) as? [Int] {
+        if let array = UserDefaults.standard.array(forKey: watchlistKey) as? [String] {
             watchlist = Set(array)
         }
     }

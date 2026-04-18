@@ -13,10 +13,10 @@ class SearchManager: ObservableObject {
     }
     
     func addRecentSearch(_ item: MediaItem) {
-        // Remove duplicates based on tmdbID if available, or title
+        // Remove duplicates based on ID or title
         recentSearches.removeAll { existing in
-            if let id1 = existing.tmdbID, let id2 = item.tmdbID {
-                return id1 == id2
+            if existing.id == item.id {
+                return true
             }
             return existing.title == item.title
         }

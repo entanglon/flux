@@ -30,7 +30,7 @@ struct CastListView: View {
                                 .foregroundStyle(.white)
                                 .multilineTextAlignment(.center)
                             
-                            Text(member.role)
+                            Text(member.role ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.7))
                                 .multilineTextAlignment(.center)

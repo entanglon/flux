@@ -9,7 +9,7 @@ class UserDataService: ObservableObject {
     @Published var watchlist: [MediaItem] = []
     @Published var history: [MediaItem] = []
     
-    private var db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
     private var watchlistListener: ListenerRegistration?
     private var historyListener: ListenerRegistration?
     private var currentUser: User?
@@ -66,12 +66,11 @@ class UserDataService: ObservableObject {
         
         // 1. Decode to temporary tuples with timestamp
         let rawItems: [(item: MediaItem, timestamp: TimeInterval)] = itemsData.compactMap { dict -> (MediaItem, TimeInterval)? in
-            guard let idString = dict["id"] as? String,
-                  let typeString = dict["type"] as? String else { return nil }
+            let idString = dict["id"] as? String ?? ""
+            let typeString = dict["type"] as? String ?? ""
             
             let timestamp = dict["timestamp"] as? TimeInterval ?? 0
             
-            let tmdbID = Int(idString)
             let title = dict["title"] as? String ?? "Unknown"
             let posterPath = dict["image"] as? String
             let backdropPath = dict["backdrop"] as? String
@@ -101,22 +100,20 @@ class UserDataService: ObservableObject {
             let progress = dict["progress"] as? Double
             
             var item = MediaItem(
-                tmdbID: tmdbID,
-                title: title,
-                description: "",
-                imageURL: nil,
-                posterURL: finalPosterURL,
-                backdropURL: finalBackdropURL,
-                streamURL: nil,
-                category: typeString == "movie" ? "Movie" : "TV Show",
-                progress: progress,
-                trailerURL: nil,
-                cast: nil
-            )
-            item.lastSeason = lastSeason
-            item.lastEpisode = lastEpisode
-            item.lastEpisodeTitle = lastEpisodeTitle
-            
+            id: idString,
+            title: title,
+            description: "",
+            imageURL: nil,
+            posterURL: finalPosterURL,
+            backdropURL: finalBackdropURL,
+            heroURL: nil,
+            streamURL: nil,
+            category: typeString == "movie" ? "Movie" : "TV Show"
+        )
+        item.lastSeason = lastSeason
+        item.lastEpisode = lastEpisode
+        item.lastEpisodeTitle = lastEpisodeTitle
+        item.progress = progress
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
                 item.lastEpisodeImage = url
             }
@@ -129,10 +126,10 @@ class UserDataService: ObservableObject {
         
         // 3. Deduplicate (Keep first/newest occurrence)
         var uniqueItems: [MediaItem] = []
-        var seenIDs: Set<Int> = []
+        var seenIDs: Set<String> = []
         
         for entry in sorted {
-            if let id = entry.item.tmdbID {
+            let id = entry.item.id; if true {
                 if !seenIDs.contains(id) {
                     uniqueItems.append(entry.item)
                     seenIDs.insert(id)
@@ -149,12 +146,12 @@ class UserDataService: ObservableObject {
     // MARK: - Actions
     
     func isInWatchlist(_ item: MediaItem) -> Bool {
-        guard let tmdbID = item.tmdbID else { return false }
-        return watchlist.contains { $0.tmdbID == tmdbID }
+        let tmdbID = item.id
+        return watchlist.contains { $0.id == tmdbID }
     }
     
     func toggleWatchlist(_ item: MediaItem) {
-        guard let user = currentUser, item.tmdbID != nil else { return }
+        guard let user = currentUser, !item.id.isEmpty else { return }
         let docRef = db.collection("users").document(user.uid).collection("data").document("mylist")
         
         if isInWatchlist(item) {
@@ -166,7 +163,7 @@ class UserDataService: ObservableObject {
     
     // Helper to add/remove generic
     private func addToList(docRef: DocumentReference, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
-        guard let tmdbID = item.tmdbID else { return }
+        let tmdbID = item.id
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
         var imageVal = ""
@@ -188,7 +185,7 @@ class UserDataService: ObservableObject {
         }
         
         var finalItem: [String: Any] = [
-            "id": String(tmdbID),
+            "id": item.id,
             "type": typeString,
             "title": item.title,
             "image": imageVal,
@@ -210,25 +207,25 @@ class UserDataService: ObservableObject {
     }
     
     func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
-        guard let user = currentUser, item.tmdbID != nil else { return }
+        guard let user = currentUser, !item.id.isEmpty else { return }
         let docRef = db.collection("users").document(user.uid).collection("data").document("history")
         addToList(docRef: docRef, item: item, progress: progress, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage)
     }
     
     func removeFromHistory(_ item: MediaItem) {
-        guard let user = currentUser, item.tmdbID != nil else { return }
+        guard let user = currentUser, !item.id.isEmpty else { return }
         let docRef = db.collection("users").document(user.uid).collection("data").document("history")
         removeFromList(docRef: docRef, item: item)
     }
 
     private func removeFromList(docRef: DocumentReference, item: MediaItem) {
-        guard let tmdbID = item.tmdbID else { return }
+        let tmdbID = item.id
         
         docRef.getDocument { snapshot, error in
             guard let data = snapshot?.data(),
                   let items = data["items"] as? [[String: Any]] else { return }
             
-            let idStr = String(tmdbID)
+            let idStr = item.id
             let newItems = items.filter { ($0["id"] as? String) != idStr }
             
             docRef.updateData(["items": newItems])

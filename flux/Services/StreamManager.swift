@@ -36,7 +36,7 @@ class StreamManager {
     
     // Synchronous Cache Access
     func getCachedStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) -> [Stream]? {
-        guard let tmdbID = item.tmdbID else { return nil }
+        guard let tmdbID = Int(item.id) else { return nil }
         
         let s = season ?? 1
         let e = episode ?? 1
@@ -50,7 +50,7 @@ class StreamManager {
     }
     
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
-        guard let tmdbID = item.tmdbID else { return [] }
+        guard let tmdbID = Int(item.id) else { return [] }
         
         // Cache Key Construction
         let s = season ?? 1
@@ -71,7 +71,7 @@ class StreamManager {
         let tmdbType = (type == "series") ? "tv" : "movie"
         
         // Use TMDB ID if available
-        guard let tmdbID = item.tmdbID else {
+        guard let tmdbID = Int(item.id) else {
             print("No TMDB ID for item: \(item.title)")
             return []
         }

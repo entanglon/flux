@@ -245,7 +245,7 @@ struct TMDBMovieDetail: Codable, Identifiable {
     
     nonisolated func toMediaItem() -> MediaItem {
         MediaItem(
-            tmdbID: id,
+            id: String(id),
             title: title,
             description: overview ?? "",
             imageURL: backdropURL ?? posterURL,
@@ -310,7 +310,7 @@ struct TMDBTVShowDetail: Codable, Identifiable {
     
     nonisolated func toMediaItem() -> MediaItem {
         MediaItem(
-            tmdbID: id,
+            id: String(id),
             title: name,
             description: overview ?? "",
             imageURL: backdropURL ?? posterURL,
@@ -412,7 +412,7 @@ struct TMDBEpisode: Codable, Identifiable {
 extension TMDBMovie {
     nonisolated func toMediaItem() -> MediaItem {
         MediaItem(
-            tmdbID: id,
+            id: String(id),
             title: title,
             description: overview ?? "",
             imageURL: backdropURL ?? posterURL,
@@ -437,7 +437,7 @@ extension TMDBMovie {
 extension TMDBTVShow {
     nonisolated func toMediaItem() -> MediaItem {
         MediaItem(
-            tmdbID: id,
+            id: String(id),
             title: name,
             description: overview ?? "",
             imageURL: backdropURL ?? posterURL,

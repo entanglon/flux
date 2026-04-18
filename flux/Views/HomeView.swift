@@ -320,7 +320,8 @@ struct HomeView: View {
             await withTaskGroup(of: [MediaItem].self) { group in
                 for seed in seeds {
                     group.addTask {
-                        if let id = seed.tmdbID {
+                        let idString = seed.id
+                        if let id = Int(idString) {
                             if seed.category == "TV Show" {
                                 if let recs = try? await TMDBService.shared.fetchTVShowRecommendations(id: id) {
                                     return recs.map { $0.toMediaItem() }
