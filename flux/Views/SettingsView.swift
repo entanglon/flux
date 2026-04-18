@@ -8,6 +8,10 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
             StreamingSettingsView()
                 .tabItem { Label("Streaming", systemImage: "antenna.radiowaves.left.and.right") }
+            AddonsView()
+                .tabItem { Label("Addons", systemImage: "puzzlepiece.extension") }
+            TraktSettingsView()
+                .tabItem { Label("Trakt", systemImage: "calendar.badge.clock") }
             PlaybackSettingsView()
                 .tabItem { Label("Playback", systemImage: "play.tv") }
             AdvancedSettingsView()
@@ -24,6 +28,10 @@ struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
     
+    @AppStorage("enableRichMetadata") private var enableRichMetadata = false
+    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
+    @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
+    
     var body: some View {
         Form {
             Section(header: Text("Account")) {
@@ -36,6 +44,22 @@ struct GeneralSettingsView: View {
                     Toggle("Sync Watchlist & History", isOn: $syncEnabled)
                 } else {
                     Text("Not Signed In")
+                }
+            }
+            
+            Section(header: Text("Metadata Preferences")) {
+                Toggle("Enable Rich Metadata (TMDB)", isOn: $enableRichMetadata)
+                Text("Show cast photos and detailed metadata. Requires a personal TMDB API key.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                if enableRichMetadata {
+                    Toggle("Use TMDB for Home Page", isOn: $enableTMDBHomePage)
+                    Text("Replaces Stremio addons catalogs on the home page with TMDB trending/popular lists.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        
+                    SecureField("TMDB API Key", text: $tmdbApiKey)
                 }
             }
         }
@@ -69,20 +93,83 @@ struct StreamingSettingsView: View {
                 .pickerStyle(.menu)
             }
             
-            Section(header: Text("Addons")) {
-                Toggle("WebStreamer", isOn: $enableWebStreamer)
-                Toggle("Nuvio Streams", isOn: $enableNuvio)
-            }
-            
             Section(header: Text("Services")) {
                 SecureField("Real-Debrid API Key", text: $rdApiKey)
-                SecureField("Trakt Client ID", text: $traktClientId)
             }
         }
         .formStyle(.grouped)
     }
 }
 
+// MARK: - Trakt Settings
+struct TraktSettingsView: View {
+    @StateObject private var traktManager = TraktManager.shared
+    @State private var pinCode: String = ""
+    @State private var isExchanging: Bool = false
+    @State private var errorMsg: String?
+
+    var body: some View {
+        Form {
+            Section(header: Text("Trakt Integration")) {
+                if traktManager.isAuthenticated {
+                    HStack {
+                        Text("Connected to Trakt")
+                            .foregroundColor(.green)
+                        Spacer()
+                        Button("Disconnect") {
+                            traktManager.logout()
+                        }
+                        .controlSize(.small)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Connect your Trakt account to automatically scrobble what you're watching.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Button("1. Get Trakt PIN") {
+                            #if os(macOS)
+                            NSWorkspace.shared.open(traktManager.authorizationURL)
+                            #else
+                            UIApplication.shared.open(traktManager.authorizationURL)
+                            #endif
+                        }
+                        .controlSize(.regular)
+                        
+                        HStack {
+                            TextField("2. Paste PIN here", text: $pinCode)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .disabled(isExchanging)
+                            
+                            Button(isExchanging ? "Connecting..." : "Connect") {
+                                guard !pinCode.isEmpty else { return }
+                                isExchanging = true
+                                errorMsg = nil
+                                
+                                traktManager.exchangeCodeForToken(code: pinCode.trimmingCharacters(in: .whitespacesAndNewlines)) { success, error in
+                                    isExchanging = false
+                                    if success {
+                                        pinCode = ""
+                                    } else {
+                                        errorMsg = error?.localizedDescription ?? "Failed to connect. Make sure your PIN is correct."
+                                    }
+                                }
+                            }
+                            .disabled(pinCode.isEmpty || isExchanging)
+                        }
+                        
+                        if let errorMsg = errorMsg {
+                            Text(errorMsg)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
 // MARK: - 3. Playback Settings
 struct PlaybackSettingsView: View {
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
@@ -116,9 +203,8 @@ struct AdvancedSettingsView: View {
         Form {
              Section(header: Text("Storage")) {
                 Button("Clear Image Cache") {
-                    if let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-                         try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("ImageCache"))
-                    }
+                    ImageSession.shared.configuration.urlCache?.removeAllCachedResponses()
+                    URLCache.shared.removeAllCachedResponses()
                 }
             }
             
