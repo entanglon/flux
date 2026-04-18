@@ -16,6 +16,7 @@ struct StremioAddon: Codable, Identifiable, Hashable {
     var transportUrl: String
     var isEnabled: Bool
     var catalogs: [StremioCatalog]?
+    var resources: [String]?
 }
 
 struct AddonManifest: Codable {
@@ -24,6 +25,7 @@ struct AddonManifest: Codable {
     var description: String?
     var version: String?
     var catalogs: [StremioCatalog]?
+    var resources: [String]?
 }
 
 class AddonManager: ObservableObject {
@@ -90,7 +92,8 @@ class AddonManager: ObservableObject {
                 catalogs: [
                     StremioCatalog(type: "movie", id: "top", name: "Popular"),
                     StremioCatalog(type: "series", id: "top", name: "Popular")
-                ]
+                ],
+                resources: ["catalog", "meta"]
             )
             addons.append(cinemeta)
             saveAddons()
@@ -116,7 +119,8 @@ class AddonManager: ObservableObject {
                 url: piUrl,
                 transportUrl: piUrl,
                 isEnabled: true,
-                catalogs: nil
+                catalogs: nil,
+                resources: ["stream"]
             )
             self.addons.insert(piAddon, at: 0)
         }
@@ -160,7 +164,8 @@ class AddonManager: ObservableObject {
             url: baseURLStr,
             transportUrl: baseURLStr,
             isEnabled: true,
-            catalogs: manifest.catalogs
+            catalogs: manifest.catalogs,
+            resources: manifest.resources
         )
         
         await MainActor.run {
