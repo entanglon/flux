@@ -157,14 +157,13 @@ class MPVController: ObservableObject {
         }
     }
     
-    func addExternalSubtitle(_ subtitle: Subtitle) {
+    func addExternalSubtitle(_ subtitle: StremioSubtitleTrack) {
         playerView?.addExternalSubtitle(url: subtitle.url.absoluteString, title: subtitle.language)
         // Re-fetch tracks after a brief delay to show the new track selected
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.fetchTracks()
         }
     }
-}
 }
 
 // MARK: - View Controller
@@ -213,7 +212,6 @@ class MPVViewController: NSViewController {
     func getTracks() -> [Track] { return glView.getTracks() }
     func selectTrack(_ track: Track) { glView.selectTrack(track) }
     func addExternalSubtitle(url: String, title: String) { glView.addExternalSubtitle(url: url, title: title) }
-}
 }
 
 // MARK: - OpenGL View & MPV Backend

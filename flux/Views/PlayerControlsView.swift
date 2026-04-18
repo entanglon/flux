@@ -20,9 +20,9 @@ struct PlayerControlsView: View {
     // Track Support
     var audioTracks: [Track]
     var subtitleTracks: [Track]
-    var externalTracks: [Subtitle]
+    var externalTracks: [StremioSubtitleTrack]
     var onSelectTrack: (Track) -> Void
-    var onSelectExternalSub: (Subtitle) -> Void
+    var onSelectExternalSub: (StremioSubtitleTrack) -> Void
     
     @State private var isControlsVisible = true
     @State private var hoverTimer: Timer?
@@ -323,9 +323,9 @@ extension View {
 struct TrackSelectionList: View {
     let title: String
     let tracks: [Track]
-    let externalTracks: [Subtitle]
+    let externalTracks: [StremioSubtitleTrack]
     let onSelect: (Track) -> Void
-    let onSelectExternal: (Subtitle) -> Void
+    let onSelectExternal: (StremioSubtitleTrack) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

@@ -12,7 +12,7 @@ class PlayerManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var availableStreams: [Stream] = []
     @Published var currentStreamURL: URL?
-    @Published var externalSubtitles: [Subtitle] = []
+    @Published var externalSubtitles: [StremioSubtitleTrack] = []
     
     // Track current episode
     var currentSeason: Int?
