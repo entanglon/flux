@@ -20,7 +20,9 @@ struct PlayerControlsView: View {
     // Track Support
     var audioTracks: [Track]
     var subtitleTracks: [Track]
+    var externalTracks: [Subtitle]
     var onSelectTrack: (Track) -> Void
+    var onSelectExternalSub: (Subtitle) -> Void
     
     @State private var isControlsVisible = true
     @State private var hoverTimer: Timer?
@@ -157,7 +159,13 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                                 .popover(isPresented: $showSubtitlePopover, arrowEdge: .bottom) {
-                                    TrackSelectionList(title: "Subtitles", tracks: subtitleTracks, onSelect: onSelectTrack)
+                                    TrackSelectionList(
+                                        title: "Subtitles", 
+                                        tracks: subtitleTracks, 
+                                        externalTracks: externalTracks, 
+                                        onSelect: onSelectTrack,
+                                        onSelectExternal: onSelectExternalSub
+                                    )
                                 }
                                 
                                 Divider()
@@ -176,7 +184,13 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                                 .popover(isPresented: $showAudioPopover, arrowEdge: .bottom) {
-                                    TrackSelectionList(title: "Audio", tracks: audioTracks, onSelect: onSelectTrack)
+                                    TrackSelectionList(
+                                        title: "Audio", 
+                                        tracks: audioTracks, 
+                                        externalTracks: [], 
+                                        onSelect: onSelectTrack,
+                                        onSelectExternal: { _ in }
+                                    )
                                 }
                             }
                             .glassEffect(.regular.interactive(), in: .capsule)
@@ -309,7 +323,9 @@ extension View {
 struct TrackSelectionList: View {
     let title: String
     let tracks: [Track]
+    let externalTracks: [Subtitle]
     let onSelect: (Track) -> Void
+    let onSelectExternal: (Subtitle) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -346,6 +362,44 @@ struct TrackSelectionList: View {
                     }
                 }
                 .padding(8)
+                
+                if !externalTracks.isEmpty {
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                        .padding(.vertical, 4)
+                    
+                    Text("External Sources")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 4)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(externalTracks) { sub in
+                            Button {
+                                onSelectExternal(sub)
+                            } label: {
+                                HStack {
+                                    Spacer().frame(width: 16)
+                                    Text(sub.language)
+                                    if let source = sub.source {
+                                        Text("(\(source))")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .cornerRadius(6)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
             }
         }
         .frame(minWidth: 200, maxHeight: 300)

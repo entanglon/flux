@@ -156,6 +156,15 @@ class MPVController: ObservableObject {
             self.fetchTracks()
         }
     }
+    
+    func addExternalSubtitle(_ subtitle: Subtitle) {
+        playerView?.addExternalSubtitle(url: subtitle.url.absoluteString, title: subtitle.language)
+        // Re-fetch tracks after a brief delay to show the new track selected
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.fetchTracks()
+        }
+    }
+}
 }
 
 // MARK: - View Controller
@@ -203,6 +212,8 @@ class MPVViewController: NSViewController {
     func setVolume(_ value: Double) { glView.setVolume(value) }
     func getTracks() -> [Track] { return glView.getTracks() }
     func selectTrack(_ track: Track) { glView.selectTrack(track) }
+    func addExternalSubtitle(url: String, title: String) { glView.addExternalSubtitle(url: url, title: title) }
+}
 }
 
 // MARK: - OpenGL View & MPV Backend
@@ -389,6 +400,10 @@ final class MPVOGLView: NSOpenGLView {
     func selectTrack(_ track: Track) {
         let propertyName = track.type == "audio" ? "aid" : "sid"
         mpv_set_option_string(mpv, propertyName, "\(track.id)")
+    }
+    
+    func addExternalSubtitle(url: String, title: String) {
+        command("sub-add", url, "select", title)
     }
     
     private func command(_ args: String...) {

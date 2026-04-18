@@ -53,8 +53,12 @@ struct PlayerView: View {
                 },
                 audioTracks: mpv.audioTracks,
                 subtitleTracks: mpv.subtitleTracks,
+                externalTracks: playerManager.externalSubtitles,
                 onSelectTrack: { track in
                     mpv.selectTrack(track)
+                },
+                onSelectExternalSub: { sub in
+                    mpv.addExternalSubtitle(sub)
                 }
             )
             // Exit Warning Overlay
