@@ -9,6 +9,10 @@ struct DetailView: View {
     @State private var relatedItems: [MediaItem] = []
     @State private var heroEpisode: Episode?
     @State private var isLoadingDetails = true
+    @AppStorage("enableRichMetadata") private var enableRichMetadata = false
+    
+    // Derived IDs
+    @State private var activeImdbID: String? = nil
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
     @Environment(\.openWindow) private var openWindow
@@ -395,7 +399,26 @@ struct DetailView: View {
     private func loadDetails() async {
         do {
             let type = item.category == "TV Show" ? "series" : "movie"
-            let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: item.id)
+            var fetchID = item.id
+            
+            // 1. ID Translation Layer (TMDB -> IMDb)
+            // If the ID is purely numerical, it's a TMDB ID and needs translation for Stremio
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
+                if let translatedID = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type) {
+                    fetchID = translatedID
+                }
+            }
+            
+            self.activeImdbID = fetchID
+            
+            // 2. Fetch Stremio/Cinemeta Metadata
+            var detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
+            
+            // 3. Optional TMDB Enrichment Layer
+            if enableRichMetadata {
+                detailedItem = await TMDBEnricher.shared.enrichMediaItem(detailedItem)
+            }
+            
             fullItem = detailedItem
             
             if type == "series" {
@@ -409,7 +432,7 @@ struct DetailView: View {
             relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
             isLoadingDetails = false
         } catch {
-            print(error)
+            print("Error loading detailed metadata: \(error)")
             isLoadingDetails = false
         }
     }
