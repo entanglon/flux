@@ -34,6 +34,8 @@ class TraktManager: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("2", forHTTPHeaderField: "trakt-api-version")
+        request.addValue(Secrets.traktClientId, forHTTPHeaderField: "trakt-api-key")
         
         let body: [String: String] = ["client_id": Secrets.traktClientId]
         request.httpBody = try JSONEncoder().encode(body)
@@ -60,6 +62,8 @@ class TraktManager: ObservableObject {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("2", forHTTPHeaderField: "trakt-api-version")
+            request.addValue(Secrets.traktClientId, forHTTPHeaderField: "trakt-api-key")
             
             let body: [String: String] = [
                 "code": deviceCode,
