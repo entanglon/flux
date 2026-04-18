@@ -3,7 +3,10 @@ import Foundation
 class TMDBService {
     static let shared = TMDBService()
     private let baseURL = "https://api.themoviedb.org/3"
-    private let apiKey = Secrets.tmdbAPIKey
+    private var apiKey: String {
+        let key = UserDefaults.standard.string(forKey: "tmdbApiKey") ?? ""
+        return key.isEmpty ? Secrets.tmdbAPIKey : key
+    }
     
     private init() {}
     
