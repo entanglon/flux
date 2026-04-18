@@ -78,7 +78,7 @@ class StreamManager {
         
         // Try to fetch IMDB ID
         var streamId = "tmdb:\(tmdbID)"
-        if let imdbID = try? await TMDBService.shared.fetchExternalIDs(type: tmdbType, id: tmdbID) {
+        if let imdbID = try? await TMDBClient.shared.fetchExternalIDs(type: tmdbType, id: tmdbID) {
             streamId = imdbID
             print("Found IMDB ID for \(item.title): \(imdbID)")
         } else {

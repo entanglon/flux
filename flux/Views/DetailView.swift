@@ -7,15 +7,14 @@ struct DetailView: View {
     @State private var showSeasonPopover = false
     @State private var episodes: [Episode] = []
     @State private var relatedItems: [MediaItem] = []
-    @State private var videos: [TMDBVideo] = []
-    
-    // Data State
     @State private var heroEpisode: Episode?
-    @State private var watchProviders: [TMDBWatchProvider] = []
     @State private var isLoadingDetails = true
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
+    @ObservedObject private var downloadManager = DownloadManager.shared
     @Environment(\.openWindow) private var openWindow
+    
+    @AppStorage("enableRichMetadata") private var enableRichMetadata = false
     
     // Computed
     var displayItem: MediaItem { fullItem ?? item }
@@ -169,6 +168,36 @@ struct DetailView: View {
                                             .padding(.vertical, 14)
                                     }
                                     .buttonStyle(GlassButtonStyle(shape: .capsule, style: userData.isInWatchlist(displayItem) ? .regular.tint(.green) : .regular))
+                                    
+                                    if downloadManager.downloadedItems.contains(where: { $0.id == displayItem.id }) {
+                                        Button(action: {
+                                            if let downloadedItem = downloadManager.downloadedItems.first(where: { $0.id == displayItem.id }) {
+                                                downloadManager.delete(item: downloadedItem)
+                                            }
+                                        }) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.headline)
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 24)
+                                                .padding(.vertical, 14)
+                                        }
+                                        .buttonStyle(GlassButtonStyle(shape: .capsule, style: .regular.tint(.green)))
+                                        .help("Downloaded")
+                                    } else if let progress = downloadManager.activeDownloads[displayItem] {
+                                        Button(action: {}) {
+                                            HStack(spacing: 8) {
+                                                ProgressView()
+                                                    .controlSize(.small)
+                                                    .tint(.white)
+                                                Text("\(Int(progress * 100))%")
+                                                    .font(.subheadline).bold()
+                                            }
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 20)
+                                            .padding(.vertical, 14)
+                                        }
+                                        .buttonStyle(GlassButtonStyle(shape: .capsule, style: .regular))
+                                    }
                                 } else {
                                     Text("Coming Soon")
                                         .font(.headline)
@@ -276,14 +305,7 @@ struct DetailView: View {
                                 
                                 DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 140) { member in
                                     VStack(spacing: 8) {
-                                        AsyncImage(url: member.imageURL) { img in
-                                            img.resizable().aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Color.gray
-                                        }
-                                        .frame(width: 80, height: 80)
-                                        .clipShape(Circle())
-                                        .glassEffect(.regular, in: .circle)
+                                        CastCircle(name: member.name, imageURL: member.imageURL, size: 80)
                                         
                                         VStack(spacing: 2) {
                                             Text(member.name)
@@ -309,53 +331,72 @@ struct DetailView: View {
                     // MARK: - 3. Info Footer Section
                     VStack(alignment: .leading, spacing: 40) {
                         Divider().background(Color.white.opacity(0.1))
-                        
-                        // 1. How to Watch Cards
-                        if !watchProviders.isEmpty {
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("How to Watch")
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                
+
+                        // 1. Where to Watch (JustWatch Bridge / Providers)
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Where to Watch")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.white)
+                            
+                            if enableRichMetadata, let providers = displayItem.watchProviders, !providers.isEmpty {
                                 ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 16) {
-                                        ForEach(watchProviders) { provider in
-                                            Link(destination: provider.externalURL(for: displayItem.title) ?? URL(string: "https://www.google.com/search?q=\(displayItem.title)+watch")!) {
-                                                HStack(spacing: 16) {
-                                                    AsyncImage(url: provider.logoURL) { img in
-                                                        img.resizable().aspectRatio(contentMode: .fit)
-                                                    } placeholder: {
-                                                        Color.gray
+                                    HStack(spacing: 20) {
+                                        ForEach(providers, id: \.self) { provider in
+                                            let destURL = URL(string: "https://www.themoviedb.org/movie/\(displayItem.id)/watch")!
+                                            // Ideally we'd use the TMDB /watch/providers link from provider itself if passed along
+                                            Link(destination: destURL) {
+                                                VStack(spacing: 8) {
+                                                    if let logo = provider.logoURL {
+                                                        AsyncImage(url: logo) { image in
+                                                            image.resizable()
+                                                                .aspectRatio(contentMode: .fit)
+                                                        } placeholder: {
+                                                            Color.gray.opacity(0.3)
+                                                        }
+                                                        .frame(width: 60, height: 60)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 12))
                                                     }
-                                                    .frame(width: 60, height: 60)
-                                                    .cornerRadius(12)
-                                                    
-                                                    VStack(alignment: .leading, spacing: 4) {
-                                                        Text("Stream on")
-                                                            .font(.caption)
-                                                            .foregroundStyle(.secondary)
-                                                        Text(provider.provider_name)
-                                                            .font(.headline)
-                                                            .fontWeight(.semibold)
-                                                            .foregroundStyle(.white)
-                                                    }
-                                                    Spacer()
+                                                    Text(provider.name)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                        .lineLimit(1)
+                                                        .frame(width: 60)
                                                 }
-                                                .padding(16)
-                                                .frame(width: 280, alignment: .leading)
-                                                .background(Color(white: 0.12))
-                                                .cornerRadius(16)
                                             }
                                             .buttonStyle(.plain)
                                         }
                                     }
                                 }
                             }
-                            .padding(.horizontal, 60)
+                            
+                            Link(destination: URL(string: "https://www.justwatch.com/us/search?q=\(displayItem.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!) {
+                                HStack(spacing: 16) {
+                                    Image(systemName: "magnifyingglass.circle.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(.blue)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Find on JustWatch")
+                                            .font(.headline)
+                                            .foregroundStyle(.white)
+                                        Text("Check region-specific availability and providers")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(20)
+                                .background(Color(white: 0.12))
+                                .cornerRadius(16)
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        
-                        // 2. About Section
+                        .padding(.horizontal, 60)
+
                         VStack(alignment: .leading, spacing: 16) {
                             Text("About")
                                 .font(.title3)
@@ -395,9 +436,9 @@ struct DetailView: View {
                                     .foregroundStyle(.white)
                                 
                                 VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailRow(label: "Released", value: displayItem.releaseDateYear ?? "Unknown")
-                                    InfoDetailRow(label: "Rated", value: "PG-13") // Mock
-                                    InfoDetailRow(label: "Content Advisory", value: "Violence, Language") // Mock
+                                    InfoDetailRow(label: "Released", value: displayItem.releaseDate ?? "2025")
+                                    InfoDetailRow(label: "Director", value: displayItem.director ?? "N/A")
+                                    InfoDetailRow(label: "Runtime", value: displayItem.runtime ?? "N/A")
                                     InfoDetailRow(label: "Region of Origin", value: displayItem.originCountry ?? "United States")
                                 }
                             }
@@ -445,9 +486,7 @@ struct DetailView: View {
                 Spacer()
             }
             ToolbarItem(placement: .primaryAction) {
-                let typeStr = displayItem.category == "TV Show" ? "tv" : "movie"
-                let idStr = displayItem.id ?? ""
-                ShareLink(item: URL(string: "https://www.themoviedb.org/\(typeStr)/\(idStr)")!) {
+                ShareLink(item: URL(string: "https://www.stremio.com/app/detail/\(displayItem.category == "TV Show" ? "series" : "movie")/\(displayItem.id)")!) {
                     Image(systemName: "square.and.arrow.up")
                         .foregroundStyle(.white)
                 }
@@ -484,61 +523,49 @@ struct DetailView: View {
     }
     
     private func loadDetails() async {
-        guard let id = Int(item.id) else { return }
         do {
-            let type = item.category == "TV Show" ? "tv" : "movie"
+            let type = item.category == "TV Show" ? "series" : "movie"
             
-            if item.category == "TV Show" {
-                let details = try await TMDBService.shared.fetchTVShowDetails(id: id)
-                let credits = try await TMDBService.shared.fetchTVCredits(id: id)
-                
-                // Try Recommendations first, then Similar
-                var related: [TMDBTVShow] = []
-                if let recs = try? await TMDBService.shared.fetchTVShowRecommendations(id: id), !recs.isEmpty {
-                    related = recs
-                } else if let similar = try? await TMDBService.shared.fetchSimilarTVShows(id: id) {
-                    related = similar
+            let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: item.id)
+            fullItem = detailedItem
+            
+            if enableRichMetadata {
+                if let enriched = await TMDBEnricher.shared.enrichContent(imdbID: item.id, category: item.category) {
+                    fullItem?.cast = enriched.cast
+                    fullItem?.watchProviders = enriched.providers
+                    if let newHero = enriched.heroURL {
+                        fullItem?.heroURL = newHero
+                    }
+                    if let newSeasons = enriched.seasons {
+                        fullItem?.seasons = newSeasons
+                    }
                 }
-                
-                var newItem = details.toMediaItem()
-                newItem.cast = credits.cast.map { CastMember(name: $0.name, role: $0.character, imageURL: $0.profileURL) }
-                fullItem = newItem
-                relatedItems = related.map { $0.toMediaItem() }
-                
-                if let firstSeason = details.seasons?.first(where: { $0.seasonNumber > 0 }) ?? details.seasons?.first {
-                    selectedSeason = firstSeason.toSeason()
-                    await loadEpisodes(for: selectedSeason!)
-                }
-            } else {
-                let details = try await TMDBService.shared.fetchMovieDetails(id: id)
-                let credits = try await TMDBService.shared.fetchMovieCredits(id: id)
-                
-                // Try Recommendations first, then Similar
-                var related: [TMDBMovie] = []
-                if let recs = try? await TMDBService.shared.fetchMovieRecommendations(id: id), !recs.isEmpty {
-                    related = recs
-                } else if let similar = try? await TMDBService.shared.fetchSimilarMovies(id: id) {
-                    related = similar
-                }
-                
-                var newItem = details.toMediaItem()
-                newItem.cast = credits.cast.map { CastMember(name: $0.name, role: $0.character, imageURL: $0.profileURL) }
-                fullItem = newItem
-                relatedItems = related.map { $0.toMediaItem() }
             }
-            watchProviders = try await TMDBService.shared.fetchWatchProviders(type: type, id: id)
+            
+            if type == "series" {
+                if let seasons = detailedItem.seasons, let first = seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first {
+                    selectedSeason = first
+                    await loadEpisodes(for: first)
+                }
+            }
+            
+            let related = try? await StremioService.shared.fetchRelated(type: type, genres: detailedItem.genres)
+            relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
+            
+            // Cinemeta does not return watch providers out of the box
             isLoadingDetails = false
-        } catch { print(error) }
+        } catch {
+            print(error)
+            isLoadingDetails = false
+        }
     }
     
     private func loadEpisodes(for season: Season) async {
-        guard let tvID = Int(item.id) else { return }
-        do {
-            let seasonDetails = try await TMDBService.shared.fetchSeasonDetails(tvId: tvID, seasonNumber: season.seasonNumber)
-            self.episodes = seasonDetails.episodes.map { $0.toEpisode() }
-            // Set Hero Episode to first by default (or update logic to find next-to-watch)
-            if let first = episodes.first { heroEpisode = first }
-        } catch { print(error) }
+        guard let allEpisodes = fullItem?.episodes else { return }
+        self.episodes = allEpisodes.filter { $0.seasonNumber == season.seasonNumber }
+            .sorted { $0.episodeNumber < $1.episodeNumber }
+        
+        if let first = self.episodes.first { heroEpisode = first }
     }
 }
 

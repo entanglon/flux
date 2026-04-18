@@ -12,6 +12,7 @@ class PlayerManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var availableStreams: [Stream] = []
     @Published var currentStreamURL: URL?
+    @Published var externalSubtitles: [Subtitle] = []
     
     // Track current episode
     var currentSeason: Int?
@@ -37,44 +38,49 @@ class PlayerManager: ObservableObject {
         self.currentStreamURL = nil
         self.resetPreloadState()
         
+        // 0. Offline Check
+        if let localUrl = DownloadManager.shared.getLocalUrl(for: item) {
+            print("[PlayerManager] Playing downloaded file: \(localUrl)")
+            self.currentStreamURL = localUrl
+            self.isLoading = false
+            return
+        }
+        
         // 1. Instant Replay Check
-        let id = item.id
-        if true {
-            let key = item.category == "TV Show" ? "\(id):\(season ?? 1):\(episode ?? 1)" : "\(id)"
+        let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
+        
+        if let cached = lastPlayedStreams[key] {
+            let elapsed = Date().timeIntervalSince(cached.timestamp)
             
-            if let cached = lastPlayedStreams[key] {
-                let elapsed = Date().timeIntervalSince(cached.timestamp)
-                
-                // If Fresh (< 60 mins), Play Immediately
-                if elapsed < 3600 {
-                    print("[PlayerManager] Cache Fresh (\(Int(elapsed/60))m): Playing immediately.")
-                    self.currentStreamURL = cached.url
-                    self.isLoading = false
-                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                    return
-                } else {
-                    // Cache Stale, Validate
-                    print("[PlayerManager] Cache Stale (\(Int(elapsed/60))m): Validating...")
-                    AsyncTask {
-                        if await validateStream(cached.url) {
-                            print("[PlayerManager] Validation Success. Playing.")
-                            await MainActor.run {
-                                self.currentStreamURL = cached.url
-                                self.isLoading = false
-                                // Update timestamp to extend validity
-                                self.lastPlayedStreams[key] = CachedStream(url: cached.url, timestamp: Date())
-                            }
-                            self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                        } else {
-                            print("[PlayerManager] Validation Failed. Refetching.")
-                            await MainActor.run {
-                                self.lastPlayedStreams.removeValue(forKey: key)
-                                self.fetchAndRace(item: item, season: season, episode: episode)
-                            }
+            // If Fresh (< 60 mins), Play Immediately
+            if elapsed < 3600 {
+                print("[PlayerManager] Cache Fresh (\(Int(elapsed/60))m): Playing immediately.")
+                self.currentStreamURL = cached.url
+                self.isLoading = false
+                self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                return
+            } else {
+                // Cache Stale, Validate
+                print("[PlayerManager] Cache Stale (\(Int(elapsed/60))m): Validating...")
+                AsyncTask {
+                    if await validateStream(cached.url) {
+                        print("[PlayerManager] Validation Success. Playing.")
+                        await MainActor.run {
+                            self.currentStreamURL = cached.url
+                            self.isLoading = false
+                            // Update timestamp to extend validity
+                            self.lastPlayedStreams[key] = CachedStream(url: cached.url, timestamp: Date())
+                        }
+                        self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                    } else {
+                        print("[PlayerManager] Validation Failed. Refetching.")
+                        await MainActor.run {
+                            self.lastPlayedStreams.removeValue(forKey: key)
+                            self.fetchAndRace(item: item, season: season, episode: episode)
                         }
                     }
-                    return // Async validation owns the flow now
                 }
+                return // Async validation owns the flow now
             }
         }
         
@@ -107,8 +113,18 @@ class PlayerManager: ObservableObject {
         }
         
         AsyncTask {
-            // If we cached, this will return immediately
-            let streams = await StreamManager.shared.fetchStreams(for: item, season: season, episode: episode)
+            _ = await StreamManager.shared.fetchStreams(for: item, season: season, episode: episode) // Ensuring cache init
+            
+            // Parallel fetch streams and subtitles
+            async let streamsTask = StreamManager.shared.fetchStreams(for: item, season: season, episode: episode)
+            async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
+            
+            let streams = await streamsTask
+            let extraSubs = await subsTask
+            
+            await MainActor.run {
+                self.externalSubtitles = extraSubs
+            }
             
             // Flux Mode Debugging
             let isFluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
@@ -205,8 +221,7 @@ class PlayerManager: ObservableObject {
     
     private func saveLastPlayedStream(url: URL) {
         guard let item = currentItem else { return }
-        let id = item.id
-        let key = item.category == "TV Show" ? "\(id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(id)"
+        let key = item.category == "TV Show" ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
         lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date())
         print("[PlayerManager] Saved Instant Replay URL for \(key)")
     }
@@ -241,6 +256,7 @@ class PlayerManager: ObservableObject {
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
             self.availableStreams = []
+            self.externalSubtitles = []
             self.isLoading = false
             self.errorMessage = nil
             self.currentSeason = nil
@@ -274,16 +290,16 @@ class PlayerManager: ObservableObject {
     }
     
     func playNextEpisode() {
-        guard let next = nextEpisodeInfo, let item = currentItem, let tmdbID = Int(item.id) else { return }
+        guard let next = nextEpisodeInfo, let item = currentItem else { return }
         print("Playing Next Episode: S\(next.season):E\(next.episode)")
         
         AsyncTask {
             // Fetch next episode details to get the image
             var nextEpisodeImage: URL? = nil
-            if let seasonDetails = try? await TMDBService.shared.fetchSeasonDetails(tvId: tmdbID, seasonNumber: next.season) {
+            if let meta = try? await StremioService.shared.fetchMeta(type: "series", id: item.id) {
                 // Find the episode
-                if let ep = seasonDetails.episodes.first(where: { $0.episodeNumber == next.episode }) {
-                    nextEpisodeImage = ep.toEpisode().stillURL
+                if let vids = meta.episodes, let ep = vids.first(where: { $0.episodeNumber == next.episode && $0.seasonNumber == next.season }) {
+                    nextEpisodeImage = ep.stillURL
                 }
             }
             

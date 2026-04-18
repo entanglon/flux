@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseAuth
 
 struct SettingsView: View {
     var body: some View {
@@ -29,7 +28,6 @@ struct GeneralSettingsView: View {
     @AppStorage("syncEnabled") private var syncEnabled = true
     
     @AppStorage("enableRichMetadata") private var enableRichMetadata = false
-    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
     @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
     
     var body: some View {
@@ -54,11 +52,6 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                 
                 if enableRichMetadata {
-                    Toggle("Use TMDB for Home Page", isOn: $enableTMDBHomePage)
-                    Text("Replaces Stremio addons catalogs on the home page with TMDB trending/popular lists.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        
                     SecureField("TMDB API Key", text: $tmdbApiKey)
                 }
             }
@@ -103,73 +96,119 @@ struct StreamingSettingsView: View {
 
 // MARK: - Trakt Settings
 struct TraktSettingsView: View {
-    @StateObject private var traktManager = TraktManager.shared
-    @State private var pinCode: String = ""
-    @State private var isExchanging: Bool = false
-    @State private var errorMsg: String?
-
+    @ObservedObject var traktService = TraktService.shared
+    
+    @State private var deviceCode: String? = nil
+    @State private var verificationUrl: String? = nil
+    @State private var isActivating: Bool = false
+    @State private var errorMessage: String? = nil
+    
     var body: some View {
         Form {
-            Section(header: Text("Trakt Integration")) {
-                if traktManager.isAuthenticated {
+            Section(header: Text("API Credentials")) {
+                Text("Trakt requires a Client ID & Secret to allow device authentication.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Client ID", text: $traktService.clientId)
+                SecureField("Client Secret", text: $traktService.clientSecret)
+            }
+            
+            Section(header: Text("Account")) {
+                if traktService.isAuthenticated {
                     HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
                         Text("Connected to Trakt")
-                            .foregroundColor(.green)
                         Spacer()
                         Button("Disconnect") {
-                            traktManager.logout()
+                            traktService.logout()
                         }
-                        .controlSize(.small)
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Connect your Trakt account to automatically scrobble what you're watching.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        Button("1. Get Trakt PIN") {
-                            #if os(macOS)
-                            NSWorkspace.shared.open(traktManager.authorizationURL)
-                            #else
-                            UIApplication.shared.open(traktManager.authorizationURL)
-                            #endif
+                    
+                    HStack {
+                        Button("Sync History Now") {
+                            Task {
+                                try? await traktService.syncHistory()
+                            }
                         }
-                        .controlSize(.regular)
+                        .disabled(traktService.isSyncing)
+                        
+                        if traktService.isSyncing {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                        }
+                    }
+                } else if isActivating, let code = deviceCode, let urlStr = verificationUrl, let url = URL(string: urlStr) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Activation Required")
+                            .font(.headline)
+                        Text("1. Go to \(urlStr)")
+                        Text("2. Enter the code below:")
                         
                         HStack {
-                            TextField("2. Paste PIN here", text: $pinCode)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .disabled(isExchanging)
-                            
-                            Button(isExchanging ? "Connecting..." : "Connect") {
-                                guard !pinCode.isEmpty else { return }
-                                isExchanging = true
-                                errorMsg = nil
-                                
-                                traktManager.exchangeCodeForToken(code: pinCode.trimmingCharacters(in: .whitespacesAndNewlines)) { success, error in
-                                    isExchanging = false
-                                    if success {
-                                        pinCode = ""
-                                    } else {
-                                        errorMsg = error?.localizedDescription ?? "Failed to connect. Make sure your PIN is correct."
-                                    }
-                                }
+                            Text(code)
+                                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                .textSelection(.enabled)
+                            Spacer()
+                            Link(destination: url) {
+                                Text("Open Link")
                             }
-                            .disabled(pinCode.isEmpty || isExchanging)
                         }
                         
-                        if let errorMsg = errorMsg {
-                            Text(errorMsg)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
+                        ProgressView("Waiting for authorization...")
+                            .padding(.top, 8)
                     }
+                    .padding(.vertical, 8)
+                } else {
+                    Button("Connect to Trakt") {
+                        startDeviceFlow()
+                    }
+                    .disabled(!traktService.canAttemptAuth)
+                    if !traktService.canAttemptAuth {
+                        Text("Please enter a Client ID and Secret to connect.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
         }
         .formStyle(.grouped)
     }
+    
+    private func startDeviceFlow() {
+        isActivating = true
+        errorMessage = nil
+        Task {
+            do {
+                let response = try await traktService.generateDeviceCode()
+                await MainActor.run {
+                    self.deviceCode = response.user_code
+                    self.verificationUrl = response.verification_url
+                }
+                
+                // Automatically polls
+                try await traktService.pollForToken(deviceCode: response.device_code, interval: response.interval, expiresIn: response.expires_in)
+                
+                await MainActor.run {
+                    self.isActivating = false
+                    self.deviceCode = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.isActivating = false
+                    self.errorMessage = "Failed to connect: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
 }
+
 // MARK: - 3. Playback Settings
 struct PlaybackSettingsView: View {
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
@@ -203,8 +242,9 @@ struct AdvancedSettingsView: View {
         Form {
              Section(header: Text("Storage")) {
                 Button("Clear Image Cache") {
-                    ImageSession.shared.configuration.urlCache?.removeAllCachedResponses()
-                    URLCache.shared.removeAllCachedResponses()
+                    if let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                         try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("ImageCache"))
+                    }
                 }
             }
             
