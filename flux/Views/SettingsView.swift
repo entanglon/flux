@@ -28,6 +28,7 @@ struct GeneralSettingsView: View {
     @AppStorage("syncEnabled") private var syncEnabled = true
     
     @AppStorage("enableRichMetadata") private var enableRichMetadata = false
+    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
     @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
     
     var body: some View {
@@ -52,6 +53,9 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                 
                 if enableRichMetadata {
+                    Toggle("Use TMDB for Home Page", isOn: $enableTMDBHomePage)
+                        .padding(.leading, 20)
+                    
                     SecureField("TMDB API Key", text: $tmdbApiKey)
                 }
             }
