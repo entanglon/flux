@@ -8,13 +8,31 @@ struct ContinueWatchingCard: View {
     @State private var fetchedImage: URL?
     
     var DisplayImage: URL? {
-        fetchedImage ?? item.lastEpisodeImage ?? item.backdropURL ?? item.posterURL ?? item.imageURL
+        let rawURL = fetchedImage ?? item.lastEpisodeImage ?? item.heroURL ?? item.backdropURL ?? item.posterURL ?? item.imageURL
+        guard let url = rawURL else { return nil }
+        
+        var urlString = url.absoluteString
+        
+        // Force high-res for TMDB image URLs
+        if urlString.contains("image.tmdb.org") {
+            urlString = urlString.replacingOccurrences(of: "/w300/", with: "/w1280/")
+                                 .replacingOccurrences(of: "/w500/", with: "/w1280/")
+                                 .replacingOccurrences(of: "/w780/", with: "/w1280/")
+        }
+        
+        // Force high-res for Cinemeta / Metahub URLs
+        if urlString.contains("images.metahub.space") {
+            urlString = urlString.replacingOccurrences(of: "/small/", with: "/large/")
+                                 .replacingOccurrences(of: "/medium/", with: "/large/")
+        }
+        
+        return URL(string: urlString) ?? url
     }
     
     var body: some View {
         ZStack {
             // Background Image
-            CachedImage(url: DisplayImage) { phase in
+            CachedImage(url: DisplayImage, maxDimension: 600) { phase in
                 switch phase {
                 case .empty:
                     Rectangle()
@@ -35,22 +53,34 @@ struct ContinueWatchingCard: View {
             .frame(width: 280, height: 157.5) // 16:9 Aspect Ratio
             .clipped()
             .task {
-                // Self-healing: If TV Show, always try to fetch specific episode image to ensure correctness
+                // Ensure TMDB Enriched Image for TV Shows
                 if item.category == "TV Show",
-                   // item.lastEpisodeImage == nil (Removed to force update for incorrect images),
-                   let id = item.tmdbID,
                    let season = item.lastSeason,
                    let episode = item.lastEpisode {
-                    
                     do {
-                        let details = try await TMDBService.shared.fetchSeasonDetails(tvId: id, seasonNumber: season)
-                        if let epStruct = details.episodes.first(where: { $0.episodeNumber == episode }),
-                           let path = epStruct.stillPath {
-                            fetchedImage = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+                        // Check if we already have it in history nicely
+                        // Need to fetch TMDB ID
+                        if let enriched = await TMDBEnricher.shared.enrichContent(imdbID: item.id, category: item.category),
+                           let tmdbId = enriched.tmdbID {
+                            let details = try await TMDBClient.shared.fetchSeasonDetails(tvId: tmdbId, seasonNumber: season)
+                            if let ep = details.episodes.first(where: { $0.episodeNumber == episode }),
+                               let path = ep.stillPath {
+                                fetchedImage = URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+                            } else if let backdrop = enriched.heroURL {
+                                fetchedImage = backdrop
+                            }
                         }
                     } catch {
-                        print("Failed to fetch recovery image for history item: \(item.title)")
+                        print("Failed to fetch episode still: \(error)")
                     }
+                } else if item.category == "Movie" {
+                    // For movies, prioritize hero backdrop
+                    do {
+                        if let enriched = await TMDBEnricher.shared.enrichContent(imdbID: item.id, category: item.category),
+                           let backdrop = enriched.heroURL {
+                            fetchedImage = backdrop
+                        }
+                    } catch { }
                 }
             }
             
