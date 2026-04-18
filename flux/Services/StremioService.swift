@@ -54,8 +54,9 @@ class StremioService {
     private init() {}
     
     // MARK: - Catalogs Fetching
-    func fetchCatalog(type: String, id: String, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0) async throws -> [MediaItem] {
-        var urlString = "\(cinemetaURL)/catalog/\(type)/\(id)"
+    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0) async throws -> [MediaItem] {
+        let base = baseURL ?? cinemetaURL
+        var urlString = "\(base)/catalog/\(type)/\(id)"
         
         if let genre = genre, let encodedGenre = genre.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
             urlString += "/genre=\(encodedGenre)"
@@ -109,9 +110,58 @@ class StremioService {
          return try await fetchCatalog(type: "series", id: "top", skip: 20)
     }
     func searchMulti(query: String) async throws -> (movies: [MediaItem], tvShows: [MediaItem]) {
-        async let movies = fetchCatalog(type: "movie", id: "top", search: query)
-        async let tvShows = fetchCatalog(type: "series", id: "top", search: query)
-        return try await (movies, tvShows)
+        let addons = AddonManager.shared.enabledAddons
+        var allMovies: [MediaItem] = []
+        var allTVShows: [MediaItem] = []
+        
+        await withTaskGroup(of: (movies: [MediaItem], tvShows: [MediaItem]).self) { group in
+            for addon in addons {
+                guard let catalogs = addon.catalogs, !catalogs.isEmpty else { continue }
+                
+                // Get the first movie and series catalog for this addon to search against
+                let movieCatalog = catalogs.first(where: { $0.type == "movie" })
+                let tvCatalog = catalogs.first(where: { $0.type == "series" })
+                
+                group.addTask {
+                    var m: [MediaItem] = []
+                    var t: [MediaItem] = []
+                    
+                    if let movieCat = movieCatalog {
+                        m = (try? await self.fetchCatalog(type: "movie", id: movieCat.id, baseURL: addon.url, search: query)) ?? []
+                    }
+                    if let tvCat = tvCatalog {
+                        t = (try? await self.fetchCatalog(type: "series", id: tvCat.id, baseURL: addon.url, search: query)) ?? []
+                    }
+                    
+                    return (m, t)
+                }
+            }
+            
+            for await result in group {
+                allMovies.append(contentsOf: result.movies)
+                allTVShows.append(contentsOf: result.tvShows)
+            }
+        }
+        
+        // Deduplicate and Sort
+        let dedupedMovies = deduplicate(allMovies)
+        let dedupedTV = deduplicate(allTVShows)
+        
+        return (dedupedMovies, dedupedTV)
+    }
+    
+    private func deduplicate(_ items: [MediaItem]) -> [MediaItem] {
+        var seenIDs = Set<String>()
+        var uniqueItems: [MediaItem] = []
+        
+        for item in items {
+            if !seenIDs.contains(item.id) {
+                seenIDs.insert(item.id)
+                uniqueItems.append(item)
+            }
+        }
+        
+        return uniqueItems.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
     }
     
     func fetchRelated(type: String, genres: [String]?) async throws -> [MediaItem] {
@@ -134,7 +184,7 @@ extension StremioMetaPreview {
             imageURL: nil,
             posterURL: self.poster != nil ? URL(string: self.poster!) : nil,
             backdropURL: self.background != nil ? URL(string: self.background!) : nil,
-            heroURL: nil,
+            heroURL: self.background != nil ? URL(string: self.background!) : nil,
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             releaseDate: self.releaseInfo,
@@ -198,7 +248,7 @@ extension StremioMetaDetail {
             imageURL: nil,
             posterURL: self.poster != nil ? URL(string: self.poster!) : nil,
             backdropURL: self.background != nil ? URL(string: self.background!) : nil,
-            heroURL: nil,
+            heroURL: self.background != nil ? URL(string: self.background!) : nil,
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             cast: finalCast,
