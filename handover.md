@@ -14,6 +14,9 @@ The application has been successfully restored to its stable, Stremio-native sta
     - **Original Quality Banners**: Upgraded hero backdrops and episode stills to TMDB `original` resolution. Fixed a priority bug where low-res episode thumbnails were used as backgrounds.
 - **Hero Carousel Refined**: Content is now filtered for "Latest" (2024+) and "Upcoming" releases, sorted by overall popularity (TMDB rank).
 - **Trakt Thumbnail Bridge**: Fixed the "loading wheel" bug where Trakt IMDb IDs (`tt...`) failed to resolve episode thumbnails.
+- **Immersive UI & Top Bar Transparency**: Successfully implemented a transparent window toolbar while preserving macOS traffic lights (minimize, maximize, close). Content (Hero images) now flows seamlessly behind the window controls for a modern "Immersive" look.
+- **Sidebar Selection Polish**: Fixed the sidebar selection indicators so they span the **full width of the sidebar**, ensuring high-fidelity alignment with the modern Apple TV interface. Corner radii tuned to 10px for premium feel.
+- **Fidelity Restoration**: Performed a thorough purge of unrequested custom header components to return the application to a clean, stable structure while keeping the transparency and sidebar improvements.
 
 ## 🛠️ Developer Handbook (Contributor Guide)
 
@@ -48,4 +51,4 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
 2. **Player Refinements**: Support for external subtitle files and stream racing optimizations.
 3. **Download Manager**: Implement background downloading for offline viewing.
 
-*Last Updated: April 19, 2026 (02:15 PM)*
+*Last Updated: April 19, 2026 (06:55 PM)*

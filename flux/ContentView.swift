@@ -12,7 +12,6 @@ struct ContentView: View {
                 get: { selectedCategory },
                 set: { newValue in
                     if newValue == selectedCategory {
-                        // User accepted re-selection of same tab, reset stack
                         path = NavigationPath()
                     }
                     selectedCategory = newValue
@@ -22,7 +21,7 @@ struct ContentView: View {
                 librarySection
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 350) // Slightly wider for better Apple TV feel
             .safeAreaInset(edge: .bottom) {
                  UserProfileFooter()
             }
@@ -34,24 +33,15 @@ struct ContentView: View {
                         .ignoresSafeArea()
                     
                     if let selected = selectedCategory {
-                        // Change content based on selection.
                         switch selected {
-                        case .search:
-                            SearchView()
-                        case .home:
-                            HomeView()
-                        case .movies:
-                            MoviesView()
-                        case .tvShows:
-                            TVShowsView()
-                        case .trending:
-                            TrendingView()
-                        case .watchlist:
-                            WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
-                        case .history:
-                            HistoryView()
-                        case .downloads:
-                            DownloadsView()
+                        case .search: SearchView()
+                        case .home: HomeView()
+                        case .movies: MoviesView()
+                        case .tvShows: TVShowsView()
+                        case .trending: TrendingView()
+                        case .watchlist: WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
+                        case .history: HistoryView()
+                        case .downloads: DownloadsView()
                         }
                     } else {
                         HomeView()
@@ -66,9 +56,11 @@ struct ContentView: View {
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)
                 }
+                .toolbarBackground(.hidden, for: .windowToolbar)
             }
+            .ignoresSafeArea(edges: .top)
         }
-        .navigationTitle("Flux")
+        .navigationTitle("") // Hide Title text but keep area for controls
         .background(Color.black)
         .onChange(of: selectedCategory) {
             path = NavigationPath()
@@ -102,13 +94,16 @@ struct ContentView: View {
             }
             selectedCategory = item
         }) {
-            Label(title, systemImage: isSelected ? (icon == "magnifyingglass" ? icon : "\(icon).fill") : icon)
+            HStack {
+                Label(title, systemImage: isSelected ? (icon == "magnifyingglass" ? icon : "\(icon).fill") : icon)
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(isSelected ? Color.white.opacity(0.15) : Color.clear)
+            .cornerRadius(10) // 10px as requested earlier
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(isSelected ? Color.white.opacity(0.1) : Color.clear)
-        .cornerRadius(6)
     }
 }
 

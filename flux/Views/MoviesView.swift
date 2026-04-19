@@ -15,7 +15,7 @@ struct MoviesView: View {
                         .frame(height: 500)
                 } else {
                     // Featured Movie
-                    if let featured = popularMovies.first {
+                    if !popularMovies.isEmpty {
                         FeaturedCarousel(items: Array(popularMovies.prefix(5)))
                             .frame(height: 600)
                     }

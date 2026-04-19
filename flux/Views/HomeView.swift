@@ -61,90 +61,12 @@ struct HomeView: View {
                         .padding(.bottom, 16)
                     }
 
-                    // Flux Native Catalogs (if enabled)
-                    if enableFluxCatalogue {
-                        ForEach(nativeSections) { section in
-                            VStack(alignment: .leading, spacing: 16) {
-                                ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
-                                    .padding(.horizontal, 40)
-                                
-                                CarouselView(items: section.items) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                            .frame(width: 180)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.bottom, 16)
-                        }
-                    }
-
-                    // Dynamic Addon Catalogs (Stremio)
-                    ForEach(addonSections) { section in
-                        VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
-                                .padding(.horizontal, 40)
-                            
-                            CarouselView(items: section.items) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-
-                    // Watchlist Row
-                    if !userData.watchlist.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Watchlist", destination: WatchlistView(selectedTab: .constant(.watchlist)))
-                                .padding(.horizontal, 40)
-                            
-                            CarouselView(items: userData.watchlist) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-
-                    // Browse by Genre
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Browse by Genre")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 40)
-                        
-                        CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
-                            NavigationLink(value: MediaListView.ListType.genre(id: genre.id)) {
-                                GenreCard(genre: genre)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.bottom, 16)
-                    
-                    // Recently Watched (History - Vertical)
-                    if !userData.history.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Recently Watched", destination: HistoryView())
-                                .padding(.horizontal, 40)
-                            
-                            CarouselView(items: userData.history) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                    // ... rest of content rows ...
+                    fluxNativeRows
+                    addonRows
+                    watchlistRow
+                    genreRow
+                    historyRow
                 }
             }
             .padding(.bottom, 80)
@@ -155,7 +77,99 @@ struct HomeView: View {
         }
     }
     
-    @MainActor
+    // Extracted subviews for readability
+    @ViewBuilder private var fluxNativeRows: some View {
+        if enableFluxCatalogue {
+            ForEach(nativeSections) { section in
+                VStack(alignment: .leading, spacing: 16) {
+                    ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
+                        .padding(.horizontal, 40)
+                    
+                    CarouselView(items: section.items) { item in
+                        NavigationLink(value: item) {
+                            GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                .frame(width: 180)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 16)
+            }
+        }
+    }
+    
+    @ViewBuilder private var addonRows: some View {
+        ForEach(addonSections) { section in
+            VStack(alignment: .leading, spacing: 16) {
+                ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
+                    .padding(.horizontal, 40)
+                
+                CarouselView(items: section.items) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 16)
+        }
+    }
+    
+    @ViewBuilder private var watchlistRow: some View {
+        if !userData.watchlist.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionHeader(title: "Watchlist", destination: WatchlistView(selectedTab: .constant(.watchlist)))
+                    .padding(.horizontal, 40)
+                
+                CarouselView(items: userData.watchlist) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 16)
+        }
+    }
+    
+    @ViewBuilder private var genreRow: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Browse by Genre")
+                .font(.title2)
+                .fontWeight(.bold)
+                .padding(.horizontal, 40)
+            
+            CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
+                NavigationLink(value: MediaListView.ListType.genre(id: genre.id)) {
+                    GenreCard(genre: genre)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 16)
+    }
+    
+    @ViewBuilder private var historyRow: some View {
+        if !userData.history.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionHeader(title: "Recently Watched", destination: HistoryView())
+                    .padding(.horizontal, 40)
+                
+                CarouselView(items: userData.history) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+extension HomeView {
     private func loadData() async {
         do {
             // 1. Featured Hero - Using Trending All for a perfect mix of Popularity + Newness
