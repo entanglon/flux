@@ -19,9 +19,12 @@ struct GlassCard: View {
     var aspectRatio: CardAspectRatio = .landscape
     var progress: Double? = nil
     var showTitle: Bool = true
+    
+    @State private var displayItem: MediaItem
     @State private var isHovering = false
     
     init(item: MediaItem, aspectRatio: CardAspectRatio = .landscape, progress: Double? = nil, showTitle: Bool = true) {
+        self._displayItem = State(initialValue: item)
         self.item = item
         self.aspectRatio = aspectRatio
         self.progress = progress
@@ -36,7 +39,7 @@ struct GlassCard: View {
             Color.clear
                 .aspectRatio(aspectRatio.ratio, contentMode: .fit)
                 .overlay(
-                    CachedImage(url: aspectRatio == .portrait ? (item.posterURL ?? item.imageURL) : (item.backdropURL ?? item.imageURL)) { phase in
+                    CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL)) { phase in
                         switch phase {
                         case .empty:
                             Rectangle()
@@ -125,12 +128,12 @@ struct GlassCard: View {
             // Text Content
             if showTitle {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
+                    Text(displayItem.title)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     
-                    Text(item.category)
+                    Text(displayItem.category)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -141,6 +144,15 @@ struct GlassCard: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
+        }
+        .task {
+            // Auto-enrich if poster/backdrop is missing (e.g. History items from Trakt)
+            if displayItem.posterURL == nil || displayItem.backdropURL == nil {
+                let enriched = await TMDBEnricher.shared.quickEnrich(displayItem)
+                await MainActor.run {
+                    self.displayItem = enriched
+                }
+            }
         }
     }
 }

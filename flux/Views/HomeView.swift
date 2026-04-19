@@ -18,9 +18,11 @@ struct HomeView: View {
     @Environment(\.openWindow) private var openWindow
     
     @State private var heroContent: [MediaItem] = []
-    @State private var dynamicSections: [CatalogSection] = []
-    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
+    @State private var nativeSections: [CatalogSection] = []
+    @State private var addonSections: [CatalogSection] = []
     @State private var genres: [Genre] = Genre.allGenres
+    
+    @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
 
     @State private var isLoading = true
     
@@ -59,8 +61,27 @@ struct HomeView: View {
                         .padding(.bottom, 16)
                     }
 
-                    // Dynamic Addon Catalogs
-                    ForEach(dynamicSections) { section in
+                    // Flux Native Catalogs (if enabled)
+                    if enableFluxCatalogue {
+                        ForEach(nativeSections) { section in
+                            VStack(alignment: .leading, spacing: 16) {
+                                ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
+                                    .padding(.horizontal, 40)
+                                
+                                CarouselView(items: section.items) { item in
+                                    NavigationLink(value: item) {
+                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                            .frame(width: 180)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.bottom, 16)
+                        }
+                    }
+
+                    // Dynamic Addon Catalogs (Stremio)
+                    ForEach(addonSections) { section in
                         VStack(alignment: .leading, spacing: 16) {
                             ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
                                 .padding(.horizontal, 40)
@@ -137,120 +158,117 @@ struct HomeView: View {
     @MainActor
     private func loadData() async {
         do {
-            // Load Hero content (Featured Carousel)
-            var rawHero: [MediaItem] = []
-            
-            if enableTMDBHomePage {
-                 // Use TMDB 'Now Playing' and 'Upcoming' for the Hero Carousel
-                 let latestMovies = (try? await TMDBEnricher.shared.fetchLatestMovies()) ?? []
-                 let latestTV = (try? await TMDBEnricher.shared.fetchLatestTV()) ?? []
-                 rawHero = latestMovies + latestTV
-            } else {
-                // Fallback to Stremio but filter for RECENT items only (2024+)
-                let items = (try? await StremioService.shared.fetchTrendingMovies()) ?? []
-                rawHero = items.filter { item in
-                    if let year = item.releaseDateYear, let yearInt = Int(year) {
-                        return yearInt >= 2024
-                    }
-                    return true // Include if year is missing (often the case for upcoming)
-                }
+            // 1. Featured Hero - Using Trending All for a perfect mix of Popularity + Newness
+            if let trending = try? await TMDBEnricher.shared.fetchTrendingAll() {
+                self.heroContent = Array(trending.prefix(20))
             }
             
-            // Sort by popularity (descending) to show the most popular items among newest releases
-            rawHero = rawHero.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+            // 2. Load Sections
+            await fetchNativeTMDBSections()
+            await fetchAddonSections() // Restore Addon support
             
-            // NEW: Background Enrichment for Carousel
-            // We only need high-res backdrops for the first 5-6 items shown in the carousel.
-            var enrichedHero: [MediaItem] = []
-            let candidates = Array(rawHero.prefix(10))
-            
-            await withTaskGroup(of: MediaItem.self) { group in
-                for item in candidates {
-                    group.addTask {
-                        return await TMDBEnricher.shared.enrichMediaItem(item)
-                    }
-                }
-                for await enriched in group {
-                    enrichedHero.append(enriched)
+            // 3. Background: Enrich History Items (Fixes blank cards)
+            Task.detached(priority: .background) {
+                for item in self.userData.history {
+                    _ = await TMDBEnricher.shared.quickEnrich(item)
                 }
             }
-            
-            self.heroContent = enrichedHero.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
-            
-            // Generate dynamic catalogs
-            await fetchDynamicCatalogs()
             
             isLoading = false
         } catch {
             print("Error fetching data: \(error)")
-            // Generate dynamic catalogs anyway to show some content
-            await fetchDynamicCatalogs()
+            await fetchNativeTMDBSections()
             isLoading = false
         }
     }
     
-    private func fetchDynamicCatalogs() async {
-        let addons = AddonManager.shared.enabledAddons
+    private func fetchNativeTMDBSections() async {
         var fetchedSections: [CatalogSection] = []
         
-        // 1. Add TMDB Overrides if enabled
-        if enableTMDBHomePage {
-            if let trendingMovies = try? await TMDBEnricher.shared.fetchTrending(type: "movie") {
-                fetchedSections.append(CatalogSection(addonName: "TMDB", title: "TMDB - Trending Movies", type: "movie", items: trendingMovies))
-            }
-            if let trendingTV = try? await TMDBEnricher.shared.fetchTrending(type: "tv") {
-                fetchedSections.append(CatalogSection(addonName: "TMDB", title: "TMDB - Trending TV Shows", type: "series", items: trendingTV))
-            }
-        }
-        
-        // 2. Fetch from Stremio Addons
-        await withTaskGroup(of: [CatalogSection].self) { group in
-            for addon in addons {
-                let hasCatalogResource = addon.resources?.contains("catalog") ?? false
-                let catalogs = addon.catalogs ?? []
-                
-                if !hasCatalogResource && catalogs.isEmpty {
-                    continue
-                }
-                
-                group.addTask {
-                    var localSections: [CatalogSection] = []
-                    
-                    // If catalogs are empty but resource is present, try a standard fallback
-                    let catalogsToFetch = catalogs.isEmpty ? 
-                        [StremioCatalog(type: "movie", id: "top", name: "Popular"), 
-                         StremioCatalog(type: "series", id: "top", name: "Popular")] : 
-                        Array(catalogs.prefix(3))
-                    // Limit to 3 catalogs per addon to avoid overloading
-                    for catalog in catalogsToFetch {
-                        guard let items = try? await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url) else { continue }
-                        if items.isEmpty { continue }
-                        
-                        let catalogName = catalog.name ?? catalog.id.capitalized
-                        let title = "\(addon.name) - \(catalogName)"
-                        
-                        localSections.append(CatalogSection(
-                            addonName: addon.name,
-                            title: title,
-                            type: catalog.type,
-                            items: items
-                        ))
-                    }
-                    return localSections
-                }
+        // We fetch these in parallel for speed
+        await withTaskGroup(of: CatalogSection?.self) { group in
+            // Trending
+            group.addTask {
+                 if let items = try? await TMDBEnricher.shared.fetchTrending(type: "movie"), !items.isEmpty {
+                     return CatalogSection(addonName: "TMDB", title: "Trending Movies", type: "movie", items: items)
+                 }
+                 return nil
             }
             
-            for await sections in group {
-                fetchedSections.append(contentsOf: sections)
+            // Popular TV
+            group.addTask {
+                 if let items = try? await TMDBEnricher.shared.fetchPopular(type: "tv"), !items.isEmpty {
+                     return CatalogSection(addonName: "TMDB", title: "Popular Series", type: "series", items: items)
+                 }
+                 return nil
+            }
+            
+            // Upcoming
+            group.addTask {
+                 if let items = try? await TMDBEnricher.shared.fetchUpcomingMovies(), !items.isEmpty {
+                     return CatalogSection(addonName: "TMDB", title: "Upcoming Movies", type: "movie", items: items)
+                 }
+                 return nil
+            }
+            
+            // Top Rated TV
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTopRated(type: "tv"), !items.isEmpty {
+                    return CatalogSection(addonName: "TMDB", title: "Top Rated Shows", type: "series", items: items)
+                }
+                return nil
+            }
+
+            for await section in group {
+                if let s = section { fetchedSections.append(s) }
             }
         }
         
         await MainActor.run {
-            self.dynamicSections = fetchedSections.sorted { s1, s2 in
-                if s1.addonName == "Cinemeta" { return true }
-                if s2.addonName == "Cinemeta" { return false }
-                return s1.addonName < s2.addonName
+            // Sort sections by a fixed preference
+            let order = ["Trending Movies", "Popular Series", "Upcoming Movies", "Top Rated Shows"]
+            self.nativeSections = fetchedSections.sorted { s1, s2 in
+                let i1 = order.firstIndex(of: s1.title) ?? 99
+                let i2 = order.firstIndex(of: s2.title) ?? 99
+                return i1 < i2
             }
+        }
+    }
+    
+    private func fetchAddonSections() async {
+        let addons = AddonManager.shared.enabledAddons
+        var sections: [CatalogSection] = []
+        
+        await withTaskGroup(of: CatalogSection?.self) { group in
+            for addon in addons {
+                guard let catalogs = addon.catalogs else { continue }
+                for catalog in catalogs {
+                    // Only fetch first 2 catalogs per addon to keep home page snappy
+                    if catalogs.firstIndex(where: { $0.id == catalog.id }) ?? 0 > 1 { continue }
+                    
+                    group.addTask {
+                        do {
+                            let items = try await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url)
+                            if !items.isEmpty {
+                                let categoryName = catalog.type == "series" ? "Series" : "Movies"
+                                let catalogTitle = catalog.name ?? addon.name
+                                return CatalogSection(addonName: addon.name, title: "\(catalogTitle) \(categoryName)", type: catalog.type, items: items)
+                            }
+                        } catch {
+                            print("Error fetching addon catalog: \(error)")
+                        }
+                        return nil
+                    }
+                }
+            }
+            
+            for await section in group {
+                if let s = section { sections.append(s) }
+            }
+        }
+        
+        await MainActor.run {
+            self.addonSections = sections
         }
     }
     

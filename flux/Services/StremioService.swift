@@ -79,7 +79,23 @@ class StremioService {
         }
         
         let catalogResponse = try JSONDecoder().decode(StremioCatalogResponse.self, from: data)
-        return catalogResponse.metas.map { $0.toMediaItem() }
+        let items = catalogResponse.metas.map { $0.toMediaItem() }
+        
+        // Internal Enrichment: Process in parallel before returning
+        var enrichedItems: [MediaItem] = []
+        await withTaskGroup(of: MediaItem.self) { group in
+            for item in items {
+                group.addTask {
+                    return await TMDBEnricher.shared.quickEnrich(item)
+                }
+            }
+            for await enriched in group {
+                enrichedItems.append(enriched)
+            }
+        }
+        
+        // Sorting by popularity after enrichment (unless it's a specific catalog that needs order)
+        return enrichedItems.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
     }
     
     // MARK: - Meta Fetching
@@ -94,7 +110,10 @@ class StremioService {
         }
         
         let metaResponse = try JSONDecoder().decode(StremioMetaResponse.self, from: data)
-        return metaResponse.meta.toMediaItem()
+        let rawItem = metaResponse.meta.toMediaItem()
+        
+        // Internal Full Enrichment: Cast, 4K Banners, Details
+        return await TMDBEnricher.shared.fullEnrich(rawItem)
     }
     
     // Legacy API Maps (Translating old TMDB calls to Cinemeta catalogs)
@@ -188,6 +207,7 @@ extension StremioMetaPreview {
             heroURL: self.background != nil ? URL(string: self.background!) : nil,
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
+            popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
             releaseDate: self.releaseInfo,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil
         )
@@ -257,6 +277,7 @@ extension StremioMetaDetail {
             seasons: seasonsArray,
             runtime: self.runtime,
             genres: self.genres,
+            popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
             releaseDate: self.releaseInfo,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil,
             episodes: episodesArray

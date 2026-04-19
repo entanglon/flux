@@ -26,10 +26,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
-    
-    @AppStorage("enableRichMetadata") private var enableRichMetadata = false
-    @AppStorage("enableTMDBHomePage") private var enableTMDBHomePage = false
-    @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
+    @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
     
     var body: some View {
         Form {
@@ -40,24 +37,14 @@ struct GeneralSettingsView: View {
                          Spacer()
                          Button("Sign Out") { authManager.signOut() }
                     }
-                    Toggle("Sync Watchlist & History", isOn: $syncEnabled)
-                } else {
-                    Text("Not Signed In")
                 }
             }
             
-            Section(header: Text("Metadata Preferences")) {
-                Toggle("Enable Rich Metadata (TMDB)", isOn: $enableRichMetadata)
-                Text("Show cast photos and detailed metadata. Requires a personal TMDB API key.")
+            Section(header: Text("Discovery")) {
+                Toggle("Enable Flux Home Catalogue", isOn: $enableFluxCatalogue)
+                Text("Show Trending and Popular sections from TMDB at the top of Home.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
-                if enableRichMetadata {
-                    Toggle("Use TMDB for Home Page", isOn: $enableTMDBHomePage)
-                        .padding(.leading, 20)
-                    
-                    SecureField("TMDB API Key", text: $tmdbApiKey)
-                }
             }
         }
         .formStyle(.grouped)

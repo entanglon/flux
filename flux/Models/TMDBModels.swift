@@ -14,6 +14,54 @@ struct TMDBResponse<T: Codable>: Codable {
     }
 }
 
+// MARK: - Trending Combined
+struct TMDBTrendingResponse: Codable {
+    let results: [TMDBTrendingItem]
+}
+
+struct TMDBTrendingItem: Codable {
+    let id: Int
+    let mediaType: String
+    let title: String?
+    let name: String?
+    let overview: String?
+    let posterPath: String?
+    let backdropPath: String?
+    let releaseDate: String?
+    let firstAirDate: String?
+    let popularity: Double?
+    let voteAverage: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case id, overview, popularity
+        case mediaType = "media_type"
+        case title, name
+        case posterPath = "poster_path"
+        case backdropPath = "backdrop_path"
+        case releaseDate = "release_date"
+        case firstAirDate = "first_air_date"
+        case voteAverage = "vote_average"
+    }
+    
+    func toMediaItem() -> MediaItem {
+        let isMovie = mediaType == "movie"
+        return MediaItem(
+            id: String(id),
+            title: (isMovie ? title : name) ?? "Untitled",
+            description: overview ?? "",
+            imageURL: TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop) ?? TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster),
+            posterURL: TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster),
+            backdropURL: TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop),
+            heroURL: TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic),
+            streamURL: nil,
+            category: isMovie ? "Movie" : "TV Show",
+            popularity: popularity,
+            releaseDate: isMovie ? releaseDate : firstAirDate,
+            voteAverage: voteAverage
+        )
+    }
+}
+
 // MARK: - Movie
 struct TMDBMovie: Codable, Identifiable {
     let id: Int
@@ -34,18 +82,15 @@ struct TMDBMovie: Codable, Identifiable {
     }
     
     nonisolated var posterURL: URL? {
-        guard let path = posterPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster)
     }
     
     nonisolated var backdropURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w780\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop)
     }
     
     nonisolated var heroURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic)
     }
 }
 
@@ -69,18 +114,15 @@ struct TMDBTVShow: Codable, Identifiable {
     }
     
     nonisolated var posterURL: URL? {
-        guard let path = posterPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster)
     }
     
     nonisolated var backdropURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w780\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop)
     }
     
     nonisolated var heroURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic)
     }
 }
 
@@ -229,18 +271,15 @@ struct TMDBMovieDetail: Codable, Identifiable {
     }
     
     nonisolated var posterURL: URL? {
-        guard let path = posterPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster)
     }
     
     nonisolated var backdropURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w780\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop)
     }
     
     nonisolated var heroURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic)
     }
     
     nonisolated func toMediaItem() -> MediaItem {
@@ -294,18 +333,15 @@ struct TMDBTVShowDetail: Codable, Identifiable {
     }
     
     nonisolated var posterURL: URL? {
-        guard let path = posterPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: posterPath, quality: .poster)
     }
     
     nonisolated var backdropURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w780\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .backdrop)
     }
     
     nonisolated var heroURL: URL? {
-        guard let path = backdropPath else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+        TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic)
     }
     
     nonisolated func toMediaItem() -> MediaItem {

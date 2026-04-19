@@ -77,20 +77,38 @@ struct ContentView: View {
 
     private var browseSection: some View {
         Section("Browse") {
-            NavigationLink(value: SidebarItem.search) { Label("Search", systemImage: "magnifyingglass") }
-            NavigationLink(value: SidebarItem.home) { Label("Home", systemImage: "house") }
-            NavigationLink(value: SidebarItem.movies) { Label("Movies", systemImage: "film") }
-            NavigationLink(value: SidebarItem.tvShows) { Label("TV Shows", systemImage: "tv") }
-            NavigationLink(value: SidebarItem.trending) { Label("Trending", systemImage: "flame") }
+            sidebarRow(.search, title: "Search", icon: "magnifyingglass")
+            sidebarRow(.home, title: "Home", icon: "house")
+            sidebarRow(.movies, title: "Movies", icon: "film")
+            sidebarRow(.tvShows, title: "TV Shows", icon: "tv")
+            sidebarRow(.trending, title: "Trending", icon: "chart.line.uptrend.xyaxis")
         }
     }
     
     private var librarySection: some View {
         Section("Library") {
-            NavigationLink(value: SidebarItem.watchlist) { Label("Watchlist", systemImage: "bookmark") }
-            NavigationLink(value: SidebarItem.history) { Label("History", systemImage: "clock") }
-            NavigationLink(value: SidebarItem.downloads) { Label("Downloads", systemImage: "arrow.down.circle") }
+            sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark")
+            sidebarRow(.history, title: "Recently Added", icon: "clock")
+            sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle")
         }
+    }
+    
+    @ViewBuilder
+    private func sidebarRow(_ item: SidebarItem, title: String, icon: String) -> some View {
+        let isSelected = selectedCategory == item
+        Button(action: {
+            if isSelected {
+                path = NavigationPath()
+            }
+            selectedCategory = item
+        }) {
+            Label(title, systemImage: isSelected ? (icon == "magnifyingglass" ? icon : "\(icon).fill") : icon)
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(isSelected ? Color.white.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
     }
 }
 

@@ -63,79 +63,75 @@ struct FeaturedCarousel: View {
                 )
                 
                 // 3. Content
-                VStack(alignment: .leading, spacing: 12) {
-                    // Title (Logo styling)
-                    Text(item.title)
-                        .font(.system(size: 52, weight: .heavy)) // Large Impactful Title
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 4)
-                        .lineLimit(2)
-                    
-                    // Metadata Row
-                    HStack(spacing: 8) {
-                        Text(item.category) // Movie / TV Show
-                        Text("•")
-                        if let genres = item.genres?.prefix(2).map({ $0 }) {
-                            Text(genres.joined(separator: ", "))
+                NavigationLink(value: item) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Title (Logo styling)
+                        Text(item.title)
+                            .font(.system(size: 52, weight: .heavy)) // Large Impactful Title
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 4)
+                            .lineLimit(2)
+                        
+                        // Metadata Row
+                        HStack(spacing: 8) {
+                            Text(item.category) // Movie / TV Show
                             Text("•")
+                            if let genres = item.genres?.prefix(2).map({ $0 }) {
+                                Text(genres.joined(separator: ", "))
+                                Text("•")
+                            }
+                            if let year = item.releaseDateYear {
+                                Text(year)
+                            }
                         }
-                        if let year = item.releaseDateYear {
-                            Text(year)
-                        }
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white.opacity(0.8))
-                    
-                    // Description
-                    Text(item.description)
-                        .font(.body)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(3)
-                        .frame(maxWidth: 600, alignment: .leading)
-                        .padding(.top, 4)
-                        .shadow(radius: 2)
-                    
-                    // Action Buttons
-                    HStack(spacing: 16) {
-                        // Play Button
-                        if item.streamURL != nil {
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white.opacity(0.8))
+                        
+                        // Description
+                        Text(item.description)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(3)
+                            .frame(maxWidth: 600, alignment: .leading)
+                            .padding(.top, 4)
+                            .shadow(radius: 2)
+                        
+                        // Action Buttons
+                        HStack(spacing: 16) {
+                            // Watch Now Button
+                            HStack {
+                                Image(systemName: "play.fill")
+                                    .font(.headline)
+                                Text("Watch Now")
+                                    .font(.headline)
+                            }
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 14)
+                            .background(Color.white)
+                            .cornerRadius(30)
+                            
+                            // Watchlist Button
                             Button(action: {
-                                // Play action
+                                userData.toggleWatchlist(item)
                             }) {
-                                HStack {
-                                    Image(systemName: "play.fill")
-                                        .font(.headline)
-                                    Text("Play")
-                                        .font(.headline)
+                                HStack(spacing: 8) {
+                                    Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
+                                    Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
                                 }
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 32)
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 24)
                                 .padding(.vertical, 14)
-                                .background(Color.white)
-                                .cornerRadius(30)
+                                .glassEffect(.regular.interactive(), in: .capsule)
                             }
                             .buttonStyle(.plain)
                         }
-                        
-                        // Watchlist Button
-                        Button(action: {
-                            userData.toggleWatchlist(item)
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
-                                Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
-                            }
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 14)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
+                        .padding(.top, 16)
                     }
-                    .padding(.top, 16)
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 48)
                 .padding(.bottom, 60)
             }
@@ -197,15 +193,8 @@ struct FeaturedCarousel: View {
     
     private func arrowButton(direction: String) -> some View {
         Image(systemName: "chevron.\(direction)")
-            .font(.system(size: 20, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 64)
-            .background(.ultraThinMaterial)
-            .cornerRadius(32)
-            .overlay(
-                Capsule()
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
+            .font(.system(size: 40, weight: .light))
+            .foregroundStyle(.white.opacity(0.6))
             .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
     }
 }

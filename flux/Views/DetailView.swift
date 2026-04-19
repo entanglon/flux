@@ -9,7 +9,6 @@ struct DetailView: View {
     @State private var relatedItems: [MediaItem] = []
     @State private var heroEpisode: Episode?
     @State private var isLoadingDetails = true
-    @AppStorage("enableRichMetadata") private var enableRichMetadata = false
     
     // Derived IDs
     @State private var activeImdbID: String? = nil
@@ -36,24 +35,18 @@ struct DetailView: View {
                     ZStack(alignment: .bottomLeading) {
                         // Background Image
                         ZStack {
-                            // 1. Initial/Fallback Background (Small/Blurry)
-                            CachedImage(url: item.heroURL ?? item.backdropURL ?? item.imageURL, maxDimension: 600) { phase in
+                            // Unified Banner Layer
+                            // We use a single CachedImage that tracks displayItem.heroURL.
+                            // Since displayItem defaults to fullItem ?? item, this handles the transition
+                            // from initial metadata to enriched metadata seamlessly without a view swap.
+                            CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 4096) { phase in
                                 if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill)
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .transition(.opacity.animation(.easeInOut(duration: 0.5)))
                                 } else {
                                     Rectangle().fill(Color(white: 0.1))
-                                }
-                            }
-                            
-                            // 2. High-Res Enriched Background (Fade-In)
-                            if let enrichedURL = heroEpisode?.heroURL ?? displayItem.heroURL ?? displayItem.backdropURL {
-                                CachedImage(url: enrichedURL, maxDimension: 3840) { phase in // Increased to 4K resolution
-                                    if let image = phase.image {
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .transition(.opacity.animation(.easeInOut(duration: 0.5)))
-                                    }
                                 }
                             }
                         }
@@ -463,14 +456,8 @@ struct DetailView: View {
             
             self.activeImdbID = fetchID
             
-            // 2. Fetch Stremio/Cinemeta Metadata
-            var detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
-            
-            // 3. Optional TMDB Enrichment Layer
-            if enableRichMetadata {
-                detailedItem = await TMDBEnricher.shared.enrichMediaItem(detailedItem)
-            }
-            
+            // 2. Fetch Enriched Metadata (Internally handles TMDB if available)
+            let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
             fullItem = detailedItem
             
             if type == "series" {
@@ -508,9 +495,9 @@ struct DetailView: View {
             if let first = currentSeasonEpisodes.first { heroEpisode = first }
         }
         
-        // Background Enrichment: Fetch descriptions if enabled
-        if UserDefaults.standard.bool(forKey: "enableRichMetadata"),
-           let tmdbID = UserDefaults.standard.string(forKey: "activeTMDBID") {
+        // Background Enrichment: Fetch descriptions automatically
+        if let id = fullItem?.id, id.hasPrefix("tt"),
+           let tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: id, type: "tv") {
             
             let enrichedOverviews = await TMDBEnricher.shared.fetchSeasonEnrichment(tvId: tmdbID, seasonNumber: season.seasonNumber)
             

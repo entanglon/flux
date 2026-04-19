@@ -189,9 +189,8 @@ struct ContinueWatchingCard: View {
         .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
         .onHover { isHovering = $0 }
         .task {
-            // If it's a TV show and we need an episode still
-            if UserDefaults.standard.bool(forKey: "enableRichMetadata"),
-               item.category == "TV Show",
+            // Priority: Resolve thumbnails for TV Shows (especially Trakt sync items)
+            if item.category == "TV Show",
                let season = item.lastSeason,
                let episode = item.lastEpisode,
                fetchedImage == nil {

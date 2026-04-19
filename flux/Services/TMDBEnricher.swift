@@ -1,12 +1,45 @@
-import Foundation
-import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 class TMDBEnricher {
     static let shared = TMDBEnricher()
     
     private let baseURL = "https://api.themoviedb.org/3"
     
-    // We use a property to fetch the API key dynamically from AppStorage or Secrets
+    // MARK: - Caching Layer
+    private var idCache: [String: String] = [:] // IMDb -> TMDB
+    private var itemCache: [String: MediaItem] = [:] // ID -> Enriched Item
+    
+    // MARK: - Adaptive Resolution
+    enum ImageQuality {
+        case poster      // w780
+        case backdrop    // w1280
+        case original    // 4K/Original
+        case automatic   // Screen-aware
+    }
+    
+    func adaptiveURL(path: String?, quality: ImageQuality) -> URL? {
+        guard let path = path else { return nil }
+        let size: String
+        switch quality {
+        case .poster: size = "w780"
+        case .backdrop: size = "w1280"
+        case .original: size = "original"
+        case .automatic:
+            #if os(macOS)
+            let screen = NSScreen.main
+            let scale = screen?.backingScaleFactor ?? 1.0
+            let physicalWidth = (screen?.frame.width ?? 1920) * scale
+            // If physical width is > 2000, we prioritize Original/4K quality
+            size = physicalWidth > 2000 ? "original" : "w1280"
+            #else
+            size = "w1280"
+            #endif
+        }
+        return URL(string: "https://image.tmdb.org/t/p/\(size)\(path)")
+    }
+    
     private var apiKey: String {
         let key = UserDefaults.standard.string(forKey: "tmdbApiKey") ?? ""
         return key.isEmpty ? Secrets.tmdbAPIKey : key
@@ -14,7 +47,7 @@ class TMDBEnricher {
     
     private init() {}
     
-    // MARK: - ID Translation (Critical for Stremio Compatibility)
+    // MARK: - ID Translation
     func resolveTmdbID(imdbID: String, type: String) async -> String? {
         let mediaType = type.contains("movie") ? "movie" : "tv"
         let findURL = "\(baseURL)/find/\(imdbID)?api_key=\(apiKey)&external_source=imdb_id"
@@ -41,85 +74,100 @@ class TMDBEnricher {
             let response = try JSONDecoder().decode(ExternalIDsResponse.self, from: data)
             return response.imdb_id
         } catch {
-            print("Failed to translate TMDB ID \(tmdbID): \(error)")
             return nil
         }
     }
     
-    // MARK: - Asset Enrichment
-    func enrichMediaItem(_ item: MediaItem) async -> MediaItem {
-        guard !apiKey.isEmpty else { return item }
+    // MARK: - Built-Upon-Enriched Logic
+
+    /// Quick enrichment for catalog carousels
+    func quickEnrich(_ item: MediaItem) async -> MediaItem {
+        if let cached = itemCache[item.id] { return cached }
         
         var enriched = item
-        let type = item.category.contains("TV") || item.category.lowercased().contains("series") ? "tv" : "movie"
-        let imdbID = item.id.starts(with: "tt") ? item.id : nil
+        let type = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") ? "tv" : "movie"
         
-        // 1. First, find the TMDB ID if we only have IMDb ID
-        var tmdbID: Int? = nil
-        if let id = imdbID {
-            let findURL = "\(baseURL)/find/\(id)?api_key=\(apiKey)&external_source=imdb_id"
-            if let url = URL(string: findURL),
-               let (data, _) = try? await URLSession.shared.data(from: url),
-               let response = try? JSONDecoder().decode(TMDBFindResponse.self, from: data) {
-                if type == "movie" {
-                    tmdbID = response.movie_results.first?.id
-                } else {
-                    tmdbID = response.tv_results.first?.id
-                }
+        // 1. Resolve TMDB ID
+        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        guard let id = tmdbIDString else { return item }
+        
+        // 2. Fetch basic metadata
+        let urlString = "\(baseURL)/\(type)/\(id)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return item }
+        
+        await MainActor.run {
+            if let backdropPath = json["backdrop_path"] as? String {
+                enriched.backdropURL = adaptiveURL(path: backdropPath, quality: .backdrop)
+                enriched.heroURL = adaptiveURL(path: backdropPath, quality: .automatic)
+            }
+            if let posterPath = json["poster_path"] as? String {
+                enriched.posterURL = adaptiveURL(path: posterPath, quality: .poster)
+            }
+            if let popularity = json["popularity"] as? Double {
+                enriched.popularity = popularity
+            }
+            if let overview = json["overview"] as? String, enriched.description.isEmpty {
+                enriched.description = overview
             }
         }
         
-        let idToUse = tmdbID != nil ? String(tmdbID!) : item.id
+        itemCache[item.id] = enriched
+        return enriched
+    }
+
+    /// Full enrichment for DetailView
+    func fullEnrich(_ item: MediaItem) async -> MediaItem {
+        var enriched = await quickEnrich(item)
         
-        // 2. Fetch Details & Assets
+        // Preserve essential metadata from the source (Cinemeta/Addon)
+        enriched.episodes = item.episodes
+        enriched.seasons = item.seasons
+        
+        let type = enriched.category.lowercased().contains("tv") || enriched.category.lowercased().contains("series") ? "tv" : "movie"
+        
+        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        guard let id = tmdbIDString else { return enriched }
+        
         await withTaskGroup(of: Void.self) { group in
-            // Step A: Details (for high-res imagery)
             group.addTask {
-                let detailURL = "\(self.baseURL)/\(type)/\(idToUse)?api_key=\(self.apiKey)"
-                if let url = URL(string: detailURL),
+                let urlString = "\(self.baseURL)/\(type)/\(id)?api_key=\(self.apiKey)"
+                if let url = URL(string: urlString),
                    let (data, _) = try? await URLSession.shared.data(from: url),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let backdropPath = json["backdrop_path"] as? String {
                     await MainActor.run {
-                        if let backdropPath = json["backdrop_path"] as? String {
-                            // Upgrading resolution to 'original' for crisp hero banners
-                            enriched.backdropURL = URL(string: "https://image.tmdb.org/t/p/original\(backdropPath)")
-                            enriched.heroURL = enriched.backdropURL
-                        }
-                        if let posterPath = json["poster_path"] as? String {
-                            enriched.posterURL = URL(string: "https://image.tmdb.org/t/p/w780\(posterPath)")
-                        }
-                        if let overview = json["overview"] as? String, enriched.description.isEmpty {
-                            enriched.description = overview
-                        }
+                        enriched.backdropURL = self.adaptiveURL(path: backdropPath, quality: .automatic)
+                        enriched.heroURL = enriched.backdropURL
                     }
                 }
             }
             
-            // Step B: Credits
             group.addTask {
-                if let credits = await self.fetchCredits(id: idToUse, type: type) {
+                if let credits = await self.fetchCredits(id: id, type: type) {
                     await MainActor.run {
                         enriched.cast = credits.cast.prefix(15).map { cast in
-                            CastMember(name: cast.name, role: cast.character, imageURL: cast.profileURL)
+                            CastMember(name: cast.name, role: cast.character, imageURL: self.adaptiveURL(path: cast.profilePath, quality: .poster))
                         }
                     }
                 }
             }
             
-            // Step C: Watch Providers
             group.addTask {
-                if let response = await self.fetchWatchProviders(id: idToUse, type: type) {
+                if let response = await self.fetchWatchProviders(id: id, type: type) {
                     let region = response.results["US"] ?? response.results.first?.value
                     let items = (region?.flatrate ?? []) + (region?.buy ?? []) + (region?.rent ?? [])
                     if !items.isEmpty {
                         await MainActor.run {
-                            enriched.watchProviders = items.map { WatchProvider(name: $0.provider_name, logoURL: $0.logoURL, displayPriority: 0) }
+                            enriched.watchProviders = items.map { WatchProvider(name: $0.provider_name, logoURL: self.adaptiveURL(path: $0.logo_path, quality: .poster), displayPriority: 0) }
                         }
                     }
                 }
             }
         }
         
+        itemCache[item.id] = enriched
         return enriched
     }
     
@@ -130,10 +178,7 @@ class TMDBEnricher {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(TMDBEpisodeDetail.self, from: data) else { return nil }
         
-        if let path = response.still_path {
-            return URL(string: "https://image.tmdb.org/t/p/original\(path)")
-        }
-        return nil
+        return adaptiveURL(path: response.still_path, quality: .backdrop)
     }
     
     func fetchSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: String] {
@@ -149,11 +194,56 @@ class TMDBEnricher {
         return overviews
     }
     
-    // MARK: - Catalog Fetching (HomeView Override)
+    // MARK: - Catalog Fetching (Flux Discovery Layer)
+    func fetchTrendingAll() async throws -> [MediaItem] {
+        let urlString = "\(baseURL)/trending/all/week?api_key=\(apiKey)"
+        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        let response = try JSONDecoder().decode(TMDBTrendingResponse.self, from: data)
+        let results = response.results.compactMap { $0.toMediaItem() }
+        
+        // Apply Freshness Filter: Only 2024+ content for the main Hero
+        return results.filter { item in
+            guard let date = item.releaseDate, !date.isEmpty else { return true }
+            return date >= "2024-01-01"
+        }
+    }
     func fetchTrending(type: String) async throws -> [MediaItem] {
         let mediaType = type.contains("movie") ? "movie" : "tv"
         let urlString = "\(baseURL)/trending/\(mediaType)/week?api_key=\(apiKey)"
-        
+        return try await fetchCatalog(from: urlString, type: mediaType)
+    }
+
+    func fetchPopular(type: String) async throws -> [MediaItem] {
+        let mediaType = type.contains("movie") ? "movie" : "tv"
+        let urlString = "\(baseURL)/\(mediaType)/popular?api_key=\(apiKey)"
+        return try await fetchCatalog(from: urlString, type: mediaType)
+    }
+
+    func fetchTopRated(type: String) async throws -> [MediaItem] {
+        let mediaType = type.contains("movie") ? "movie" : "tv"
+        let urlString = "\(baseURL)/\(mediaType)/top_rated?api_key=\(apiKey)"
+        return try await fetchCatalog(from: urlString, type: mediaType)
+    }
+
+    func fetchUpcomingMovies() async throws -> [MediaItem] {
+        let urlString = "\(baseURL)/movie/upcoming?api_key=\(apiKey)"
+        return try await fetchCatalog(from: urlString, type: "movie")
+    }
+
+    func fetchLatestMovies() async throws -> [MediaItem] {
+        let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)"
+        return try await fetchCatalog(from: urlString, type: "movie")
+    }
+    
+    func fetchLatestTV() async throws -> [MediaItem] {
+        let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)"
+        return try await fetchCatalog(from: urlString, type: "tv")
+    }
+
+    // Generic Internal Fetcher
+    private func fetchCatalog(from urlString: String, type mediaType: String) async throws -> [MediaItem] {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(from: url)
         
@@ -164,21 +254,6 @@ class TMDBEnricher {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
             return response.results.map { $0.toMediaItem() }
         }
-    }
-    func fetchLatestMovies() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)"
-        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(TMDBResponse<TMDBMovie>.self, from: data)
-        return response.results.map { $0.toMediaItem() }
-    }
-    
-    func fetchLatestTV() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)"
-        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
-        return response.results.map { $0.toMediaItem() }
     }
     
     // MARK: - Helper API Calls
