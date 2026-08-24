@@ -39,18 +39,46 @@ struct MediaListView: View {
         GridItem(.adaptive(minimum: 160), spacing: 24)
     ]
     
+    @Environment(\.dismiss) private var dismiss
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
+                // Header with Liquid Glass Back button
+                HStack(spacing: 16) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .contentShape(Circle())
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .buttonStyle(.plain)
+
+                    Text(title)
+                        .font(.system(size: 44, weight: .heavy))
+                        .foregroundStyle(.white)
+                    
+                    Spacer()
+                }
+                .padding(.top, 24)
+                
                 content
             }
-            .padding(40)
+            .padding(.leading, 268)
+            .padding(.trailing, 40)
+            .padding(.top, 40)
+            .padding(.bottom, 40)
         }
-        .background(Color.black.opacity(0.9))
+        .navigationBarBackButtonHidden(true)
+        .toolbarVisibility(.hidden, for: .windowToolbar)
+        .background(
+            LinearGradient(gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]), startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
         .task {
             await loadData()
         }
-        .navigationTitle(title)
     }
     
     @ViewBuilder

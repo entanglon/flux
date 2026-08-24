@@ -134,8 +134,8 @@ class UserDataService: ObservableObject {
     private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
-        let imageVal = item.posterURL?.absoluteString ?? ""
-        let backdropVal = item.backdropURL?.absoluteString ?? ""
+        let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
+        let backdropVal = item.backdropURL?.absoluteString ?? item.heroURL?.absoluteString ?? imageVal
         
         var finalItem: [String: Any] = [
             "id": item.id,

@@ -81,6 +81,19 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Vendored hydra server (DEPRECATED — replaced by Stremio server.js; kept locally for reference)
+#
+hydra/
+scratch/
+
+# Build artifacts & local extras
+#
+Flux.dmg
+build_release/
+default.profraw
+*.profraw
+ContentView_Backup.swift
+
 # General
 #
 *.log
@@ -88,3 +101,10 @@ yarn-error.log*
 *.bak
 *.zip
 *.tar.gz
+
+# Runtime caches & misc local assets
+#
+FluxImageCache/
+DMG_BG/
+icon.png
+flux-icons/

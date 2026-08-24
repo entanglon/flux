@@ -5,32 +5,20 @@ struct ContentView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @StateObject private var playerManager = PlayerManager.shared
     @State private var path = NavigationPath()
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List(selection: Binding(
-                get: { selectedCategory },
-                set: { newValue in
-                    if newValue == selectedCategory {
-                        path = NavigationPath()
-                    }
-                    selectedCategory = newValue
-                }
-            )) {
-                browseSection
-                librarySection
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 350) // Slightly wider for better Apple TV feel
-            .safeAreaInset(edge: .bottom) {
-                 UserProfileFooter()
-            }
-        } detail: {
+        ZStack(alignment: .leading) {
+            // MARK: - Full Bleed Detail Content View (Background Layer)
             NavigationStack(path: $path) {
                 ZStack {
-                    // Global Background
-                    LinearGradient(gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]), startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .ignoresSafeArea()
+                    // Global dark mesh background
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
                     
                     if let selected = selectedCategory {
                         switch selected {
@@ -56,52 +44,147 @@ struct ContentView: View {
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)
                 }
-                .toolbarBackground(.hidden, for: .windowToolbar)
             }
-            .ignoresSafeArea(edges: .top)
+            .navigationBarBackButtonHidden(true)
+            .toolbarVisibility(.visible, for: .windowToolbar)
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            .toolbar(removing: .title)
+            .windowToolbarFullScreenVisibility(.onHover)
+            .ignoresSafeArea(.all, edges: .all)
+            
+            // MARK: - System Sidebar Material
+            VStack(alignment: .leading, spacing: 0) {
+                // Traffic light clearance height
+                Color.clear
+                    .frame(height: 38)
+                
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        browseSection
+                        librarySection
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+                }
+                
+                Spacer(minLength: 8)
+                
+                UserProfileFooter()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
+            }
+            .frame(width: sidebarWidth)
+            .background(
+                Color.black.opacity(0.22)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            )
+            .glassEffect(.regular, in: .rect(cornerRadius: 24))
+            .overlay(alignment: .trailing) {
+                // Sidebar Resizing Drag Handle
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+                    .frame(width: 8)
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.resizeLeftRight.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { gesture in
+                                let newWidth = sidebarWidth + gesture.translation.width
+                                sidebarWidth = min(max(newWidth, 200), 340)
+                            }
+                    )
+            }
+            .padding(.leading, 8)
+            .padding(.top, 0)
+            .padding(.bottom, 10)
+            .ignoresSafeArea(.all, edges: .top)
         }
-        .navigationTitle("") // Hide Title text but keep area for controls
-        .background(Color.black)
+        #if os(macOS)
+        .background(WindowAccessor { window in
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.styleMask.insert(.fullSizeContentView)
+            window.isMovableByWindowBackground = true
+            window.titlebarSeparatorStyle = .none
+            window.backgroundColor = .clear
+            window.toolbar?.isVisible = true
+            window.toolbar?.showsBaselineSeparator = false
+            window.standardWindowButton(.closeButton)?.isHidden = false
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+            window.standardWindowButton(.zoomButton)?.isHidden = false
+            window.standardWindowButton(.closeButton)?.alphaValue = 1
+            window.standardWindowButton(.miniaturizeButton)?.alphaValue = 1
+            window.standardWindowButton(.zoomButton)?.alphaValue = 1
+        })
+        #endif
         .onChange(of: selectedCategory) {
             path = NavigationPath()
         }
     }
 
+    // MARK: - Sidebar Sections (Apple TV / Music SF Symbols)
+
     private var browseSection: some View {
-        Section("Browse") {
-            sidebarRow(.search, title: "Search", icon: "magnifyingglass")
-            sidebarRow(.home, title: "Home", icon: "house")
-            sidebarRow(.movies, title: "Movies", icon: "film")
-            sidebarRow(.tvShows, title: "TV Shows", icon: "tv")
-            sidebarRow(.trending, title: "Trending", icon: "chart.line.uptrend.xyaxis")
+        VStack(alignment: .leading, spacing: 4) {
+            sidebarRow(.search, title: "Search", icon: "magnifyingglass", fillIcon: "magnifyingglass")
+            sidebarRow(.home, title: "Home", icon: "house", fillIcon: "house.fill")
+            sidebarRow(.movies, title: "Movies", icon: "film", fillIcon: "film.fill")
+            sidebarRow(.tvShows, title: "TV Shows", icon: "tv", fillIcon: "tv.fill")
+            sidebarRow(.trending, title: "Trending", icon: "chart.line.uptrend.xyaxis", fillIcon: "chart.line.uptrend.xyaxis")
         }
     }
     
     private var librarySection: some View {
-        Section("Library") {
-            sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark")
-            sidebarRow(.history, title: "Recently Added", icon: "clock")
-            sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle")
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Library")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.leading, 10)
+                .padding(.bottom, 2)
+                .padding(.top, 4)
+            
+            sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark", fillIcon: "bookmark.fill")
+            sidebarRow(.history, title: "Recently Added", icon: "clock", fillIcon: "clock.fill")
+            sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
         }
     }
     
     @ViewBuilder
-    private func sidebarRow(_ item: SidebarItem, title: String, icon: String) -> some View {
+    private func sidebarRow(_ item: SidebarItem, title: String, icon: String, fillIcon: String) -> some View {
         let isSelected = selectedCategory == item
+        
         Button(action: {
-            if isSelected {
-                path = NavigationPath()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                if isSelected {
+                    path = NavigationPath()
+                }
+                selectedCategory = item
             }
-            selectedCategory = item
         }) {
-            HStack {
-                Label(title, systemImage: isSelected ? (icon == "magnifyingglass" ? icon : "\(icon).fill") : icon)
+            HStack(spacing: 12) {
+                Image(systemName: isSelected ? fillIcon : icon)
+                    .font(.system(size: 15, weight: isSelected ? .bold : .medium))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.68))
+                    .frame(width: 22, alignment: .center)
+                
+                Text(title)
+                    .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.82))
+                
                 Spacer()
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .background(isSelected ? Color.white.opacity(0.15) : Color.clear)
-            .cornerRadius(10) // 10px as requested earlier
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+            .if(isSelected) { view in
+                view.glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10))
+            }
         }
         .buttonStyle(.plain)
     }
@@ -119,9 +202,8 @@ struct UserProfileFooter: View {
         Button(action: {
             showingAuth = true
         }) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 if let user = authManager.currentUser {
-                    // Avatar
                     if let photoURL = user.photoURL {
                         AsyncImage(url: photoURL) { image in
                             image.resizable()
@@ -129,49 +211,42 @@ struct UserProfileFooter: View {
                         } placeholder: {
                             Color.gray.opacity(0.3)
                         }
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .clipShape(Circle())
                     } else {
                         Circle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(width: 32, height: 32)
+                            .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 28, height: 28)
                             .overlay(
-                                Text(String(user.email?.prefix(1) ?? "U").uppercased())
-                                    .font(.system(size: 14, weight: .bold))
+                                Text(String(user.displayName?.prefix(1) ?? user.email?.prefix(1) ?? "Z").uppercased())
+                                    .font(.system(size: 12, weight: .bold))
                                     .foregroundStyle(.white)
                             )
                     }
                     
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(user.displayName ?? user.email ?? "User")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                            .foregroundStyle(.white)
-                    }
+                    Text(user.displayName ?? user.email ?? "Zain Ul Nazir")
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.9))
                 } else {
-                    // Guest Avatar
                     Circle()
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 32, height: 32)
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: 28, height: 28)
                         .overlay(
                             Image(systemName: "person.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 13))
                                 .foregroundStyle(.white.opacity(0.8))
                         )
                     
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sign In")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                    }
+                    Text("Sign In")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
-                Spacer() 
+                Spacer()
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 16) 
-            .contentShape(Rectangle()) 
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showingAuth) {
@@ -183,3 +258,46 @@ struct UserProfileFooter: View {
         }
     }
 }
+
+#if os(macOS)
+import AppKit
+
+struct WindowAccessor: NSViewRepresentable {
+    let callback: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                self.configure(window)
+                
+                let center = NotificationCenter.default
+                let names: [Notification.Name] = [
+                    NSWindow.willEnterFullScreenNotification,
+                    NSWindow.didEnterFullScreenNotification,
+                    NSWindow.willExitFullScreenNotification,
+                    NSWindow.didExitFullScreenNotification,
+                    NSWindow.didResizeNotification
+                ]
+                for name in names {
+                    center.addObserver(forName: name, object: window, queue: .main) { _ in
+                        self.configure(window)
+                    }
+                }
+            }
+        }
+        return view
+    }
+    
+    private func configure(_ window: NSWindow) {
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
+        window.isMovableByWindowBackground = true
+        
+        callback(window)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+#endif

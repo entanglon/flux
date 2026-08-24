@@ -36,13 +36,14 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
         ZStack {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: spacing) {
+                    LazyHStack(spacing: spacing) {
                         ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                             content(item, index)
                                 .id(index)
                         }
                     }
-                    .padding(.horizontal, 40)
+                    .padding(.leading, 268)
+                    .padding(.trailing, 40)
                     .padding(.bottom, 20)
                     .background(GeometryReader { geo in
                         Color.clear
@@ -71,7 +72,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                             arrowButton(direction: "left")
                         }
                         .buttonStyle(.plain)
-                        .padding(.leading, 10)
+                        .padding(.leading, 268)
                         .transition(.opacity)
                     }
                 }
@@ -103,13 +104,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
             .font(.system(size: 20, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 32, height: 64)
-            .background(.ultraThinMaterial)
-            .cornerRadius(32)
-            .overlay(
-                Capsule()
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+            .glassEffect(.regular.interactive(), in: .capsule)
     }
     
     private func scrollRight(proxy: ScrollViewProxy) {
@@ -143,4 +138,3 @@ private struct CarouselScrollOffsetKey: PreferenceKey {
         value = value ?? nextValue()
     }
 }
-

@@ -1,15 +1,52 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+import Darwin
+
+/// Held for the process lifetime — a second instance fails to lock and exits.
+private var instanceLockFD: Int32 = -1
+private func acquireSingleInstanceLock() -> Bool {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        .appendingPathComponent("Flux")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let path = dir.appendingPathComponent(".instance.lock").path
+    let fd = open(path, O_CREAT | O_RDWR, 0o644)
+    guard fd >= 0 else { return true }
+    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        close(fd)
+        return false
+    }
+    instanceLockFD = fd
+    return true
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // App lifecycle configuration
+    }
+}
+#endif
 // import FirebaseCore
 
 @main
 struct fluxApp: App {
     @StateObject private var playerManager = PlayerManager.shared
     @StateObject private var authManager = AuthManager.shared
-    
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
+
     init() {
-        // if FirebaseApp.app() == nil {
-        //     FirebaseApp.configure()
-        // }
+        #if os(macOS)
+        guard acquireSingleInstanceLock() else {
+            print("[flux] Another instance is already running — exiting")
+            exit(0)
+        }
+        NSWindow.allowsAutomaticWindowTabbing = false
+        #endif
+
+        StremioServerManager.shared.startServerIfNeeded()
+        StreamProxyManager.shared.start()
     }
     
     var body: some Scene {
@@ -18,12 +55,15 @@ struct fluxApp: App {
                 .environmentObject(playerManager)
                 .environmentObject(authManager)
                 .preferredColorScheme(.dark)
+                .containerBackground(.clear, for: .window)
         }
-        .windowStyle(.hiddenTitleBar)
         .commands {
             SidebarCommands()
+            ToolbarCommands()
+            CommandGroup(replacing: .newItem) { }
         }
         .defaultSize(width: 1200, height: 800)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         
         // Player Window
         WindowGroup(id: "player", for: MediaItem.ID.self) { $itemId in
@@ -37,6 +77,7 @@ struct fluxApp: App {
             }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commandsRemoved()
         .defaultSize(width: 1280, height: 720)
         

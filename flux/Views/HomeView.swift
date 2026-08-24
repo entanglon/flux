@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CatalogSection: Identifiable, Equatable {
     let id = UUID()
@@ -25,15 +26,27 @@ struct HomeView: View {
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
 
     @State private var isLoading = true
-    
+    @State private var scrollOffset: CGFloat = 0.0
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: HomeScrollOffsetKey.self,
+                        value: geo.frame(in: .named("homeScrollSpace")).minY
+                    )
+                }
+                .frame(height: 0)
+
                 if isLoading {
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 500)
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: 236)
+                        ProgressView()
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .frame(height: 500)
                 } else {
                     // Featured Carousel (Trending / Hero Content)
                     if !heroContent.isEmpty {
@@ -45,7 +58,8 @@ struct HomeView: View {
                     if !userData.history.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(title: "Continue Watching", destination: HistoryView(showAsContinueWatching: true))
-                                .padding(.horizontal, 40)
+                                .padding(.leading, 268)
+                                .padding(.trailing, 40)
                             
                             CarouselView(items: userData.history, itemWidth: 280) { item in
                                 Button(action: {
@@ -71,7 +85,11 @@ struct HomeView: View {
             }
             .padding(.bottom, 80)
         }
-        .ignoresSafeArea(edges: .top)
+        .coordinateSpace(name: "homeScrollSpace")
+        .onPreferenceChange(HomeScrollOffsetKey.self) { value in
+            scrollOffset = max(0, -value)
+        }
+        .ignoresSafeArea(.all, edges: .top)
         .task {
             await loadData()
         }
@@ -83,7 +101,8 @@ struct HomeView: View {
             ForEach(nativeSections) { section in
                 VStack(alignment: .leading, spacing: 16) {
                     ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
-                        .padding(.horizontal, 40)
+                        .padding(.leading, 268)
+                        .padding(.trailing, 40)
                     
                     CarouselView(items: section.items) { item in
                         NavigationLink(value: item) {
@@ -102,7 +121,8 @@ struct HomeView: View {
         ForEach(addonSections) { section in
             VStack(alignment: .leading, spacing: 16) {
                 ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
-                    .padding(.horizontal, 40)
+                    .padding(.leading, 268)
+                    .padding(.trailing, 40)
                 
                 CarouselView(items: section.items) { item in
                     NavigationLink(value: item) {
@@ -120,7 +140,8 @@ struct HomeView: View {
         if !userData.watchlist.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "Watchlist", destination: WatchlistView(selectedTab: .constant(.watchlist)))
-                    .padding(.horizontal, 40)
+                    .padding(.leading, 268)
+                    .padding(.trailing, 40)
                 
                 CarouselView(items: userData.watchlist) { item in
                     NavigationLink(value: item) {
@@ -139,7 +160,8 @@ struct HomeView: View {
             Text("Browse by Genre")
                 .font(.title2)
                 .fontWeight(.bold)
-                .padding(.horizontal, 40)
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
             
             CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
                 NavigationLink(value: MediaListView.ListType.genre(id: genre.id)) {
@@ -155,7 +177,8 @@ struct HomeView: View {
         if !userData.history.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "Recently Watched", destination: HistoryView())
-                    .padding(.horizontal, 40)
+                    .padding(.leading, 268)
+                    .padding(.trailing, 40)
                 
                 CarouselView(items: userData.history) { item in
                     NavigationLink(value: item) {
@@ -188,11 +211,15 @@ extension HomeView {
                 }
             }
             
-            isLoading = false
+            await MainActor.run {
+                self.isLoading = false
+            }
         } catch {
             print("Error fetching data: \(error)")
             await fetchNativeTMDBSections()
-            isLoading = false
+            await MainActor.run {
+                self.isLoading = false
+            }
         }
     }
     
@@ -287,6 +314,13 @@ extension HomeView {
     }
     
 
+}
+
+struct HomeScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 #Preview {

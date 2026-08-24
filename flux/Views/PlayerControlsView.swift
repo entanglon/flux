@@ -349,7 +349,7 @@ struct TrackSelectionList: View {
                                     Spacer().frame(width: 16)
                                 }
                                 
-                                Text(track.title.isEmpty ? track.lang : track.title)
+                                Text(track.displayName)
                                 Spacer()
                             }
                             .padding(.vertical, 6)

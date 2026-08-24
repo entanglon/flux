@@ -6,13 +6,15 @@ struct FeaturedCarousel: View {
     @State private var currentIndex = 0
     @State private var isHovering = false
     @ObservedObject private var userData = UserDataService.shared
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
     let timer = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             if !items.isEmpty {
-                let item = items[currentIndex]
+                let safeIndex = max(0, min(currentIndex, items.count - 1))
+                let item = items[safeIndex]
                 
                 // 1. Hero Image / Backdrop Selection
                 GeometryReader { geo in
@@ -21,11 +23,25 @@ struct FeaturedCarousel: View {
                         if let heroURL = item.heroURL ?? item.backdropURL {
                             CachedImage(url: heroURL.highQuality(), maxDimension: 1920) { phase in
                                 if let image = phase.image {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: geo.size.width, height: geo.size.height)
-                                        .clipped()
+                                    let effectiveSidebarWidth = CGFloat(max(160.0, sidebarWidth - 10.0))
+                                    
+                                    HStack(spacing: 0) {
+                                        // 1. Sidebar Background Extension (Mirrored & Blurred, ALWAYS 100% under sidebar)
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .scaleEffect(x: -1, y: 1)
+                                            .blur(radius: 30)
+                                            .frame(width: effectiveSidebarWidth, height: geo.size.height)
+                                            .clipped()
+                                        
+                                        // 2. Main Hero Artwork (Starts slightly under sidebar edge, zero bleed)
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: max(0, geo.size.width - effectiveSidebarWidth), height: geo.size.height)
+                                            .clipped()
+                                    }
                                 } else {
                                     Rectangle().fill(Color.gray.opacity(0.1))
                                 }
@@ -51,108 +67,143 @@ struct FeaturedCarousel: View {
                 .transition(.opacity.animation(.easeInOut(duration: 0.8)))
                 .id(currentIndex)
                 
-                // 2. Gradient Overlay (Bottom Up)
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: .clear, location: 0.4),
-                        .init(color: .black.opacity(0.6), location: 0.7),
-                        .init(color: .black.opacity(0.9), location: 1.0)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                // 2. Dual Vignette Gradient Mesh (Apple TV Master Grade)
+                ZStack {
+                    
+                    // Left Vignette (Title text readability)
+                    LinearGradient(
+                        gradient: Gradient(colors: [.black.opacity(0.85), .black.opacity(0.4), .clear]),
+                        startPoint: .leading,
+                        endPoint: .init(x: 0.65, y: 0.5)
+                    )
+                    
+                    // Bottom-Up Vignette (Seamless row transition)
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: .clear, location: 0.35),
+                            .init(color: .black.opacity(0.5), location: 0.65),
+                            .init(color: .black, location: 1.0)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+                .ignoresSafeArea()
                 
                 // 3. Content
                 NavigationLink(value: item) {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        // Category Eyebrow
+                        Text(item.category.uppercased())
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(2.0)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .shadow(color: .black.opacity(0.5), radius: 4)
+                        
                         // Title (Logo styling)
                         Text(item.title)
-                            .font(.system(size: 52, weight: .heavy)) // Large Impactful Title
+                            .font(.system(size: 56, weight: .heavy))
                             .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 4)
+                            .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
                             .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         
-                        // Metadata Row
-                        HStack(spacing: 8) {
-                            Text(item.category) // Movie / TV Show
-                            Text("•")
-                            if let genres = item.genres?.prefix(2).map({ $0 }) {
-                                Text(genres.joined(separator: ", "))
-                                Text("•")
-                            }
+                        // Metadata Row with Tech Badges
+                        HStack(spacing: 10) {
                             if let year = item.releaseDateYear {
                                 Text(year)
+                                    .fontWeight(.bold)
                             }
+                            if let genres = item.genres?.prefix(2).map({ $0 }) {
+                                Text("•")
+                                Text(genres.joined(separator: ", "))
+                            }
+                            if let vote = item.voteAverage, vote > 0 {
+                                Text("•")
+                                HStack(spacing: 3) {
+                                    Image(systemName: "star.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.yellow)
+                                    Text(String(format: "%.1f", vote))
+                                }
+                            }
+                            
+                            TechBadge(text: "4K")
+                            TechBadge(text: "HDR")
+                            TechBadge(text: "ATMOS")
                         }
                         .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white.opacity(0.9))
                         
                         // Description
                         Text(item.description)
-                            .font(.body)
-                            .foregroundStyle(.white.opacity(0.9))
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(3)
-                            .frame(maxWidth: 600, alignment: .leading)
-                            .padding(.top, 4)
-                            .shadow(radius: 2)
+                            .lineSpacing(3)
+                            .frame(maxWidth: 620, alignment: .leading)
+                            .padding(.top, 2)
+                            .shadow(color: .black.opacity(0.4), radius: 4)
                         
-                        // Action Buttons
-                        HStack(spacing: 16) {
-                            // Watch Now Button
-                            HStack {
+                        // Action Buttons (Apple TV Master Layout)
+                        HStack(spacing: 14) {
+                            // Primary Play Button
+                            HStack(spacing: 8) {
                                 Image(systemName: "play.fill")
-                                    .font(.headline)
-                                Text("Watch Now")
-                                    .font(.headline)
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("Play")
+                                    .font(.system(size: 14, weight: .bold))
                             }
                             .foregroundStyle(.black)
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 14)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 10)
                             .background(Color.white)
-                            .cornerRadius(30)
+                            .clipShape(Capsule())
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
                             
-                            // Watchlist Button
+                            // Secondary Watchlist Button (Circular Glass + Button)
                             Button(action: {
                                 userData.toggleWatchlist(item)
                             }) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
-                                    Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
-                                }
-                                .font(.headline)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 14)
-                                .glassEffect(.regular.interactive(), in: .capsule)
+                                Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 36, height: 36)
+                                    .glassEffect(.regular.interactive(), in: .circle)
                             }
                             .buttonStyle(.plain)
                         }
-                        .padding(.top, 16)
+                        .padding(.top, 12)
                     }
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 48)
-                .padding(.bottom, 60)
+                .padding(.leading, 268)
+                .padding(.trailing, 48)
+                .padding(.bottom, 40)
             }
             
-            // Paging Indicators
-            HStack(spacing: 8) {
+            // Apple TV Dynamic Page Indicators (Pills)
+            HStack(spacing: 6) {
                 ForEach(0..<items.count, id: \.self) { index in
-                    Circle()
-                        .fill(index == currentIndex ? Color.white : Color.white.opacity(0.2))
-                        .frame(width: 8, height: 8)
+                    Capsule()
+                        .fill(index == currentIndex ? Color.white : Color.white.opacity(0.3))
+                        .frame(width: index == currentIndex ? 24 : 8, height: 8)
+                        .shadow(color: index == currentIndex ? .white.opacity(0.5) : .clear, radius: 4)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: currentIndex)
                         .onTapGesture {
-                            withAnimation {
+                            withAnimation(.easeInOut(duration: 0.4)) {
                                 currentIndex = index
                             }
                         }
                 }
             }
-            .frame(maxWidth: .infinity) // Center align
-            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity)
+            .padding(.leading, 268)
+            .padding(.trailing, 48)
+            .padding(.bottom, 16)
         }
-        .frame(height: 680) // Taller hero
+        .frame(height: 680)
         .overlay(alignment: .leading) {
             if isHovering {
                 Button(action: {
@@ -163,7 +214,7 @@ struct FeaturedCarousel: View {
                     arrowButton(direction: "left")
                 }
                 .buttonStyle(.plain)
-                .padding(.leading, 20)
+                .padding(.leading, 268)
                 .transition(.opacity)
             }
         }
@@ -185,6 +236,7 @@ struct FeaturedCarousel: View {
             withAnimation { isHovering = hovering }
         }
         .onReceive(timer) { _ in
+            guard !items.isEmpty else { return }
             withAnimation {
                 currentIndex = (currentIndex + 1) % items.count
             }
@@ -193,9 +245,11 @@ struct FeaturedCarousel: View {
     
     private func arrowButton(direction: String) -> some View {
         Image(systemName: "chevron.\(direction)")
-            .font(.system(size: 40, weight: .light))
-            .foregroundStyle(.white.opacity(0.6))
-            .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+            .glassEffect(.regular.interactive(), in: .circle)
     }
 }
 

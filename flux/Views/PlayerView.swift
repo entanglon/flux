@@ -1,11 +1,16 @@
 import SwiftUI
+import Combine
 
 struct PlayerView: View {
     @StateObject private var mpv = MPVController()
     @ObservedObject private var playerManager = PlayerManager.shared
     @State private var showExitWarning = false
+    @State private var animatedProgress: Double = 0.0
+    @State private var pulseScale: CGFloat = 0.96
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
+    
+    private let loadingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ZStack {
@@ -14,11 +19,6 @@ struct PlayerView: View {
             // Video Layer
             MPVVideoView(controller: mpv)
                 .ignoresSafeArea()
-                .onAppear {
-                    mpv.onPlaybackError = {
-                        playerManager.tryNextStream()
-                    }
-                }
             
             // Controls Layer
             PlayerControlsView(
@@ -76,7 +76,9 @@ struct PlayerView: View {
         .focusable() // Make the view capable of receiving key presses
         .focusEffectDisabled() // Remove the blue focus ring
         .onKeyPress(.space) {
-            mpv.togglePlayPause()
+            if mpv.timePos >= 0.5 {
+                mpv.togglePlayPause()
+            }
             return .handled
         }
         .onKeyPress(.escape) {
@@ -113,6 +115,10 @@ struct PlayerView: View {
             return .handled
         }
         .onAppear {
+            mpv.onPlaybackError = {
+                print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
+                playerManager.tryNextStream()
+            }
             // If URL is already present (Instant Replay), start playing
             if let url = playerManager.currentStreamURL {
                 print("PlayerView: onAppear found url, playing...")
@@ -127,6 +133,8 @@ struct PlayerView: View {
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             if let url = newURL {
                 print("PlayerView: URL changed to \(url), playing...")
+                // Reset buffering progress for the new stream
+                animatedProgress = 0.0
                 mpv.play(url: url)
             }
         }
@@ -150,6 +158,11 @@ struct PlayerView: View {
             errorView(error: error)
         }
         
+        // Logo Buffering Overlay (Stremio-style real logo fill loading bar)
+        if isBufferingOverlayActive {
+            logoBufferingView
+        }
+        
         // Stream Selection UI
         if !playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.availableStreams.isEmpty {
             streamSelectionView
@@ -161,6 +174,16 @@ struct PlayerView: View {
         }
     }
     
+    private var isBufferingOverlayActive: Bool {
+        guard !playerManager.isLoading, playerManager.currentStreamURL != nil else { return false }
+        if mpv.isUserPaused { return false }
+        
+        let isInitialLoad = !mpv.isPlaying || mpv.timePos < 0.5
+        let isMidPlayBuffer = mpv.isBuffering || mpv.isSeeking
+        
+        return isInitialLoad || isMidPlayBuffer
+    }
+    
     @ViewBuilder
     private func nextEpisodeButton(season: Int, episode: Int) -> some View {
         VStack {
@@ -170,26 +193,22 @@ struct PlayerView: View {
                 Button(action: {
                     playerManager.playNextEpisode()
                 }) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Image(systemName: "forward.end.fill")
-                            .font(.title2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Next Episode")
-                                .font(.caption).fontWeight(.bold).textCase(.uppercase)
-                                .foregroundStyle(.white.opacity(0.8))
-                            Text("S\(season) E\(episode)")
-                                .font(.headline).fontWeight(.bold)
-                                .foregroundStyle(.white)
-                        }
+                        Text("Next: S\(season) E\(episode)")
+                            .fontWeight(.medium)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 14)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                    .shadow(radius: 20)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
-                .padding(.bottom, 80) // Above control bar
+                .padding(.bottom, 60)
                 .padding(.trailing, 40)
             }
         }
@@ -198,14 +217,142 @@ struct PlayerView: View {
     
     private var loadingView: some View {
         ZStack {
-            Color.black.opacity(0.5)
-            ProgressView("Finding Stream...")
-                .controlSize(.large)
-                .tint(.white)
-                .foregroundColor(.white)
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+            VStack(spacing: 12) {
+                let title = playerManager.isFetchingStreams ? "Finding Streams..." : "Connecting to Stream..."
+                ProgressView(title)
+                    .controlSize(.large)
+                    .tint(.white)
+                    .foregroundColor(.white)
+                if let status = playerManager.statusText {
+                    Text(status)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .transition(.opacity)
+                }
+            }
         }
     }
     
+    private var logoBufferingView: some View {
+        ZStack {
+            // 1. Fullscreen backdrop picture
+            if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
+                AsyncImage(url: bgURL) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } placeholder: {
+                    Color.black
+                }
+            } else {
+                Color.black
+            }
+            
+            // 2. Subtle dark vignette gradient
+            LinearGradient(
+                colors: [.black.opacity(0.4), .black.opacity(0.2), .black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            
+            // 3. Center Official Logo / Title vibrant fill loading bar
+            let realProgress = CGFloat(min(1.0, max(0.0, animatedProgress)))
+            
+            VStack(spacing: 24) {
+                if let media = item {
+                    let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
+                    
+                    ZStack {
+                        if let lURL = logoURL {
+                            // Base translucent watermark logo
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 150)
+                                    .opacity(0.25)
+                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                            
+                            // Real progress fill logo (left-to-right fill)
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 150)
+                                    .opacity(1.0)
+                                    .mask(
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .frame(width: max(0, geo.size.width * realProgress))
+                                                .animation(.linear(duration: 0.25), value: realProgress)
+                                        }
+                                    )
+                                    .shadow(color: .white.opacity(0.4), radius: 12, x: 0, y: 2)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                        } else {
+                            // Text fallback for media with no logo image
+                            Text(media.title.uppercased())
+                                .font(.system(size: 48, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.25))
+                            
+                            Text(media.title.uppercased())
+                                .font(.system(size: 48, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white)
+                                .mask(
+                                    GeometryReader { geo in
+                                        Rectangle()
+                                            .frame(width: max(0, geo.size.width * realProgress))
+                                            .animation(.linear(duration: 0.25), value: realProgress)
+                                    }
+                                )
+                        }
+                    }
+                    .scaleEffect(pulseScale)
+                    .padding(.horizontal, 40)
+                }
+            }
+        }
+        .onReceive(loadingTimer) { _ in
+            guard playerManager.currentStreamURL != nil else { return }
+
+            // Stremio-style: use demuxer-cache-time / duration for buffer progress.
+            // Works for ALL stream types (torrent, HTTP, HLS) — no endpoint polling.
+            if mpv.isPlaying && mpv.timePos >= 0.5 {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    self.animatedProgress = 1.0
+                }
+                return
+            }
+
+            let cacheTime = mpv.demuxerCacheTime
+            let dur = mpv.duration
+            if cacheTime > 0 && dur > 0 {
+                let bufferFill = min(0.99, cacheTime / dur)
+                withAnimation(.easeOut(duration: 0.3)) {
+                    self.animatedProgress = max(self.animatedProgress, bufferFill)
+                }
+            } else if mpv.isPlaying {
+                // Playing but no cache-time data yet — show minimal fill
+                withAnimation(.easeOut(duration: 0.3)) {
+                    self.animatedProgress = max(self.animatedProgress, 0.03)
+                }
+            }
+        }
+        .onAppear {
+            animatedProgress = 0.0
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                pulseScale = 1.03
+            }
+        }
+        .transition(.opacity)
+    }
+
     private func errorView(error: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -215,8 +362,11 @@ struct PlayerView: View {
                 .font(.headline)
                 .foregroundColor(.white)
             Button("Close") {
-                playerManager.close()
-                dismiss()
+                // Clear error + current URL to reveal the stream picker,
+                // but keep availableStreams so the user can pick another source.
+                playerManager.errorMessage = nil
+                playerManager.currentStreamURL = nil
+                playerManager.isLoading = false
             }
             .buttonStyle(.borderedProminent)
         }
@@ -224,78 +374,146 @@ struct PlayerView: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 16))
     }
     
+    @State private var selectedStreamFilter: String = "All"
+
     private var streamSelectionView: some View {
-        VStack(spacing: 20) {
-            Text("Select Stream")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
+        let allStreams = playerManager.availableStreams
+        
+        let availableSources: [String] = {
+            var sourcesSet = Set<String>()
+            for s in allStreams {
+                if !s.source.isEmpty { sourcesSet.insert(s.source) }
+            }
+            return Array(sourcesSet).sorted()
+        }()
+        
+        // Clean filter layout: type → quality → sources
+        var dynamicFilters: [String] = ["All", "Best"]
+        if allStreams.contains(where: { $0.isTorrent }) {
+            dynamicFilters.append("Torrents")
+        }
+        if allStreams.contains(where: { !$0.isTorrent }) {
+            dynamicFilters.append("Direct")
+        }
+        // Quality filters — only show qualities that exist
+        let availableQualities = Set(allStreams.map { $0.quality })
+        for q in ["4K", "1080p", "720p"] {
+            if availableQualities.contains(q) { dynamicFilters.append(q) }
+        }
+        // Source filters
+        dynamicFilters += availableSources
+
+        let filteredStreams: [Stream] = {
+            if selectedStreamFilter == "All" { return allStreams }
+            if selectedStreamFilter == "Best" {
+                return allStreams
+                    .filter { playerManager.probeStatus[$0.stableKey]?.ok == true }
+                    .sorted { s1, s2 in
+                        StreamManager.shared.streamSortComparator(s1, s2)
+                    }
+            }
+            if selectedStreamFilter == "Torrents" { return allStreams.filter { $0.isTorrent } }
+            if selectedStreamFilter == "Direct" { return allStreams.filter { !$0.isTorrent } }
+            if selectedStreamFilter == "4K" || selectedStreamFilter == "1080p" || selectedStreamFilter == "720p" {
+                return allStreams.filter { $0.quality == selectedStreamFilter }
+            }
+            return allStreams.filter { $0.source == selectedStreamFilter || $0.source.lowercased().contains(selectedStreamFilter.lowercased()) }
+        }()
+
+        let isVerifyingBest = selectedStreamFilter == "Best"
+            && filteredStreams.isEmpty
+            && allStreams.contains { playerManager.probeStatus[$0.stableKey] == nil }
+        
+        return VStack(spacing: 16) {
+            VStack(spacing: 4) {
+                Text("Select Stream")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                if playerManager.isFetchingStreams {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.blue)
+                        Text("Searching Streams... (\(allStreams.count) found)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                } else {
+                    Text("\(allStreams.count) streams found")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
             
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(playerManager.availableStreams) { stream in
+            // Dynamic Category / Source Filter Tabs
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(dynamicFilters, id: \.self) { filter in
                         Button(action: {
-                            playerManager.selectStream(stream)
-                        }) {
-                            HStack {
-                                HStack(spacing: 6) {
-                                    Text(stream.quality)
-                                        .font(.caption)
-                                        .fontWeight(.bold)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(qualityColor(stream.quality))
-                                        .foregroundColor(.white)
-                                        .cornerRadius(6)
-                                        
-                                    if let lang = stream.language {
-                                        Text(lang)
-                                            .font(.caption)
-                                            .fontWeight(.bold)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.blue.opacity(0.8))
-                                            .foregroundColor(.white)
-                                            .cornerRadius(6)
-                                    }
-                                    
-                                    if let size = stream.size {
-                                        Text(size)
-                                            .font(.caption)
-                                            .fontWeight(.bold)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.gray.opacity(0.8))
-                                            .foregroundColor(.white)
-                                            .cornerRadius(6)
-                                    }
-                                }
-                                
-                                VStack(alignment: .leading) {
-                                    Text(stream.title)
-                                        .font(.body)
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                    Text(stream.source)
-                                        .font(.caption)
-                                        .foregroundColor(.white.opacity(0.7))
-                                }
-                                
-                                Spacer()
-                                
-                                Image(systemName: "play.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.white.opacity(0.8))
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedStreamFilter = filter
                             }
-                            .padding()
-                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                        }) {
+                            Text(filter)
+                                .font(.system(size: 12, weight: .bold))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    selectedStreamFilter == filter
+                                    ? Color.blue
+                                    : Color.white.opacity(0.12)
+                                )
+                                .foregroundColor(
+                                    selectedStreamFilter == filter
+                                    ? .white
+                                    : .white.opacity(0.8)
+                                )
+                                .cornerRadius(20)
                         }
                         .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 4)
+            }
+            .padding(.horizontal)
+            
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if filteredStreams.isEmpty && isVerifyingBest {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.blue)
+                            Text("Verifying sources…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Probing response times and swarm health")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .padding(.top, 40)
+                    } else if filteredStreams.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "film.stack")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.secondary)
+                            Text("No streams found for \"\(selectedStreamFilter)\"")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 40)
+                    } else {
+                        ForEach(filteredStreams) { stream in
+                            StreamRowItemView(stream: stream) {
+                                playerManager.selectStream(stream)
+                            }
+                        }
+                    }
+                }
                 .padding()
             }
-            .frame(maxWidth: 500, maxHeight: 600)
+            .frame(maxHeight: 440)
             
             Button("Cancel") {
                 playerManager.close()
@@ -304,24 +522,192 @@ struct PlayerView: View {
             .buttonStyle(.plain)
             .foregroundColor(.white.opacity(0.7))
         }
-        .padding()
-        .glassEffect(.regular.tint(.clear), in: .rect(cornerRadius: 20))
-        .shadow(radius: 20)
+        .padding(20)
+        .frame(width: 620)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 10)
     }
     
-    func qualityColor(_ quality: String) -> Color {
+    private func getSubtitle() -> String {
+        if let season = PlayerManager.shared.currentSeason, let episode = PlayerManager.shared.currentEpisode {
+            return "S\(season):E\(episode)"
+        }
+        return item?.description ?? "No description"
+    }
+
+}
+
+struct StreamRowItemView: View {
+    let stream: Stream
+    let onSelect: () -> Void
+    @State private var isHovered = false
+    @ObservedObject private var playerManager = PlayerManager.shared
+
+    /// Health badge: green check for probe/seeder-verified sources, gray dot while pending.
+    private var healthBadge: some View {
+        Group {
+            if let status = playerManager.probeStatus[stream.stableKey] {
+                if status.ok {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 10))
+                        if !stream.isTorrent && status.latency > 0 && status.latency < 3 {
+                            Text(String(format: "%.2fs", status.latency))
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.mint.opacity(0.8))
+                    .foregroundColor(.white)
+                    .cornerRadius(6)
+                } else {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.12))
+                        .foregroundColor(.yellow)
+                        .cornerRadius(6)
+                }
+            }
+        }
+    }
+
+    /// Season-pack indicator: listed size is the whole pack; playback extracts only
+    /// the requested episode.
+    private var packBadge: some View {
+        Group {
+            if stream.isSeasonPack {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 9))
+                    Text("PACK")
+                        .font(.system(size: 9, weight: .heavy))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.75))
+                .foregroundColor(.white)
+                .cornerRadius(6)
+            }
+        }
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    // Provider Badge
+                    Text(stream.source)
+                        .font(.caption2)
+                        .fontWeight(.heavy)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(providerColor(stream.source))
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                    
+                    // Quality Badge
+                    Text(stream.quality)
+                        .font(.caption2)
+                        .fontWeight(.heavy)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(qualityColor(stream.quality))
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                    
+                    // Seeders / Peers
+                    if let seeders = stream.seeders {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 10))
+                            Text("\(seeders)")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.8))
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                    }
+                    
+                    // Size Badge (packs show total size explicitly)
+                    if let size = stream.size {
+                        Text(stream.isSeasonPack ? "\(size) pack" : size)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.15))
+                            .foregroundColor(.white.opacity(0.9))
+                            .cornerRadius(6)
+                    }
+                    
+                    // Language Badge
+                    if let lang = stream.language {
+                        Text(lang)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.indigo.opacity(0.8))
+                            .foregroundColor(.white)
+                            .cornerRadius(6)
+                    }
+                    
+                    Spacer()
+
+                    packBadge
+
+                    healthBadge
+
+                    Image(systemName: "play.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(isHovered ? .blue : .white.opacity(0.9))
+                        .scaleEffect(isHovered ? 1.15 : 1.0)
+                }
+                
+                Text(stream.cleanTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(isHovered ? nil : 2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: isHovered)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .padding(12)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isHovered ? Color.blue.opacity(0.6) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isHovered = hovering
+            }
+        }
+    }
+    
+    private func providerColor(_ source: String) -> Color {
+        let src = source.lowercased()
+        if src.contains("hydra") { return .cyan }
+        if src.contains("torrent") { return .orange }
+        return .purple
+    }
+    
+    private func qualityColor(_ quality: String) -> Color {
         switch quality {
         case "4K": return .purple
         case "1080p": return .blue
         case "720p": return .green
         default: return .gray
         }
-    }
-    
-    func getSubtitle() -> String {
-        if let season = PlayerManager.shared.currentSeason, let episode = PlayerManager.shared.currentEpisode {
-            return "S\(season):E\(episode)"
-        }
-        return item?.description ?? "No description"
     }
 }

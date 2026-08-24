@@ -101,7 +101,7 @@ struct AuthView: View {
             }
         }
         .frame(width: 400, height: 450)
-        .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow))
+        .glassEffect(.regular, in: .rect)
         .ignoresSafeArea()
         // Listeners
         .onChange(of: authManager.currentUser) { _, user in

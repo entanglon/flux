@@ -63,15 +63,25 @@ class TMDBEnricher {
         }
     }
     
+    /// "movie|tv:tmdbID" -> imdbID. Kills the per-play TMDB round-trip that delayed
+    /// every stream listing (Stremio never pays this cost — it has IMDb IDs natively).
+    private var imdbIDCache: [String: String] = [:]
+
     func getImdbID(tmdbID: String, type: String) async -> String? {
         let mediaType = type.contains("movie") ? "movie" : "tv"
+        let cacheKey = "\(mediaType):\(tmdbID)"
+        if let cached = imdbIDCache[cacheKey] { return cached }
+
         let urlString = "\(baseURL)/\(mediaType)/\(tmdbID)/external_ids?api_key=\(apiKey)"
-        
+
         guard let url = URL(string: urlString) else { return nil }
-        
+
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             let response = try JSONDecoder().decode(ExternalIDsResponse.self, from: data)
+            if let imdbID = response.imdb_id {
+                imdbIDCache[cacheKey] = imdbID
+            }
             return response.imdb_id
         } catch {
             return nil
@@ -130,9 +140,12 @@ class TMDBEnricher {
         let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
         guard let id = tmdbIDString else { return enriched }
         
+        let currentBaseURL = self.baseURL
+        let currentAPIKey = self.apiKey
+
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                let urlString = "\(self.baseURL)/\(type)/\(id)?api_key=\(self.apiKey)"
+                let urlString = "\(currentBaseURL)/\(type)/\(id)?api_key=\(currentAPIKey)"
                 if let url = URL(string: urlString),
                    let (data, _) = try? await URLSession.shared.data(from: url),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -242,6 +255,24 @@ class TMDBEnricher {
         return try await fetchCatalog(from: urlString, type: "tv")
     }
 
+    func fetchSimilar(item: MediaItem) async -> [MediaItem] {
+        let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
+        let tmdbID = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        guard let id = tmdbID else { return [] }
+        
+        let recURL = "\(baseURL)/\(type)/\(id)/recommendations?api_key=\(apiKey)"
+        if let items = try? await fetchCatalog(from: recURL, type: type), !items.isEmpty {
+            return items
+        }
+        
+        let simURL = "\(baseURL)/\(type)/\(id)/similar?api_key=\(apiKey)"
+        if let items = try? await fetchCatalog(from: simURL, type: type), !items.isEmpty {
+            return items
+        }
+        
+        return []
+    }
+
     // Generic Internal Fetcher
     private func fetchCatalog(from urlString: String, type mediaType: String) async throws -> [MediaItem] {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
@@ -249,10 +280,10 @@ class TMDBEnricher {
         
         if mediaType == "movie" {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBMovie>.self, from: data)
-            return response.results.map { $0.toMediaItem() }
+            return response.results.map { $0.toMediaItem() }.filter { $0.isReleased }
         } else {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
-            return response.results.map { $0.toMediaItem() }
+            return response.results.map { $0.toMediaItem() }.filter { $0.isReleased }
         }
     }
     

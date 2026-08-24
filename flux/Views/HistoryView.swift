@@ -6,7 +6,6 @@ struct HistoryView: View {
     var showAsContinueWatching: Bool = false
     @Environment(\.openWindow) private var openWindow
     
-    // Adaptive columns based on mode
     var columns: [GridItem] {
         if showAsContinueWatching {
             return [GridItem(.adaptive(minimum: 280), spacing: 24)]
@@ -18,25 +17,61 @@ struct HistoryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                if userData.history.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 60))
-                            .foregroundColor(.gray)
-                        Text(showAsContinueWatching ? "No Continue Watching Items" : "No Watch History")
-                            .font(.title2)
-                            .foregroundColor(.gray)
-                        Text("Movies and shows you watch will appear here.")
-                            .foregroundColor(.gray.opacity(0.8))
+                // Header
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text(showAsContinueWatching ? "Continue Watching" : "Recently Added")
+                        .font(.system(size: 44, weight: .heavy))
+                        .foregroundStyle(.white)
+                    
+                    if !userData.history.isEmpty {
+                        Text("\(userData.history.count) ITEMS")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .glassEffect(.clear, in: .capsule)
                     }
+                    
+                    Spacer()
+                }
+                .padding(.top, 48)
+                
+                if userData.history.isEmpty {
+                    // Apple TV Liquid Glass Empty State Card
+                    VStack(spacing: 20) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.purple, .blue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .glassEffect(.clear, in: .circle)
+                        
+                        Text(showAsContinueWatching ? "No In-Progress Titles" : "No Watch History")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
+                        
+                        Text("Movies and TV shows you start watching will automatically appear here.")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                    }
+                    .padding(.vertical, 60)
+                    .padding(.horizontal, 40)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 100)
+                    .glassEffect(.clear, in: .rect(cornerRadius: 24))
+                    .padding(.top, 20)
                 } else {
                     LazyVGrid(columns: columns, spacing: 40) {
                         ForEach(userData.history) { item in
                             if showAsContinueWatching {
                                 Button(action: {
-                                    // Direct Play
                                     PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
                                     openWindow(id: "player", value: item.id)
                                 }) {
@@ -53,18 +88,14 @@ struct HistoryView: View {
                     }
                 }
             }
-            .padding(40)
+            .padding(.leading, 268)
+            .padding(.trailing, 40)
+            .padding(.top, 40)
+            .padding(.bottom, 60)
         }
-        .background(Color.black.opacity(0.9))
-        .navigationTitle(showAsContinueWatching ? "Continue Watching" : "History")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(showAsContinueWatching ? "Continue Watching" : "History")
-                    .font(.headline)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-            }
-        }
+        .background(Color.clear)
+        .navigationBarBackButtonHidden(true)
+        .toolbarVisibility(.hidden, for: .windowToolbar)
     }
 }
 

@@ -3,7 +3,7 @@ import AppKit
 import OpenGL.GL
 import MPVKit
 import Combine
-
+import Darwin
 // MARK: - SwiftUI View
 struct MPVVideoView: NSViewControllerRepresentable {
     @ObservedObject var controller: MPVController
@@ -21,7 +21,7 @@ struct MPVVideoView: NSViewControllerRepresentable {
     }
     
     static func dismantleNSViewController(_ nsViewController: MPVViewController, coordinator: Coordinator) {
-        nsViewController.glView.cleanup()
+        nsViewController.playerView.cleanup()
     }
     
     func makeCoordinator() -> Coordinator {
@@ -45,6 +45,52 @@ struct Track: Identifiable, Equatable {
     let title: String
     let lang: String
     var isSelected: Bool
+    
+    var displayName: String {
+        let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isUnknownTitle = rawTitle.isEmpty || rawTitle.lowercased() == "unknown" || rawTitle.lowercased().starts(with: "track")
+        
+        var languageName = ""
+        if !lang.isEmpty && lang.lowercased() != "und" {
+            let locale = Locale(identifier: "en")
+            if let localized = locale.localizedString(forLanguageCode: lang), !localized.isEmpty {
+                languageName = localized.capitalized
+            } else {
+                switch lang.lowercased() {
+                case "eng", "en": languageName = "English"
+                case "hin", "hi": languageName = "Hindi"
+                case "spa", "es": languageName = "Spanish"
+                case "fre", "fra", "fr": languageName = "French"
+                case "ger", "deu", "de": languageName = "German"
+                case "zho", "chi", "zh": languageName = "Chinese"
+                case "jpn", "ja": languageName = "Japanese"
+                case "kor", "ko": languageName = "Korean"
+                case "rus", "ru": languageName = "Russian"
+                case "ita", "it": languageName = "Italian"
+                case "por", "pt": languageName = "Portuguese"
+                case "tam", "ta": languageName = "Tamil"
+                case "tel", "te": languageName = "Telugu"
+                case "kan", "kn": languageName = "Kannada"
+                case "mal", "ml": languageName = "Malayalam"
+                case "ara", "ar": languageName = "Arabic"
+                default: languageName = lang.uppercased()
+                }
+            }
+        }
+        
+        if !isUnknownTitle {
+            if !languageName.isEmpty && !rawTitle.lowercased().contains(languageName.lowercased()) {
+                return "\(languageName) - \(rawTitle)"
+            }
+            return rawTitle
+        }
+        
+        if !languageName.isEmpty {
+            return "\(languageName) (\(type == "audio" ? "Audio" : "Subtitles"))"
+        }
+        
+        return "\(type == "audio" ? "Audio Track" : "Subtitle Track") \(id)"
+    }
 }
 
 // MARK: - Controller
@@ -54,6 +100,12 @@ class MPVController: ObservableObject {
     @Published var duration: Double = 0.0
     @Published var timePos: Double = 0.0
     @Published var volume: Double = 1.0
+    @Published var bufferProgress: Double = 0.0
+    
+    @Published var isBuffering = false
+    @Published var demuxerCacheTime: Double = 0.0
+    @Published var isSeeking = false
+    @Published var isUserPaused = false
     
     @Published var audioTracks: [Track] = []
     @Published var subtitleTracks: [Track] = []
@@ -65,18 +117,22 @@ class MPVController: ObservableObject {
     weak var playerView: MPVViewController?
     
     func play(url: URL) {
+        self.isUserPaused = false
         playerView?.play(url)
     }
     
     func play() {
+        self.isUserPaused = false
         playerView?.resume()
     }
     
     func pause() {
+        self.isUserPaused = true
         playerView?.pause()
     }
     
     func stop() {
+        self.isUserPaused = false
         playerView?.stop()
     }
     
@@ -130,11 +186,39 @@ class MPVController: ObservableObject {
             case "pause":
                 if let paused = value as? Bool {
                     self.isPlaying = !paused
+                    if !self.isBuffering {
+                        self.isUserPaused = paused
+                    }
+                }
+            case "paused-for-cache":
+                if let buff = value as? Bool {
+                    self.isBuffering = buff
+                    if buff {
+                        self.isUserPaused = false
+                    }
+                }
+            case "seeking":
+                if let seek = value as? Bool {
+                    self.isSeeking = seek
                 }
             case "volume":
                 if let vol = value as? Double {
                     self.volume = vol / 100.0
                 }
+            case "cache-buffering-state":
+                if let percent = value as? Int64 {
+                    self.bufferProgress = min(1.0, max(0.0, Double(percent) / 100.0))
+                } else if let percent = value as? Int {
+                    self.bufferProgress = min(1.0, max(0.0, Double(percent) / 100.0))
+                } else if let percent = value as? Double {
+                    self.bufferProgress = min(1.0, max(0.0, percent / 100.0))
+                }
+            case "demuxer-cache-time":
+                if let time = value as? Double {
+                    self.demuxerCacheTime = time
+                }
+            case "video-params/gamma", "video-params/primaries":
+                self.playerView?.playerView?.applyColorPipeline()
             default:
                 break
             }
@@ -168,125 +252,372 @@ class MPVController: ObservableObject {
 
 // MARK: - View Controller
 class MPVViewController: NSViewController {
-    var glView: MPVOGLView!
+    var playerView: MPVLayerView!
     weak var delegate: MPVController?
     
     override func loadView() {
         self.view = NSView(frame: .init(x: 0, y: 0, width: 1280, height: 720))
-        self.glView = MPVOGLView(frame: self.view.bounds)
-        self.glView.autoresizingMask = [.width, .height]
-        self.view.addSubview(glView)
+        self.playerView = MPVLayerView(frame: self.view.bounds)
+        self.playerView.autoresizingMask = [.width, .height]
+        self.view.addSubview(playerView)
     }
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.glView.setupContext()
-        self.glView.setupMpv()
+        self.playerView.setupContext()
+        self.playerView.setupMpv()
         
-        self.glView.onPropertyChange = { [weak self] name, value in
+        self.playerView.onPropertyChange = { [weak self] name, value in
             self?.delegate?.handlePropertyChange(name: name, value: value)
         }
         
-        self.glView.onPlaybackError = { [weak self] in
+        self.playerView.onPlaybackError = { [weak self] in
              print("[MPV] Playback error detected")
              DispatchQueue.main.async {
                  self?.delegate?.onPlaybackError?()
              }
         }
         
-        let vol = self.glView.getVolume()
+        let vol = self.playerView.getVolume()
         DispatchQueue.main.async {
             self.delegate?.volume = vol / 100.0
         }
     }
     
-    func play(_ url: URL) { glView.loadFile(url) }
-    func pause() { glView.setPause(true) }
-    func resume() { glView.setPause(false) }
-    func stop() { glView.stop() }
+    func play(_ url: URL) { playerView.loadFile(url) }
+    func pause() { playerView.setPause(true) }
+    func resume() { playerView.setPause(false) }
+    func stop() { playerView.stop() }
     
-    func seek(absolute seconds: Double) { glView.seek(absoluteSeconds: seconds) }
-    func seek(relative seconds: Double) { glView.seek(relativeSeconds: seconds) }
+    func seek(absolute seconds: Double) { playerView.seek(absoluteSeconds: seconds) }
+    func seek(relative seconds: Double) { playerView.seek(relativeSeconds: seconds) }
     
-    func setVolume(_ value: Double) { glView.setVolume(value) }
-    func getTracks() -> [Track] { return glView.getTracks() }
-    func selectTrack(_ track: Track) { glView.selectTrack(track) }
-    func addExternalSubtitle(url: String, title: String) { glView.addExternalSubtitle(url: url, title: title) }
+    func setVolume(_ value: Double) { playerView.setVolume(value) }
+    func getTracks() -> [Track] { return playerView.getTracks() }
+    func selectTrack(_ track: Track) { playerView.selectTrack(track) }
+    func addExternalSubtitle(url: String, title: String) { playerView.addExternalSubtitle(url: url, title: title) }
 }
 
 // MARK: - OpenGL View & MPV Backend
-final class MPVOGLView: NSOpenGLView {
-    var mpv: OpaquePointer!
+// MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
+final class MPVLayer: CAOpenGLLayer {
+    weak var ownerView: MPVLayerView?
+    private let frameLock = NSLock()
+    private var hasNewFrame = false
+    
+    override init() {
+        super.init()
+        self.isAsynchronous = true
+    }
+    
+    override init(layer: Any) {
+        super.init(layer: layer)
+        self.isAsynchronous = true
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.isAsynchronous = true
+    }
+    
+    func markNewFrame() {
+        frameLock.lock()
+        hasNewFrame = true
+        frameLock.unlock()
+    }
+    
+    override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
+        // Float (RGBA16F) backbuffer only on EDR-capable displays — needed for HDR output
+        let edr = NSScreen.main?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+        let attributes: [CGLPixelFormatAttribute] = edr > 1.0
+            ? [
+                kCGLPFAAccelerated,
+                kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(kCGLOGLPVersion_3_2_Core.rawValue)),
+                kCGLPFADoubleBuffer,
+                kCGLPFAColorFloat,
+                kCGLPFAColorSize, CGLPixelFormatAttribute(64),
+                kCGLPFADepthSize, CGLPixelFormatAttribute(24),
+                CGLPixelFormatAttribute(0)
+            ]
+            : [
+                kCGLPFAAccelerated,
+                kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(kCGLOGLPVersion_3_2_Core.rawValue)),
+                kCGLPFADoubleBuffer,
+                kCGLPFAColorSize, CGLPixelFormatAttribute(32),
+                kCGLPFADepthSize, CGLPixelFormatAttribute(24),
+                CGLPixelFormatAttribute(0)
+            ]
+        var pix: CGLPixelFormatObj?
+        var npix: GLint = 0
+        CGLChoosePixelFormat(attributes, &pix, &npix)
+        return pix!
+    }
+    
+    override func copyCGLContext(forPixelFormat pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
+        var ctx: CGLContextObj?
+        CGLCreateContext(pixelFormat, nil, &ctx)
+        return ctx!
+    }
+    
+    override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
+        guard let owner = ownerView else { return false }
+        guard let gl = owner.mpvGL else { return true }
+        let flags = mpv_render_context_update(gl)
+        return (flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue)) != 0
+    }
+    
+    override func draw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
+        CGLSetCurrentContext(ctx)
+        
+        guard let owner = ownerView, owner.mpv != nil else {
+            glFlush()
+            return
+        }
+        
+        if owner.mpvGL == nil {
+            owner.setupMPVGL(with: ctx)
+        }
+        
+        guard let mpvGL = owner.mpvGL else {
+            glFlush()
+            return
+        }
+        
+        // Update render context on OpenGL thread with active context
+        _ = mpv_render_context_update(mpvGL)
+        
+        let scale = contentsScale
+        let w = Int32(bounds.width * scale)
+        let h = Int32(bounds.height * scale)
+        
+        guard w > 0 && h > 0 else {
+            glFlush()
+            return
+        }
+        
+        glViewport(0, 0, GLsizei(w), GLsizei(h))
+        
+        var currentFBO: GLint = 0
+        glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &currentFBO)
+        
+        var flipY: Int32 = 1
+        var fbo = mpv_opengl_fbo(fbo: currentFBO, w: w, h: h, internal_format: 0)
+        
+        withUnsafeMutablePointer(to: &fbo) { fboPtr in
+            withUnsafeMutablePointer(to: &flipY) { flipPtr in
+                var params = [
+                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
+                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
+                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                ]
+                let result = mpv_render_context_render(mpvGL, &params)
+                if result >= 0 {
+                    mpv_render_context_report_swap(mpvGL)
+                }
+            }
+        }
+        
+        glFlush()
+    }
+}
+
+// MARK: - Hosting NSView Backed by CAOpenGLLayer
+final class MPVLayerView: NSView {
+    private(set) var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
+    private var pendingURL: URL?
+    private var displayLink: CVDisplayLink?
+    let mpvLayer = MPVLayer()
+    
     var queue = DispatchQueue(label: "mpv", qos: .userInteractive)
     var onPropertyChange: ((String, Any) -> Void)?
     var onPlaybackError: (() -> Void)?
+    private var isEventLoopRunning = false
+    private let eventLoopLock = NSLock()
+    private var isCleaningUp = false
+    private var lastTimePosDispatchTime: Double = 0
+    private var lastTelemetryLogTime: Double = 0
     
-    override class func defaultPixelFormat() -> NSOpenGLPixelFormat {
-        let attributes: [NSOpenGLPixelFormatAttribute] = [
-            NSOpenGLPixelFormatAttribute(NSOpenGLPFAOpenGLProfile),
-            NSOpenGLPixelFormatAttribute(NSOpenGLProfileVersion4_1Core),
-            NSOpenGLPixelFormatAttribute(NSOpenGLPFADoubleBuffer),
-            NSOpenGLPixelFormatAttribute(NSOpenGLPFAColorSize), NSOpenGLPixelFormatAttribute(32),
-            NSOpenGLPixelFormatAttribute(NSOpenGLPFADepthSize), NSOpenGLPixelFormatAttribute(24),
-            NSOpenGLPixelFormatAttribute(0)
-        ]
-        return NSOpenGLPixelFormat(attributes: attributes)!
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .duringViewResize
+        mpvLayer.ownerView = self
     }
     
-    override func reshape() {
-        super.reshape()
-        renderFrame()
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+    
+    override func makeBackingLayer() -> CALayer {
+        return mpvLayer
     }
     
-    override func draw(_ dirtyRect: NSRect) {
-        renderFrame()
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        mpvLayer.contentsScale = window?.backingScaleFactor ?? 2.0
     }
+    
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        mpvLayer.contentsScale = window?.backingScaleFactor ?? 2.0
+    }
+    
+    func setupDisplayLink() {
+        // Display link setup if needed
+    }
+
+    // MARK: HDR / EDR pipeline (ported from Cascade)
+    private var lastPipelineKey: String = ""
+
+    /// Detects HDR (PQ/HLG) content and routes mpv + the CAOpenGLLayer through
+    /// an extended-dynamic-range output path, exactly like Cascade's player.
+    func applyColorPipeline() {
+        guard let mpv = mpv else { return }
+
+        let gamma = getPropertyString("video-params/gamma") ?? ""
+        let primaries = getPropertyString("video-params/primaries") ?? ""
+        let isHDR = gamma == "pq" || gamma == "hlg"
+        let key = "\(gamma)|\(primaries)"
+        guard key != lastPipelineKey || lastPipelineKey.isEmpty == isHDR else { return }
+        lastPipelineKey = key
+
+        if isHDR {
+            let edr = NSScreen.main?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+            let peak = max(300, min(1600, Int(edr * 500)))
+            mpv_set_property_string(mpv, "target-trc", gamma)
+            switch primaries {
+            case "bt.2020": mpv_set_property_string(mpv, "target-prim", "bt.2020")
+            case "display-p3", "dci-p3": mpv_set_property_string(mpv, "target-prim", "display-p3")
+            default: mpv_set_property_string(mpv, "target-prim", "auto")
+            }
+            mpv_set_property_string(mpv, "target-peak", String(peak))
+            mpv_set_property_string(mpv, "tone-mapping", "clip")
+            print("[MPV] HDR pipeline active (gamma=\(gamma), prim=\(primaries), peak=\(peak)nits)")
+        } else {
+            for p in ["target-trc", "target-prim", "target-peak", "tone-mapping"] {
+                mpv_set_property_string(mpv, p, "auto")
+            }
+        }
+
+        DispatchQueue.main.async { [mpvLayer] in
+            mpvLayer.wantsExtendedDynamicRangeContent = isHDR
+            if isHDR {
+                switch (gamma, primaries) {
+                case ("hlg", "bt.2020"):
+                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
+                case ("hlg", _):
+                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3_HLG)
+                case (_, "display-p3"), (_, "dci-p3"):
+                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3_PQ)
+                default:
+                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_PQ)
+                }
+            } else {
+                mpvLayer.colorspace = nil
+            }
+        }
+    }
+    
+    func mpvRenderUpdate() {
+        DispatchQueue.main.async { [weak self] in
+            self?.mpvLayer.setNeedsDisplay()
+        }
+    }
+    
+    private func displayLinkFired() {
+        // Handled via mpvGLUpdate callback
+    }
+    
+    func teardown() {
+        guard !isCleaningUp else { return }
+        isCleaningUp = true
+        
+        if let link = displayLink {
+            CVDisplayLinkStop(link)
+            displayLink = nil
+        }
+        
+        if let glCtx = self.mpvGL {
+            mpv_render_context_set_update_callback(glCtx, { _ in }, nil)
+            mpv_render_context_free(glCtx)
+            self.mpvGL = nil
+        }
+        if let handle = self.mpv {
+            mpv_terminate_destroy(handle)
+            self.mpv = nil
+        }
+    }
+    
+    func cleanup() {
+        teardown()
+    }
+    
+    deinit { cleanup() }
     
     func setupContext() {
-        self.openGLContext = NSOpenGLContext(format: MPVOGLView.defaultPixelFormat(), share: nil)
-        self.openGLContext?.view = self
-        self.openGLContext?.makeCurrentContext()
+        // Context created natively by CAOpenGLLayer
     }
     
     func setupMpv() {
         mpv = mpv_create()
         if mpv == nil { return }
         
-        // 1. VO Setting
-        mpv_set_option_string(mpv, "vo", "libmpv")
-        
-        // 2. High Quality Profile (Balanced)
-        // 'gpu-hq' is high quality but efficient enough for most modern Macs.
-        mpv_set_option_string(mpv, "profile", "gpu-hq")
-        
-        // REMOVED 'ewa_lanczossharp' as it causes lag on some systems.
-        // mpv_set_option_string(mpv, "scale", "ewa_lanczossharp")
-        // mpv_set_option_string(mpv, "cscale", "ewa_lanczossharp")
-        
-        // 3. HW Acceleration
-        // 'auto-safe' allows MPV to choose best method (usually videotoolbox on macOS)
-        let hwdec = UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "auto-safe" : "no"
-        mpv_set_option_string(mpv, "hwdec", hwdec)
-        
-        // 4. Cache & Streaming Optimization
-        mpv_set_option_string(mpv, "cache", "yes")
-        mpv_set_option_string(mpv, "demuxer-max-bytes", "256MiB")
-        mpv_set_option_string(mpv, "demuxer-readahead-secs", "20")
-        
-        // 5. User-Agent & Referrer
-        mpv_set_option_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        mpv_set_option_string(mpv, "referrer", "https://flux.app/")
-        
-        // 6. Subtitle Styling (Premium scaling)
-        mpv_set_option_string(mpv, "sub-font-size", "45") // Balanced size for desktop/TV
-        mpv_set_option_string(mpv, "sub-border-size", "2") // Cleaner outlines
-        mpv_set_option_string(mpv, "sub-margin-y", "40") // Slightly off the bottom edge
-        
-        // 7. Terminal/Log Output
+        // Options prior to initialization (matching Stremio's mpv.cpp)
         mpv_set_option_string(mpv, "terminal", "yes")
+        mpv_set_option_string(mpv, "load-scripts", "no")
+        mpv_set_option_string(mpv, "load-osd-console", "no")
+        mpv_set_option_string(mpv, "load-stats-overlay", "no")
+        mpv_set_option_string(mpv, "load-auto-profiles", "no")
+        mpv_set_option_string(mpv, "ytdl", "no")
+        mpv_set_option_string(mpv, "osc", "no")
+        // Fail over reasonably fast when a torrent swarm is dead: the Stremio
+        // server holds the file response silent until pieces flow, so without a
+        // timeout mpv would wait forever instead of triggering auto-fallback.
+        mpv_set_option_string(mpv, "network-timeout", "45")
+        mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
         
-        // 7. Language Preferences
+        if mpv_initialize(mpv) < 0 {
+            print("[MPV] init failed")
+            return
+        }
+        
+        // Properties set AFTER initialization (matching Stremio's mpv.cpp)
+        mpv_set_property_string(mpv, "vo", "libmpv")
+        mpv_set_property_string(mpv, "profile", "fast")
+        mpv_set_property_string(mpv, "scale", "bilinear")
+        mpv_set_property_string(mpv, "hwdec", "auto")
+        mpv_set_property_string(mpv, "gpu-hwdec-interop", "auto")
+        mpv_set_property_string(mpv, "video-sync", "audio")
+        
+        mpv_set_property_string(mpv, "sub-cache", "yes")
+        mpv_set_property_string(mpv, "sub-ass-override", "no")
+        
+        mpv_set_property_string(mpv, "cache", "yes")
+        mpv_set_property_string(mpv, "cache-secs", "10")
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "104857600")     // 100 MB demuxer buffer
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "20971520") // 20 MB backward buffer
+        mpv_set_property_string(mpv, "demuxer-readahead-secs", "10")
+        mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
+        mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll", "yes")
+        mpv_set_property_string(mpv, "stream-buffer-size", "131072")       // 128 KB initial network buffer for instant start
+        mpv_set_property_string(mpv, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
+        mpv_set_property_string(mpv, "force-seekable", "yes")              // Enable seeking in Hydra torrent streams
+        mpv_set_property_string(mpv, "access-references", "no")
+        mpv_set_property_string(mpv, "audio-fallback-to-null", "yes")
+        mpv_set_property_string(mpv, "framedrop", "vo")
+        
+        mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        mpv_set_property_string(mpv, "referrer", "https://flux.app/")
+
+        // Dolby Atmos / DTS bitstream passthrough (E-AC-3 JOC & TrueHD carry Atmos)
+        if UserDefaults.standard.bool(forKey: "enableAudioPassthrough") {
+            mpv_set_property_string(mpv, "audio-spdif", "ac3,eac3,truehd,dts")
+            mpv_set_property_string(mpv, "audio-exclusive", "yes")
+        }
+        
+        mpv_set_property_string(mpv, "sub-font-size", "45")
+        mpv_set_property_string(mpv, "sub-border-size", "2")
+        mpv_set_property_string(mpv, "sub-margin-y", "40")
+        
         let audioLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
         let subLang = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
         
@@ -303,31 +634,35 @@ final class MPVOGLView: NSOpenGLView {
             }
         }
         
-        mpv_set_option_string(mpv, "alang", getIsoCode(audioLang))
-        mpv_set_option_string(mpv, "slang", getIsoCode(subLang))
+        mpv_set_property_string(mpv, "alang", getIsoCode(audioLang))
+        mpv_set_property_string(mpv, "slang", getIsoCode(subLang))
         
-        // Observe properties
+        // Observe properties (Must be called AFTER mpv_initialize)
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "volume", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "cache-buffering-state", MPV_FORMAT_INT64)
+        mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "demuxer-cache-time", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "seeking", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "video-params/gamma", MPV_FORMAT_STRING)
+        mpv_observe_property(mpv, 0, "video-params/primaries", MPV_FORMAT_STRING)
         
-        if mpv_initialize(mpv) < 0 {
-            print("mpv init failed")
-            return
-        }
-        
-        setupGL()
+        // Only capture warnings and errors to minimize CPU and string allocations
+        mpv_request_log_messages(mpv, "warn")
         
         mpv_set_wakeup_callback(self.mpv, mpvWakeUp, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
+        startEventLoop()
     }
     
-    func setupGL() {
+    func setupMPVGL(with ctx: CGLContextObj) {
+        guard mpvGL == nil, mpv != nil else { return }
+        CGLSetCurrentContext(ctx)
+        
         let getProcAddress: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? = { _, name in
             guard let name = name else { return nil }
-            let symbolName = CFStringCreateWithCString(kCFAllocatorDefault, name, CFStringBuiltInEncodings.ASCII.rawValue)
-            let identifier = CFBundleGetBundleWithIdentifier("com.apple.opengl" as CFString)
-            return CFBundleGetFunctionPointerForName(identifier, symbolName)
+            return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) // RTLD_DEFAULT
         }
         
         var initParams = mpv_opengl_init_params(
@@ -342,18 +677,40 @@ final class MPVOGLView: NSOpenGLView {
                     mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: initParamsPtr),
                     mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
                 ]
-                mpv_render_context_create(&mpvGL, mpv, &params)
+                let res = mpv_render_context_create(&mpvGL, mpv, &params)
+                if res < 0 {
+                    print("[MPV] Failed to create mpv render context: \(res)")
+                } else {
+                    print("[MPV] Successfully created render context!")
+                }
             }
         }
         
         mpv_render_context_set_update_callback(mpvGL, mpvGLUpdate, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
+        setupDisplayLink()
+        
+        if let pending = pendingURL {
+            print("[MPV] Context ready! Now loading pending URL: \(pending.lastPathComponent)")
+            let urlToLoad = pending
+            pendingURL = nil
+            command("loadfile", urlToLoad.absoluteString)
+        }
     }
     
     func loadFile(_ url: URL) {
-        command("loadfile", url.absoluteString)
+        print("[MPV] loadFile called: \(url.absoluteString)")
+        if mpvGL == nil {
+            print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent)")
+            pendingURL = url
+        } else {
+            pendingURL = nil
+            print("[MPV] Executing loadfile command for: \(url.lastPathComponent)")
+            command("loadfile", url.absoluteString)
+        }
     }
     
     func setPause(_ paused: Bool) {
+        guard mpv != nil else { return }
         mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
     }
     
@@ -370,6 +727,7 @@ final class MPVOGLView: NSOpenGLView {
     }
     
     func setVolume(_ value: Double) {
+        guard mpv != nil else { return }
         var doubleVal = value * 100
         mpv_set_property(mpv, "volume", MPV_FORMAT_DOUBLE, &doubleVal)
     }
@@ -389,7 +747,7 @@ final class MPVOGLView: NSOpenGLView {
             for i in 0..<Int(count) {
                 let type = getPropertyString("track-list/\(i)/type") ?? ""
                 let id = getPropertyInt("track-list/\(i)/id") ?? 0
-                let title = getPropertyString("track-list/\(i)/title") ?? "Unknown"
+                let title = getPropertyString("track-list/\(i)/title") ?? getPropertyString("track-list/\(i)/demux-title") ?? ""
                 let lang = getPropertyString("track-list/\(i)/lang") ?? "und"
                 let selected = getPropertyBool("track-list/\(i)/selected") ?? false
                 if type == "audio" || type == "sub" {
@@ -401,8 +759,9 @@ final class MPVOGLView: NSOpenGLView {
     }
     
     func selectTrack(_ track: Track) {
+        guard mpv != nil else { return }
         let propertyName = track.type == "audio" ? "aid" : "sid"
-        mpv_set_option_string(mpv, propertyName, "\(track.id)")
+        mpv_set_property_string(mpv, propertyName, "\(track.id)")
     }
     
     func addExternalSubtitle(url: String, title: String) {
@@ -410,6 +769,7 @@ final class MPVOGLView: NSOpenGLView {
     }
     
     private func command(_ args: String...) {
+        guard mpv != nil else { return }
         withCStrings(args) { cArgs in
             var mutableArgs = cArgs
             mutableArgs.withUnsafeMutableBufferPointer { buffer in
@@ -419,7 +779,15 @@ final class MPVOGLView: NSOpenGLView {
     }
     
     // Helpers
+    private func getPropertyDouble(_ name: String) -> Double? {
+        guard mpv != nil else { return nil }
+        var value: Double = 0
+        if mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &value) >= 0 { return value }
+        return nil
+    }
+    
     private func getPropertyString(_ name: String) -> String? {
+        guard mpv != nil else { return nil }
         guard let cString = mpv_get_property_string(mpv, name) else { return nil }
         let str = String(cString: cString)
         mpv_free(cString)
@@ -427,72 +795,95 @@ final class MPVOGLView: NSOpenGLView {
     }
     
     private func getPropertyInt(_ name: String) -> Int? {
+        guard mpv != nil else { return nil }
         var value: Int64 = 0
         if mpv_get_property(mpv, name, MPV_FORMAT_INT64, &value) >= 0 { return Int(value) }
         return nil
     }
     
     private func getPropertyBool(_ name: String) -> Bool? {
+        guard mpv != nil else { return nil }
         var value: Int32 = 0
         if mpv_get_property(mpv, name, MPV_FORMAT_FLAG, &value) >= 0 { return value != 0 }
         return nil
     }
 
-    func readEvents() {
-        queue.async {
-            while self.mpv != nil {
-                guard let event = mpv_wait_event(self.mpv, 0), event.pointee.event_id != MPV_EVENT_NONE else { break }
+    func startEventLoop() {
+        eventLoopLock.lock()
+        guard !isEventLoopRunning else {
+            eventLoopLock.unlock()
+            return
+        }
+        isEventLoopRunning = true
+        eventLoopLock.unlock()
+
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            defer {
+                self.eventLoopLock.lock()
+                self.isEventLoopRunning = false
+                self.eventLoopLock.unlock()
+            }
+
+            while !self.isCleaningUp, let handle = self.mpv {
+                guard let event = mpv_wait_event(handle, 1.0) else { continue }
+                let eventId = event.pointee.event_id
+                if eventId == MPV_EVENT_NONE { continue }
                 
-                if event.pointee.event_id == MPV_EVENT_PROPERTY_CHANGE {
+                switch eventId {
+                case MPV_EVENT_START_FILE:
+                    print("[MPV EVENT] START_FILE")
+                case MPV_EVENT_END_FILE:
+                    let endFile = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self)
+                    let reason = endFile.pointee.reason
+                    let error = endFile.pointee.error
+                    print("[MPV EVENT] END_FILE reason:\(reason) error:\(error)")
+                    if reason == MPV_END_FILE_REASON_ERROR {
+                        print("[MPV] Error: End File Reason ERROR (code: \(error))")
+                        DispatchQueue.main.async { self.onPlaybackError?() }
+                    }
+                case MPV_EVENT_FILE_LOADED:
+                    print("[MPV EVENT] FILE_LOADED")
+                case MPV_EVENT_LOG_MESSAGE:
+                    let logMsg = event.pointee.data.assumingMemoryBound(to: mpv_event_log_message.self)
+                    let prefix = String(cString: logMsg.pointee.prefix)
+                    let text = String(cString: logMsg.pointee.text)
+                    print("[MPV LOG] \(prefix): \(text)")
+                default:
+                    break
+                }
+                
+                if eventId == MPV_EVENT_PROPERTY_CHANGE {
                     let prop = event.pointee.data.assumingMemoryBound(to: mpv_event_property.self)
                     let name = String(cString: prop.pointee.name)
                     
                     if prop.pointee.format == MPV_FORMAT_DOUBLE {
                         let value = prop.pointee.data.assumingMemoryBound(to: Double.self).pointee
-                        self.onPropertyChange?(name, value)
+                        if name == "time-pos" {
+                            let now = CFAbsoluteTimeGetCurrent()
+                            if now - self.lastTimePosDispatchTime >= 0.25 {
+                                self.lastTimePosDispatchTime = now
+                                DispatchQueue.main.async { self.onPropertyChange?(name, value) }
+                            }
+                        } else {
+                            DispatchQueue.main.async { self.onPropertyChange?(name, value) }
+                        }
                     } else if prop.pointee.format == MPV_FORMAT_FLAG {
                         let value = prop.pointee.data.assumingMemoryBound(to: Int32.self).pointee != 0
-                        self.onPropertyChange?(name, value)
+                        DispatchQueue.main.async { self.onPropertyChange?(name, value) }
+                    } else if prop.pointee.format == MPV_FORMAT_INT64 {
+                        let value = prop.pointee.data.assumingMemoryBound(to: Int64.self).pointee
+                        DispatchQueue.main.async { self.onPropertyChange?(name, value) }
+                    } else if prop.pointee.format == MPV_FORMAT_STRING {
+                        if let cStr = prop.pointee.data.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee {
+                            let value = String(cString: cStr)
+                            DispatchQueue.main.async { self.onPropertyChange?(name, value) }
+                        }
                     }
-                } else if event.pointee.event_id == MPV_EVENT_END_FILE {
-                      let endFile = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self)
-                      // Detect error or initialization failure
-                      if endFile.pointee.reason == MPV_END_FILE_REASON_ERROR {
-                          print("[MPV] Error: End File Reason ERROR")
-                          self.onPlaybackError?()
-                      }
                 }
             }
         }
     }
-    
-    func renderFrame() {
-        guard let ctx = self.openGLContext, mpvGL != nil else { return }
-        ctx.makeCurrentContext()
-        let backingRect = self.convertToBacking(self.bounds)
-        glViewport(0, 0, GLsizei(backingRect.width), GLsizei(backingRect.height))
-        var flipY: Int32 = 1
-        var fbo = mpv_opengl_fbo(fbo: 0, w: Int32(backingRect.width), h: Int32(backingRect.height), internal_format: 0)
-        
-        withUnsafeMutablePointer(to: &fbo) { fboPtr in
-            withUnsafeMutablePointer(to: &flipY) { flipPtr in
-                var params = [
-                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
-                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
-                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
-                ]
-                mpv_render_context_render(mpvGL, &params)
-            }
-        }
-        ctx.flushBuffer()
-    }
-    
-    func cleanup() {
-        if mpvGL != nil { mpv_render_context_free(mpvGL); mpvGL = nil }
-        if mpv != nil { mpv_terminate_destroy(mpv); mpv = nil }
-    }
-    
-    deinit { cleanup() }
     
     private func withCStrings(_ strings: [String], block: ([UnsafePointer<CChar>?]) -> Void) {
         var cStrings: [UnsafePointer<CChar>?] = []
@@ -511,11 +902,13 @@ final class MPVOGLView: NSOpenGLView {
 }
 
 func mpvGLUpdate(_ ctx: UnsafeMutableRawPointer?) {
-    let glView = unsafeBitCast(ctx, to: MPVOGLView.self)
-    DispatchQueue.main.async { glView.renderFrame() }
+    guard let ctx = ctx else { return }
+    let layerView = Unmanaged<MPVLayerView>.fromOpaque(ctx).takeUnretainedValue()
+    layerView.mpvRenderUpdate()
 }
 
 func mpvWakeUp(_ ctx: UnsafeMutableRawPointer?) {
-    let glView = unsafeBitCast(ctx, to: MPVOGLView.self)
-    glView.readEvents()
+    guard let ctx = ctx else { return }
+    let layerView = Unmanaged<MPVLayerView>.fromOpaque(ctx).takeUnretainedValue()
+    layerView.startEventLoop()
 }

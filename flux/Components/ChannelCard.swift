@@ -47,12 +47,6 @@ struct ChannelCard: View {
             
             // 2. Liquid Glass Logo Area (Bottom 40%)
             ZStack(alignment: .center) {
-                // Glass Effect
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(Color.black.opacity(0.3)) // Slight darken for contrast
-                
-                // Logo
                 if let logoURL = channel.logoURL {
                     CachedImage(url: logoURL) { phase in
                         switch phase {
@@ -82,7 +76,9 @@ struct ChannelCard: View {
                         .scaleEffect(0.8)
                 }
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 96) // 40% of 240
+            .glassEffect(.clear, in: .rect)
         }
         .frame(width: 160, height: 240) // Standard Portrait Size
         .background(Color.black.opacity(0.3))

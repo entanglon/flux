@@ -23,6 +23,7 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var posterURL: URL?
     var backdropURL: URL?
     var heroURL: URL?
+    var logoURL: URL?
     let streamURL: URL?
     let category: String // "movie" or "series" usually in Stremio
     var progress: Double? // 0.0 to 1.0
@@ -46,6 +47,20 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var releaseDateYear: String? {
         guard let date = releaseDate else { return nil }
         return String(date.prefix(4))
+    }
+    
+    var isReleased: Bool {
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return true }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        if let date = formatter.date(from: dateStr) {
+            return date <= Date()
+        }
+        if dateStr.count >= 4, let year = Int(dateStr.prefix(4)) {
+            let currentYear = Calendar.current.component(.year, from: Date())
+            return year <= currentYear
+        }
+        return true
     }
     
     // History Specific

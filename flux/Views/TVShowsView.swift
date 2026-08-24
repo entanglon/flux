@@ -17,14 +17,14 @@ struct TVShowsView: View {
                     // Featured Carousel
                     if !popularShows.isEmpty {
                         FeaturedCarousel(items: Array(popularShows.prefix(5)))
-                            .frame(height: 600)
                     }
                     
                     // Popular Shows Grid
                     if !popularShows.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(title: "Popular Shows", destination: MediaListView(type: .popularTV))
-                                .padding(.horizontal, 40)
+                                .padding(.leading, 268)
+                            .padding(.trailing, 40)
                             
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
                                 ForEach(popularShows) { item in
@@ -34,7 +34,8 @@ struct TVShowsView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 40)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
                         }
                     }
                     
@@ -42,7 +43,8 @@ struct TVShowsView: View {
                     if !trendingShows.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(title: "Trending Now", destination: MediaListView(type: .trendingTV))
-                                .padding(.horizontal, 40)
+                                .padding(.leading, 268)
+                            .padding(.trailing, 40)
                             
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
                                 ForEach(trendingShows) { item in
@@ -52,7 +54,8 @@ struct TVShowsView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 40)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
                         }
                     }
                 }

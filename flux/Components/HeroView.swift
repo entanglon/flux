@@ -56,8 +56,7 @@ struct HeroView: View {
                     Label("Play Now", systemImage: "play.fill")
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 16)

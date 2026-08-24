@@ -29,28 +29,37 @@ struct CachedImage<Content: View>: View {
             return
         }
         
+        // 1. Try In-Memory NSCache (Instant 0ms retrieval)
+        let nsURL = url as NSURL
+        if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: nsURL) {
+            phase = .success(Image(nsImage: cachedNSImage))
+            return
+        }
+        
         let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30)
         let session = ImageSession.shared
         
         do {
-            // 1. Try Memory Cache First (Fastest)
+            // 2. Try Disk/URLCache
             if let cached = URLCache.shared.cachedResponse(for: request) {
                 if let downsampled = downsample(data: cached.data, maxDimension: maxDimension) {
-                     withTransaction(transaction) {
-                         phase = .success(Image(nsImage: downsampled))
-                     }
-                     return
+                    ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
+                    withTransaction(transaction) {
+                        phase = .success(Image(nsImage: downsampled))
+                    }
+                    return
                 }
             }
             
-            // 2. Fetch Network
+            // 3. Fetch Network
             let (data, _) = try await session.data(for: request)
             
-            // 3. Downsample
+            // 4. Downsample
             guard let downsampled = downsample(data: data, maxDimension: maxDimension) else {
                 throw URLError(.cannotDecodeContentData)
             }
             
+            ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
             withTransaction(transaction) {
                 phase = .success(Image(nsImage: downsampled))
             }
@@ -87,4 +96,8 @@ class ImageSession {
                                    diskPath: "FluxImageCache")
         return URLSession(configuration: config)
     }()
+}
+
+final class ImageInMemoryCache {
+    static let shared = NSCache<NSURL, NSImage>()
 }

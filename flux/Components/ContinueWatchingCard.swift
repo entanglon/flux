@@ -8,7 +8,9 @@ struct ContinueWatchingCard: View {
     @State private var fetchedImage: URL?
     
     var DisplayImage: URL? {
-        let rawURL = fetchedImage ?? item.lastEpisodeImage ?? item.heroURL ?? item.backdropURL ?? item.posterURL ?? item.imageURL
+        let cinemetaBackdrop = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/background/medium/\(item.id)/img") : nil
+        let cinemetaPoster = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/poster/medium/\(item.id)/img") : nil
+        let rawURL = fetchedImage ?? item.lastEpisodeImage ?? item.backdropURL ?? item.heroURL ?? cinemetaBackdrop ?? item.posterURL ?? item.imageURL ?? cinemetaPoster
         guard let url = rawURL else { return nil }
         
         var urlString = url.absoluteString
@@ -103,8 +105,7 @@ struct ContinueWatchingCard: View {
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.white)
                                 .padding(8)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
+                                .glassEffect(.regular.interactive(), in: .circle)
                         }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
@@ -170,10 +171,10 @@ struct ContinueWatchingCard: View {
                                 .fill(Color.white.opacity(0.3))
                                 .frame(height: 4)
                             
-                            // Fill
+                            // Fill (Apple TV White Progress)
                             if let progress = item.progress {
                                 Capsule()
-                                    .fill(Color.red) // Netflix Red
+                                    .fill(Color.white)
                                     .frame(width: geo.size.width * max(progress, 0.05), height: 4)
                             }
                         }
@@ -186,14 +187,27 @@ struct ContinueWatchingCard: View {
         }
         .frame(width: 280, height: 157.5)
         .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovering ? [.white.opacity(0.5), .white.opacity(0.15)] : [.white.opacity(0.1), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovering ? 1.5 : 0.5
+                )
+        )
+        .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 10 : 4)
+        .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
         .onHover { isHovering = $0 }
-        .task {
+        .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
+        .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
+            fetchedImage = nil
             // Priority: Resolve thumbnails for TV Shows (especially Trakt sync items)
             if item.category == "TV Show",
                let season = item.lastSeason,
-               let episode = item.lastEpisode,
-               fetchedImage == nil {
+               let episode = item.lastEpisode {
                 
                 var tmdbIDToUse: String? = nil
                 

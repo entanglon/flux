@@ -94,7 +94,7 @@ struct ProfileView: View {
             }
         }
         .frame(width: 400, height: 500)
-        .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow))
+        .glassEffect(.regular, in: .rect)
         .ignoresSafeArea()
     }
     

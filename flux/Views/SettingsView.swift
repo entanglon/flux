@@ -59,9 +59,23 @@ struct StreamingSettingsView: View {
     @AppStorage("rdApiKey") private var rdApiKey = ""
     @AppStorage("traktClientId") private var traktClientId = ""
     @AppStorage("preferredQuality") private var preferredQuality = "4K"
+    @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
     
     var body: some View {
         Form {
+            Section(header: Text("Stream Sources")) {
+                Picker("Stream Filter", selection: $streamingSourceMode) {
+                    Text("HTTP & Torrent Streams (Both)").tag("both")
+                    Text("HTTP Streams Only").tag("http")
+                    Text("Torrent Streams Only").tag("torrent")
+                }
+                .pickerStyle(.menu)
+                
+                Text("Select whether Flux should load HTTP streams, Torrent streams, or both simultaneously.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
             Section(header: Text("Flux Mode")) {
                 Toggle("Enable Flux Mode", isOn: $enableFluxMode)
                 Text("Automatically find and play the fastest stream.")
@@ -75,10 +89,6 @@ struct StreamingSettingsView: View {
                     Text("480p").tag("480p")
                 }
                 .pickerStyle(.menu)
-            }
-            
-            Section(header: Text("Services")) {
-                SecureField("Real-Debrid API Key", text: $rdApiKey)
             }
         }
         .formStyle(.grouped)
@@ -194,15 +204,20 @@ struct TraktSettingsView: View {
 // MARK: - 3. Playback Settings
 struct PlaybackSettingsView: View {
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
+    @AppStorage("enableAudioPassthrough") private var enableAudioPassthrough = false
     @AppStorage("defaultAudioLang") private var defaultAudioLang = "English"
     @AppStorage("defaultSubLang") private var defaultSubLang = "English"
-    
+
     let languages = ["English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
-    
+
     var body: some View {
         Form {
-            Section(header: Text("Video Player")) {
+            Section(header: Text("Video Player"), footer: Text("Restart playback after changing these options.")) {
                 Toggle("Hardware Acceleration", isOn: $useHardwareAcceleration)
+            }
+
+            Section(header: Text("Audio"), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Requires exclusive access to the output device.")) {
+                Toggle("Audio Passthrough (Atmos / DTS)", isOn: $enableAudioPassthrough)
             }
             
             Section(header: Text("Languages")) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DetailView: View {
     let item: MediaItem
+    @Environment(\.dismiss) private var dismiss
     @State private var fullItem: MediaItem?
     @State private var selectedSeason: Season?
     @State private var showSeasonPopover = false
@@ -15,6 +16,7 @@ struct DetailView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
     // Computed
     var displayItem: MediaItem { fullItem ?? item }
@@ -27,10 +29,25 @@ struct DetailView: View {
         return true
     }
     
+    @State private var scrollOffsetY: CGFloat = 0
+    
+    var topBarOpacity: Double {
+        let offset = -scrollOffsetY
+        if offset <= 0 { return 0 }
+        return min(1.0, Double(offset / 150.0))
+    }
+
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                VStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                    GeometryReader { innerGeo in
+                        Color.clear.preference(
+                            key: DetailScrollOffsetKey.self,
+                            value: innerGeo.frame(in: .named("detailScrollSpace")).minY
+                        )
+                    }
+                    .frame(height: 0)
                     // MARK: - 1. Immersive Hero (60% Height)
                     ZStack(alignment: .bottomLeading) {
                         // Background Image
@@ -41,10 +58,26 @@ struct DetailView: View {
                             // from initial metadata to enriched metadata seamlessly without a view swap.
                             CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 4096) { phase in
                                 if let image = phase.image {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .transition(.opacity.animation(.easeInOut(duration: 0.5)))
+                                    let effectiveSidebarWidth = CGFloat(max(160.0, sidebarWidth - 10.0))
+                                    
+                                    HStack(spacing: 0) {
+                                        // 1. Sidebar Extension (Mirrored & Blurred, ALWAYS 100% under sidebar)
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .scaleEffect(x: -1, y: 1)
+                                            .blur(radius: 30)
+                                            .frame(width: effectiveSidebarWidth, height: geo.size.height * 0.80)
+                                            .clipped()
+                                        
+                                        // 2. Main Hero Artwork (Starts slightly under sidebar edge, zero bleed)
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: max(0, geo.size.width - effectiveSidebarWidth), height: geo.size.height * 0.80)
+                                            .clipped()
+                                    }
+                                    .transition(.opacity.animation(.easeInOut(duration: 0.5)))
                                 } else {
                                     Rectangle().fill(Color(white: 0.1))
                                 }
@@ -178,7 +211,7 @@ struct DetailView: View {
                             }
                             .padding(.top, 10)
                         }
-                        .padding(.leading, 60)
+                        .padding(.leading, 268)
                         .padding(.bottom, 60)
                     }
                     .frame(height: geo.size.height * 0.80)
@@ -229,7 +262,8 @@ struct DetailView: View {
                         if !relatedItems.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 SectionHeader(title: "Related", destination: MediaListView(title: "Related", type: .fixed(title: "Related", items: relatedItems)))
-                                    .padding(.horizontal, 60)
+                                    .padding(.leading, 268)
+                                    .padding(.trailing, 60)
                                 
                                 DetailRail(items: relatedItems, idPath: \.id, itemWidth: 160, itemHeight: 240) { item in
                                    NavigationLink(value: item) {
@@ -244,7 +278,8 @@ struct DetailView: View {
                         if let cast = displayItem.cast, !cast.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 SectionHeader(title: "Cast & Crew", destination: CastListView(cast: cast))
-                                    .padding(.horizontal, 60)
+                                    .padding(.leading, 268)
+                                    .padding(.trailing, 60)
                                 
                                 DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 140) { member in
                                     VStack(spacing: 8) {
@@ -305,7 +340,8 @@ struct DetailView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 60)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 60)
                         } else {
                             // Fallback to Search Link
                             VStack(alignment: .leading, spacing: 16) {
@@ -339,7 +375,8 @@ struct DetailView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            .padding(.horizontal, 60)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 60)
                         }
 
                         VStack(alignment: .leading, spacing: 16) {
@@ -370,7 +407,8 @@ struct DetailView: View {
                             .background(Color(white: 0.12))
                             .cornerRadius(16)
                         }
-                        .padding(.horizontal, 60)
+                        .padding(.leading, 268)
+                        .padding(.trailing, 60)
                         
                         HStack(alignment: .top, spacing: 60) {
                             VStack(alignment: .leading, spacing: 20) {
@@ -412,26 +450,37 @@ struct DetailView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(.horizontal, 60)
+                        .padding(.leading, 268)
+                        .padding(.trailing, 60)
                         .padding(.bottom, 80)
                     }
                     .background(Color.black.opacity(0.5))
                 }
             }
-        }
-        .background(Color.black)
-        .ignoresSafeArea(edges: .top)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Spacer()
+            .coordinateSpace(name: "detailScrollSpace")
+            .onPreferenceChange(DetailScrollOffsetKey.self) { value in
+                self.scrollOffsetY = value
             }
-            ToolbarItem(placement: .primaryAction) {
-                ShareLink(item: URL(string: "https://www.stremio.com/app/detail/\(displayItem.category == "TV Show" ? "series" : "movie")/\(displayItem.id)")!) {
-                    Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(.white)
-                }
-            }
+            .ignoresSafeArea(edges: .top)
         }
+        .background(
+            LinearGradient(gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]), startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .overlay(alignment: .topLeading) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 268)
+            .padding(.top, 14)
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
             await loadDetails()
         }
@@ -475,8 +524,13 @@ struct DetailView: View {
                 }
             }
             
-            let related = try? await StremioService.shared.fetchRelated(type: type, genres: detailedItem.genres)
-            relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
+            let tmdbSimilar = await TMDBEnricher.shared.fetchSimilar(item: detailedItem)
+            if !tmdbSimilar.isEmpty {
+                relatedItems = Array(tmdbSimilar.filter { $0.id != detailedItem.id }.prefix(12))
+            } else {
+                let related = try? await StremioService.shared.fetchRelated(type: type, genres: detailedItem.genres)
+                relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
+            }
             isLoadingDetails = false
         } catch {
             print("Error loading detailed metadata: \(error)")
@@ -644,8 +698,7 @@ struct LiquidEpisodeCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(isHovering ? 0.5 : 0.1), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 5)
-        .scaleEffect(isHovering ? 1.02 : 1.0)
+        .shadow(color: isHovering ? Color.black.opacity(0.3) : Color.black.opacity(0.1), radius: isHovering ? 10 : 4, x: 0, y: isHovering ? 6 : 2)
         .animation(.spring(duration: 0.3), value: isHovering)
         .onHover { isHovering = $0 }
     }
@@ -679,7 +732,8 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
                             .id(enumeration.offset)
                     }
                 }
-                .padding(.horizontal, 60)
+                .padding(.leading, 268)
+                .padding(.trailing, 60)
                 .padding(.top, 10) // Reduced top padding
                 .padding(.bottom, 30) // Keep bottom for shadow
                 .background(GeometryReader { geo in
@@ -705,7 +759,7 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
                 if isHovering && scrollPosition < -tolerance {
                     Button(action: { scrollLeft(proxy: proxy) }) { arrowButton("left") }
                         .buttonStyle(.plain)
-                        .padding(.leading, 20)
+                        .padding(.leading, 268)
                         .transition(.opacity)
                 }
             }
@@ -730,10 +784,7 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
             .font(.system(size: 20, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 32, height: 64)
-            .background(.ultraThinMaterial)
-            .cornerRadius(32)
-            .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-            .shadow(radius: 10)
+            .glassEffect(.regular.interactive(), in: .capsule)
     }
     
     // Update scroll logic to deduce index from visual estimation if needed, 
@@ -758,5 +809,12 @@ struct ScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat? = nil
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = value ?? nextValue()
+    }
+}
+
+struct DetailScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

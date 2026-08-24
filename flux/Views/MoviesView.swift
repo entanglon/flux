@@ -17,14 +17,14 @@ struct MoviesView: View {
                     // Featured Movie
                     if !popularMovies.isEmpty {
                         FeaturedCarousel(items: Array(popularMovies.prefix(5)))
-                            .frame(height: 600)
                     }
                     
                     // Popular Movies Grid
                     if !popularMovies.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(title: "Popular Movies", destination: MediaListView(type: .popularMovies))
-                                .padding(.horizontal, 40)
+                                .padding(.leading, 268)
+                            .padding(.trailing, 40)
                             
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                                 ForEach(popularMovies) { item in
@@ -34,7 +34,8 @@ struct MoviesView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 40)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
                         }
                     }
                     
@@ -42,7 +43,8 @@ struct MoviesView: View {
                     if !topRatedMovies.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(title: "Top Rated", destination: MediaListView(type: .topRatedMovies))
-                                .padding(.horizontal, 40)
+                                .padding(.leading, 268)
+                            .padding(.trailing, 40)
                             
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                                 ForEach(topRatedMovies) { item in
@@ -52,7 +54,8 @@ struct MoviesView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 40)
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
                         }
                     }
                 }

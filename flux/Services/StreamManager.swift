@@ -3,27 +3,70 @@ import Foundation
 struct Stream: Identifiable {
     let id = UUID()
     let title: String
+    let cleanTitle: String
     let url: URL
     let source: String
     let quality: String
     var size: String?
     var language: String?
+    var seeders: Int?
+    var leechers: Int?
+    var fileIdx: Int? = nil
+    var isSeasonPack: Bool = false
+    var proxyHeaders: [String: String]? = nil
+
+    /// True for magnet / torrent-backed sources
+    var isTorrent: Bool {
+        url.absoluteString.hasPrefix("magnet:") || url.absoluteString.contains("xt=urn:btih:")
+    }
+
+    /// Stable identity across refetches (UUID changes every snapshot): infoHash + file index.
+    var stableKey: String {
+        if let hash = url.absoluteString.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) {
+            return String(url.absoluteString[hash]).replacingOccurrences(of: "btih:", with: "") + "#\(fileIdx ?? -1)"
+        }
+        return url.absoluteString + "#\(fileIdx ?? -1)"
+    }
 }
 
 struct StremioResponse: Codable {
     let streams: [StremioStream]
 }
 
+struct StremioBehaviorHints: Codable {
+    let proxyHeaders: [String: [String: String]]?
+    let notWebReady: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case proxyHeaders
+        case notWebReady
+    }
+}
+
 struct StremioStream: Codable {
     let name: String?
     let title: String?
-    let url: String
+    let url: String?
+    let infoHash: String?
+    let fileIdx: Int?
+    let sources: [String]?
+    let behaviorHints: StremioBehaviorHints?
 }
 
 class StreamManager {
     static let shared = StreamManager()
-    
+
     private init() {}
+
+    /// Shared session: connection reuse + bounded timeouts so a hanging addon
+    /// never stalls the whole source list (Stremio-style fast failure).
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 20
+        config.httpShouldUsePipelining = true
+        return URLSession(configuration: config)
+    }()
     
     // In-memory cache: "tmdbID:season:episode" -> [Stream]
     private var streamCache: [String: [Stream]] = [:]
@@ -46,104 +89,301 @@ class StreamManager {
     }
     
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
-        // Cache Key Construction
+        return await fetchStreamsRealtime(for: item, season: season, episode: episode, onStreamsUpdated: { _ in })
+    }
+    
+    func fetchStreamsRealtime(for item: MediaItem, season: Int? = nil, episode: Int? = nil, onStreamsUpdated: @escaping ([Stream]) -> Void) async -> [Stream] {
         let s = season ?? 1
         let e = episode ?? 1
-        let isSeries = item.category == "TV Show"
+        let isSeries = item.category == "TV Show" || item.category == "Series"
+        let type = isSeries ? "series" : "movie"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        // Check Cache
         if let cached = streamCache[cacheKey], !cached.isEmpty {
-            print("[StreamManager] Returning cached streams for \(cacheKey)")
+            onStreamsUpdated(cached)
             return cached
         }
         
-        var allStreams: [Stream] = []
-        
-        // Determine type based on category
-        let type = (item.category == "TV Show") ? "series" : "movie"
-        
-        // Construct the ID. For series, we must specify season and episode.
-        var finalStreamId = item.id
-        if type == "series" {
-            finalStreamId += ":\(s):\(e)"
+        // Resolve IMDb ID (Stremio addons expect tt... IDs)
+        var resolvedImdbID: String? = nil
+        if item.id.starts(with: "tt") {
+            resolvedImdbID = item.id
+        } else {
+            resolvedImdbID = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type)
         }
         
-        print("Fetching streams for \(item.title) [\(type)] ID: \(finalStreamId)")
-        
-        // Parallel fetching from all enabled addons
+        var allStreams: [Stream] = []
+
         await withTaskGroup(of: [Stream].self) { group in
-            let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled }
-            
+            // Only addons that actually provide streams — Cinemeta (catalog/meta)
+            // would just waste a request in the fan-out. Addons with unknown
+            // resources are still queried (manifests may use complex shapes).
+            let enabledAddons = AddonManager.shared.addons.filter {
+                guard $0.isEnabled else { return false }
+                guard let resources = $0.resources, !resources.isEmpty else { return true }
+                return resources.contains("stream")
+            }
+
             for addon in enabledAddons {
+                let cleanBaseURL = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
+
                 group.addTask {
-                    return await self.fetchFromAddon(baseURL: addon.url.replacingOccurrences(of: "/manifest.json", with: ""), type: type, id: finalStreamId, sourceName: addon.name)
+                    let baseID = resolvedImdbID ?? item.id
+                    let targetID = isSeries ? "\(baseID):\(s):\(e)" : baseID
+                    return await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: addon.name)
                 }
             }
             
             for await streams in group {
+                guard !streams.isEmpty else { continue }
                 allStreams.append(contentsOf: streams)
+                let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+                let filtered = allStreams.filter { s in
+                    guard self.isWithinMaxResolution(s) else { return false }
+                    let isTorrent = s.url.absoluteString.starts(with: "magnet:") || (s.seeders != nil && s.seeders! > 0)
+                    if sourceMode == "http" { return !isTorrent }
+                    if sourceMode == "torrent" { return isTorrent }
+                    return true
+                }
+                let snapshot = filtered.sorted { s1, s2 in
+                    self.streamSortComparator(s1, s2)
+                }
+                
+                await MainActor.run {
+                    onStreamsUpdated(snapshot)
+                }
             }
         }
         
-        // Filter by Title Match (Basic fuzzy check)
-        // allStreams = allStreams.filter { isTitleMatch(streamTitle: $0.title, itemTitle: item.title) }
-        
-        // Sort by Quality (4K > 1080p > 720p)
-        let sortedStreams = allStreams.sorted { s1, s2 in
-            qualityScore(s1.quality) > qualityScore(s2.quality)
+        let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+        let finalFiltered = deduped(allStreams).filter { s in
+            guard self.isWithinMaxResolution(s) else { return false }
+            let isTorrent = s.isTorrent || (s.seeders != nil && s.seeders! > 0)
+            if sourceMode == "http" { return !isTorrent }
+            if sourceMode == "torrent" { return isTorrent }
+            return true
         }
-        
+
+        let sortedStreams = finalFiltered.sorted { s1, s2 in
+            streamSortComparator(s1, s2)
+        }
+
         streamCache[cacheKey] = sortedStreams
         return sortedStreams
     }
+
+    /// Collapses duplicate entries for the same underlying source (same torrent from
+    /// multiple addons, same HTTP URL) keeping the richest metadata per key.
+    private func deduped(_ streams: [Stream]) -> [Stream] {
+        var indexByKey: [String: Int] = [:]
+        var out: [Stream] = []
+        for s in streams {
+            if let i = indexByKey[s.stableKey] {
+                if (s.seeders ?? -1) > (out[i].seeders ?? -1) {
+                    out[i] = s
+                }
+            } else {
+                indexByKey[s.stableKey] = out.count
+                out.append(s)
+            }
+        }
+        return out
+    }
+    
+    // MARK: - Quality & Health Sorting
+    
+    func qualityScore(_ quality: String) -> Int {
+        switch quality.uppercased() {
+        case "4K", "2160P", "UHD": return 4
+        case "1080P", "FHD": return 3
+        case "720P", "HD": return 2
+        case "480P", "SD": return 1
+        default: return 1
+        }
+    }
+    
+    func maxAllowedQualityScore() -> Int {
+        let pref = UserDefaults.standard.string(forKey: "preferredQuality") ?? "4K"
+        return qualityScore(pref)
+    }
+    
+    func isWithinMaxResolution(_ stream: Stream) -> Bool {
+        return qualityScore(stream.quality) <= maxAllowedQualityScore()
+    }
+    
+    /// Health score within a quality tier: Torrent health (seeders/leechers) + size sanity; HTTP reliability.
+    func computeStreamHealthScore(_ stream: Stream) -> Double {
+        var score: Double = 0.0
+        
+        if stream.isTorrent {
+            let seeders = Double(stream.seeders ?? 0)
+            score += min(seeders, 500.0) * 10.0
+            if let leechers = stream.leechers {
+                score += Double(leechers) * 0.5
+            }
+        } else {
+            // Direct / Debrid HTTP streams have baseline verified instant availability
+            score += 1000.0
+        }
+        
+        // Size efficiency bonus for reasonable file sizes
+        if let sizeStr = stream.size?.uppercased() {
+            if sizeStr.contains("GB") {
+                let numStr = sizeStr.replacingOccurrences(of: "GB", with: "").trimmingCharacters(in: .whitespaces)
+                if let sizeInGB = Double(numStr) {
+                    if sizeInGB >= 1.0 && sizeInGB <= 8.0 {
+                        score += 25.0
+                    }
+                }
+            }
+        }
+        
+        return score
+    }
+    
+    /// Primary sort: Quality tier (1080p > 720p > SD).
+    /// Secondary sort within tier: Health descending (healthiest first).
+    func streamSortComparator(_ s1: Stream, _ s2: Stream) -> Bool {
+        let q1 = qualityScore(s1.quality)
+        let q2 = qualityScore(s2.quality)
+        if q1 != q2 {
+            return q1 > q2
+        }
+        return computeStreamHealthScore(s1) > computeStreamHealthScore(s2)
+    }
+    
+    private func normalizeAddonURL(_ rawUrl: String) -> String {
+        var url = rawUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.hasPrefix("stremio://") {
+            url = url.replacingOccurrences(of: "stremio://", with: "https://")
+        }
+        if url.hasSuffix("/manifest.json") {
+            url = String(url.dropLast("/manifest.json".count))
+        }
+        return url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
     
     private func fetchFromAddon(baseURL: String, type: String, id: String, sourceName: String) async -> [Stream] {
-        let urlString = "\(baseURL)/stream/\(type)/\(id).json"
+        let addonURLStr = normalizeAddonURL(baseURL)
+        let urlString = "\(addonURLStr)/stream/\(type)/\(id).json"
         guard let url = URL(string: urlString) else { return [] }
         
         print("[\(sourceName)] Requesting: \(urlString)")
-        
+
         var request = URLRequest(url: url)
-        request.timeoutInterval = 45 // 45 second timeout for slow addons (Hydra etc)
-        
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 45
-        config.timeoutIntervalForResource = 60
-        let session = URLSession(configuration: config)
+        request.timeoutInterval = 12
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await self.session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                 return []
             }
             
             let stremioResponse = try JSONDecoder().decode(StremioResponse.self, from: data)
             let streams = stremioResponse.streams.compactMap { stream -> Stream? in
-                let urlString = stream.url
-                guard let streamUrl = URL(string: urlString) else { return nil }
-                    
-                    // Parse metadata
-                    let title = stream.title ?? stream.name ?? "Unknown"
-                    let quality = parseQuality(from: title)
-                    let size = parseSize(from: title)
-                    let language = parseLanguage(from: title)
-                    
-                    return Stream(
-                        title: title,
-                        url: streamUrl,
-                        source: sourceName,
-                        quality: quality,
-                        size: size,
-                        language: language
-                    )
+                var targetURLString = stream.url
+                if (targetURLString == nil || targetURLString == "about:blank"), let hash = stream.infoHash {
+                    var magnet = "magnet:?xt=urn:btih:\(hash)"
+                    if let trackers = stream.sources {
+                        for tr in trackers {
+                            if tr.starts(with: "tracker:") {
+                                let cleanTr = tr.replacingOccurrences(of: "tracker:", with: "")
+                                if let encoded = cleanTr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                                    magnet += "&tr=\(encoded)"
+                                }
+                            }
+                        }
+                    }
+                    targetURLString = magnet
                 }
+                
+                guard var finalURLStr = targetURLString, finalURLStr != "about:blank" else { return nil }
+                if !finalURLStr.starts(with: "magnet:") {
+                    finalURLStr = normalizeAddonURL(finalURLStr)
+                }
+                guard let streamUrl = URL(string: finalURLStr) else { return nil }
+                
+                let rawTitle = stream.title ?? stream.name ?? "Unknown Stream"
+                let nameHeader = stream.name ?? ""
+                let combinedTitle = "\(nameHeader) \(rawTitle)"
+                let quality = parseQuality(from: combinedTitle)
+                let size = parseSize(from: rawTitle)
+                let language = parseLanguage(from: rawTitle)
+                let seeders = parseSeeders(from: rawTitle)
+                let leechers = parseLeechers(from: rawTitle)
+                let clean = cleanTitleString(name: nameHeader, title: rawTitle)
+
+                // Extract proxy headers from behaviorHints (e.g. Referer, Origin)
+                let headers = stream.behaviorHints?.proxyHeaders?["request"]
+
+                return Stream(
+                    title: rawTitle,
+                    cleanTitle: clean,
+                    url: streamUrl,
+                    source: sourceName,
+                    quality: quality,
+                    size: size,
+                    language: language,
+                    seeders: seeders,
+                    leechers: leechers,
+                    fileIdx: stream.fileIdx,
+                    isSeasonPack: detectSeasonPack(name: nameHeader, title: rawTitle),
+                    proxyHeaders: headers
+                )
+            }
             print("[\(sourceName)] Found \(streams.count) streams")
             return streams
         } catch {
             print("[\(sourceName)] Error: \(error.localizedDescription)")
             return []
         }
+    }
+    
+    private func parseSeeders(from title: String) -> Int? {
+        let patterns = [
+            #"👤\s*(\d+)"#,
+            #"(?i)S:\s*(\d+)"#,
+            #"(?i)seeders?:\s*(\d+)"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+               let range = Range(match.range(at: 1), in: title) {
+                return Int(title[range])
+            }
+        }
+        return nil
+    }
+    
+    private func parseLeechers(from title: String) -> Int? {
+        let patterns = [
+            #"👥\s*(\d+)"#,
+            #"(?i)P:\s*(\d+)"#,
+            #"(?i)peers?:\s*(\d+)"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+               let range = Range(match.range(at: 1), in: title) {
+                return Int(title[range])
+            }
+        }
+        return nil
+    }
+    
+    private func cleanTitleString(name: String, title: String) -> String {
+        var result = title.replacingOccurrences(of: "\n", with: " • ")
+        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let lowerName = name.lowercased()
+        let lowerResult = result.lowercased()
+        
+        if !name.isEmpty && !lowerName.contains("torrentio") && !lowerName.contains("stremio") && !lowerResult.hasPrefix(lowerName) {
+            result = "\(name) • \(result)"
+        }
+        
+        result = result.replacingOccurrences(of: "^[•\\-\\s]+", with: "", options: .regularExpression)
+        return result
     }
     
     private func parseQuality(from title: String) -> String {
@@ -160,35 +400,96 @@ class StreamManager {
         return s.contains(t) || t.contains(s)
     }
     
-    private func qualityScore(_ quality: String) -> Int {
-        switch quality {
-        case "4K": return 4
-        case "1080p": return 3
-        case "720p": return 2
-        case "SD": return 1
-        default: return 0
-        }
-    }
-    
     private func parseSize(from title: String) -> String? {
-        let pattern = #"(?i)(\d+(?:\.\d+)?\s*(MB|GB))"#
-        if let range = title.range(of: pattern, options: .regularExpression) {
-             return String(title[range])
+        let pattern = #"(?i)(\d+(?:\.\d+)?)\s*(TB|GB|MB)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = title as NSString
+        let matches = regex.matches(in: title, range: NSRange(location: 0, length: ns.length))
+        // Prefer the size tagged with a disk/size marker (💾), else the LAST match —
+        // addons like Torrentio put the authoritative size at the end of the title.
+        for m in matches.reversed() {
+            let lowerBound = max(0, m.range.location - 2)
+            let prefix = ns.substring(with: NSRange(location: lowerBound, length: m.range.location - lowerBound))
+            if prefix.contains("💾") || prefix.lowercased().contains("size") {
+                return ns.substring(with: m.range)
+            }
         }
-        return nil
+        guard let last = matches.last else { return nil }
+        return ns.substring(with: last.range)
+    }
+
+    /// Detects full-season / complete-series packs so the UI can label them and
+    /// players know the listed size is NOT the per-episode size.
+    private func detectSeasonPack(name: String, title: String) -> Bool {
+        let combined = "\(name) \(title)"
+        let patterns = [
+            #"(?i)\b(?:complete|full)\s+season\b"#,
+            #"(?i)\bseason\s*\d{1,2}\s*(?:complete|pack)\b"#,
+            #"(?i)\bs\d{1,2}\s*[-–~]\s*s\d{1,2}\b"#,
+            #"\bS\d{1,2}\b(?!\s*?E\d{1,3})"#
+        ]
+        for p in patterns {
+            if combined.range(of: p, options: .regularExpression) != nil {
+                return true
+            }
+        }
+        return false
     }
     
     private func parseLanguage(from title: String) -> String? {
-        var languages: [String] = []
         let upperTitle = title.uppercased()
-        let tokens = upperTitle.components(separatedBy: .whitespacesAndNewlines).flatMap { $0.components(separatedBy: .punctuationCharacters) }
         
-        if tokens.contains("EN") || tokens.contains("ENG") || upperTitle.contains("ENGLISH") { languages.append("EN") }
-        if tokens.contains("HI") || tokens.contains("HIN") || upperTitle.contains("HINDI") { languages.append("HI") }
-        if tokens.contains("RU") || tokens.contains("RUS") || upperTitle.contains("RUSSIAN") { languages.append("RU") }
-        if tokens.contains("FR") || tokens.contains("FRE") || upperTitle.contains("FRENCH") { languages.append("FR") }
-        if tokens.contains("MULTI") || upperTitle.contains("DUAL AUDIO") || upperTitle.contains("MULTI-AUDIO") { languages.append("MULTI") }
+        // Separate audio portion from subtitle portion if "SUB" / "SUBS" is present
+        var audioPart = upperTitle
+        if let subRange = upperTitle.range(of: "SUB ") ?? upperTitle.range(of: "SUB(") ?? upperTitle.range(of: "SUBS") {
+            audioPart = String(upperTitle[..<subRange.lowerBound])
+        }
+        
+        var languages: [String] = []
+        let tokens = audioPart.components(separatedBy: CharacterSet.alphanumerics.inverted)
+        
+        func hasLang(_ keys: [String], full: String) -> Bool {
+            if audioPart.contains(full) { return true }
+            for k in keys {
+                if tokens.contains(k) { return true }
+            }
+            return false
+        }
+        
+        if hasLang(["EN", "ENG"], full: "ENGLISH") { languages.append("EN") }
+        if hasLang(["RU", "RUS"], full: "RUSSIAN") { languages.append("RU") }
+        if hasLang(["KO", "KOR"], full: "KOREAN") { languages.append("KO") }
+        if hasLang(["JA", "JPN"], full: "JAPANESE") { languages.append("JA") }
+        if hasLang(["HI", "HIN"], full: "HINDI") { languages.append("HI") }
+        if hasLang(["ES", "SPA"], full: "SPANISH") { languages.append("ES") }
+        if hasLang(["FR", "FRE", "FRA"], full: "FRENCH") { languages.append("FR") }
+        if hasLang(["DE", "GER", "DEU"], full: "GERMAN") { languages.append("DE") }
+        if hasLang(["IT", "ITA"], full: "ITALIAN") { languages.append("IT") }
+        if hasLang(["ZH", "CHI", "ZHO"], full: "CHINESE") { languages.append("ZH") }
+        
+        if (audioPart.contains("MULTI") || audioPart.contains("DUAL AUDIO") || audioPart.contains("MVO") || audioPart.contains("DVO")) && languages.isEmpty {
+            languages.append("MULTI")
+        }
         
         return languages.isEmpty ? nil : languages.joined(separator: ", ")
+    }
+    
+    private func fetchKitsuID(for title: String) async -> String? {
+        guard let encoded = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://kitsu.io/api/edge/anime?filter[text]=\(encoded)") else { return nil }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let dataArray = json["data"] as? [[String: Any]],
+               let first = dataArray.first,
+               let id = first["id"] as? String {
+                print("[StreamManager] Resolved Kitsu Anime ID for '\(title)': \(id)")
+                return id
+            }
+        } catch {
+            return nil
+        }
+        return nil
     }
 }

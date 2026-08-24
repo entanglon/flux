@@ -39,25 +39,51 @@ struct GlassCard: View {
             Color.clear
                 .aspectRatio(aspectRatio.ratio, contentMode: .fit)
                 .overlay(
-                    CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL)) { phase in
-                        switch phase {
-                        case .empty:
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.15))
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure:
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.15))
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 20))
-                                        .foregroundColor(.white.opacity(0.3))
-                                )
-                        @unknown default:
-                            EmptyView()
+                    Group {
+                        if aspectRatio == .landscape && displayItem.backdropURL == nil {
+                            ZStack {
+                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
+                                    if let img = phase.image {
+                                        img.resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .blur(radius: 16)
+                                            .overlay(Color.black.opacity(0.45))
+                                    } else {
+                                        Rectangle().fill(Color.gray.opacity(0.2))
+                                    }
+                                }
+                                
+                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
+                                    if let img = phase.image {
+                                        img.resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .padding(.vertical, 6)
+                                            .shadow(color: .black.opacity(0.6), radius: 6)
+                                    }
+                                }
+                            }
+                        } else {
+                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL)) { phase in
+                                switch phase {
+                                case .empty:
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.15))
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                case .failure:
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.15))
+                                        .overlay(
+                                            Image(systemName: "photo")
+                                                .font(.system(size: 20))
+                                                .foregroundColor(.white.opacity(0.3))
+                                        )
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
                         }
                     }
                 )
@@ -91,10 +117,7 @@ struct GlassCard: View {
                                  .font(.system(size: 16, weight: .bold))
                                  .foregroundColor(.white)
                                  .padding(8)
-                                 .background(.ultraThinMaterial)
-                                 .clipShape(Circle())
-                                 .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                                 .shadow(radius: 4)
+                                 .glassEffect(.regular.interactive(), in: .circle)
                          }
                          .menuStyle(.button)
                          .buttonStyle(.plain)
@@ -122,20 +145,32 @@ struct GlassCard: View {
                     }
                 }
                 .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            LinearGradient(
+                                colors: isHovering ? [.white.opacity(0.6), .white.opacity(0.2)] : [.white.opacity(0.12), .clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: isHovering ? 1.5 : 0.5
+                        )
+                )
                 .clipped()
-                .shadow(color: isHovering ? Color.black.opacity(0.4) : Color.black.opacity(0.2), radius: isHovering ? 12 : 6, x: 0, y: isHovering ? 6 : 3)
+                .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 6, x: 0, y: isHovering ? 10 : 4)
+                .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
             
             // Text Content
             if showTitle {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(displayItem.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: isHovering ? .bold : .semibold))
+                        .foregroundStyle(.white)
                         .lineLimit(1)
                     
                     Text(displayItem.category)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 4)
