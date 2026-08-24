@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @StateObject private var playerManager = PlayerManager.shared
     @State private var path = NavigationPath()
+    @State private var refreshToken = 0
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
 
     var body: some View {
@@ -20,20 +21,24 @@ struct ContentView: View {
                     )
                     .ignoresSafeArea()
                     
-                    if let selected = selectedCategory {
-                        switch selected {
-                        case .search: SearchView()
-                        case .home: HomeView()
-                        case .movies: MoviesView()
-                        case .tvShows: TVShowsView()
-                        case .trending: TrendingView()
-                        case .watchlist: WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
-                        case .history: HistoryView()
-                        case .downloads: DownloadsView()
+                    Group {
+                        if let selected = selectedCategory {
+                            switch selected {
+                            case .search: SearchView()
+                            case .home: HomeView()
+                            case .movies: MoviesView()
+                            case .tvShows: TVShowsView()
+                            case .trending: TrendingView()
+                            case .watchlist: WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
+                            case .history: HistoryView()
+                            case .downloads: DownloadsView()
+                            }
+                        } else {
+                            HomeView()
                         }
-                    } else {
-                        HomeView()
                     }
+                    // Bumping the token recreates the page → full refresh (Cmd+R)
+                    .id(refreshToken)
                 }
                 .navigationDestination(for: MediaItem.self) { item in
                     DetailView(item: item)
@@ -125,6 +130,18 @@ struct ContentView: View {
         #endif
         .onChange(of: selectedCategory) {
             path = NavigationPath()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                refreshToken += 1
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxNavigate)) { note in
+            guard let target = note.object as? SidebarItem else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                selectedCategory = target
+                path = NavigationPath()
+            }
         }
     }
 

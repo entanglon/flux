@@ -235,21 +235,48 @@ struct PlaybackSettingsView: View {
 
 // MARK: - 4. Advanced Settings
 struct AdvancedSettingsView: View {
+    @AppStorage("stremioCacheGB") private var stremioCacheGB = 2
+    @State private var cacheUsage = ""
+
+    /// Mirrors Stremio's cache size options (disk LRU — oldest torrents evicted first).
+    private let cacheOptions = [1, 2, 5, 10, 20, 50]
+
     var body: some View {
         Form {
-             Section(header: Text("Storage")) {
+             Section(header: Text("Storage"),
+                     footer: Text("Torrent streams buffer to disk and the least-recently-watched titles are evicted automatically when the limit is reached. Changing the limit applies immediately.")) {
+                Picker("Torrent Cache Size", selection: $stremioCacheGB) {
+                    ForEach(cacheOptions, id: \.self) { gb in
+                        Text("\(gb) GB").tag(gb)
+                    }
+                }
+                .onChange(of: stremioCacheGB) { _, newValue in
+                    Task { await StremioServerManager.shared.setCacheSize(gigabytes: newValue) }
+                }
+
+                if !cacheUsage.isEmpty {
+                    HStack {
+                        Text("Currently Used")
+                        Spacer()
+                        Text(cacheUsage).foregroundStyle(.secondary)
+                    }
+                }
+
                 Button("Clear Image Cache") {
                     if let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
                          try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("ImageCache"))
                     }
                 }
             }
-            
+
             Section(header: Text("About")) {
                 Text("Version 1.0.0 (Beta)")
             }
         }
         .formStyle(.grouped)
+        .task {
+            cacheUsage = await StremioServerManager.shared.cacheUsage()
+        }
     }
 }
 

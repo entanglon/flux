@@ -21,17 +21,7 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if isSearching {
-                        if isLoading {
-                            VStack(spacing: 16) {
-                                ProgressView()
-                                    .controlSize(.large)
-                                    .tint(.white)
-                                Text("Searching movies & series...")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 320)
-                        } else if searchResults.isEmpty {
+                        if !isLoading && searchResults.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -43,7 +33,7 @@ struct SearchView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: 300)
-                        } else {
+                        } else if !isLoading {
                             searchResultsView
                         }
                     } else {
@@ -53,6 +43,11 @@ struct SearchView: View {
                 .padding(.leading, 268)
                 .padding(.trailing, 40)
                 .padding(.bottom, 60)
+            }
+            .overlay {
+                if isSearching && isLoading {
+                    ContentLoader(label: "Searching movies & series…")
+                }
             }
 
             // Floating Apple TV Liquid Glass Search Bar Capsule (Positioned in Toolbar Row, Centered over content)
@@ -97,6 +92,10 @@ struct SearchView: View {
             .padding(.top, 14)
         }
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            // Apple TV behavior: arriving at Search focuses the field immediately
+            isSearchFocused = true
+        }
         .onChange(of: searchText) { _, newValue in
             if newValue.isEmpty {
                 isSearching = false
@@ -189,7 +188,7 @@ struct SearchView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                     ForEach(Genre.allGenres, id: \.id) { genre in
                         NavigationLink(destination: MediaListView(title: genre.name, type: .genre(id: genre.id))) {
                             GenreCard(genre: genre)

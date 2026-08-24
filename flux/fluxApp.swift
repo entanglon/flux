@@ -61,6 +61,39 @@ struct fluxApp: App {
             SidebarCommands()
             ToolbarCommands()
             CommandGroup(replacing: .newItem) { }
+            CommandGroup(after: .newItem) {
+                Button("Refresh") {
+                    NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                Divider()
+
+                Button("Home") {
+                    NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.home)
+                }
+                .keyboardShortcut("1", modifiers: .command)
+
+                Button("Movies") {
+                    NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.movies)
+                }
+                .keyboardShortcut("2", modifiers: .command)
+
+                Button("TV Shows") {
+                    NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.tvShows)
+                }
+                .keyboardShortcut("3", modifiers: .command)
+
+                Button("Trending") {
+                    NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.trending)
+                }
+                .keyboardShortcut("4", modifiers: .command)
+
+                Button("Search") {
+                    NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.search)
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
         }
         .defaultSize(width: 1200, height: 800)
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))

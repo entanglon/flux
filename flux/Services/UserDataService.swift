@@ -40,6 +40,29 @@ class UserDataService: ObservableObject {
             self.history = parseItems(historyData)
         }
     }
+
+    /// Fills in missing artwork/IDs for history items via TMDB and publishes the
+    /// enriched items. Without the write-back, Continue Watching cards restored
+    /// from disk keep nil URLs and render as eternal spinners.
+    func enrichHistory() async {
+        let items = history
+        guard !items.isEmpty else { return }
+        var updated: [MediaItem] = []
+        updated.reserveCapacity(items.count)
+        var didChange = false
+        for item in items {
+            let enriched = await TMDBEnricher.shared.quickEnrich(item)
+            if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL {
+                didChange = true
+            }
+            updated.append(enriched)
+        }
+        if didChange {
+            await MainActor.run {
+                self.history = updated
+            }
+        }
+    }
     
     private func parseItems(_ itemsData: [[String: Any]]) -> [MediaItem] {
         let rawItems: [(item: MediaItem, timestamp: TimeInterval)] = itemsData.compactMap { dict in

@@ -22,6 +22,8 @@ struct HomeView: View {
     @State private var nativeSections: [CatalogSection] = []
     @State private var addonSections: [CatalogSection] = []
     @State private var genres: [Genre] = Genre.allGenres
+    @State private var forYouItems: [MediaItem] = []
+    @State private var becauseTitle: String? = nil
     
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
 
@@ -39,15 +41,7 @@ struct HomeView: View {
                 }
                 .frame(height: 0)
 
-                if isLoading {
-                    HStack(spacing: 0) {
-                        Color.clear.frame(width: 236)
-                        ProgressView()
-                            .controlSize(.large)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .frame(height: 500)
-                } else {
+                if !isLoading {
                     // Featured Carousel (Trending / Hero Content)
                     if !heroContent.isEmpty {
                         FeaturedCarousel(items: Array(heroContent.prefix(5)))
@@ -75,6 +69,27 @@ struct HomeView: View {
                         .padding(.bottom, 16)
                     }
 
+                    // For You (taste-based recommendations, below Continue Watching)
+                    if !forYouItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 16) {
+                            ListSectionHeader(
+                                title: becauseTitle != nil ? "Because you watched \(becauseTitle!)" : "For You",
+                                value: MediaListView.ListType.fixed(title: "For You", items: forYouItems)
+                            )
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
+
+                            CarouselView(items: forYouItems) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                        .frame(width: 180)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 16)
+                    }
+
                     // ... rest of content rows ...
                     fluxNativeRows
                     addonRows
@@ -84,6 +99,11 @@ struct HomeView: View {
                 }
             }
             .padding(.bottom, 80)
+        }
+        .overlay {
+            if isLoading {
+                ContentLoader()
+            }
         }
         .coordinateSpace(name: "homeScrollSpace")
         .onPreferenceChange(HomeScrollOffsetKey.self) { value in
@@ -197,18 +217,23 @@ extension HomeView {
         do {
             // 1. Featured Hero - Using Trending All for a perfect mix of Popularity + Newness
             if let trending = try? await TMDBEnricher.shared.fetchTrendingAll() {
-                self.heroContent = Array(trending.prefix(20))
+                self.heroContent = Array(trending.filter { $0.isReleased }.prefix(20))
             }
             
             // 2. Load Sections
             await fetchNativeTMDBSections()
             await fetchAddonSections() // Restore Addon support
             
-            // 3. Background: Enrich History Items (Fixes blank cards)
+            // 3. Background: Enrich History Items (fills missing thumbnails, writes back)
             Task.detached(priority: .background) {
-                for item in self.userData.history {
-                    _ = await TMDBEnricher.shared.quickEnrich(item)
-                }
+                await self.userData.enrichHistory()
+            }
+
+            // 4. For You — taste-based recommendations (hidden until enough signal)
+            if TasteProfileManager.shared.hasEnoughSignal {
+                let (recs, because) = await TasteProfileManager.shared.forYouRecommendations()
+                self.forYouItems = recs
+                self.becauseTitle = because?.title
             }
             
             await MainActor.run {
@@ -268,7 +293,13 @@ extension HomeView {
         await MainActor.run {
             // Sort sections by a fixed preference
             let order = ["Trending Movies", "Popular Series", "Upcoming Movies", "Top Rated Shows"]
-            self.nativeSections = fetchedSections.sorted { s1, s2 in
+            // The dedicated "Upcoming Movies" row intentionally keeps unreleased
+            // titles — every other row filters them out (nothing to play yet).
+            let released = fetchedSections.map { section -> CatalogSection in
+                if section.title == "Upcoming Movies" { return section }
+                return CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
+            }
+            self.nativeSections = released.sorted { s1, s2 in
                 let i1 = order.firstIndex(of: s1.title) ?? 99
                 let i2 = order.firstIndex(of: s2.title) ?? 99
                 return i1 < i2
@@ -309,7 +340,9 @@ extension HomeView {
         }
         
         await MainActor.run {
-            self.addonSections = sections
+            self.addonSections = sections.map { section in
+                CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
+            }
         }
     }
     

@@ -11,52 +11,50 @@ struct TrendingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 500)
-                } else {
-                    // 1. Full-Bleed Hero Carousel for Top Trending Titles
-                    if !trendingItems.isEmpty {
-                        FeaturedCarousel(items: Array(trendingItems.prefix(5)))
-                    }
-                    
-                    // 2. Main Trending Catalog Section
-                    VStack(alignment: .leading, spacing: 24) {
-                        HStack(alignment: .firstTextBaseline, spacing: 16) {
-                            Text("Trending Now")
-                                .font(.system(size: 32, weight: .heavy))
-                                .foregroundStyle(.white)
-                            
-                            if !trendingItems.isEmpty {
-                                Text("\(trendingItems.count) TITLES")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .tracking(1.5)
-                                    .foregroundStyle(.white.opacity(0.8))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 5)
-                                    .glassEffect(.clear, in: .capsule)
-                            }
-                            
-                            Spacer()
+                // 1. Full-Bleed Hero Carousel for Top Trending Titles
+                if !trendingItems.isEmpty {
+                    FeaturedCarousel(items: Array(trendingItems.prefix(5)))
+                }
+                
+                // 2. Main Trending Catalog Section
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        Text("Trending Now")
+                            .font(.system(size: 32, weight: .heavy))
+                            .foregroundStyle(.white)
+                        
+                        if !trendingItems.isEmpty {
+                            Text("\(trendingItems.count) TITLES")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1.5)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .glassEffect(.clear, in: .capsule)
                         }
                         
-                        // 3. Grid of Trending Glass Cards
-                        LazyVGrid(columns: columns, spacing: 32) {
-                            ForEach(trendingItems) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: true)
-                                }
-                                .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    
+                    // 3. Grid of Trending Glass Cards
+                    LazyVGrid(columns: columns, spacing: 32) {
+                        ForEach(trendingItems) { item in
+                            NavigationLink(value: item) {
+                                GlassCard(item: item, aspectRatio: .portrait, showTitle: true)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(.leading, 268)
-                    .padding(.trailing, 40)
                 }
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
             }
             .padding(.bottom, 80)
+        }
+        .overlay {
+            if isLoading {
+                ContentLoader()
+            }
         }
         .ignoresSafeArea(edges: .top)
         .task {
@@ -68,7 +66,7 @@ struct TrendingView: View {
         do {
             let items = try await StremioService.shared.fetchTrendingMovies()
             await MainActor.run {
-                self.trendingItems = items
+                self.trendingItems = items.filter { $0.isReleased }
                 self.isLoading = false
             }
         } catch {

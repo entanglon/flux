@@ -13,7 +13,7 @@ struct Genre: Identifiable, Hashable {
         Genre(id: 35, name: "Comedy", icon: "face.smiling.fill", imageURL: "https://unsplash.com/photos/ohbfKsIEbJQ/download?force=true"),
         Genre(id: 18, name: "Drama", icon: "theatermasks.fill", imageURL: "https://unsplash.com/photos/65UK3Fa_yIg/download?force=true"),
         Genre(id: 53, name: "Thriller", icon: "waveform.path.ecg", imageURL: "https://unsplash.com/photos/wmTmcpeHzrI/download?force=true"),
-        Genre(id: 27, name: "Horror", icon: "ghost.fill", imageURL: "https://unsplash.com/photos/uFUQ55RuMrs/download?force=true"),
+        Genre(id: 27, name: "Horror", icon: "skull.fill", imageURL: "https://unsplash.com/photos/uFUQ55RuMrs/download?force=true"),
         Genre(id: 10749, name: "Romance", icon: "heart.fill", imageURL: "https://unsplash.com/photos/w5hhoYM_JsU/download?force=true"),
         Genre(id: 14, name: "Fantasy", icon: "wand.and.stars", imageURL: "https://unsplash.com/photos/facU72FcKBI/download?force=true"),
         Genre(id: 16, name: "Animation", icon: "paintpalette.fill", imageURL: "https://unsplash.com/photos/JINPheIkUek/download?force=true"),

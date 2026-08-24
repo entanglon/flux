@@ -6,50 +6,67 @@ struct ContinueWatchingCard: View {
     @ObservedObject private var userData = UserDataService.shared
     
     @State private var fetchedImage: URL?
-    
-    var DisplayImage: URL? {
+
+    /// Full thumbnail ladder — CachedImage walks it and only shows the
+    /// placeholder if EVERY candidate fails. Selection-time fallbacks that
+    /// 404 at load time used to kill the whole chain.
+    private var imageCandidates: [URL] {
         let cinemetaBackdrop = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/background/medium/\(item.id)/img") : nil
         let cinemetaPoster = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/poster/medium/\(item.id)/img") : nil
-        let rawURL = fetchedImage ?? item.lastEpisodeImage ?? item.backdropURL ?? item.heroURL ?? cinemetaBackdrop ?? item.posterURL ?? item.imageURL ?? cinemetaPoster
-        guard let url = rawURL else { return nil }
-        
-        var urlString = url.absoluteString
-        
-        // Force high-res for TMDB image URLs
-        if urlString.contains("image.tmdb.org") {
-            urlString = urlString.replacingOccurrences(of: "/w300/", with: "/w1280/")
-                                 .replacingOccurrences(of: "/w500/", with: "/w1280/")
-                                 .replacingOccurrences(of: "/w780/", with: "/w1280/")
+
+        func upgraded(_ url: URL?) -> URL? {
+            guard var urlString = url?.absoluteString else { return nil }
+            if urlString.contains("image.tmdb.org") {
+                urlString = urlString.replacingOccurrences(of: "/w300/", with: "/w1280/")
+                                     .replacingOccurrences(of: "/w500/", with: "/w1280/")
+                                     .replacingOccurrences(of: "/w780/", with: "/w1280/")
+            }
+            if urlString.contains("images.metahub.space") || urlString.contains("episodes.metahub.space") {
+                urlString = urlString.replacingOccurrences(of: "/small/", with: "/large/")
+                                     .replacingOccurrences(of: "/medium/", with: "/large/")
+                                     .replacingOccurrences(of: "/w780/", with: "/w1280/")
+            }
+            return URL(string: urlString)
         }
-        
-        // Force high-res for Cinemeta / Metahub URLs
-        if urlString.contains("images.metahub.space") {
-            urlString = urlString.replacingOccurrences(of: "/small/", with: "/large/")
-                                 .replacingOccurrences(of: "/medium/", with: "/large/")
+
+        var seen = Set<String>()
+        var out: [URL] = []
+        for candidate in [fetchedImage, item.lastEpisodeImage, item.backdropURL, item.heroURL, cinemetaBackdrop, item.posterURL, item.imageURL, cinemetaPoster] {
+            if let url = upgraded(candidate), seen.insert(url.absoluteString).inserted {
+                out.append(url)
+            }
         }
-        
-        return URL(string: urlString) ?? url
+        return out
     }
-    
+
     var body: some View {
         ZStack {
-            // Background Image
-            CachedImage(url: DisplayImage, maxDimension: 600) { phase in
+            // Background Image — walks the candidate ladder on failure
+            CachedImage(
+                url: imageCandidates.first,
+                fallbacks: Array(imageCandidates.dropFirst()),
+                maxDimension: 600
+            ) { phase in
                 switch phase {
-                case .empty:
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay(ProgressView().controlSize(.small))
                 case .success(let image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                case .failure:
+                default:
+                    // Every candidate failed — deterministic placeholder, never a spinner.
                     Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                @unknown default:
-                    EmptyView()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(red: 0.18, green: 0.20, blue: 0.32), Color(red: 0.05, green: 0.06, blue: 0.12)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Image(systemName: "film.stack")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.white.opacity(0.25))
+                        )
                 }
             }
             .frame(width: 280, height: 157.5) // 16:9 Aspect Ratio

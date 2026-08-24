@@ -71,6 +71,11 @@ struct MediaListView: View {
             .padding(.top, 40)
             .padding(.bottom, 40)
         }
+        .overlay {
+            if isLoading && items.isEmpty {
+                ContentLoader()
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(
@@ -83,29 +88,23 @@ struct MediaListView: View {
     
     @ViewBuilder
     private var content: some View {
-        if isLoading && items.isEmpty {
-            ProgressView()
-                .controlSize(.large)
-                .frame(maxWidth: .infinity, minHeight: 200)
-        } else {
-            LazyVGrid(columns: columns, spacing: 40) {
-                ForEach(items) { item in
-                    NavigationLink(value: item) {
-                        GlassCard(item: item, aspectRatio: aspectRatio, showTitle: false)
-                    }
-                    .buttonStyle(.plain)
-                    .onAppear {
-                        if item == items.last {
-                            Task { await loadData() }
-                        }
+        LazyVGrid(columns: columns, spacing: 40) {
+            ForEach(items) { item in
+                NavigationLink(value: item) {
+                    GlassCard(item: item, aspectRatio: aspectRatio, showTitle: false)
+                }
+                .buttonStyle(.plain)
+                .onAppear {
+                    if item == items.last {
+                        Task { await loadData() }
                     }
                 }
-                
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                }
+            }
+
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding()
             }
         }
     }
@@ -156,9 +155,9 @@ struct MediaListView: View {
                 if newItems.isEmpty {
                     canLoadMore = false
                 } else {
-                    // Deduplicate
+                    // Deduplicate + hide unreleased titles (nothing to play yet)
                     let existingIDs = Set(items.map { $0.id })
-                    let uniqueItems = newItems.filter { !existingIDs.contains($0.id) }
+                    let uniqueItems = newItems.filter { !existingIDs.contains($0.id) && $0.isReleased }
                     items.append(contentsOf: uniqueItems)
                     skipCount += 20 // Standard Cinemeta skip
                 }

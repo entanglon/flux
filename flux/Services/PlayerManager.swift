@@ -519,6 +519,7 @@ class PlayerManager: ObservableObject {
         guard let item = currentItem, duration > 0 else { return }
         let progress = time / duration
         UserDataService.shared.addToHistory(item, progress: progress, season: currentSeason, episode: currentEpisode, episodeImage: currentEpisodeImage)
+        TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
     
     func close() {

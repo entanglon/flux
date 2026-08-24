@@ -8,59 +8,57 @@ struct MoviesView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 48) {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 500)
-                } else {
-                    // Featured Movie
-                    if !popularMovies.isEmpty {
-                        FeaturedCarousel(items: Array(popularMovies.prefix(5)))
-                    }
-                    
-                    // Popular Movies Grid
-                    if !popularMovies.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Popular Movies", destination: MediaListView(type: .popularMovies))
-                                .padding(.leading, 268)
-                            .padding(.trailing, 40)
-                            
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
-                                ForEach(popularMovies) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
+                // Featured Movie
+                if !popularMovies.isEmpty {
+                    FeaturedCarousel(items: Array(popularMovies.prefix(5)))
+                }
+
+                // Popular Movies Grid
+                if !popularMovies.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SectionHeader(title: "Popular Movies", destination: MediaListView(type: .popularMovies))
                             .padding(.leading, 268)
-                            .padding(.trailing, 40)
-                        }
-                    }
-                    
-                    // Top Rated Grid
-                    if !topRatedMovies.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Top Rated", destination: MediaListView(type: .topRatedMovies))
-                                .padding(.leading, 268)
-                            .padding(.trailing, 40)
-                            
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
-                                ForEach(topRatedMovies) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                    }
-                                    .buttonStyle(.plain)
+                        .padding(.trailing, 40)
+                        
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
+                            ForEach(popularMovies) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
                         }
+                        .padding(.leading, 268)
+                        .padding(.trailing, 40)
+                    }
+                }
+                
+                // Top Rated Grid
+                if !topRatedMovies.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SectionHeader(title: "Top Rated", destination: MediaListView(type: .topRatedMovies))
+                            .padding(.leading, 268)
+                        .padding(.trailing, 40)
+                        
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
+                            ForEach(topRatedMovies) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.leading, 268)
+                        .padding(.trailing, 40)
                     }
                 }
             }
             .padding(.bottom, 80)
+        }
+        .overlay {
+            if isLoading {
+                ContentLoader()
+            }
         }
         .ignoresSafeArea(edges: .top)
         .task {
@@ -76,8 +74,8 @@ struct MoviesView: View {
             let (p, t) = try await (popular, topRated)
             
             await MainActor.run {
-                self.popularMovies = p
-                self.topRatedMovies = t
+                self.popularMovies = p.filter { $0.isReleased }
+                self.topRatedMovies = t.filter { $0.isReleased }
                 self.isLoading = false
             }
         } catch {

@@ -69,3 +69,18 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var lastEpisodeTitle: String?
     var lastEpisodeImage: URL?
 }
+
+/// Minimal init for recommendation seeds — extension keeps the memberwise init.
+extension MediaItem {
+    init(seed id: String, title: String, category: String, progress: Double? = nil, genres: [String]? = nil) {
+        self.init(
+            id: id, title: title, description: "", imageURL: nil, posterURL: nil,
+            backdropURL: nil, heroURL: nil, logoURL: nil, streamURL: nil,
+            category: category, progress: progress, trailerURL: nil, cast: nil,
+            director: nil, seasons: nil, runtime: nil, certification: nil,
+            genres: genres, popularity: nil, releaseDate: nil, spokenLanguages: nil,
+            originCountry: nil, voteAverage: nil, episodes: nil, watchProviders: nil,
+            lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil
+        )
+    }
+}

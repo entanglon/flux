@@ -81,6 +81,7 @@ class StremioServerManager: ObservableObject {
             if await isServerAlive() {
                 await MainActor.run { self.isRunning = true }
                 print("[StremioServer] Reusing running instance on port \(port)")
+                await applySavedCacheSize()
                 return
             }
             await launchAndDiscoverPort()
@@ -161,10 +162,17 @@ class StremioServerManager: ObservableObject {
                 port = p
                 await MainActor.run { self.isRunning = true }
                 print("[StremioServer] UP on http://127.0.0.1:\(p)")
+                await applySavedCacheSize()
                 return
             }
         }
         print("[StremioServer] No port answered after launch — server did not start")
+    }
+
+    /// Pushes the user's saved cache limit (UserDefaults) to the server at startup.
+    private func applySavedCacheSize() async {
+        let savedGB = UserDefaults.standard.object(forKey: "stremioCacheGB") as? Int ?? 2
+        await setCacheSize(gigabytes: savedGB)
     }
 
     // MARK: - Download
@@ -186,6 +194,40 @@ class StremioServerManager: ObservableObject {
             print("[StremioServer] Download error: \(error.localizedDescription)")
             return false
         }
+    }
+
+    // MARK: - Cache Size (Stremio-style disk cache limiter)
+
+    /// Applies the user's disk-cache limit to the running server. The server
+    /// evicts least-recently-watched torrents once the limit is exceeded.
+    func setCacheSize(gigabytes: Int) async {
+        guard await ensureRunning() else {
+            print("[StremioServer] Cannot set cache size — server unavailable")
+            return
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("settings"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 5
+        let bytes = Int64(gigabytes) * 1024 * 1024 * 1024
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["cacheSize": bytes])
+        if let (_, resp) = try? await URLSession.shared.data(for: request) {
+            print("[StremioServer] cacheSize=\(gigabytes)GB → HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
+        }
+    }
+
+    /// Current on-disk torrent cache usage, formatted ("2.1 GB").
+    func cacheUsage() async -> String {
+        let cacheDir = appPath + "/stremio-cache"
+        guard let enumerator = FileManager.default.enumerator(atPath: cacheDir) else { return "0 KB" }
+        var total: Int64 = 0
+        for case let path as String in enumerator {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: cacheDir + "/" + path),
+               let size = attrs[.size] as? Int64 {
+                total += size
+            }
+        }
+        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
     }
 
     deinit { stopServer() }

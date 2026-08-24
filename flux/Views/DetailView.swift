@@ -15,6 +15,7 @@ struct DetailView: View {
     @State private var activeImdbID: String? = nil
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
+    @ObservedObject private var tasteProfile = TasteProfileManager.shared
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -208,6 +209,20 @@ struct DetailView: View {
                                         .glassEffect(.regular.interactive(), in: .circle)
                                 }
                                 .buttonStyle(.plain)
+
+                                // Love — strongest taste signal for the For You rail
+                                Button(action: {
+                                    tasteProfile.toggleLove(displayItem)
+                                }) {
+                                    Image(systemName: tasteProfile.isLoved(displayItem) ? "heart.fill" : "heart")
+                                        .font(.title3)
+                                        .foregroundStyle(tasteProfile.isLoved(displayItem) ? Color.pink : .white)
+                                        .padding(14)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                        .symbolEffect(.bounce, value: tasteProfile.isLoved(displayItem))
+                                }
+                                .buttonStyle(.plain)
+                                .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
                             }
                             .padding(.top, 10)
                         }

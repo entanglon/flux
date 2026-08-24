@@ -92,6 +92,19 @@ struct GlassCard: View {
                     Color.black.opacity(isHovering ? 0.3 : 0.0)
                         .animation(.easeInOut(duration: 0.2), value: isHovering)
                 )
+                // Coming Soon badge for unreleased titles (e.g. Upcoming rows)
+                .overlay(alignment: .topLeading) {
+                    if !displayItem.isReleased {
+                        Text(displayItem.releaseDateYear != nil ? "Coming \(displayItem.releaseDateYear!)" : "Coming Soon")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .glassEffect(.regular, in: .capsule)
+                            .padding(8)
+                    }
+                }
                 // Menu Button
                 .overlay(alignment: .bottomTrailing) {
                     if isHovering {

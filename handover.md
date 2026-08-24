@@ -25,21 +25,31 @@ Stremio streaming server (server.js) as the local torrent engine.
 - **Metadata**: TMDB enrichment (cast/providers/backdrops/episode overviews) with IMDb-ID
   caching; Trakt sync via device OAuth.
 
-## Recent Milestones (Aug 23-24)
+## Recent Milestones (Aug 24)
 - **Playback works end-to-end** via Stremio server.js: create → mpv → smooth playback,
-  verified across multiple titles. Buffering overlay driven by mpv `paused-for-cache`.
+  verified across multiple titles. Buffering overlay driven by mpv `paused-for-cache`;
+  buffer fill = `demuxer-cache-time / cache-secs(10)` (pre-roll readiness, NOT duration fraction).
 - **Fixed the "source is dead" chain**: torrentHash prefix bug (create 404), probe-induced
   dead-marking, dead-skip now auto-selection-only, create failures no longer poison hashes.
 - **Fast stream listing**: parallel addon fan-out + IMDb-ID cache + Cinemeta excluded.
 - **Flux Mode simplified**: top health-ranked torrent plays immediately; mpv
   (`network-timeout=45`) + `onPlaybackError` drive auto-fallback — Stremio behavior.
+- **Cache size limiter** in Settings → Advanced → Storage (1–50 GB, applied live via
+  `POST /settings {cacheSize}`, re-applied on every launch, LRU eviction server-side).
+- **Keyboard shortcuts**: Cmd+R refresh, Cmd+1–4 pages, Cmd+F search.
+- **UI polish pass**: centered `ContentLoader` overlays (never inside scroll content),
+  genre cards use bundled optimized artwork (fixed 160×240, zero network),
+  Continue Watching thumbnail ladder (CachedImage `fallbacks:` — walks candidates on
+  failure; never trust `URLCache.shared`), unreleased titles filtered from feeds
+  ("Coming YYYY" badge on GlassCard; "Upcoming Movies" row exempt), Search autofocus.
+- **For You recommendations** (`TasteProfileManager`): local taste profile from ♥ Love
+  (DetailView), watch completion, and watchlist; TMDB `/recommendations` per seed title;
+  "For You" + "Because you watched X" rails under Continue Watching; hidden until signal.
 
 ## Known Open Issues
-1. **Buffer loading bar fill doesn't move** — overlay shows/hides correctly, but the logo
-   fill (demuxer-cache-time/duration) isn't updating visually. Next session's first task;
-   investigation plan in `task.md`.
-2. WebStreamrMBG public instance (baby-beamup.club) has had uptime issues — HTTP streams
-   depend on it; Torrentio/Comet torrents are unaffected.
+1. For You rail refreshes on page load / Cmd+R only — live refresh after ♥ toggle pending.
+2. WebStreamrMBG public instance has had uptime issues — HTTP streams depend on it.
+3. Downloads page is a stub.
 
 ## 🛠️ Developer Handbook (Contributor Guide)
 
@@ -65,8 +75,8 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
 - **`handover.md`**: This is the "Long-term Memory". Always update it before ending a session.
 
 ## Pending Tasks (Next Session)
-1. **Buffer loading bar**: make the overlay fill reflect real buffered data (plan in `task.md`).
+1. **Live For You refresh** after ♥ toggle (currently page-load/Cmd+R only).
 2. **Adaptive Homepage**: Refactor `HomeView` to dynamically iterate through all `enabledAddons`.
 3. **Download Manager**: Implement background downloading for offline viewing.
 
-*Last Updated: Aug 24, 2026*
+*Last Updated: Aug 24, 2026 (late evening)*

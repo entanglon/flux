@@ -1,5 +1,12 @@
 import Foundation
 
+extension Notification.Name {
+    /// Reload the currently visible page (Cmd+R).
+    static let fluxRefresh = Notification.Name("fluxRefresh")
+    /// Switch sidebar page — object is a SidebarItem (Cmd+1…4, Cmd+F).
+    static let fluxNavigate = Notification.Name("fluxNavigate")
+}
+
 struct GenreNavigation: Hashable {
     let name: String
     let id: Int

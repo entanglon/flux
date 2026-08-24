@@ -321,8 +321,6 @@ struct PlayerView: View {
         .onReceive(loadingTimer) { _ in
             guard playerManager.currentStreamURL != nil else { return }
 
-            // Stremio-style: use demuxer-cache-time / duration for buffer progress.
-            // Works for ALL stream types (torrent, HTTP, HLS) — no endpoint polling.
             if mpv.isPlaying && mpv.timePos >= 0.5 {
                 withAnimation(.easeOut(duration: 0.3)) {
                     self.animatedProgress = 1.0
@@ -330,17 +328,17 @@ struct PlayerView: View {
                 return
             }
 
+            // Buffer-readiness metric (real data): how full is mpv's pre-roll
+            // demuxer cache vs its target (cache-secs=10). Reaches 100% exactly
+            // when playback starts. NOTE: cacheTime/duration is WRONG here — a
+            // 10s cache on a 2h movie is <0.2% and the fill would never move.
             let cacheTime = mpv.demuxerCacheTime
-            let dur = mpv.duration
-            if cacheTime > 0 && dur > 0 {
-                let bufferFill = min(0.99, cacheTime / dur)
+            print("[BUFFER] cacheTime=\(String(format: "%.1f", cacheTime))s playing=\(mpv.isPlaying) buffering=\(mpv.isBuffering)")
+            let fill = min(0.99, cacheTime / 10.0)
+
+            if fill > 0.005 {
                 withAnimation(.easeOut(duration: 0.3)) {
-                    self.animatedProgress = max(self.animatedProgress, bufferFill)
-                }
-            } else if mpv.isPlaying {
-                // Playing but no cache-time data yet — show minimal fill
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.animatedProgress = max(self.animatedProgress, 0.03)
+                    self.animatedProgress = max(self.animatedProgress, fill)
                 }
             }
         }

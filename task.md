@@ -2,6 +2,51 @@
 
 > Check this file first when starting a session. `handover.md` is long-term memory; this is the working state.
 
+## Session: Aug 24, 2026 (evening) — UI Polish + For You Recommendations
+
+### Outcome: ALL REPORTED UI ISSUES FIXED ✅ + taste-based recommendations shipped
+
+### Fixed this session (user-reported)
+1. **Keyboard shortcuts** — Cmd+R refresh (`.fluxRefresh` notification → `refreshToken` `.id()` recreates page),
+   Cmd+1/2/3/4 Home/Movies/TV/Trending, Cmd+F Search (`.fluxNavigate`, object = SidebarItem).
+   Registered in fluxApp `.commands` (CommandGroup after .newItem).
+2. **Loading ring placement** — `ContentLoader` (Components/) used as `.overlay` on each page's
+   ScrollView (NEVER inside scroll content — ScrollView proposes unlimited height so in-content
+   centering fails; overlay fills the exact viewport). Pages: Home, Movies, TV, Trending, MediaList, Search.
+3. **Search Browse genre cards** — old `Genre.imageURL`s were Unsplash *download links* (HTML pages).
+   Now: all 12 images downloaded (w=640, ~1MB total) into `Assets.xcassets/genre-*.imageset`,
+   rendered locally, zero network. Card is FIXED 160×240 (CarouselView does NOT apply itemWidth
+   to content — flexible cards collapse inconsistently; always fix the frame inside the card).
+4. **SF Symbols gotcha** — `ghost.fill` AND `skull.fill` DO NOT EXIST on this macOS. Validate with
+   `NSImage(systemSymbolName:)`. Horror uses `eyes.inverse`.
+5. **Continue Watching thumbnails** — two bugs: (a) CachedImage checked `URLCache.shared` (system
+   cache, can hold stale redirect/HTML) instead of the session's own `FluxImageCache`; (b) fallback
+   chain ran at URL-SELECTION time only — a dead metahub episode still (new shows have none) killed
+   the card. CachedImage now takes `fallbacks: [URL?]` and WALKS the ladder on failure (memory →
+   session disk cache → network → next candidate). ContinueWatchingCard passes 8-URL ladder.
+6. **Unreleased content** — filtered from Home hero/rows, Movies, TV, Trending, MediaList.
+   EXCEPTION: "Upcoming Movies" row keeps them by design. GlassCard shows "Coming YYYY" badge.
+7. **Search polish** — autofocus on arrive, grid spacing unified 16→24.
+
+### New feature: For You recommendations (TasteProfileManager.swift)
+- Signals: ♥ Love (weight 5, button on DetailView next to watchlist — NOT in player per user),
+  watch completion ≥70% (2.5), watchlist (affinity only), partial watch (0.5). ~45-day recency decay.
+- Engine: seeds (4 loved + 4 completed) → parallel TMDB `/recommendations` per seed (that IS the
+  collaborative signal — global viewing behavior) → merge, score = seed weight × rank decay +
+  genre affinity ×0.3 + voteAverage ×0.2 → filter watched/watchlisted/unreleased → top 20.
+- UI: "For You" rail below Continue Watching; title becomes "Because you watched X" when a seed
+  exists. Hidden until ≥1 loved or ≥2 completed watches. Backfills seeds from existing history
+  on first launch. See-All via MediaListView.ListType.fixed.
+- MediaItem got `init(seed:...)` in an EXTENSION (custom init in the struct would kill the
+  memberwise init that TMDBModels relies on).
+
+### NEXT / open
+- For You rail only refreshes on page load / Cmd+R — consider live refresh after ♥ toggle.
+- WebStreamrMBG instance uptime; debrid support would be the big playback upgrade.
+- Downloads page is still a stub (empty array).
+
+---
+
 ## Session: Aug 24, 2026 — Streaming Backend Overhaul (Hydra → Stremio server.js)
 
 ### Outcome: PLAYBACK WORKS END-TO-END ✅
