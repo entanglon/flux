@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct fluxApp: App {
     @StateObject private var playerManager = PlayerManager.shared
     @StateObject private var authManager = AuthManager.shared
+    @StateObject private var profileManager = ProfileManager.shared
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
@@ -51,11 +52,17 @@ struct fluxApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(playerManager)
-                .environmentObject(authManager)
-                .preferredColorScheme(.dark)
-                .containerBackground(.clear, for: .window)
+            if profileManager.currentProfile != nil {
+                ContentView()
+                    .environmentObject(playerManager)
+                    .environmentObject(authManager)
+                    .preferredColorScheme(.dark)
+                    .containerBackground(.clear, for: .window)
+            } else {
+                ProfileGateView()
+                    .preferredColorScheme(.dark)
+                    .containerBackground(.clear, for: .window)
+            }
         }
         .commands {
             SidebarCommands()

@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import OpenGL.GL
-import MPVKit
+import Libmpv
 import Combine
 import Darwin
 // MARK: - SwiftUI View

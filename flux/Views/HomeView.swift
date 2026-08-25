@@ -41,7 +41,15 @@ struct HomeView: View {
                 }
                 .frame(height: 0)
 
-                if !isLoading {
+                if isLoading {
+                    // Ghost loading layout — hero + skeleton rails
+                    VStack(alignment: .leading, spacing: 44) {
+                        GhostHero()
+                        GhostRail()
+                        GhostRail()
+                    }
+                    .padding(.bottom, 40)
+                } else {
                     // Featured Carousel (Trending / Hero Content)
                     if !heroContent.isEmpty {
                         FeaturedCarousel(items: Array(heroContent.prefix(5)))
@@ -99,11 +107,6 @@ struct HomeView: View {
                 }
             }
             .padding(.bottom, 80)
-        }
-        .overlay {
-            if isLoading {
-                ContentLoader()
-            }
         }
         .coordinateSpace(name: "homeScrollSpace")
         .onPreferenceChange(HomeScrollOffsetKey.self) { value in
@@ -186,6 +189,7 @@ struct HomeView: View {
             CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
                 NavigationLink(value: MediaListView.ListType.genre(id: genre.id)) {
                     GenreCard(genre: genre)
+                        .frame(width: 160)
                 }
                 .buttonStyle(.plain)
             }
@@ -293,12 +297,17 @@ extension HomeView {
         await MainActor.run {
             // Sort sections by a fixed preference
             let order = ["Trending Movies", "Popular Series", "Upcoming Movies", "Top Rated Shows"]
-            // The dedicated "Upcoming Movies" row intentionally keeps unreleased
-            // titles — every other row filters them out (nothing to play yet).
+            // The dedicated "Upcoming Movies" row keeps ONLY genuinely unreleased
+            // titles (TMDB's upcoming endpoint leaks just-released ones) — every
+            // other row filters unreleased out (nothing to play yet). Empty
+            // sections are dropped entirely so no hollow rails render.
             let released = fetchedSections.map { section -> CatalogSection in
-                if section.title == "Upcoming Movies" { return section }
+                if section.title == "Upcoming Movies" {
+                    return CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { !$0.isReleased })
+                }
                 return CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
             }
+            .filter { !$0.items.isEmpty }
             self.nativeSections = released.sorted { s1, s2 in
                 let i1 = order.firstIndex(of: s1.title) ?? 99
                 let i2 = order.firstIndex(of: s2.title) ?? 99
@@ -343,6 +352,7 @@ extension HomeView {
             self.addonSections = sections.map { section in
                 CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
             }
+            .filter { !$0.items.isEmpty }
         }
     }
     

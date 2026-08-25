@@ -1,4 +1,0 @@
-framework module Libbluray [system] {
-    umbrella "."
-    export *
-}

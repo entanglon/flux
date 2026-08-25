@@ -21,7 +21,13 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if isSearching {
-                        if !isLoading && searchResults.isEmpty {
+                        if isLoading {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
+                                ForEach(0..<12, id: \.self) { _ in
+                                    GhostCard()
+                                }
+                            }
+                        } else if searchResults.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -33,7 +39,7 @@ struct SearchView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: 300)
-                        } else if !isLoading {
+                        } else {
                             searchResultsView
                         }
                     } else {
@@ -43,11 +49,6 @@ struct SearchView: View {
                 .padding(.leading, 268)
                 .padding(.trailing, 40)
                 .padding(.bottom, 60)
-            }
-            .overlay {
-                if isSearching && isLoading {
-                    ContentLoader(label: "Searching movies & series…")
-                }
             }
 
             // Floating Apple TV Liquid Glass Search Bar Capsule (Positioned in Toolbar Row, Centered over content)

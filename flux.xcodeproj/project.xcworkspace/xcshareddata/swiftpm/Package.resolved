@@ -1,4 +1,5 @@
 {
+  "originHash" : "bfb8dd2af69007f4a78a51cc8a74f7a633448c9701fa232c48bf0f9eafa249e5",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -100,6 +101,15 @@
       }
     },
     {
+      "identity" : "mpvkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mpvkit/MPVKit.git",
+      "state" : {
+        "revision" : "288527dffbc6d3e63cce147fc7b520c64a791603",
+        "version" : "1.0.0"
+      }
+    },
+    {
       "identity" : "nanopb",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/firebase/nanopb.git",
@@ -127,5 +137,5 @@
       }
     }
   ],
-  "version" : 2
+  "version" : 3
 }

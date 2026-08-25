@@ -11,8 +11,27 @@ class UserDataService: ObservableObject {
     struct User { var id: String }
     private var currentUser: User?
     
-    private let watchlistKey = "localWatchlistDataStremio" // New Key to prevent crash from old TMDB int IDs
-    private let historyKey = "localHistoryDataStremio"
+    private var watchlistKey = "localWatchlistDataStremio" // New Key to prevent crash from old TMDB int IDs
+    private var historyKey = "localHistoryDataStremio"
+
+    /// Scopes all history/watchlist storage to a profile. When `migrateLegacyData`
+    /// is set (first profile ever created), pre-profile data is carried over so
+    /// nobody loses their library.
+    func switchProfile(to profile: UserProfile?, migrateLegacyData: Bool = false) {
+        if let profile {
+            historyKey = "profile.\(profile.id.uuidString).history"
+            watchlistKey = "profile.\(profile.id.uuidString).watchlist"
+
+            if migrateLegacyData,
+               UserDefaults.standard.data(forKey: historyKey) == nil,
+               let legacy = UserDefaults.standard.array(forKey: "localHistoryDataStremio") {
+                UserDefaults.standard.set(legacy, forKey: historyKey)
+            }
+        }
+        watchlist = []
+        history = []
+        loadInitialData()
+    }
     
     private init() {
          loadInitialData()

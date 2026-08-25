@@ -73,10 +73,13 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                         }
                         .buttonStyle(.plain)
                         .padding(.leading, 268)
+                        // Scroll content carries .padding(.bottom, 20), which pushes
+                        // the overlay's vertical center below the card axis.
+                        .offset(y: -10)
                         .transition(.opacity)
                     }
                 }
-                
+
                 // Right Arrow
                 .overlay(alignment: .trailing) {
                     if isHovering && (scrollPosition + contentWidth > containerWidth + tolerance) {
@@ -87,6 +90,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                         }
                         .buttonStyle(.plain)
                         .padding(.trailing, 10)
+                        .offset(y: -10)
                         .transition(.opacity)
                     }
                 }

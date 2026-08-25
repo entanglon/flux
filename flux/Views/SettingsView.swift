@@ -9,8 +9,6 @@ struct SettingsView: View {
                 .tabItem { Label("Streaming", systemImage: "antenna.radiowaves.left.and.right") }
             AddonsView()
                 .tabItem { Label("Addons", systemImage: "puzzlepiece.extension") }
-            TraktSettingsView()
-                .tabItem { Label("Trakt", systemImage: "calendar.badge.clock") }
             PlaybackSettingsView()
                 .tabItem { Label("Playback", systemImage: "play.tv") }
             AdvancedSettingsView()
@@ -92,112 +90,6 @@ struct StreamingSettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-}
-
-// MARK: - Trakt Settings
-struct TraktSettingsView: View {
-    @ObservedObject var traktManager = TraktManager.shared
-    
-    @State private var pinCode: String = ""
-    @State private var isActivating: Bool = false
-    @State private var errorMessage: String? = nil
-    
-    var body: some View {
-        Form {
-            Section(header: Text("Account")) {
-                if traktManager.isAuthenticated {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Connected to Trakt")
-                        Spacer()
-                        Button("Disconnect") {
-                            traktManager.logout()
-                        }
-                    }
-                    
-                    HStack {
-                        Button("Sync History Now") {
-                            Task {
-                                try? await traktManager.syncHistory()
-                            }
-                        }
-                        .disabled(traktManager.isSyncing)
-                        
-                        if traktManager.isSyncing {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                        }
-                    }
-                } else if isActivating {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Finish Linking Trakt")
-                            .font(.headline)
-                        Text("1. A browser window should have opened. Log in and Approve Flux.")
-                        Text("2. Copy the PIN code provided by Trakt and paste it below.")
-                        
-                        TextField("Enter PIN Code", text: $pinCode)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                        
-                        HStack {
-                            Button("Submit PIN") {
-                                submitPin()
-                            }
-                            .disabled(pinCode.isEmpty)
-                            .buttonStyle(.borderedProminent)
-                            
-                            Button("Cancel") {
-                                isActivating = false
-                                pinCode = ""
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                } else {
-                    Button("Connect to Trakt") {
-                        startPinFlow()
-                    }
-                }
-                
-                if let error = errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
-        .formStyle(.grouped)
-    }
-    
-    private func startPinFlow() {
-        if let url = traktManager.authorizationURL {
-            NSWorkspace.shared.open(url)
-            isActivating = true
-            errorMessage = nil
-            pinCode = ""
-        } else {
-            errorMessage = "Failed to generate authorization URL."
-        }
-    }
-    
-    private func submitPin() {
-        Task {
-            do {
-                try await traktManager.exchangePINForToken(pin: pinCode)
-                await MainActor.run {
-                    self.isActivating = false
-                    self.pinCode = ""
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = "Authentication failed. Please check your PIN and try again."
-                }
-            }
-        }
     }
 }
 

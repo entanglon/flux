@@ -2,6 +2,72 @@
 
 > Check this file first when starting a session. `handover.md` is long-term memory; this is the working state.
 
+## Session: Aug 25, 2026 — Profiles, mpv 0.41, Ghost Loading, App Size
+
+### Outcome: playback verified on mpv 0.41 ✅ · app 1.6GB → 100MB ✅ · local profiles shipped ✅
+
+### Local multi-profile system (Netflix-style, local-only)
+- `ProfileManager` + `UserProfile` + `AvatarStyle` (Models/UserProfile.swift).
+- Gate: fluxApp shows `ProfileGateView` when `currentProfile == nil` — selection
+  ("Who's Watching?") / creation (glass panel, name + avatar strip) / **Manage Profiles**
+  (pencil=edit pre-filled panel w/ Save, X=delete w/ confirm alert).
+- Avatars: 12 drawn faces (solid color + minimalist SwiftUI shapes — smile/laugh/
+  sunglasses/wink/heart-eyes/etc). Runtime lesson: ghost.fill & skull.fill DON'T exist;
+  validate with `NSImage(systemSymbolName:)`. Wink = one round eye + one tilted capsule
+  (capsule OVER a circle just reads squashed). Smile arc must sit below eyes (0.44w frame
+  at y 0.47w — earlier 0.56w @ 0.40w overlapped the eyes).
+- Data isolation: UserDataService + TasteProfileManager keys namespaced
+  `profile.{uuid}.*`; first profile migrates legacy history; footer click → picker.
+- Sidebar footer = ProfileFooter (avatar + name, click → selection). Trakt REMOVED
+  entirely (Trakt now requires VIP to create apps) — TraktManager.swift deleted.
+
+### mpv upgrade 0.38 → 0.41 (playback verified by user ✅)
+- Vendored `LocalPackages/LocalMPVKit` REPLACED by remote SPM dep:
+  `mpvkit/MPVKit` pinned **exactVersion 1.0.0**, product **MPVKit-GPL** (samba parity).
+- Code change: `import MPVKit` → **`import Libmpv`** (the framework's own modulemap
+  exposes module `Libmpv`; upstream's `_MPVKit-GPL` target is a dummy that just links).
+- pbxproj gotchas: remote package needs BOTH an `XCRemoteSwiftPackageReference` entry
+  AND a line in the project object's `packageReferences` array; the exception set's
+  `target` must be the PBXNativeTarget id (F7D62115…), not the group.
+- SPM statically links the frameworks into `flux.debug.dylib` (326 mpv_* symbols);
+  the 36K frameworks in Contents/Frameworks are link shims — that's NORMAL.
+- Repo −452MB (LocalPackages deleted; it WAS git-tracked, deletions committed).
+
+### App size: 1.6GB → 100MB (Debug)
+- `hydra-server` (224MB) was stale in products — purged by clean rebuild.
+- Xcode 16 filesystem-synchronized group on `flux/` copies ALL non-source files into
+  Resources — LocalPackages leaked 1.36GB that way. Fix: moved LocalPackages to project
+  root + `PBXFileSystemSynchronizedBuildFileExceptionSet` membershipExceptions
+  (MPVKit-Swift, implementation_plan.md, SecretsExample.txt).
+- Release build still needs a size/playback re-check (debug dylib is 87MB of that 100MB).
+
+### Ghost loading UI (Components/GhostViews.swift)
+- Shimmer modifier + GhostPoster/GhostCard/GhostHero/GhostRail/GhostGrid.
+- Wired IN-PLACE (inside scroll content) on Home (hero+rails), Movies/TV/Trending
+  (hero+grid), Search + MediaList (grids). ContentLoader overlay removed from all —
+  ghosts preview the real layout. ContentLoader.swift kept but currently unused.
+
+### Other fixes this session
+- Continue Watching thumbnails: CachedImage gained `fallbacks: [URL?]` ladder (walks
+  candidates on failure; fixed wrong-cache bug — it read URLCache.shared instead of the
+  session's FluxImageCache). Enrichment write-back via UserDataService.enrichHistory().
+- Upcoming rail: `/discover/movie?primary_release_date.gte=today` (the /upcoming endpoint
+  leaks already-released); empty rails hidden; unreleased filtered everywhere else;
+  GlassCard "Coming YYYY" badge.
+- Genre cards: bundled optimized art (Assets genre-*.imageset), fixed 160×240 → then
+  Color.clear+aspectRatio overlay pattern (image intrinsic size was leaking into layout
+  → broken shapes AND edge-click misses; contentShape fixes clicks), no icons, no zoom.
+- Carousel arrows offset(y:-10) — content's bottom padding shifted their axis.
+- App icon: flux-cascade.png (pre-shaped w/ alpha — scale only, NO mask) into all 10 sizes.
+
+### NEXT / open
+- Release build: verify size + playback (mergeable-library behavior may differ).
+- For You rail: live refresh after ♥ toggle.
+- Account system decision (Firebase vs alternatives) + login/signup + guest users.
+- Downloads page still a stub.
+
+---
+
 ## Session: Aug 24, 2026 (evening) — UI Polish + For You Recommendations
 
 ### Outcome: ALL REPORTED UI ISSUES FIXED ✅ + taste-based recommendations shipped

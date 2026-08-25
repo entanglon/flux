@@ -11,6 +11,11 @@ struct TrendingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
+                if isLoading {
+                    GhostHero()
+                    GhostGrid()
+                }
+                if !isLoading {
                 // 1. Full-Bleed Hero Carousel for Top Trending Titles
                 if !trendingItems.isEmpty {
                     FeaturedCarousel(items: Array(trendingItems.prefix(5)))
@@ -48,14 +53,11 @@ struct TrendingView: View {
                 }
                 .padding(.leading, 268)
                 .padding(.trailing, 40)
+                }
             }
             .padding(.bottom, 80)
         }
-        .overlay {
-            if isLoading {
-                ContentLoader()
-            }
-        }
+
         .ignoresSafeArea(edges: .top)
         .task {
             await loadTrendingData()

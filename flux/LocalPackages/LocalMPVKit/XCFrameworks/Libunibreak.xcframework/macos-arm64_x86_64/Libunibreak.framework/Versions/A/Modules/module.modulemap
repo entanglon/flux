@@ -1,4 +1,0 @@
-framework module Libunibreak [system] {
-    umbrella "."
-    export *
-}

@@ -71,11 +71,6 @@ struct MediaListView: View {
             .padding(.top, 40)
             .padding(.bottom, 40)
         }
-        .overlay {
-            if isLoading && items.isEmpty {
-                ContentLoader()
-            }
-        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(
@@ -88,6 +83,13 @@ struct MediaListView: View {
     
     @ViewBuilder
     private var content: some View {
+        if isLoading && items.isEmpty {
+            LazyVGrid(columns: columns, spacing: 40) {
+                ForEach(0..<12, id: \.self) { _ in
+                    GhostCard()
+                }
+            }
+        } else {
         LazyVGrid(columns: columns, spacing: 40) {
             ForEach(items) { item in
                 NavigationLink(value: item) {
@@ -106,6 +108,7 @@ struct MediaListView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
             }
+        }
         }
     }
     

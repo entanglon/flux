@@ -8,6 +8,13 @@ struct MoviesView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 48) {
+                if isLoading {
+                    VStack(spacing: 48) {
+                        GhostHero()
+                        GhostGrid()
+                    }
+                }
+                if !isLoading {
                 // Featured Movie
                 if !popularMovies.isEmpty {
                     FeaturedCarousel(items: Array(popularMovies.prefix(5)))
@@ -52,14 +59,11 @@ struct MoviesView: View {
                         .padding(.trailing, 40)
                     }
                 }
+                }
             }
             .padding(.bottom, 80)
         }
-        .overlay {
-            if isLoading {
-                ContentLoader()
-            }
-        }
+
         .ignoresSafeArea(edges: .top)
         .task {
             await loadData()

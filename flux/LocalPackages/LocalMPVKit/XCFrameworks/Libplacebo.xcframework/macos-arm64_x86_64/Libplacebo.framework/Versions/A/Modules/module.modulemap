@@ -1,4 +1,0 @@
-framework module Libplacebo [system] {
-    umbrella "."
-    export *
-}

@@ -36,9 +36,24 @@
 		F7D6212F2EE1E52200C25560 /* fluxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = fluxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F7D621A12EE1E52000C25561 /* Exceptions for "flux" folder in flux target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MPVKit-Swift,
+				implementation_plan.md,
+				SecretsExample.txt,
+			);
+			target = F7D621152EE1E52000C25560 /* flux */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F7D621182EE1E52000C25560 /* flux */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F7D621A12EE1E52000C25561 /* Exceptions for "flux" folder in flux target */,
+			);
 			path = flux;
 			sourceTree = "<group>";
 		};
@@ -211,8 +226,8 @@
 			mainGroup = F7D6210D2EE1E52000C25560;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F79D5CD42EE34E9E0062A21F /* XCLocalSwiftPackageReference "flux/LocalPackages/LocalMPVKit" */,
 				F73008512EE439BD00E56A23 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F7D621172EE1E52000C25560 /* Products */;
@@ -421,7 +436,6 @@
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/flux/LocalPackages/LocalMPVKit/Frameworks",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -458,7 +472,6 @@
 				EXCLUDED_ARCHS = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/flux/LocalPackages/LocalMPVKit/Frameworks",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
@@ -598,13 +611,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F79D5CD42EE34E9E0062A21F /* XCLocalSwiftPackageReference "flux/LocalPackages/LocalMPVKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = flux/LocalPackages/LocalMPVKit;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		F73008512EE439BD00E56A23 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -612,6 +618,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 12.6.0;
+			};
+		};
+		F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -632,9 +646,10 @@
 			package = F73008512EE439BD00E56A23 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
 		};
-		F79D5CD52EE34E9E0062A21F /* MPVKit */ = {
+		F79D5CD52EE34E9E0062A21F /* MPVKit-GPL */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = MPVKit;
+			package = F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit-GPL;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

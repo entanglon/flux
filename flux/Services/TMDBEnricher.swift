@@ -241,8 +241,17 @@ class TMDBEnricher {
     }
 
     func fetchUpcomingMovies() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/movie/upcoming?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: "movie")
+        // /movie/upcoming mixes in titles whose PRIMARY date already passed
+        // (earlier foreign release), which breaks unreleased-only filtering.
+        // discover with primary_release_date.gte=today guarantees genuinely
+        // unreleased, popularity-sorted results.
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let today = fmt.string(from: Date())
+        let discoverURL = "\(baseURL)/discover/movie?api_key=\(apiKey)&primary_release_date.gte=\(today)&sort_by=popularity.desc&include_adult=false"
+        let items = try await fetchCatalog(from: discoverURL, type: "movie")
+        if !items.isEmpty { return items }
+        return try await fetchCatalog(from: "\(baseURL)/movie/upcoming?api_key=\(apiKey)", type: "movie")
     }
 
     func fetchLatestMovies() async throws -> [MediaItem] {

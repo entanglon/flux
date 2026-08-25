@@ -216,6 +216,7 @@ struct ContinueWatchingCard: View {
                 )
         )
         .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 10 : 4)
+        .contentShape(Rectangle())
         .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
         .onHover { isHovering = $0 }
         .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")

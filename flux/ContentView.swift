@@ -73,8 +73,8 @@ struct ContentView: View {
                 }
                 
                 Spacer(minLength: 8)
-                
-                UserProfileFooter()
+
+                ProfileFooter()
                     .padding(.horizontal, 12)
                     .padding(.top, 4)
                     .padding(.bottom, 6)
@@ -211,68 +211,34 @@ struct ContentView: View {
     ContentView()
 }
 
-struct UserProfileFooter: View {
-    @ObservedObject var authManager = AuthManager.shared
-    @State private var showingAuth = false
-    
+/// Current local profile identity — click returns to the profile picker.
+struct ProfileFooter: View {
+    @ObservedObject var profileManager = ProfileManager.shared
+
     var body: some View {
-        Button(action: {
-            showingAuth = true
-        }) {
+        Button {
+            profileManager.switchToProfileSelection()
+        } label: {
             HStack(spacing: 10) {
-                if let user = authManager.currentUser {
-                    if let photoURL = user.photoURL {
-                        AsyncImage(url: photoURL) { image in
-                            image.resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Color.gray.opacity(0.3)
-                        }
-                        .frame(width: 28, height: 28)
-                        .clipShape(Circle())
-                    } else {
-                        Circle()
-                            .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 28, height: 28)
-                            .overlay(
-                                Text(String(user.displayName?.prefix(1) ?? user.email?.prefix(1) ?? "Z").uppercased())
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white)
-                            )
-                    }
-                    
-                    Text(user.displayName ?? user.email ?? "Zain Ul Nazir")
+                if let profile = profileManager.currentProfile {
+                    AvatarBadge(avatarID: profile.avatarID, size: 28)
+
+                    Text(profile.name)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(.white.opacity(0.9))
-                } else {
-                    Circle()
-                        .fill(Color.white.opacity(0.15))
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.8))
-                        )
-                    
-                    Text("Sign In")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
                 }
                 Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showingAuth) {
-            if authManager.currentUser != nil {
-                ProfileView()
-            } else {
-                AuthView()
-            }
-        }
+        .help("Switch profile")
     }
 }
 

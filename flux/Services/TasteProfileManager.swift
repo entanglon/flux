@@ -10,8 +10,19 @@ final class TasteProfileManager: ObservableObject {
 
     @Published private(set) var lovedItems: [MediaItem] = []
 
-    private let lovedKey = "tasteProfileLovedItems"
-    private let watchedKey = "tasteProfileWatchSnapshots"
+    private var lovedKey = "tasteProfileLovedItems"
+    private var watchedKey = "tasteProfileWatchSnapshots"
+
+    /// Scopes taste data to a profile.
+    func switchProfile(to profile: UserProfile?) {
+        if let profile {
+            lovedKey = "profile.\(profile.id.uuidString).loved"
+            watchedKey = "profile.\(profile.id.uuidString).watchSnaps"
+        }
+        lovedItems = []
+        snapshots = []
+        load()
+    }
 
     struct WatchSnapshot: Codable {
         let id: String
