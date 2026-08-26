@@ -43,6 +43,8 @@ Stremio streaming server (server.js) as the local torrent engine.
   platform's native popularity order (no IMDb re-sort).
 - **Hero/poster quality** (Aug 26): Backdrops upgraded to 4K (metahub large, 3840×2160).
   Posters use metahub large (780×1170) for all IMDb IDs — fixes low-res JustWatch OTT posters.
+  Fixed WebP embedded thumbnail bug: `kCGImageSourceCreateThumbnailFromImageIfAbsent`
+  silently used 160×90 thumbnails; switched to `CreateThumbnailFromImageAlways` for full decode.
 - **Native auth** (Aug 26): Cloudflare Worker with PBKDF2+JWT (no Firebase). AuthView
   redesigned as Instagram-style split card. Confirm password, email validation, show/hide
   toggles. Firebase Auth/Core/FirebaseFirestore fully removed from project.

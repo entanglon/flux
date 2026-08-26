@@ -1,6 +1,24 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 26, 2026 (latest) — OTT RAIL + QUALITY FIXES + CACHE EVICTION
+## LATEST: Aug 26, 2026 (latest) — HERO QUALITY FIX + CACHE BUTTON FIX
+Commit 9182131. Two fixes:
+
+### Hero image quality (WebP embedded thumbnail bug)
+- Root cause: `kCGImageSourceCreateThumbnailFromImageIfAbsent` silently used the
+  WebP's embedded thumbnail (160×90) instead of decoding the full image.
+- Fix: switched to `kCGImageSourceCreateThumbnailFromImageAlways` which forces
+  full decode. Hero now renders at 1920×1080 (source resolution for these titles).
+- Added debug logging (`ImageDebugLog` writes to /tmp/flux_image_debug.log).
+- Note: metahub `large` tier is not consistently 4K — some titles (Shawshank,
+  Interstellar) are 1920×1080, others are 3840×2160.
+
+### Clear Image Cache button
+- Was clearing wrong directory + accidentally touching torrent-related caches.
+- Now only clears: ImageSession URLCache, ImageInMemoryCache NSCache, FluxImageCache dirs.
+
+---
+
+## Aug 26, 2026 (latest) — OTT RAIL + QUALITY FIXES + CACHE EVICTION
 Commit ac91bd8. All requested fixes shipped:
 
 ### OTT Explore rail
