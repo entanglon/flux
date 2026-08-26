@@ -66,7 +66,7 @@ struct GlassCard: View {
                         } else {
                             // Decode at render resolution — the 300px default
                             // left cards soft on Retina (cards draw ~480px).
-                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 800) { phase in
+                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 1200) { phase in
                                 switch phase {
                                 case .empty:
                                     Rectangle()
