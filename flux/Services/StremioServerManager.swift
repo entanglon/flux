@@ -397,6 +397,11 @@ class StremioServerManager: ObservableObject {
             env["NO_CORS"] = "1"
             env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
             env["STREMIO_MEM_LIMIT"] = "536870912"
+            env["GOGC"] = "off"
+            if UserDefaults.standard.bool(forKey: "ramCacheMode") {
+                env["STREMIO_MEMORY_CACHE_SIZE"] = "268435456"
+                print("[StremioServer] RAM cache mode ON — 256MB in-memory piece cache")
+            }
             engineIsFluxEngine = true
             print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort)")
         case .nodeJS(let nodePath):
