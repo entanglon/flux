@@ -78,8 +78,23 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
 - **`handover.md`**: This is the "Long-term Memory". Always update it before ending a session.
 
 ## Pending Tasks (Next Session)
-1. **Release build verification** (size + playback) after the mpv 0.41 swap.
-2. **Account system**: pick backend (Firebase vs free alternatives), login/signup pages, guest users.
-3. **Live For You refresh** after ♥ toggle; adaptive homepage; download manager.
+1. **PiP / mini floating player** (player PIP button is a stub; needs custom always-on-top mini window since mpv has no native PiP).
+2. **Collections** (custom user lists).
+3. **Account system**: pick backend (Firebase vs free alternatives), login/signup pages, guest users.
+4. **Release build verification** (size + playback) after the mpv 0.41 swap.
+5. Live For You refresh after ♥ toggle.
 
-*Last Updated: Aug 25, 2026*
+## Recent Additions (Aug 25, late)
+- **OpenSubtitles**: subtitle search in the player (addon protocol, one-tap load).
+- **Auto-play next episode** (countdown panel + Settings toggle) & **Skip Intro**.
+- **Downloads**: stream-to-file manager with progress/cancel/persistence; offline
+  playback auto-detected; Detail page download button (best stream, source-filter aware).
+- **Person pages**: cast circles → hero (blurred backdrop, bio, facts) → filmography grid.
+- **Season dropdown**: root-overlay floating panel (controller + direct frame writes).
+- **Addons**: Meteor (torrents) + Stremify (HTTP) added after live verification;
+  Flux Mode honors the HTTP/Torrent/Both source filter; foreign-dub health penalty.
+- **TV genres** (Movies/TV toggle), **search autocomplete** (150ms, top 6),
+  **NEW EPISODE badges** (TMDB last_episode_to_air, 7-day window), **per-profile
+  playback settings** (snapshot/restore), **hydra fully removed**.
+
+*Last Updated: Aug 25, 2026 (late)*

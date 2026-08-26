@@ -1,5 +1,41 @@
 # Flux — Active Session Journal
 
+## LATEST: Aug 25, 2026 (session 3) — Feature Wave: 7 features shipped
+Committed 7a83d76. Shipped: OpenSubtitles integration (addon + player picker),
+auto-play next episode (10s countdown + Cancel) & Skip Intro (first 90s),
+real Downloads (stream-to-file, progress, offline playback), Person pages
+(cast circles -> hero page -> filmography -> detail), season dropdown (root-overlay
+pattern after 4 failed approaches — see notes), Meteor+Stremify addons (live-verified),
+Flux Mode source-filter support, language-aware health ranking, TV genre toggle,
+search autocomplete, NEW EPISODE badges, per-profile playback settings, hydra fully
+removed, app icon flux-cascade. App size: 100MB Debug.
+
+### KEY LESSONS (do not re-learn these)
+- Value-based NavigationLinks don't resolve inside destination-pushed views ->
+  use NavigationLink(destination:) for PersonView filmography cards
+- PreferenceKey values don't propagate out of pushed NavigationStack views on
+  macOS -> write frames directly to a shared controller via GeometryReader
+  onChange (season dropdown anchor)
+- Native Menu/popover are modal (block scrolling); ZStack panels push layout;
+  overlay-on-button loses z-order to later siblings. Final season dropdown =
+  inline expanding panel (pushes rail down — user accepted) after trying
+  root-overlay pattern (works but user preferred inline)
+- SF Symbols: validate at runtime (ghost.fill/skull.fill don't exist)
+- Stremify streams need referer from behaviorHints.proxyHeaders (auto-injected)
+- WebStreamrMBG + Meteor verified working (user's Stremio setup was right)
+- OpenSubtitles v3 addon: https://v3-opensubtitles.strem.io (subtitles resource)
+
+### REMAINING
+- PiP / mini floating player window (medium effort — custom mini window, mpv
+  has no native PiP; PIP button in player is a stub)
+- Collections (custom user lists)
+- Account system decision (Firebase vs alternatives) + login/signup + guests
+- Cascade personal Telegram debrid (future plan, personal-scale only — see below)
+- Release build verification (size + playback)
+
+---
+
+
 > Check this file first when starting a session. `handover.md` is long-term memory; this is the working state.
 
 ## Session: Aug 25, 2026 — Profiles, mpv 0.41, Ghost Loading, App Size
