@@ -67,6 +67,12 @@ struct SearchView: View {
                             .textFieldStyle(.plain)
                             .foregroundStyle(.white)
                             .focused($isSearchFocused)
+                            .onSubmit {
+                                guard !searchText.isEmpty else { return }
+                                suggestions = []
+                                isSearching = true
+                                Task { await performSearch() }
+                            }
                         
                         if !searchText.isEmpty {
                             Button(action: {
@@ -92,8 +98,8 @@ struct SearchView: View {
                     Spacer()
                 }
 
-                // Autocomplete suggestions — live below the capsule
-                if !suggestions.isEmpty && isSearchFocused {
+                // Autocomplete suggestions — dropdown while typing, hidden after submit
+                if !suggestions.isEmpty && isSearchFocused && !isSearching {
                     HStack {
                         Spacer()
                         VStack(alignment: .leading, spacing: 2) {
@@ -164,11 +170,15 @@ struct SearchView: View {
                 isLoading = false
                 searchResults = []
                 suggestions = []
+            } else if isSearching {
+                // User typed after a search — go back to suggestion mode
+                isSearching = false
+                searchResults = []
             }
         }
         .task(id: searchText) {
             guard !searchText.isEmpty else { return }
-            // Fast autocomplete: 150ms, top 6
+            // Only populate suggestions (dropdown) — full search triggered by onSubmit
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
             if let results = try? await StremioService.shared.searchMulti(query: searchText) {
@@ -177,11 +187,6 @@ struct SearchView: View {
                     suggestions = Array(sortByRelevance(combined, query: searchText).prefix(6))
                 }
             }
-            // Full search: 300ms total
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            if Task.isCancelled { return }
-            suggestions = []  // Clear suggestions before showing results
-            await performSearch()
         }
     }
     
