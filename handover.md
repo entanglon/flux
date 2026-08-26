@@ -36,7 +36,22 @@ Stremio streaming server (server.js) as the local torrent engine.
 - **Loading UX**: skeleton ghost cards everywhere (Components/GhostViews.swift) —
   wired in-place inside scroll content, not overlays.
 
-## Recent Milestones (Aug 24-25)
+## Recent Milestones (Aug 24-26)
+- **OTT Explore rail** (Aug 26): 9 platforms (Netflix, Disney+, Prime Video, Apple TV+,
+  HBO Max, Hulu, Peacock, Paramount+, Crunchyroll) with real branded logos in Home.
+  Portrait cards (2:3), full-bleed images, GlassCard hover. Catalog pages preserve
+  platform's native popularity order (no IMDb re-sort).
+- **Hero/poster quality** (Aug 26): Backdrops upgraded to 4K (metahub large, 3840×2160).
+  Posters use metahub large (780×1170) for all IMDb IDs — fixes low-res JustWatch OTT posters.
+- **Native auth** (Aug 26): Cloudflare Worker with PBKDF2+JWT (no Firebase). AuthView
+  redesigned as Instagram-style split card. Confirm password, email validation, show/hide
+  toggles. Firebase Auth/Core/FirebaseFirestore fully removed from project.
+- **Torrent cache eviction** (Aug 26): Client-side enforcement — sorts torrent dirs by
+  modification date, evicts oldest until under limit. Runs at startup and on setting change.
+- **OpenSubtitles fixed** (Aug 26): URL corrected from dead v3-opensubtitles.strem.io
+  to working opensubtitles-v3.strem.io. Migration for persisted old URL.
+- **Cinemeta-first metadata** (Aug 26): Home discovery rails use Cinemeta catalogs directly.
+  TMDB enrichment guarded by `hasKey` — no-ops without a key. Key optional in Settings.
 - **mpv 0.41 upgrade verified by user** — playback smooth after the swap.
 - **App size 1.6 GB → 100 MB** (stale hydra bundle purged; LocalPackages moved out of
   the filesystem-synchronized `flux/` folder + membership exceptions in pbxproj).
@@ -52,7 +67,7 @@ Stremio streaming server (server.js) as the local torrent engine.
 1. **Release build unverified** after the mpv swap + size work — re-check size & playback.
 2. For You rail refreshes on page load / Cmd+R only — live refresh after ♥ toggle pending.
 3. WebStreamrMBG public instance has had uptime issues — HTTP streams depend on it.
-4. Downloads page is a stub. Account system (Firebase vs alternatives) undecided.
+4. Downloads page is a stub. Account system is native (Cloudflare Worker PBKDF2+JWT).
 
 ### 🤖 AI Consultant Workflow
 - **Claude and Qwen are available as external consultants**: when stuck on a major
@@ -87,10 +102,10 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
 
 ## Pending Tasks (Next Session)
 1. **PiP / mini floating player** (player PIP button is a stub; needs custom always-on-top mini window since mpv has no native PiP).
-2. **Collections** (custom user lists).
-3. **Account system**: pick backend (Firebase vs free alternatives), login/signup pages, guest users.
-4. **Release build verification** (size + playback) after the mpv 0.41 swap.
-5. Live For You refresh after ♥ toggle.
+2. **Collections** (custom user lists) — SHIPPED, verify at runtime.
+3. **Release build verification** (size + playback) after the mpv 0.41 swap.
+4. Live For You refresh after ♥ toggle.
+5. **Downloads page** — currently a stub, needs real implementation.
 
 ## Recent Additions (Aug 25, late)
 - **OpenSubtitles**: subtitle search in the player (addon protocol, one-tap load).
@@ -105,4 +120,4 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
   **NEW EPISODE badges** (TMDB last_episode_to_air, 7-day window), **per-profile
   playback settings** (snapshot/restore), **hydra fully removed**.
 
-*Last Updated: Aug 25, 2026 (late)*
+*Last Updated: Aug 26, 2026 (latest)*

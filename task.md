@@ -1,6 +1,33 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 26, 2026 (latest) — CLEAN RELEASE BUILD + BUNDLE AUDIT
+## LATEST: Aug 26, 2026 (latest) — OTT RAIL + QUALITY FIXES + CACHE EVICTION
+Commit ac91bd8. All requested fixes shipped:
+
+### OTT Explore rail
+- 9 platforms with real branded logos (Netflix, Disney+, Prime Video, Apple TV+,
+  HBO Max, Hulu, Peacock, Paramount+, Crunchyroll) in OTTs/ folder.
+- OTTCard: portrait (2:3), full-bleed logo image, no gradient backdrop, no text labels.
+- Hover matches GlassCard exactly (dark overlay, border highlight, shadow, no zoom).
+- Catalog pages preserve platform's native popularity order (preserveOrder flag).
+- Frame: 200pt wide, matches content card width in rails.
+
+### Hero/poster quality
+- Backdrops: stored at metahub large tier (3840×2160), CachedImage maxDimension 3840.
+- Posters: metahub large (780×1170) by IMDb ID for all items (fixes JustWatch s332).
+- Verified: Shawshank (tt0111161) and Interstellar (tt0816692) resolve 200 OK.
+
+### Cache eviction
+- Client-side `evictCacheIfNeeded()` — sorts dirs by modification date, deletes oldest.
+- Runs at startup and when Settings cache size picker changes.
+- Verified: 3.3 GB → 1.4 GB (under 2 GB limit).
+
+### CastListView
+- Now matches MediaListView structure: liquid glass back button, 44pt heavy title,
+  same padding (268 left, 40 right/top/bottom), hidden nav bar and toolbar.
+
+---
+
+## Aug 26, 2026 (latest) — CLEAN RELEASE BUILD + BUNDLE AUDIT
 Release build: **115MB** (Firebase SDK bundles added ~23MB over the 92MB
 pre-auth build — expected). ZERO stray files in bundle after fixes:
 - REMOVED from flux/ (would have bundled): .DS_Store, implementation_plan.md,
