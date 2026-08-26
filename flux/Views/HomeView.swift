@@ -242,7 +242,7 @@ extension HomeView {
     private func loadData() async {
         do {
             // 1. Featured Hero - Cinemeta's Popular movies (keyless)
-            if let popular = try? await StremioService.shared.fetchCatalog(type: "movie", id: "top") {
+            if let popular = try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", preserveOrder: true) {
                 self.heroContent = Array(popular.filter { $0.isReleased }.prefix(20))
             }
             
@@ -288,7 +288,7 @@ extension HomeView {
         await withTaskGroup(of: CatalogSection?.self) { group in
             for (title, type, id) in defs {
                 group.addTask {
-                    if let items = try? await StremioService.shared.fetchCatalog(type: type, id: id), !items.isEmpty {
+                    if let items = try? await StremioService.shared.fetchCatalog(type: type, id: id, preserveOrder: true), !items.isEmpty {
                         return CatalogSection(addonName: "Cinemeta", title: title, type: type, items: items)
                     }
                     return nil

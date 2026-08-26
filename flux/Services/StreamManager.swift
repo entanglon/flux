@@ -412,7 +412,8 @@ class StreamManager {
         let upperTitle = title.uppercased()
         if upperTitle.contains("4K") || upperTitle.contains("2160P") || upperTitle.contains("UHD") { return "4K" }
         if upperTitle.contains("1080P") || upperTitle.contains("FHD") { return "1080p" }
-        if upperTitle.contains("720P") || upperTitle.contains("HD") { return "720p" }
+        if upperTitle.contains("720P") { return "720p" }
+        if upperTitle.contains("HD") && !upperTitle.contains("HDR") && !upperTitle.contains("HDR10") { return "720p" }
         return "SD"
     }
     

@@ -53,95 +53,101 @@ struct SearchView: View {
             }
 
             // Floating Apple TV Liquid Glass Search Bar Capsule (Positioned in Toolbar Row, Centered over content)
-            HStack {
-                Spacer()
-                
-                HStack(spacing: 12) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(isSearchFocused ? .cyan : .white.opacity(0.75))
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
                     
-                    TextField("Search", text: $searchText)
-                        .font(.system(size: 15, weight: .medium))
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(.white)
-                        .focused($isSearchFocused)
-                    
-                    if !searchText.isEmpty {
-                        Button(action: {
-                            searchText = ""
-                            isSearching = false
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(.white.opacity(0.65))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .frame(width: isSearchFocused ? 520 : 460, height: 42)
-                .glassEffect(
-                    .regular.interactive(),
-                    in: .capsule
-                )
-                .scaleEffect(isSearchFocused ? 1.01 : 1.0)
-                .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isSearchFocused)
-
-                // Autocomplete suggestions — live under the capsule
-                if !suggestions.isEmpty && isSearchFocused {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(suggestions.prefix(6)) { suggestion in
-                            NavigationLink(value: suggestion) {
-                                HStack(spacing: 12) {
-                                    CachedImage(url: suggestion.posterURL ?? suggestion.imageURL, maxDimension: 100) { phase in
-                                        if let img = phase.image {
-                                            img.resizable().aspectRatio(contentMode: .fill)
-                                        } else {
-                                            Rectangle().fill(Color.white.opacity(0.08))
-                                                .overlay { Image(systemName: "film").foregroundStyle(.white.opacity(0.3)) }
-                                        }
-                                    }
-                                    .frame(width: 34, height: 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(suggestion.title)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                            .lineLimit(1)
-                                        HStack(spacing: 6) {
-                                            Text(suggestion.category)
-                                            if let year = suggestion.releaseDateYear, !year.isEmpty {
-                                                Text("·")
-                                                Text(year)
-                                            }
-                                        }
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.5))
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: "arrow.up.left")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.35))
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .contentShape(Rectangle())
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(isSearchFocused ? .cyan : .white.opacity(0.75))
+                        
+                        TextField("Search", text: $searchText)
+                            .font(.system(size: 15, weight: .medium))
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(.white)
+                            .focused($isSearchFocused)
+                        
+                        if !searchText.isEmpty {
+                            Button(action: {
+                                searchText = ""
+                                isSearching = false
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white.opacity(0.65))
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(8)
-                    .frame(width: 520)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
-                    .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.horizontal, 16)
+                    .frame(width: isSearchFocused ? 520 : 460, height: 42)
+                    .glassEffect(
+                        .regular.interactive(),
+                        in: .capsule
+                    )
+                    .scaleEffect(isSearchFocused ? 1.01 : 1.0)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isSearchFocused)
+                    
+                    Spacer()
                 }
 
-                Spacer()
+                // Autocomplete suggestions — live below the capsule
+                if !suggestions.isEmpty && isSearchFocused {
+                    HStack {
+                        Spacer()
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(suggestions.prefix(6)) { suggestion in
+                                NavigationLink(value: suggestion) {
+                                    HStack(spacing: 12) {
+                                        CachedImage(url: suggestion.posterURL ?? suggestion.imageURL, maxDimension: 100) { phase in
+                                            if let img = phase.image {
+                                                img.resizable().aspectRatio(contentMode: .fill)
+                                            } else {
+                                                Rectangle().fill(Color.white.opacity(0.08))
+                                                    .overlay { Image(systemName: "film").foregroundStyle(.white.opacity(0.3)) }
+                                            }
+                                        }
+                                        .frame(width: 34, height: 48)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(suggestion.title)
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(.white)
+                                                .lineLimit(1)
+                                            HStack(spacing: 6) {
+                                                Text(suggestion.category)
+                                                if let year = suggestion.releaseDateYear, !year.isEmpty {
+                                                    Text("·")
+                                                    Text(year)
+                                                }
+                                            }
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.white.opacity(0.5))
+                                        }
+
+                                        Spacer()
+
+                                        Image(systemName: "arrow.up.left")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(.white.opacity(0.35))
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .frame(width: 520)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        Spacer()
+                    }
+                }
             }
             .padding(.leading, 244)
             .padding(.top, 14)
