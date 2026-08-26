@@ -154,10 +154,82 @@ struct TMDBCrewMember: Codable, Identifiable {
     let name: String
     let job: String
     let profilePath: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case id, name, job
         case profilePath = "profile_path"
+    }
+}
+
+// MARK: - New Episode Detection
+struct TMDBLastEpisodeInfo: Codable {
+    let lastEpisodeToAir: TMDBLastEpisode?
+
+    enum CodingKeys: String, CodingKey {
+        case lastEpisodeToAir = "last_episode_to_air"
+    }
+}
+
+struct TMDBLastEpisode: Codable {
+    let airDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case airDate = "air_date"
+    }
+}
+
+// MARK: - Person Pages
+
+struct TMDBPersonDetail: Codable {
+    let id: Int
+    let name: String
+    let biography: String?
+    let birthday: String?
+    let deathday: String?
+    let placeOfBirth: String?
+    let knownForDepartment: String?
+    let profilePath: String?
+    let popularity: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, biography, birthday, deathday, popularity
+        case placeOfBirth = "place_of_birth"
+        case knownForDepartment = "known_for_department"
+        case profilePath = "profile_path"
+    }
+
+    nonisolated var profileURL: URL? {
+        guard let path = profilePath else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/h632\(path)")
+    }
+}
+
+struct TMDBCombinedCredits: Codable {
+    let cast: [TMDBCreditItem]
+}
+
+struct TMDBCreditItem: Codable {
+    let id: Int?
+    let mediaType: String?
+    let title: String?
+    let name: String?
+    let overview: String?
+    let posterPath: String?
+    let backdropPath: String?
+    let releaseDate: String?
+    let firstAirDate: String?
+    let voteAverage: Double?
+    let popularity: Double?
+    let character: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, name, overview, character, popularity
+        case mediaType = "media_type"
+        case posterPath = "poster_path"
+        case backdropPath = "backdrop_path"
+        case releaseDate = "release_date"
+        case firstAirDate = "first_air_date"
+        case voteAverage = "vote_average"
     }
 }
 

@@ -46,13 +46,14 @@ struct GhostRect: View {
     }
 }
 
-/// 2:3 poster ghost matching GlassCard's footprint.
+/// 2:3 poster ghost matching GlassCard's footprint (or any aspect via `ratio`).
 struct GhostPoster: View {
     var width: CGFloat = 180
+    var ratio: CGFloat = 2/3
 
     var body: some View {
         Color.clear
-            .aspectRatio(2/3, contentMode: .fit)
+            .aspectRatio(ratio, contentMode: .fit)
             .frame(width: width)
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -104,6 +105,7 @@ struct GhostHero: View {
 /// A skeleton content rail: header line + row of posters (clears the sidebar).
 struct GhostRail: View {
     var posterWidth: CGFloat = 180
+    var ratio: CGFloat = 2/3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -114,7 +116,7 @@ struct GhostRail: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 24) {
                     ForEach(0..<7, id: \.self) { _ in
-                        GhostPoster(width: posterWidth)
+                        GhostPoster(width: posterWidth, ratio: ratio)
                     }
                 }
                 .padding(.leading, 268)

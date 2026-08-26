@@ -23,6 +23,11 @@ struct PlayerControlsView: View {
     var externalTracks: [StremioSubtitleTrack]
     var onSelectTrack: (Track) -> Void
     var onSelectExternalSub: (StremioSubtitleTrack) -> Void
+
+    // Online subtitle search state
+    @State private var onlineSubtitles: [StremioSubtitleTrack] = []
+    @State private var isSearchingSubtitles = false
+    @State private var subtitleSearchDone = false
     
     @State private var isControlsVisible = true
     @State private var hoverTimer: Timer?
@@ -55,6 +60,7 @@ struct PlayerControlsView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.white.opacity(0.9))
                                     .frame(width: 44, height: 32)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             
@@ -67,6 +73,7 @@ struct PlayerControlsView: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.white.opacity(0.9))
                                     .frame(width: 44, height: 32)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -101,6 +108,7 @@ struct PlayerControlsView: View {
                                 .foregroundColor(.white.opacity(0.9))
                                 .padding(24)
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         
@@ -110,6 +118,7 @@ struct PlayerControlsView: View {
                                 .foregroundColor(.white) // Pure White
                                 .padding(36) // Larger Hit Area
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         
@@ -119,6 +128,7 @@ struct PlayerControlsView: View {
                                 .foregroundColor(.white.opacity(0.9))
                                 .padding(24)
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -159,13 +169,94 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                                 .popover(isPresented: $showSubtitlePopover, arrowEdge: .bottom) {
-                                    TrackSelectionList(
-                                        title: "Subtitles", 
-                                        tracks: subtitleTracks, 
-                                        externalTracks: externalTracks, 
-                                        onSelect: onSelectTrack,
-                                        onSelectExternal: onSelectExternalSub
-                                    )
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        // Online subtitle search (OpenSubtitles addon etc.)
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Button {
+                                                Task {
+                                                    isSearchingSubtitles = true
+                                                    subtitleSearchDone = false
+                                                    if let item = PlayerManager.shared.currentItem {
+                                                        onlineSubtitles = await SubtitleManager.shared.fetchSubtitles(
+                                                            for: item,
+                                                            season: PlayerManager.shared.currentSeason,
+                                                            episode: PlayerManager.shared.currentEpisode
+                                                        )
+                                                    }
+                                                    isSearchingSubtitles = false
+                                                    subtitleSearchDone = true
+                                                }
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    if isSearchingSubtitles {
+                                                        ProgressView().controlSize(.mini)
+                                                    } else {
+                                                        Image(systemName: "globe")
+                                                            .font(.system(size: 12, weight: .semibold))
+                                                    }
+                                                    Text(onlineSubtitles.isEmpty ? "Search Online Subtitles" : "More Online Subtitles")
+                                                        .font(.system(size: 13, weight: .semibold))
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                                .contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(isSearchingSubtitles)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 6)
+
+                                            ForEach(onlineSubtitles) { sub in
+                                                Button {
+                                                    onSelectExternalSub(sub)
+                                                    showSubtitlePopover = false
+                                                } label: {
+                                                    HStack(spacing: 8) {
+                                                        Text(sub.language.uppercased())
+                                                            .font(.system(size: 10, weight: .heavy))
+                                                            .foregroundStyle(.black)
+                                                            .frame(width: 34, height: 18)
+                                                            .background(Capsule().fill(Color.white.opacity(0.85)))
+
+                                                        VStack(alignment: .leading, spacing: 1) {
+                                                            Text("Online subtitle")
+                                                                .font(.system(size: 12, weight: .medium))
+                                                                .foregroundStyle(.white)
+                                                                .lineLimit(1)
+                                                            if let source = sub.source {
+                                                                Text("via \(source)")
+                                                                    .font(.system(size: 10))
+                                                                    .foregroundStyle(.secondary)
+                                                                    .lineLimit(1)
+                                                            }
+                                                        }
+                                                        Spacer()
+                                                    }
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 5)
+                                                    .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+
+                                            if subtitleSearchDone && onlineSubtitles.isEmpty {
+                                                Text("No online subtitles found")
+                                                    .font(.system(size: 11))
+                                                    .foregroundStyle(.secondary)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.bottom, 6)
+                                            }
+
+                                            Divider().background(Color.white.opacity(0.15))
+                                        }
+
+                                        TrackSelectionList(
+                                            title: "Subtitles",
+                                            tracks: subtitleTracks,
+                                            externalTracks: externalTracks,
+                                            onSelect: onSelectTrack,
+                                            onSelectExternal: onSelectExternalSub
+                                        )
+                                    }
                                 }
                                 
                                 Divider()

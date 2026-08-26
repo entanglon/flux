@@ -203,6 +203,7 @@ struct AddProfileTile: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(isHovering ? .white : .white.opacity(0.6))
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .scaleEffect(isHovering ? 1.06 : 1.0)

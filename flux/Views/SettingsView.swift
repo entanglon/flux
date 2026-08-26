@@ -96,6 +96,7 @@ struct StreamingSettingsView: View {
 // MARK: - 3. Playback Settings
 struct PlaybackSettingsView: View {
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
+    @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
     @AppStorage("enableAudioPassthrough") private var enableAudioPassthrough = false
     @AppStorage("defaultAudioLang") private var defaultAudioLang = "English"
     @AppStorage("defaultSubLang") private var defaultSubLang = "English"
@@ -106,6 +107,10 @@ struct PlaybackSettingsView: View {
         Form {
             Section(header: Text("Video Player"), footer: Text("Restart playback after changing these options.")) {
                 Toggle("Hardware Acceleration", isOn: $useHardwareAcceleration)
+            }
+
+            Section(header: Text("Playback Behavior")) {
+                Toggle("Auto-play Next Episode", isOn: $autoPlayNextEnabled)
             }
 
             Section(header: Text("Audio"), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Requires exclusive access to the output device.")) {

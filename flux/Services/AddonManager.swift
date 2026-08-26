@@ -134,7 +134,7 @@ class AddonManager: ObservableObject {
             addons.append(comet)
         }
         
-        // WebStreamrMBG — free HTTP streams from streaming sites
+        // WebStreamrMBG — free HTTP streams from streaming sites (verified working)
         let webstreamerID = "community.stremio.webstreamrmbg"
         if !addons.contains(where: { $0.id == webstreamerID || $0.url.contains("webstreamr") }) {
             let webstreamer = StremioAddon(
@@ -150,7 +150,59 @@ class AddonManager: ObservableObject {
             )
             addons.append(webstreamer)
         }
-        
+
+        // Meteor — franchise-aware torrent matching (verified working)
+        let meteorID = "community.meteor"
+        if !addons.contains(where: { $0.id == meteorID || $0.url.contains("meteor") }) {
+            let meteor = StremioAddon(
+                id: meteorID,
+                name: "Meteor",
+                description: "Franchise-aware torrent streams",
+                version: "1.0.0",
+                url: "https://meteorfortheweebs.midnightignite.me",
+                transportUrl: "https://meteorfortheweebs.midnightignite.me",
+                isEnabled: true,
+                catalogs: nil,
+                resources: ["stream"]
+            )
+            addons.append(meteor)
+        }
+
+        // Stremify — HTTP streams for popular movies (streams need referer header
+        // from behaviorHints — Flux's StreamProxyManager injects it automatically)
+        let stremifyID = "stremify.elfhosted.com"
+        if !addons.contains(where: { $0.id == stremifyID || $0.url.contains("stremify") }) {
+            let stremify = StremioAddon(
+                id: stremifyID,
+                name: "Stremify",
+                description: "HTTP streams for popular content",
+                version: "1.0.0",
+                url: "https://stremify.elfhosted.com",
+                transportUrl: "https://stremify.elfhosted.com",
+                isEnabled: true,
+                catalogs: nil,
+                resources: ["stream"]
+            )
+            addons.append(stremify)
+        }
+
+        // OpenSubtitles v3 — online subtitle search (powers the player's subtitle picker)
+        let openSubtitlesID = "opensubtitles3"
+        if !addons.contains(where: { $0.id == openSubtitlesID || $0.url.contains("opensubtitles") }) {
+            let openSubs = StremioAddon(
+                id: openSubtitlesID,
+                name: "OpenSubtitles",
+                description: "Online subtitle search",
+                version: "1.0.0",
+                url: "https://v3-opensubtitles.strem.io",
+                transportUrl: "https://v3-opensubtitles.strem.io",
+                isEnabled: true,
+                catalogs: nil,
+                resources: ["subtitles"]
+            )
+            addons.append(openSubs)
+        }
+
         saveAddons()
     }
     

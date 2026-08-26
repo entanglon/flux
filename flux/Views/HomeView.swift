@@ -187,7 +187,7 @@ struct HomeView: View {
                 .padding(.trailing, 40)
             
             CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
-                NavigationLink(value: MediaListView.ListType.genre(id: genre.id)) {
+                NavigationLink(value: MediaListView.ListType.genre(id: genre.id, name: genre.name)) {
                     GenreCard(genre: genre)
                         .frame(width: 160)
                 }

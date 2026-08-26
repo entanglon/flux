@@ -214,7 +214,7 @@ class StreamManager {
     /// Health score within a quality tier: Torrent health (seeders/leechers) + size sanity; HTTP reliability.
     func computeStreamHealthScore(_ stream: Stream) -> Double {
         var score: Double = 0.0
-        
+
         if stream.isTorrent {
             let seeders = Double(stream.seeders ?? 0)
             score += min(seeders, 500.0) * 10.0
@@ -225,7 +225,14 @@ class StreamManager {
             // Direct / Debrid HTTP streams have baseline verified instant availability
             score += 1000.0
         }
-        
+
+        // Language preference: penalize foreign-dub releases so a 191-seeder
+        // "Dubbing PL" doesn't outrank the English original. Releases carrying
+        // the original English audio (or unmarked) are unaffected.
+        if let lang = stream.language?.uppercased(), isForeignDub(lang, title: stream.title) {
+            score *= 0.35
+        }
+
         // Size efficiency bonus for reasonable file sizes
         if let sizeStr = stream.size?.uppercased() {
             if sizeStr.contains("GB") {
@@ -237,8 +244,23 @@ class StreamManager {
                 }
             }
         }
-        
+
         return score
+    }
+
+    /// True when the release is a hard foreign DUB (no original English audio
+    /// advertised). Multi-audio releases that include English are not penalized.
+    private func isForeignDub(_ lang: String, title: String) -> Bool {
+        if lang.contains("ENGLISH") || lang.contains("ORIGINAL") || lang.contains("MULTI") {
+            return false
+        }
+        let upperTitle = title.uppercased()
+        // Multi-audio markers: original track included alongside the dub
+        if upperTitle.contains("DUAL") || upperTitle.contains("MULTI AUDIO") || upperTitle.contains("ORIG AUD") {
+            return false
+        }
+        let dubMarkers = ["DUBBED", "DUBBING", "DUB"]
+        return dubMarkers.contains { upperTitle.contains($0) }
     }
     
     /// Primary sort: Quality tier (1080p > 720p > SD).

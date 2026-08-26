@@ -7,6 +7,8 @@ struct PlayerView: View {
     @State private var showExitWarning = false
     @State private var animatedProgress: Double = 0.0
     @State private var pulseScale: CGFloat = 0.96
+    @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
+    @State private var autoPlayCancelled = false
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
     
@@ -133,8 +135,9 @@ struct PlayerView: View {
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             if let url = newURL {
                 print("PlayerView: URL changed to \(url), playing...")
-                // Reset buffering progress for the new stream
+                // Reset buffering progress + auto-play cancellation for the new stream
                 animatedProgress = 0.0
+                autoPlayCancelled = false
                 mpv.play(url: url)
             }
         }
@@ -168,9 +171,88 @@ struct PlayerView: View {
             streamSelectionView
         }
         
-        // Next Episode Overlay
-        if let next = playerManager.nextEpisodeInfo, mpv.isPlaying, mpv.progress > 0.95 {
-             nextEpisodeButton(season: next.season, episode: next.episode)
+        // Skip Intro (episodes, first 90 seconds)
+        if item?.category == "TV Show", mpv.isPlaying, !mpv.isUserPaused,
+           mpv.timePos > 4, mpv.timePos < 90, mpv.duration > 120 {
+            VStack {
+                HStack {
+                    Button {
+                        mpv.seek(absolute: 95)
+                    } label: {
+                        Text("Skip Intro")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Capsule())
+                }
+                Spacer()
+            }
+            .padding(.leading, 40)
+            .padding(.bottom, 90)
+        }
+
+        // Next Episode Overlay — countdown auto-play (last 10s), manual button before
+        if let next = playerManager.nextEpisodeInfo, mpv.isPlaying {
+            let remaining = mpv.duration > 0 ? mpv.duration - mpv.timePos : 999
+            if autoPlayNextEnabled && !autoPlayCancelled && remaining <= 10 && remaining > 0.8 {
+                autoPlayCountdownView(season: next.season, episode: next.episode, seconds: Int(ceil(remaining)))
+            } else if mpv.progress > 0.95 {
+                nextEpisodeButton(season: next.season, episode: next.episode)
+            }
+        }
+    }
+
+    // Countdown auto-play panel
+    private func autoPlayCountdownView(season: Int, episode: Int, seconds: Int) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Next episode in \(seconds)s")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text("S\(season) E\(episode)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    Button {
+                        autoPlayCancelled = true
+                    } label: {
+                        Text("Cancel")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Capsule())
+
+                    Button {
+                        autoPlayCancelled = true
+                        playerManager.playNextEpisode()
+                    } label: {
+                        Image(systemName: "forward.end.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.black)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Color.white))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .padding(.trailing, 40)
+            .padding(.bottom, 40)
         }
     }
     
@@ -324,6 +406,13 @@ struct PlayerView: View {
             if mpv.isPlaying && mpv.timePos >= 0.5 {
                 withAnimation(.easeOut(duration: 0.3)) {
                     self.animatedProgress = 1.0
+                }
+
+                // Auto-play next episode at the very end (countdown UI shows from 10s)
+                if autoPlayNextEnabled, !autoPlayCancelled,
+                   playerManager.nextEpisodeInfo != nil,
+                   mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
+                    playerManager.playNextEpisode()
                 }
                 return
             }

@@ -61,8 +61,16 @@
 - App icon: flux-cascade.png (pre-shaped w/ alpha — scale only, NO mask) into all 10 sizes.
 
 ### NEXT / open
+- **FUTURE PLAN — Cascade (personal Telegram debrid)**: personal-scale ONLY (own channel,
+  own ingested library, encrypted blobs, Telethon userbot bridge w/ Range streaming,
+  Stremio-style addon endpoint so Flux Mode consumes it natively). Precedents to study:
+  stremio-telegram-debrid (Range proxy + split stitching), TheUploader (TDLib torrent→TG).
+  Constraints: MTProto mandatory (Bot API getFile caps at 20MB); 2GB/4GB per file → split+stitch;
+  10-50MB/s with parallel workers. DECISION: personal use only — multi-user/piracy-bot-sourced
+  variant is off the table (legal + ban exposure).
 - Release build: verify size + playback (mergeable-library behavior may differ).
 - For You rail: live refresh after ♥ toggle.
+- HTTP stream addon research: verify working public instances (WebStreamr, Nuvio, etc.).
 - Account system decision (Firebase vs alternatives) + login/signup + guest users.
 - Downloads page still a stub.
 

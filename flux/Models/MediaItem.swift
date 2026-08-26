@@ -5,6 +5,7 @@ struct CastMember: Identifiable, Hashable, Codable {
     let name: String
     let role: String?
     let imageURL: URL?
+    var personID: Int? // TMDB person id — enables Person pages
 }
 
 struct WatchProvider: Identifiable, Hashable, Codable {

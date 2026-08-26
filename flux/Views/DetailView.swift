@@ -5,7 +5,7 @@ struct DetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var fullItem: MediaItem?
     @State private var selectedSeason: Season?
-    @State private var showSeasonPopover = false
+    @State private var showSeasonDropdown = false
     @State private var episodes: [Episode] = []
     @State private var relatedItems: [MediaItem] = []
     @State private var heroEpisode: Episode?
@@ -16,6 +16,7 @@ struct DetailView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
     @ObservedObject private var tasteProfile = TasteProfileManager.shared
+    @State private var isDownloading = false
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -207,6 +208,7 @@ struct DetailView: View {
                                         .foregroundStyle(.white)
                                         .padding(14)
                                         .glassEffect(.regular.interactive(), in: .circle)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
 
@@ -220,9 +222,34 @@ struct DetailView: View {
                                         .padding(14)
                                         .glassEffect(.regular.interactive(), in: .circle)
                                         .symbolEffect(.bounce, value: tasteProfile.isLoved(displayItem))
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
+
+                                // Download best stream for offline viewing
+                                Button {
+                                    isDownloading = true
+                                    Task {
+                                        await downloadBestStream()
+                                        isDownloading = false
+                                    }
+                                } label: {
+                                    Group {
+                                        if isDownloading {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "arrow.down.circle")
+                                                .font(.title3)
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    .frame(width: 34, height: 34)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isDownloading)
+                                .help("Download best stream for offline")
                             }
                             .padding(.top, 10)
                         }
@@ -232,11 +259,31 @@ struct DetailView: View {
                     .frame(height: geo.size.height * 0.80)
                     
                     VStack(alignment: .leading, spacing: 40) {
-                        if displayItem.category == "TV Show" {
+                        // Ghost rails while metadata loads
+                        if isLoadingDetails {
+                            VStack(alignment: .leading, spacing: 44) {
+                                if item.category == "TV Show" {
+                                    GhostRail(posterWidth: 380, ratio: 16/9)
+                                }
+                                GhostRail()
+                                GhostGrid()
+                            }
+                        } else if displayItem.category == "TV Show" {
                             VStack(alignment: .leading, spacing: 16) {
                                 if let seasons = displayItem.seasons, !seasons.isEmpty {
+                                    // Floating dropdown trigger — the panel itself
+                                    // renders at ContentView's root overlay (above
+                                    // rail + sidebar), positioned via this frame.
                                     Button {
-                                        showSeasonPopover.toggle()
+                                        SeasonDropdownController.shared.seasons = seasons
+                                        SeasonDropdownController.shared.selectedName = selectedSeason?.name ?? "Season 1"
+                                        SeasonDropdownController.shared.onSelect = { season in
+                                            selectedSeason = season
+                                            Task { await loadEpisodes(for: season) }
+                                        }
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            SeasonDropdownController.shared.toggle()
+                                        }
                                     } label: {
                                         HStack(spacing: 8) {
                                             Text(selectedSeason?.name ?? "Season 1")
@@ -246,20 +293,29 @@ struct DetailView: View {
                                             Image(systemName: "chevron.down")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
+                                                .rotationEffect(.degrees(SeasonDropdownController.shared.isOpen ? 180 : 0))
                                         }
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 8)
                                         .glassEffect(.regular.interactive(), in: .capsule)
+                                        .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 60)
-                                    .popover(isPresented: $showSeasonPopover, arrowEdge: .bottom) {
-                                        SeasonSelectionList(seasons: seasons, selectedSeason: selectedSeason) { season in
-                                            selectedSeason = season
-                                            showSeasonPopover = false
-                                            Task { await loadEpisodes(for: season) }
+                                    .background(
+                                        GeometryReader { geo in
+                                            // Direct write to the controller — PreferenceKey
+                                            // values don't propagate out of pushed NavigationStack
+                                            // views reliably on macOS
+                                            Color.clear
+                                                .onAppear {
+                                                    SeasonDropdownController.shared.anchor = geo.frame(in: .named("rootSpace"))
+                                                }
+                                                .onChange(of: geo.frame(in: .named("rootSpace"))) { _, frame in
+                                                    SeasonDropdownController.shared.anchor = frame
+                                                }
                                         }
-                                    }
+                                    )
+                                    .padding(.leading, 268)
                                 }
                                 
                                 DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
@@ -295,24 +351,34 @@ struct DetailView: View {
                                 SectionHeader(title: "Cast & Crew", destination: CastListView(cast: cast))
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
-                                
-                                DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 140) { member in
-                                    VStack(spacing: 8) {
-                                        CastCircle(name: member.name, imageURL: member.imageURL, size: 80)
-                                        
-                                        VStack(spacing: 2) {
-                                            Text(member.name)
-                                                .font(.caption)
-                                                .fontWeight(.bold)
-                                                .foregroundStyle(.white)
-                                                .multilineTextAlignment(.center)
-                                            Text(member.role ?? "")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .multilineTextAlignment(.center)
+
+                                DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 200) { member in
+                                    NavigationLink(destination: PersonView(personID: member.personID ?? 0, fallbackName: member.name)) {
+                                        VStack(spacing: 8) {
+                                            CastCircle(name: member.name, imageURL: member.imageURL, size: 80)
+
+                                            // Fixed-height text block keeps every
+                                            // circle on the same axis
+                                            VStack(spacing: 2) {
+                                                Text(member.name)
+                                                    .font(.caption)
+                                                    .fontWeight(.bold)
+                                                    .foregroundStyle(.white)
+                                                    .multilineTextAlignment(.center)
+                                                    .lineLimit(1)
+                                                Text(member.role ?? "")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                                    .multilineTextAlignment(.center)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(height: 44)
                                         }
+                                        .frame(width: 100)
+                                        .contentShape(Rectangle())
                                     }
-                                    .frame(width: 100)
+                                    .buttonStyle(.plain)
+                                    .disabled(member.personID == nil)
                                 }
                             }
                         }
@@ -507,6 +573,7 @@ struct DetailView: View {
     
     private func loadDetails() async {
         do {
+            SeasonDropdownController.shared.close()
             let type = item.category == "TV Show" ? "series" : "movie"
             var fetchID = item.id
             
@@ -831,5 +898,49 @@ struct DetailScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+
+// MARK: - Offline Download
+
+extension DetailView {
+    /// Picks the best stream for the current title (respecting the source filter)
+    /// and starts an offline download via DownloadManager.
+    func downloadBestStream() async {
+        // Shows: download the first episode of the selected season
+        let season = selectedSeason?.seasonNumber
+        let episode = item.category == "TV Show" ? (heroEpisode?.episodeNumber ?? 1) : nil
+
+        let streams = await StreamManager.shared.fetchStreams(
+            for: displayItem,
+            season: season,
+            episode: episode
+        )
+
+        let mode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+        let candidates = streams
+            .filter { s in
+                let isTorrent = s.isTorrent
+                if mode == "http" { return !isTorrent }
+                if mode == "torrent" { return isTorrent }
+                return true
+            }
+            .sorted { StreamManager.shared.streamSortComparator($0, $1) }
+
+        guard let best = candidates.first(where: { !$0.isTorrent }) ?? candidates.first else {
+            print("[DetailView] Download: no streams available")
+            return
+        }
+
+        let seasonEpisode: String? = (season != nil && episode != nil)
+            ? "S\(season!)E\(episode!)" : nil
+
+        DownloadManager.shared.startDownload(
+            id: best.stableKey,
+            title: displayItem.title,
+            seasonEpisode: seasonEpisode,
+            url: PlayerManager.shared.getPlayableURL(for: best)
+        )
     }
 }

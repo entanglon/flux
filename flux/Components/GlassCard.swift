@@ -22,6 +22,7 @@ struct GlassCard: View {
     
     @State private var displayItem: MediaItem
     @State private var isHovering = false
+    @State private var hasNewEpisode = false
     
     init(item: MediaItem, aspectRatio: CardAspectRatio = .landscape, progress: Double? = nil, showTitle: Bool = true) {
         self._displayItem = State(initialValue: item)
@@ -92,7 +93,7 @@ struct GlassCard: View {
                     Color.black.opacity(isHovering ? 0.3 : 0.0)
                         .animation(.easeInOut(duration: 0.2), value: isHovering)
                 )
-                // Coming Soon badge for unreleased titles (e.g. Upcoming rows)
+                // Badges: Coming Soon (unreleased) / NEW EPISODE (watchlisted, aired ≤7d)
                 .overlay(alignment: .topLeading) {
                     if !displayItem.isReleased {
                         Text(displayItem.releaseDateYear != nil ? "Coming \(displayItem.releaseDateYear!)" : "Coming Soon")
@@ -102,6 +103,15 @@ struct GlassCard: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .glassEffect(.regular, in: .capsule)
+                            .padding(8)
+                    } else if hasNewEpisode {
+                        Text("NEW EPISODE")
+                            .font(.system(size: 10, weight: .heavy))
+                            .tracking(0.5)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color(red: 0.30, green: 0.95, blue: 0.45)))
                             .padding(8)
                     }
                 }
@@ -131,6 +141,7 @@ struct GlassCard: View {
                                  .foregroundColor(.white)
                                  .padding(8)
                                  .glassEffect(.regular.interactive(), in: .circle)
+                                 .contentShape(Rectangle())
                          }
                          .menuStyle(.button)
                          .buttonStyle(.plain)
@@ -200,6 +211,12 @@ struct GlassCard: View {
                 await MainActor.run {
                     self.displayItem = enriched
                 }
+            }
+
+            // New-episode badge for watchlisted shows (TMDB-id shows only)
+            if displayItem.category == "TV Show", !displayItem.id.hasPrefix("tt"),
+               userData.watchlist.contains(where: { $0.id == displayItem.id }) {
+                hasNewEpisode = await TMDBEnricher.shared.hasAiredNewEpisode(tmdbID: displayItem.id)
             }
         }
     }

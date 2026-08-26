@@ -7,9 +7,9 @@ struct MediaListView: View {
         case topRatedMovies
         case trendingTV
         case popularTV
-        case genre(id: Int) // TMDB genre ID maps to our static list
+        case genre(id: Int, name: String) // TMDB genre — real ID + display name
         case fixed(title: String, items: [MediaItem])
-        
+
         var title: String {
             switch self {
             case .trendingMovies: return "Trending Movies"
@@ -17,7 +17,7 @@ struct MediaListView: View {
             case .topRatedMovies: return "Top Rated Movies"
             case .trendingTV: return "Trending TV Shows"
             case .popularTV: return "Popular TV Shows"
-            case .genre: return "Genre"
+            case .genre(_, let name): return name
             case .fixed(let title, _): return title
             }
         }
@@ -25,6 +25,7 @@ struct MediaListView: View {
     
     let title: String
     let type: ListType
+    @State private var genreMediaType = "movie" // genre pages: Movies/TV toggle
     @State private var items: [MediaItem] = []
     @State private var isLoading = false
     @State private var skipCount = 0
@@ -59,7 +60,35 @@ struct MediaListView: View {
                     Text(title)
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
-                    
+
+                    if case .genre = type {
+                        HStack(spacing: 0) {
+                            ForEach(["movie", "tv"], id: \.self) { mt in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        if genreMediaType != mt {
+                                            genreMediaType = mt
+                                            items = []
+                                            skipCount = 0
+                                            canLoadMore = true
+                                            Task { await loadData() }
+                                        }
+                                    }
+                                } label: {
+                                    Text(mt == "movie" ? "Movies" : "TV Shows")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(genreMediaType == mt ? .black : .white.opacity(0.7))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 7)
+                                        .background(
+                                            Capsule().fill(genreMediaType == mt ? Color.white : Color.white.opacity(0.12))
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
                     Spacer()
                 }
                 .padding(.top, 24)
@@ -78,6 +107,12 @@ struct MediaListView: View {
         )
         .task {
             await loadData()
+        }
+        .onChange(of: genreMediaType) { _, _ in
+            items = []
+            skipCount = 0
+            canLoadMore = true
+            Task { await loadData() }
         }
     }
     
@@ -145,10 +180,11 @@ struct MediaListView: View {
                 newItems = try await StremioService.shared.fetchTrendingTVShows()
             case .popularTV:
                 newItems = try await StremioService.shared.fetchPopularTVShows()
-            case .genre(let id):
-                if let genreName = Genre.allGenres.first(where: { $0.id == id })?.name {
-                    newItems = try await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: genreName, skip: skipCount)
-                }
+            case .genre(let id, _):
+                // TMDB discover: real genre-accurate titles, page-based endless scroll
+                let page = (skipCount / 20) + 1
+                newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType)
+                if newItems.isEmpty { canLoadMore = false }
             case .fixed(_, let fixedItems):
                 newItems = fixedItems
                 canLoadMore = false
@@ -162,7 +198,7 @@ struct MediaListView: View {
                     let existingIDs = Set(items.map { $0.id })
                     let uniqueItems = newItems.filter { !existingIDs.contains($0.id) && $0.isReleased }
                     items.append(contentsOf: uniqueItems)
-                    skipCount += 20 // Standard Cinemeta skip
+                    skipCount += 20 // one TMDB page per load
                 }
                 isLoading = false
             }

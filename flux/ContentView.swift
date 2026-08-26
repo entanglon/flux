@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var playerManager = PlayerManager.shared
     @State private var path = NavigationPath()
     @State private var refreshToken = 0
+    @ObservedObject private var seasonDropdown = SeasonDropdownController.shared
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
 
     var body: some View {
@@ -44,7 +45,7 @@ struct ContentView: View {
                     DetailView(item: item)
                 }
                 .navigationDestination(for: GenreNavigation.self) { genreNav in
-                    MediaListView(title: genreNav.name, type: .genre(id: genreNav.id))
+                    MediaListView(title: genreNav.name, type: .genre(id: genreNav.id, name: genreNav.name))
                 }
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)
@@ -58,8 +59,7 @@ struct ContentView: View {
             .ignoresSafeArea(.all, edges: .all)
             
             // MARK: - System Sidebar Material
-            VStack(alignment: .leading, spacing: 0) {
-                // Traffic light clearance height
+            VStack(alignment: .leading, spacing: 0) {                // Traffic light clearance height
                 Color.clear
                     .frame(height: 38)
                 
@@ -110,6 +110,34 @@ struct ContentView: View {
             .padding(.bottom, 10)
             .ignoresSafeArea(.all, edges: .top)
         }
+        // MARK: - Floating Season Dropdown (root-level overlay: above rail + sidebar)
+        .coordinateSpace(name: "rootSpace")
+        .overlay(alignment: .topLeading) {
+            if seasonDropdown.isOpen {
+                FloatingSeasonPanel(controller: seasonDropdown)
+                    .offset(
+                        x: seasonDropdown.anchor.minX,
+                        y: seasonDropdown.anchor.maxY + 8
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .simultaneousGesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    guard seasonDropdown.isOpen else { return }
+                    // Gesture is attached to the root ZStack — location is
+                    // already in rootSpace coordinates
+                    let p = value.location
+                    // Ignore taps on the button and the panel itself
+                    if !seasonDropdown.anchor.contains(p),
+                       !seasonDropdown.panelFrame.contains(p) {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            seasonDropdown.close()
+                        }
+                    }
+                }
+        )
         #if os(macOS)
         .background(WindowAccessor { window in
             window.titlebarAppearsTransparent = true

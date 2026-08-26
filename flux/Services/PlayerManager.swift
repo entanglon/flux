@@ -247,22 +247,31 @@ class PlayerManager: ObservableObject {
         }
     }
     
-    // Flux Mode source pick. The Stremio server's /create returns 200 for ANY
-    // well-formed magnet (dead swarm or not), so racing creates cannot detect
-    // dead swarms — instead take the top health-ranked torrent immediately and
-    // let mpv playback + auto-fallback handle failures (exact Stremio behavior).
-    // HTTP candidates still get a fast parallel HEAD race.
+    // Flux Mode source pick — respects the Settings stream filter:
+    //   "both"    → top health-ranked torrent wins instantly; HTTP HEAD-races only if no torrent exists
+    //   "torrent" → torrents only
+    //   "http"    → parallel HEAD race over HTTP candidates
+    // The Stremio server's /create returns 200 for ANY well-formed magnet (dead
+    // swarm or not), so racing creates proves nothing — mpv + auto-fallback
+    // handle dead swarms instead (Stremio behavior).
     private func raceBestStream(from streams: [Stream]) async -> Stream? {
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
 
-        if let topTorrent = healthy.first(where: { $0.isTorrent }) {
+        let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+
+        if sourceMode != "http", let topTorrent = healthy.first(where: { $0.isTorrent }) {
             print("[PlayerManager] Flux Mode: top-ranked torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
             return topTorrent
         }
 
+        guard sourceMode != "torrent" else {
+            print("[PlayerManager] Flux Mode: torrent-only filter, no healthy torrent found")
+            return nil
+        }
+
         let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(3))
-        print("[PlayerManager] Racing \(httpCandidates.count) HTTP candidates in parallel...")
+        print("[PlayerManager] Flux Mode: racing \(httpCandidates.count) HTTP candidates in parallel...")
 
         return await withTaskGroup(of: Stream?.self) { group in
             for stream in httpCandidates {

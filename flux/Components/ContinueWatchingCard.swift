@@ -123,6 +123,7 @@ struct ContinueWatchingCard: View {
                                 .foregroundColor(.white)
                                 .padding(8)
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .contentShape(Rectangle())
                         }
                         .menuStyle(.button)
                         .buttonStyle(.plain)

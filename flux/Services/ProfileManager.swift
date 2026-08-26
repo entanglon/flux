@@ -37,10 +37,16 @@ final class ProfileManager: ObservableObject {
     }
 
     func selectProfile(_ profile: UserProfile, migrateLegacyData: Bool = false) {
+        // Per-profile playback settings: snapshot globals for the old profile,
+        // restore the new profile's snapshot into the global keys
+        if let old = currentProfile {
+            snapshotSettings(for: old.id)
+        }
         currentProfile = profile
         if let data = try? JSONEncoder().encode(profile) {
             UserDefaults.standard.set(data, forKey: currentProfileKey)
         }
+        restoreSettings(for: profile.id)
         applyProfileDataScope(profile)
         UserDataService.shared.switchProfile(to: profile, migrateLegacyData: migrateLegacyData)
         TasteProfileManager.shared.switchProfile(to: profile)
@@ -48,10 +54,41 @@ final class ProfileManager: ObservableObject {
 
     /// Returns to the "Who's Watching?" screen (data stays intact).
     func switchToProfileSelection() {
+        if let old = currentProfile {
+            snapshotSettings(for: old.id)
+        }
         currentProfile = nil
         UserDefaults.standard.removeObject(forKey: currentProfileKey)
         UserDataService.shared.switchProfile(to: nil)
         TasteProfileManager.shared.switchProfile(to: nil)
+    }
+
+    // MARK: - Per-profile settings snapshot
+
+    private var playbackSettingKeys: [String] {
+        ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
+         "defaultAudioLang", "defaultSubLang", "preferredQuality",
+         "streamingSourceMode", "enableFluxMode", "enableFluxCatalogue", "stremioCacheGB"]
+    }
+
+    private func snapshotSettings(for profileID: UUID) {
+        var snap: [String: Any] = [:]
+        for key in playbackSettingKeys {
+            if let v = UserDefaults.standard.object(forKey: key) {
+                snap[key] = v
+            }
+        }
+        if !snap.isEmpty {
+            UserDefaults.standard.set(snap, forKey: "profile.\(profileID.uuidString).settings")
+        }
+    }
+
+    private func restoreSettings(for profileID: UUID) {
+        if let snap = UserDefaults.standard.dictionary(forKey: "profile.\(profileID.uuidString).settings") {
+            for (key, value) in snap {
+                UserDefaults.standard.set(value, forKey: key)
+            }
+        }
     }
 
     func updateProfile(_ profile: UserProfile, name: String, avatarID: String) {

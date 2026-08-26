@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchView: View {
     @State private var searchText = ""
     @State private var searchResults: [MediaItem] = []
+    @State private var suggestions: [MediaItem] = []
     @State private var isSearching = false
     @State private var isLoading = false
     @FocusState private var isSearchFocused: Bool
@@ -86,11 +87,65 @@ struct SearchView: View {
                 )
                 .scaleEffect(isSearchFocused ? 1.01 : 1.0)
                 .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isSearchFocused)
-                
+
+                // Autocomplete suggestions — live under the capsule
+                if !suggestions.isEmpty && isSearchFocused {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(suggestions.prefix(6)) { suggestion in
+                            NavigationLink(value: suggestion) {
+                                HStack(spacing: 12) {
+                                    CachedImage(url: suggestion.posterURL ?? suggestion.imageURL, maxDimension: 100) { phase in
+                                        if let img = phase.image {
+                                            img.resizable().aspectRatio(contentMode: .fill)
+                                        } else {
+                                            Rectangle().fill(Color.white.opacity(0.08))
+                                                .overlay { Image(systemName: "film").foregroundStyle(.white.opacity(0.3)) }
+                                        }
+                                    }
+                                    .frame(width: 34, height: 48)
+                                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(suggestion.title)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .lineLimit(1)
+                                        HStack(spacing: 6) {
+                                            Text(suggestion.category)
+                                            if let year = suggestion.releaseDateYear, !year.isEmpty {
+                                                Text("·")
+                                                Text(year)
+                                            }
+                                        }
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "arrow.up.left")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.35))
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                    .frame(width: 520)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 Spacer()
             }
             .padding(.leading, 244)
             .padding(.top, 14)
+            .animation(.easeInOut(duration: 0.15), value: suggestions)
         }
         .navigationBarBackButtonHidden(true)
         .onAppear {
@@ -102,11 +157,22 @@ struct SearchView: View {
                 isSearching = false
                 isLoading = false
                 searchResults = []
+                suggestions = []
             }
         }
         .task(id: searchText) {
             guard !searchText.isEmpty else { return }
-            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s debounce
+            // Fast autocomplete: 150ms, top 6
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if Task.isCancelled { return }
+            if let results = try? await StremioService.shared.searchMulti(query: searchText) {
+                let combined = (results.0 + results.1).filter { $0.isReleased }
+                if !Task.isCancelled {
+                    suggestions = Array(combined.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }.prefix(6))
+                }
+            }
+            // Full search: 300ms total
+            try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
             await performSearch()
         }
@@ -191,7 +257,7 @@ struct SearchView: View {
                 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                     ForEach(Genre.allGenres, id: \.id) { genre in
-                        NavigationLink(destination: MediaListView(title: genre.name, type: .genre(id: genre.id))) {
+                        NavigationLink(destination: MediaListView(title: genre.name, type: .genre(id: genre.id, name: genre.name))) {
                             GenreCard(genre: genre)
                         }
                         .buttonStyle(.plain)

@@ -161,7 +161,7 @@ class TMDBEnricher {
                 if let credits = await self.fetchCredits(id: id, type: type) {
                     await MainActor.run {
                         enriched.cast = credits.cast.prefix(15).map { cast in
-                            CastMember(name: cast.name, role: cast.character, imageURL: self.adaptiveURL(path: cast.profilePath, quality: .poster))
+                            CastMember(name: cast.name, role: cast.character, imageURL: self.adaptiveURL(path: cast.profilePath, quality: .poster), personID: cast.id)
                         }
                     }
                 }
@@ -240,8 +240,14 @@ class TMDBEnricher {
         return try await fetchCatalog(from: urlString, type: mediaType)
     }
 
-    func fetchUpcomingMovies() async throws -> [MediaItem] {
-        // /movie/upcoming mixes in titles whose PRIMARY date already passed
+    /// TMDB discover by genre — real genre-accurate titles, page-based pagination
+    /// (pages 1..500). Used by the genre pages for endless scroll.
+    func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie") async -> [MediaItem] {
+        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_genres=\(tmdbGenreID)&page=\(page)&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
+        return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
+    }
+
+    func fetchUpcomingMovies() async throws -> [MediaItem] {        // /movie/upcoming mixes in titles whose PRIMARY date already passed
         // (earlier foreign release), which breaks unreleased-only filtering.
         // discover with primary_release_date.gte=today guarantees genuinely
         // unreleased, popularity-sorted results.
@@ -301,6 +307,77 @@ class TMDBEnricher {
         let urlString = "\(baseURL)/\(type)/\(id)/credits?api_key=\(apiKey)"
         guard let url = URL(string: urlString), let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
         return try? JSONDecoder().decode(TMDBCredits.self, from: data)
+    }
+
+    // MARK: - New Episode Detection
+
+    private var newEpisodeCache: [String: (fresh: Bool, checkedAt: Date)] = [:]
+
+    /// True when the show's most recent episode aired within the last 7 days.
+    /// Cached 6h — watchlist cards call this per render.
+    func hasAiredNewEpisode(tmdbID: String) async -> Bool {
+        if let (fresh, checkedAt) = newEpisodeCache[tmdbID],
+           Date().timeIntervalSince(checkedAt) < 6 * 3600 {
+            return fresh
+        }
+        let urlString = "\(baseURL)/tv/\(tmdbID)?api_key=\(apiKey)"
+        var fresh = false
+        if let url = URL(string: urlString),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let show = try? JSONDecoder().decode(TMDBLastEpisodeInfo.self, from: data),
+           let airDateStr = show.lastEpisodeToAir?.airDate, !airDateStr.isEmpty {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd"
+            if let airDate = fmt.date(from: airDateStr) {
+                let days = Date().timeIntervalSince(airDate) / 86400
+                fresh = days >= 0 && days <= 7
+            }
+        }
+        newEpisodeCache[tmdbID] = (fresh, Date())
+        return fresh
+    }
+
+    // MARK: - Person Pages
+
+    func fetchPerson(personID: Int) async -> TMDBPersonDetail? {
+        let urlString = "\(baseURL)/person/\(personID)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString), let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return try? JSONDecoder().decode(TMDBPersonDetail.self, from: data)
+    }
+
+    /// Combined movie+TV credits for a person, mapped to MediaItems (sorted newest first).
+    func fetchPersonCredits(personID: Int) async -> [MediaItem] {
+        let urlString = "\(baseURL)/person/\(personID)/combined_credits?api_key=\(apiKey)"
+        guard let url = URL(string: urlString), let (data, _) = try? await URLSession.shared.data(from: url) else { return [] }
+        guard let response = try? JSONDecoder().decode(TMDBCombinedCredits.self, from: data) else { return [] }
+
+        let items = response.cast.compactMap { credit -> MediaItem? in
+            guard let id = credit.id else { return nil }
+            let isMovie = credit.mediaType == "movie"
+            let title = isMovie ? (credit.title ?? credit.name ?? "") : (credit.name ?? credit.title ?? "")
+            guard !title.isEmpty else { return nil }
+
+            var item = MediaItem(
+                seed: String(id), title: title,
+                category: isMovie ? "Movie" : "TV Show"
+            )
+            item.posterURL = adaptiveURL(path: credit.posterPath, quality: .poster)
+            item.backdropURL = adaptiveURL(path: credit.backdropPath, quality: .backdrop)
+            item.imageURL = item.backdropURL ?? item.posterURL
+            item.voteAverage = credit.voteAverage
+            item.releaseDate = isMovie ? credit.releaseDate : credit.firstAirDate
+            item.description = credit.overview ?? ""
+            item.popularity = credit.popularity
+            return item
+        }
+
+        // Newest first (undated titles sink), then by popularity
+        return items.sorted {
+            let d1 = $0.releaseDate ?? "0000"
+            let d2 = $1.releaseDate ?? "0000"
+            if d1 != d2 { return d1 > d2 }
+            return ($0.popularity ?? 0) > ($1.popularity ?? 0)
+        }
     }
     
     private func fetchWatchProviders(id: String, type: String) async -> TMDBWatchProviderResponse? {
