@@ -81,6 +81,35 @@ class PlayerManager: ObservableObject {
         }
     }
 
+    /// Called when the user navigates away from DetailView — cancels the
+    /// in-flight prefetch and tells the engine to drop the torrent immediately
+    /// instead of waiting for the idle timeout.
+    func cancelDetailPrefetch() {
+        guard inflightPrefetchKey != nil || prefetchedKey != nil else { return }
+        let keyToCancel = inflightPrefetchKey ?? prefetchedKey
+        print("[PlayerManager] Cancelling prefetch for \(keyToCancel ?? "?")")
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        inflightPrefetchKey = nil
+
+        // Drop the warm core if it was built for this prefetch
+        if let core = warmCore, core.key == keyToCancel {
+            core.controller.stop()
+            core.hostWindow?.close()
+            warmCore = nil
+        }
+
+        // Tell the engine to stop downloading the torrent immediately
+        if let stream = prefetchedStream, stream.isTorrent,
+           let hash = torrentHash(stream) {
+            StremioServerManager.shared.removeTorrent(infoHash: hash)
+        }
+        prefetchedStream = nil
+        prefetchedKey = nil
+        prefetchedSubtitles = nil
+        isPrefetching = false
+    }
+
     private func runPrefetch(item: MediaItem, season: Int?, episode: Int?, key: String, allowPrime: Bool) async {
         async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
 

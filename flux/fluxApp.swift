@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // App lifecycle configuration
     }
+    func applicationWillTerminate(_ notification: Notification) {
+        StremioServerManager.shared.stopServer()
+        StreamProxyManager.shared.stop()
+    }
 }
 #endif
 // import FirebaseCore

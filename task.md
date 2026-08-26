@@ -1,6 +1,39 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 26, 2026 (latest) — HERO QUALITY FIX + CACHE BUTTON FIX
+## LATEST: Aug 27, 2026 — MEMORY LIFECYCLE + PREFETCH CANCELLATION
+Commit pending. Multiple fixes:
+
+### Memory management (FluxEngine 1GB RAM spike)
+- Root cause: Go torrent library (anacrolix/torrent) doesn't release RSS back
+  to OS by default. FluxEngine had no memory limit. Orphaned sidecar stayed
+  running with open torrent connections after app quit (no applicationWillTerminate).
+- Fix: Added `STREMIO_MEM_LIMIT=536870912` (512MB) env var — FluxEngine reads
+  this and applies Go's `debug.SetMemoryLimit()`.
+- Fix: Added `applicationWillTerminate` in fluxApp.swift — calls
+  `stopServer()` + `StreamProxyManager.shared.stop()`. No more orphaned processes.
+- Fix: Added `removeTorrent(infoHash:)` and `removeAllTorrents()` to
+  StremioServerManager — calls Go engine's `/{hash}/remove` and `/removeAll`
+  endpoints (never called before, relied on 10min idle timeout).
+- Fix: `stopServer()` now calls `removeAllTorrents()` before killing the process.
+
+### Smart prefetch cancellation
+- Problem: Opening a DetailView started prefetching (stream fetch + torrent
+  registration + warm mpv core). Navigating away cancelled the Swift task but
+  LEFT the torrent registered on the engine — kept downloading for 10min idle
+  timeout. Multiple rapid page opens = multiple concurrent torrents.
+- Fix: Added `cancelDetailPrefetch()` to PlayerManager — cancels task, drops
+  warm core, calls `removeTorrent` immediately.
+- Fix: Added `.onDisappear` to DetailView that calls `cancelDetailPrefetch()`.
+- Flow: User opens Movie A → prefetch starts → user goes back → torrent A
+  killed immediately → user opens Movie B → only Movie B downloads.
+
+### Bundle ID + DMG
+- Changed bundle ID from `com.nemesys.flux` to `com.kernelmoth.flux`.
+- Rebuilt DMG with `create-dmg` (standard drag-to-install, no custom background).
+
+---
+
+## Aug 26, 2026 (latest) — HERO QUALITY FIX + CACHE BUTTON FIX
 Commit 9182131. Two fixes:
 
 ### Hero image quality (WebP embedded thumbnail bug)

@@ -36,7 +36,20 @@ Stremio streaming server (server.js) as the local torrent engine.
 - **Loading UX**: skeleton ghost cards everywhere (Components/GhostViews.swift) —
   wired in-place inside scroll content, not overlays.
 
-## Recent Milestones (Aug 24-26)
+## Recent Milestones (Aug 26-27)
+- **Memory & lifecycle fixes** (Aug 27): Fixed FluxEngine consuming unlimited RAM
+  (was hitting 1GB). Added `STREMIO_MEM_LIMIT=512MB` env var to cap Go engine.
+  Added `applicationWillTerminate` handler — kills sidecar + removes all torrents
+  on app quit (no more orphaned processes). Added `removeTorrent` and
+  `removeAllTorrents` methods calling Go engine's `/{hash}/remove` and
+  `/removeAll` endpoints (never called before — relied on 10min idle timeout).
+- **Smart prefetch cancellation** (Aug 27): `DetailView.onDisappear` now calls
+  `cancelDetailPrefetch()` — cancels the Swift task, drops the warm mpv core, and
+  tells the engine to `removeTorrent` immediately instead of waiting for idle
+  timeout. New movie opened = old torrent killed before new one starts.
+- **Bundle ID changed** to `com.kernelmoth.flux` (was `com.nemesys.flux`).
+- **DMG installer** rebuilt clean with `create-dmg` (sindresorhus) — standard
+  drag-to-install, no custom background.
 - **OTT Explore rail** (Aug 26): 9 platforms (Netflix, Disney+, Prime Video, Apple TV+,
   HBO Max, Hulu, Peacock, Paramount+, Crunchyroll) with real branded logos in Home.
   Portrait cards (2:3), full-bleed images, GlassCard hover. Catalog pages preserve
@@ -122,4 +135,4 @@ The "Flux Native" aesthetic is based on **Glassmorphism** and **Liquid Layouts**
   **NEW EPISODE badges** (TMDB last_episode_to_air, 7-day window), **per-profile
   playback settings** (snapshot/restore), **hydra fully removed**.
 
-*Last Updated: Aug 26, 2026 (latest)*
+*Last Updated: Aug 27, 2026 (latest)*

@@ -46,6 +46,26 @@ class StremioServerManager: ObservableObject {
         )
     }
 
+    /// Removes a specific torrent from the engine and stops its download.
+    func removeTorrent(infoHash: String) {
+        activeRegistrations.removeValue(forKey: infoHash)
+        guard let url = URL(string: "http://127.0.0.1:\(port)/\(infoHash)/remove") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+        Task { _ = try? await URLSession.shared.data(for: request) }
+        print("[StremioServer] Removed torrent \(infoHash.prefix(12))…")
+    }
+
+    /// Removes all torrents from the engine.
+    func removeAllTorrents() {
+        activeRegistrations.removeAll()
+        guard let url = URL(string: "http://127.0.0.1:\(port)/removeAll") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+        Task { _ = try? await URLSession.shared.data(for: request) }
+        print("[StremioServer] Removed all torrents")
+    }
+
     private func recordLaunchFailure() {
         failureTimestamps.append(Date())
         failureTimestamps.removeAll { Date().timeIntervalSince($0) > failureWindow }
@@ -287,6 +307,8 @@ class StremioServerManager: ObservableObject {
     }
 
     func stopServer() {
+        // Tell the engine to drop all torrents before killing it
+        if isRunning { removeAllTorrents() }
         if let task = process {
             task.terminate()
             let pid = task.processIdentifier
@@ -374,6 +396,7 @@ class StremioServerManager: ObservableObject {
             env["HTTP_PORT"] = String(assignedPort)
             env["NO_CORS"] = "1"
             env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
+            env["STREMIO_MEM_LIMIT"] = "536870912"
             engineIsFluxEngine = true
             print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort)")
         case .nodeJS(let nodePath):

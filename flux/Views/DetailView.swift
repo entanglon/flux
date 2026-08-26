@@ -577,6 +577,9 @@ struct DetailView: View {
             await loadDetails()
             prefetchPlaybackSources()
         }
+        .onDisappear {
+            PlayerManager.shared.cancelDetailPrefetch()
+        }
     }
 
     /// ADVANCED LOADING: kick off source resolution the moment the page opens.
