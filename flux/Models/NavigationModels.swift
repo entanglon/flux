@@ -12,6 +12,11 @@ struct GenreNavigation: Hashable {
     let id: Int
 }
 
+/// Pushable reference to one user collection (CollectionsView → detail grid).
+struct CollectionNavigation: Hashable {
+    let id: String
+}
+
 enum SidebarItem: String, CaseIterable, Identifiable {
     case search = "Search"
     case home = "Home"
@@ -19,6 +24,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case tvShows = "TV Shows"
     case trending = "Trending"
     case watchlist = "Watchlist"
+    case collections = "Collections"
     case history = "History"
     case downloads = "Downloads"
     
@@ -32,6 +38,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .tvShows: return "tv"
         case .trending: return "flame"
         case .watchlist: return "bookmark"
+        case .collections: return "rectangle.stack"
         case .history: return "clock"
         case .downloads: return "arrow.down.circle"
         }

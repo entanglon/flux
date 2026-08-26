@@ -29,53 +29,18 @@ struct WatchlistView: View {
                 
                 if userData.watchlist.isEmpty {
                     // Apple TV Liquid Glass Empty State Card
-                    VStack(spacing: 20) {
-                        Image(systemName: "bookmark.fill")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.cyan, .blue],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 72, height: 72)
-                            .glassEffect(.clear, in: .circle)
-                        
-                        Text("Your Watchlist is Empty")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                        
-                        Text("Save movies and TV shows to keep track of what you want to watch next.")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.65))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 360)
-                        
-                        Button(action: {
+                    LibraryEmptyState(
+                        icon: "bookmark.fill",
+                        title: "Your Watchlist is Empty",
+                        message: "Save movies and TV shows to keep track of what you want to watch next.",
+                        actionTitle: "Find Something to Watch",
+                        actionIcon: "sparkles",
+                        action: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                 selectedTab = .home
                             }
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 13, weight: .bold))
-                                Text("Find Something to Watch")
-                                    .font(.system(size: 14, weight: .bold))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .glassEffect(.regular.interactive(), in: .capsule)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.top, 8)
-                    }
-                    .padding(.vertical, 60)
-                    .padding(.horizontal, 40)
-                    .frame(maxWidth: .infinity)
-                    .glassEffect(.clear, in: .rect(cornerRadius: 24))
-                    .padding(.top, 20)
+                    )
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                         ForEach(userData.watchlist) { item in

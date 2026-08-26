@@ -9,11 +9,18 @@ struct MPVVideoView: NSViewControllerRepresentable {
     @ObservedObject var controller: MPVController
     
     func makeNSViewController(context: Context) -> MPVViewController {
-        let mpv = MPVViewController()
-        context.coordinator.player = mpv
-        controller.playerView = mpv // Link controller to view
-        mpv.delegate = controller // Link view to controller
-        return mpv
+        let vc: MPVViewController
+        if let existing = controller.playerView {
+            // Adopted warm core from the detail-page prefetch — already paired
+            // with its controller and buffering the stream.
+            vc = existing
+        } else {
+            vc = MPVViewController()
+            controller.playerView = vc
+            vc.delegate = controller
+        }
+        context.coordinator.player = vc // Link controller to view
+        return vc
     }
     
     func updateNSViewController(_ nsViewController: MPVViewController, context: Context) {
@@ -21,6 +28,12 @@ struct MPVVideoView: NSViewControllerRepresentable {
     }
     
     static func dismantleNSViewController(_ nsViewController: MPVViewController, coordinator: Coordinator) {
+        // While PiP floats this render layer, its mpv core must survive the
+        // player window's INTENTIONAL unmount (entering PiP closes the window).
+        // PiP owns teardown for that case — cleanup here would kill playback.
+        if PiPManager.shared.isHosting(nsViewController.playerView) {
+            return
+        }
         nsViewController.playerView.cleanup()
     }
     
@@ -101,6 +114,12 @@ class MPVController: ObservableObject {
     @Published var timePos: Double = 0.0
     @Published var volume: Double = 1.0
     @Published var bufferProgress: Double = 0.0
+    /// True once a loadfile was issued on this controller — lets the player
+    /// window adopt a prefetch warm core without issuing a second load.
+    @Published private(set) var hasLoadedMedia = false
+    /// URL handed to the most recent loadfile — dedupes redundant reloads when
+    /// currentStreamURL catches up after an early warm-core adoption.
+    private(set) var loadedURL: URL?
     
     @Published var isBuffering = false
     @Published var demuxerCacheTime: Double = 0.0
@@ -117,22 +136,32 @@ class MPVController: ObservableObject {
     weak var playerView: MPVViewController?
     
     func play(url: URL) {
+        // Same media already loading/loaded on this controller (warm-core
+        // adoption races finishSelect) — reloading would discard the buffer.
+        if hasLoadedMedia, loadedURL == url {
+            print("[MPVController] Skipping duplicate loadfile for \(url.lastPathComponent)")
+            return
+        }
         self.isUserPaused = false
+        self.hasLoadedMedia = true
+        self.loadedURL = url
         playerView?.play(url)
     }
-    
+
     func play() {
         self.isUserPaused = false
         playerView?.resume()
     }
-    
+
     func pause() {
         self.isUserPaused = true
         playerView?.pause()
     }
-    
+
     func stop() {
         self.isUserPaused = false
+        self.hasLoadedMedia = false
+        self.loadedURL = nil
         playerView?.stop()
     }
     
@@ -296,6 +325,9 @@ class MPVViewController: NSViewController {
     func getTracks() -> [Track] { return playerView.getTracks() }
     func selectTrack(_ track: Track) { playerView.selectTrack(track) }
     func addExternalSubtitle(url: String, title: String) { playerView.addExternalSubtitle(url: url, title: title) }
+
+    /// Pixel aspect of the loaded video (for PiP window sizing). Falls back to 16:9.
+    var videoAspectRatio: Double { playerView?.videoAspectRatio ?? 16.0 / 9.0 }
 }
 
 // MARK: - OpenGL View & MPV Backend
@@ -467,6 +499,14 @@ final class MPVLayerView: NSView {
 
     // MARK: HDR / EDR pipeline (ported from Cascade)
     private var lastPipelineKey: String = ""
+
+    /// Pixel aspect ratio of the currently loaded video (1.78 for 16:9).
+    var videoAspectRatio: Double {
+        guard let w = getPropertyDouble("width"),
+              let h = getPropertyDouble("height"),
+              w > 0, h > 0 else { return 16.0 / 9.0 }
+        return w / h
+    }
 
     /// Detects HDR (PQ/HLG) content and routes mpv + the CAOpenGLLayer through
     /// an extended-dynamic-range output path, exactly like Cascade's player.

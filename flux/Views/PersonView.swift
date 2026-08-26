@@ -50,11 +50,7 @@ struct PersonView: View {
             .padding(.top, 24)
         }
         .background(
-            LinearGradient(
-                gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color.black
             .ignoresSafeArea()
         )
         .task {
@@ -85,19 +81,11 @@ struct PersonView: View {
                                 .blur(radius: 40)
                                 .overlay(Color.black.opacity(0.55))
                         } else {
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                            Color.black
                         }
                     }
                 } else {
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    Color.black
                 }
             }
             .frame(height: 380)

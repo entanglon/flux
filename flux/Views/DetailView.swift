@@ -17,6 +17,7 @@ struct DetailView: View {
     @ObservedObject private var userData = UserDataService.shared
     @ObservedObject private var tasteProfile = TasteProfileManager.shared
     @State private var isDownloading = false
+    @State private var showCollectionsPopover = false
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -60,25 +61,12 @@ struct DetailView: View {
                             // from initial metadata to enriched metadata seamlessly without a view swap.
                             CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 4096) { phase in
                                 if let image = phase.image {
-                                    let effectiveSidebarWidth = CGFloat(max(160.0, sidebarWidth - 10.0))
-                                    
-                                    HStack(spacing: 0) {
-                                        // 1. Sidebar Extension (Mirrored & Blurred, ALWAYS 100% under sidebar)
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .scaleEffect(x: -1, y: 1)
-                                            .blur(radius: 30)
-                                            .frame(width: effectiveSidebarWidth, height: geo.size.height * 0.80)
-                                            .clipped()
-                                        
-                                        // 2. Main Hero Artwork (Starts slightly under sidebar edge, zero bleed)
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: max(0, geo.size.width - effectiveSidebarWidth), height: geo.size.height * 0.80)
-                                            .clipped()
-                                    }
+                                    HeroBackdrop.banner(
+                                        image: image,
+                                        width: geo.size.width,
+                                        height: geo.size.height * 0.80,
+                                        sidebarWidth: sidebarWidth
+                                    )
                                     .transition(.opacity.animation(.easeInOut(duration: 0.5)))
                                 } else {
                                     Rectangle().fill(Color(white: 0.1))
@@ -227,6 +215,21 @@ struct DetailView: View {
                                 .buttonStyle(.plain)
                                 .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
 
+                                // Custom user lists (Collections)
+                                Button(action: { showCollectionsPopover = true }) {
+                                    Image(systemName: "rectangle.stack.badge.plus")
+                                        .font(.title3)
+                                        .foregroundStyle(.white)
+                                        .padding(14)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
+                                    AddToCollectionView(item: displayItem)
+                                }
+                                .help("Add to list")
+
                                 // Download best stream for offline viewing
                                 Button {
                                     isDownloading = true
@@ -238,13 +241,15 @@ struct DetailView: View {
                                     Group {
                                         if isDownloading {
                                             ProgressView().controlSize(.small)
+                                                .frame(width: 18, height: 18)
                                         } else {
                                             Image(systemName: "arrow.down.circle")
                                                 .font(.title3)
                                                 .foregroundStyle(.white)
                                         }
                                     }
-                                    .frame(width: 34, height: 34)
+                                    .padding(14)
+                                    .glassEffect(.regular.interactive(), in: .circle)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -280,6 +285,12 @@ struct DetailView: View {
                                         SeasonDropdownController.shared.onSelect = { season in
                                             selectedSeason = season
                                             Task { await loadEpisodes(for: season) }
+                                            // Re-prime the pipeline for the newly selected season (S{n}E1)
+                                            PlayerManager.shared.startDetailPrefetch(
+                                                item: displayItem,
+                                                season: season.seasonNumber,
+                                                episode: 1
+                                            )
                                         }
                                         withAnimation(.easeInOut(duration: 0.18)) {
                                             SeasonDropdownController.shared.toggle()
@@ -545,7 +556,7 @@ struct DetailView: View {
             .ignoresSafeArea(edges: .top)
         }
         .background(
-            LinearGradient(gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]), startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color.black
         )
         .overlay(alignment: .topLeading) {
             Button(action: { dismiss() }) {
@@ -564,7 +575,21 @@ struct DetailView: View {
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
             await loadDetails()
+            prefetchPlaybackSources()
         }
+    }
+
+    /// ADVANCED LOADING: kick off source resolution the moment the page opens.
+    /// Non-Flux → picker is instant on Play. Flux Mode → best source resolved,
+    /// primed and held buffered in a warm mpv core so Play starts instantly.
+    private func prefetchPlaybackSources() {
+        let seasonNumber = selectedSeason?.seasonNumber ?? heroEpisode?.seasonNumber
+        let episodeNumber = heroEpisode?.episodeNumber ?? (seasonNumber != nil ? 1 : nil)
+        PlayerManager.shared.startDetailPrefetch(
+            item: displayItem,
+            season: seasonNumber,
+            episode: episodeNumber
+        )
     }
     
     func getEpisodeProgress(_ episode: Episode?) -> Double {

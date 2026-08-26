@@ -39,34 +39,11 @@ struct HistoryView: View {
                 
                 if userData.history.isEmpty {
                     // Apple TV Liquid Glass Empty State Card
-                    VStack(spacing: 20) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.purple, .blue],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 72, height: 72)
-                            .glassEffect(.clear, in: .circle)
-                        
-                        Text(showAsContinueWatching ? "No In-Progress Titles" : "No Watch History")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                        
-                        Text("Movies and TV shows you start watching will automatically appear here.")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.65))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 380)
-                    }
-                    .padding(.vertical, 60)
-                    .padding(.horizontal, 40)
-                    .frame(maxWidth: .infinity)
-                    .glassEffect(.clear, in: .rect(cornerRadius: 24))
-                    .padding(.top, 20)
+                    LibraryEmptyState(
+                        icon: "clock.arrow.circlepath",
+                        title: showAsContinueWatching ? "No In-Progress Titles" : "No Watch History",
+                        message: "Movies and TV shows you start watching will automatically appear here."
+                    )
                 } else {
                     LazyVGrid(columns: columns, spacing: 40) {
                         ForEach(userData.history) { item in

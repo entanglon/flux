@@ -21,27 +21,14 @@ struct FeaturedCarousel: View {
                     ZStack {
                         // Logic: Only use backdrop/hero (landscape). Never stretch a poster.
                         if let heroURL = item.heroURL ?? item.backdropURL {
-                            CachedImage(url: heroURL.highQuality(), maxDimension: 1920) { phase in
+                            CachedImage(url: heroURL.highQuality(), maxDimension: 3840) { phase in
                                 if let image = phase.image {
-                                    let effectiveSidebarWidth = CGFloat(max(160.0, sidebarWidth - 10.0))
-                                    
-                                    HStack(spacing: 0) {
-                                        // 1. Sidebar Background Extension (Mirrored & Blurred, ALWAYS 100% under sidebar)
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .scaleEffect(x: -1, y: 1)
-                                            .blur(radius: 30)
-                                            .frame(width: effectiveSidebarWidth, height: geo.size.height)
-                                            .clipped()
-                                        
-                                        // 2. Main Hero Artwork (Starts slightly under sidebar edge, zero bleed)
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: max(0, geo.size.width - effectiveSidebarWidth), height: geo.size.height)
-                                            .clipped()
-                                    }
+                                    HeroBackdrop.banner(
+                                        image: image,
+                                        width: geo.size.width,
+                                        height: geo.size.height,
+                                        sidebarWidth: sidebarWidth
+                                    )
                                 } else {
                                     Rectangle().fill(Color.gray.opacity(0.1))
                                 }

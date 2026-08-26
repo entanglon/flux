@@ -1,6 +1,456 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 25, 2026 (session 3) — Feature Wave: 7 features shipped
+## LATEST: Aug 26, 2026 (latest) — CLEAN RELEASE BUILD + BUNDLE AUDIT
+Release build: **115MB** (Firebase SDK bundles added ~23MB over the 92MB
+pre-auth build — expected). ZERO stray files in bundle after fixes:
+- REMOVED from flux/ (would have bundled): .DS_Store, implementation_plan.md,
+  Services/SecretsExample.txt (→ docs/), MPVKit-Swift/Scripts/*.sh
+  (→ scripts/mpvkit-legacy/ — NOTE: directory-level membershipExceptions did
+  NOT exclude these; only explicit file paths work reliably).
+- Bundle now contains ONLY: Assets.car, AppIcon.icns, FluxEngine, plist,
+  Firebase/gRPC/GoogleUtilities resource bundles. Verified by find sweep.
+- Release app launched (PID varies) for account-creation testing.
+- Root-level junk NOT in bundle (outside synced group): ContentView_Backup.swift,
+  default.profraw, Flux.dmg, FluxImageCache/, ui.png etc. — cleanup optional.
+
+---
+
+## Aug 26, 2026 (latest) — FIREBASE AUTH HYBRID + FIRST-START GATE
+Identity delegated to Firebase Auth (user created project "flux-streaming",
+plist dropped at repo root → moved into flux/ for bundling).
+
+### AuthManager rewritten onto FirebaseAuth
+- signUp/signIn via Auth.auth(); errors mapped from AuthErrorCode (note: SDK
+  uses AuthErrorCode(rawValue:) NOT AuthErrorCode.Code).
+- Session persistence native to Firebase (no Keychain juggling);
+  PasswordDeriver deleted; FluxCloudClient slimmed to fetchData/pushData
+  (Bearer = fresh ID token via getIDToken()).
+- Guest mode: continueAsGuest() persists UserDefaults "flux.authGuestMode";
+  signOut clears it → identity gate reappears.
+- GOTCHA: our Models/User.swift struct User now coexists with FirebaseAuth.User
+  — same-module declaration shadows import ✓ but keep FirebaseAuth.User
+  explicit where both appear. AuthErrorCode.Code doesn't exist in this SDK.
+
+### First-start gate (Views/Auth/AuthGateView.swift)
+Flow: needsGate (= backend configured && not authenticated && not guest) →
+AuthGateView [Create Account / Sign In / Continue as Guest] → ProfileGateView
+→ ContentView. Returning users w/ live Firebase session skip gate.
+- AuthView gained startInSignUp param (+ Identifiable for sheet(item:)).
+- fluxApp body chains gates; dev fallback skips gate when plist/backend absent.
+
+### Worker v2 deployed (JWT verification)
+- verifyIdToken(): JWKS cached 1h, RS256 via WebCrypto, aud/iss/exp/iat/sub
+  checks against FIREBASE_PROJECT_ID var ("flux-streaming").
+- Password/session routes DELETED; D1 keyed by Firebase UID; users table =
+  upserted profile record only.
+- Verified live: 401 no-auth, 401 garbage token, 404 unknown route.
+- E2E WITH REAL TOKEN still blocked on: enable Email/Password provider in
+  Firebase console (CONFIGURATION_NOT_FOUND from identitytoolkit).
+
+---
+
+## Aug 26, 2026 (latest) — BACKEND DEPLOYED + LIVE API VERIFIED ✅
+Deployed via user's wrangler (logged in as haditbutt7@gmail.com):
+- D1 database `flux` created (id 770ad44b-a383-4931-b6ea-7c4708190504, APAC)
+- Schema applied; Worker live at **https://flux-backend.nemesys.workers.dev**
+- FULL LIFECYCLE SMOKE TEST PASSED: signup → PUT data → GET data (exact
+  payload round-trip) → stale push rejected (superseded:true) → me → re-login
+  → logout invalidates session. Test user deleted afterwards.
+- FluxCloudConfig.baseURL now points at the deployed URL (isConfigured=true).
+
+### NOTE — auth architecture pivot pending
+User approved hybrid: Firebase Auth ONLY for identity + Cloudflare for data.
+Current deploy = pure-Cloudflare password auth (fully working). Next session:
+swap Worker signup/login/logout+sessions table for Firebase ID-token
+verification (JWKS RS256), re-key D1 rows by Firebase UID, swap AuthManager to
+FirebaseAuth SDK (packages already linked), delete PasswordDeriver + Keychain
+token juggling (Firebase persists its own). User must create Firebase project +
+GoogleService-Info.plist first.
+
+---
+
+## Aug 26, 2026 (latest) — CLOUDFLARE ACCOUNTS + LIBRARY SYNC BUILT
+Backend (backend/ folder, deploy with wrangler — see backend/README.md):
+- Worker API: /v1/signup|login|logout|me + GET/PUT /v1/data. D1 schema:
+  users, sessions, user_data (JSON blob), auth_attempts throttle.
+- Password scheme: CLIENT derives PBKDF2-SHA256(pw, SHA256(email), 250k) via
+  CommonCrypto and sends only the derived hex; server stores one cheap 10k
+  round on top → raw passwords never leave device, Workers CPU limit safe.
+- Sessions: random 32B tokens, only SHA-256 stored, 90-day expiry; login
+  throttling 8 fails/15min per email+ip.
+- PUT /v1/data rejects stale pushes (superseded:true when server newer).
+
+Swift side:
+- KeychainStore.swift (generic-password wrapper). FluxCloud.swift = config +
+  client (+PasswordDeriver). AuthManager REWRITTEN from dummy to real network
+  auth w/ Keychain session restore + pull-on-login/push-on-signout sync.
+- UserDataService.exportCloudPayload()/applyCloudPayload() (whole-blob
+  newer-wins merge v1) + hasLibraryContent.
+- Settings→General account row: signed-in email + Sync Now + last-sync stamp;
+  signed-out shows Sign In sheet (AuthView reused).
+- CONFIG STEP REQUIRED: set deployed URL in FluxCloudConfig.baseURL or
+  UserDefaults "cloudBaseURL" (isConfigured guards until then).
+
+### USER DEPLOY STEPS
+cd backend && wrangler login && wrangler d1 create flux (paste id into
+wrangler.toml) && wrangler d1 execute flux --remote --file=schema.sql &&
+wrangler deploy → paste URL into FluxCloud.swift default.
+
+---
+
+## Aug 26, 2026 — GO ENGINE SHIPPED + BULLETPROOFING LAYER 1
+Consultant decision executed. App now runs the **FluxEngine sidecar**
+(stremio-server-go v0.12.1, MIT, 24MB binary in flux/Engine/ → Resources) as
+PRIMARY torrent engine. Node+server.js = automatic fallback. VERIFIED LIVE:
+engine boots, binds 11470, uses Flux APP_PATH.
+
+### What changed
+- **Engine resolution** (`resolveEngine()`): bundled FluxEngine (explicit port
+  assignment 11470→11474 — it does NOT self-increment, verified) → node+
+  server.js (self-increments; HTTP_PORT hint set). server.js download no longer
+  blocks startup when sidecar present.
+- **Client firewall** (PlayerManager): `validInfoHash` — exactly-40-hex,
+  non-zero, non-degenerate. torrentHash() returns nil otherwise;
+  attemptStream() rejects malformed torrents via advancePast (manual-mode aware);
+  getPlayableURL guards URL construction. Addon magnets = attacker-controlled
+  input, validated at perimeter per consultant spec.
+- **Registration tracking + invisible restarts**: trackCreate(infoHash,magnet,
+  fileIdx) recorded at create time; ensureRunning() success-after-restart
+  replays ALL active registrations fire-and-forget so mpv reconnects onto a
+  live swarm without user action.
+- **Supervisor**: exponential backoff relaunches (.25→5s), rolling-window
+  crash cap (5 failures/60s → failed state, no CPU burn), killStaleEngines()
+  at startup (pkill -f our exact paths only — never real Stremio).
+- Sidecar exec-bit restored at runtime if resource-copy drops it.
+
+### Engine facts learned (verified live)
+- Go engine answers /heartbeat ✓ (port discovery unchanged)
+- Does NOT self-increment on conflict → explicit HTTP_PORT assignment required
+- Panic-on-zero-infohash lives in anacrolix/torrent lib (upstream); Swift
+  firewall prevents it reaching the engine from OUR client; fork hardening =
+  remaining workstream
+
+### Fork TODO (flux-engine fork, next session)
+- Clone M0Rf30/stremio-server-go → fix panicif.Zero inside engine (400 instead
+  of fatal) → fast-resume persistence → localhost auth token → seeding policy
+  (ratio/Low Power Mode) → DHT toggle + VPN kill switch → sparse-allocation
+  check → async HTTP tuning for mpv parallel connections
+- Ship gate: chaos matrix (fuzz 100k / kill -9 x500 / 24h soak) green
+
+---
+
+## Aug 26, 2026 — STREAMING ENGINE DECISION (consultant-reviewed)
+Asked Claude + Qwen (+ Gemini via user) with identical neutral prompt.
+VERDICT (2:1 + my analysis): **fork stremio-server-go → harden → supervised
+sidecar. ONE path. No Node, no librqbit.**
+- Unanimous: sidecar over embedded (crash isolation = req #1); librqbit
+  unusable for playhead-priority streaming (kills Candidate B as-is).
+- Deciding factor: anacrolix/torrent has years of production proof for
+  seek-driven piece prioritization (Elementum/Kodi); Rust path = rewrite
+  librqbit picker (months) OR drag libtorrent C++ through FFI (cancels Rust's
+  safety advantage). Gemini's anti-Go args (cgo wall) don't apply to loopback-
+  HTTP sidecar architecture; its unique gotchas adopted anyway.
+- Bulletproofing spec adopted from consultants:
+  - Swift supervisor: /stats.json heartbeat, exp-backoff restarts capped per
+    rolling window, INVISIBLE restarts via cached session replay (/create +
+    last Range)
+  - Orphan prevention: --parent-pid flag or held-pipe EOF
+  - Validate infohash(40-hex/base32 non-zero)+fileIdx at Swift firewall AND
+    inside fork (kills the observed panicif.Zero crash class)
+  - Ephemeral port (never hardcode 11470); idle-torrent reaper (10-15min);
+    memory ceiling w/ proactive idle recycle
+  - Sparse disk allocation (APFS stall gotcha); async multi-threaded HTTP
+    (mpv opens parallel Range connections)
+  - Seeding policy (ratio limits/Low Power Mode), DHT/PEX toggles + VPN-drop
+    kill switch = expected user controls
+- SHIP GATE: fuzz 100k malformed reqs = 0 crashes; kill -9 x500 mid-playback =
+  0 host crashes + bounded rebuffer; 24h soak flat RSS <10% growth; sleep/wake
+  + network flaps self-recover.
+- Signing note: sidecar binary needs own Developer ID sig matching app +
+  hardened-runtime entitlements (packaging-time task).
+- Rust not dead FOREVER: HTTP contract keeps engines swappable; revisit
+  in-process Rust embed (stremio-native style) once librqbit matures.
+
+### Consultant prompt pattern stored in handover.md (AI Consultant Workflow).
+
+---
+
+## Aug 26, 2026 (latest) — Release verification + Node self-provisioning
+RELEASE: builds clean at 92MB (Debug 100MB). USER VERIFIED RELEASE PLAYBACK ✅.
+Direct distribution planned (no App Store).
+
+### Node.js runtime self-provisioning (Services/StremioServerManager.swift)
+Stremio desktop bundles its JS runtime; our end users can't be assumed to have
+Node. New resolution order in launchAndDiscoverPort → resolveNodePath():
+1. System node (homebrew/nvm v20/22/24 candidates)
+2. Previously-downloaded runtime at ~/Library/Application Support/Flux/runtime/node
+3. One-time download of official nodejs.org dist (v22.14.0 darwin arm64/x64,
+   ~47MB tar.gz) → URLSession download → /usr/bin/tar extract ONLY bin/node
+   (--strip-components=2) → chmod 755 → smoke-test `node -v` before use.
+Failure surfaces as existing "Streaming server unavailable" path. Verified
+dist URL + extraction + execution standalone in /tmp before wiring.
+
+### Accounts — DECISION PENDING (options researched)
+- AuthManager is currently a LOCAL DUMMY (simulated sign-in, no backend).
+- Firebase SDK packages are ALREADY LINKED in the project (GoogleUtilities,
+  nanopb, leveldb, RecaptchaInterop seen compiling) — fastest to wire.
+- Options: Firebase Spark free / Supabase free (500MB PG, supabase-swift) /
+  CloudKit ($0 + native, needs $99 dev acct which notarization needs anyway,
+  zero login UI via iCloud identity) / PocketBase self-host.
+- RECOMMENDATION: CloudKit if goal = sync profiles/watchlist/collections across
+  the user's own Macs with zero friction; Supabase/Firebase if real email
+  accounts + future iOS/web.
+
+### Release readiness checklist
+✅ Release build size+compile ✅ playback (user) ✅ Node dependency solved
+⬜ Developer ID signing + hardened runtime + notarization (needs $99 acct)
+⬜ Account backend decision + wiring (or strip account UI for local-only v1)
+⬜ Minor: For You live refresh after ♥
+
+---
+
+## Aug 26, 2026 (latest) — App Icon Switcher REVERTED (user call)
+In-app icon switching attempted (setAlternateIconName is iOS-only; tried
+resource-swap approach) then icon normalization to full-bleed for Tahoe's
+auto-border — result rendered as an unmasked BOX. USER: "just go back".
+REVERTED: original pre-shaped AppIcon.iconset PNGs restored into the asset
+catalog, flux/Icons/ + Info.plist + pbxproj INFOPLIST_FILE lines deleted,
+AppIconPicker/AppIconManager/AppDelegate hook removed from code.
+LESSON: macOS 26 does not auto-mask arbitrary full-bleed icns in dev builds
+the way I assumed; pre-shaped Big-Sur-style art is what this app should use.
+Keep flux-icons/*.png around as future alternate-icon SOURCE art only.
+
+### Still in place from earlier today
+Hero/poster fixes (HeroBackdrop, GhostHero 680pt, GlassCard decode 800),
+library page unification, Collections, prefetch advanced loading, PiP v2.
+
+---
+
+## Aug 26, 2026 (latest) — App Icon Switcher + Hero/Poster Fixes
+Builds clean, relaunched.
+
+### App Icon switcher (Settings → General)
+- macOS has NO setAlternateIconName (iOS-only API!) — persistent switch for
+  non-sandboxed builds = overwrite Contents/Resources/AppIcon.icns with chosen
+  .icns + NSApp.applicationIconImage for live feedback. Choice saved to
+  UserDefaults("appIconChoice"); AppDelegate.applicationDidFinishLaunching re-
+  applies it every launch (rebuilds regenerate the asset-catalog icns).
+- Icons: flux-icons/*.png (1024² alpha) → sips 10-size iconsets → iconutil
+  .icns (~2.5MB each) in flux/Icons/ (fs-synced folder auto-bundles them).
+  FluxDefault.icns = stashed pristine asset-catalog output (restore path).
+- Settings → General → App Icon section: 5 previews (Flux/Cascade/Nature/
+  Play/Quantum), white ring on active, click swaps instantly (Dock updates
+  live; Finder/Dock file icon fully consistent after relaunch).
+- Added flux/Info.plist (CFBundleIcons/CFBundleAlternateIcons declared —
+  future-proofing) + INFOPLIST_FILE=flux/Info.plist merged into BOTH app-target
+  configs via python pbxproj edit alongside GENERATE_INFOPLIST_FILE=YES.
+
+### Hero & poster fixes
+- NEW Components/HeroBackdrop.swift — shared banner builder: full-width artwork
+  (one natural crop; old HStack double-crop over-zoomed heroes) + TRUE mirrored
+  reflection aligned to seam via scaleEffect(x:-1)+offset(2·sidebar−W) then
+  masked to sidebar strip. Used by FeaturedCarousel AND DetailView.
+- GhostHero now fixed height 680 matching FeaturedCarousel's real frame (was
+  fluid 16:9 → size jump on load). GhostViews.swift.
+- Poster sharpness: GlassCard decodes at maxDimension 800 (was default 300 →
+  upscaled blur on Retina); landscape-fallback poster copies too; collection
+  card stacks 600.
+
+---
+
+## Aug 26, 2026 (latest) — ADVANCED LOADING / Detail-Page Prefetch SHIPPED
+Builds clean, relaunched — awaiting runtime test.
+
+### What shipped (both user asks)
+1. **Non-Flux**: opening a DetailView fetches all sources in the background
+   (populates StreamManager cache) → stream picker appears INSTANTLY on Play.
+2. **Flux Mode**: page open → fetch → race best source → PRIME it (torrent
+   registered on server fire-and-forget / HTTP ranged GET warms proxy+CDN) →
+   build WARM MPV CORE holding the stream PAUSED while buffering. Hitting Play
+   adopts that core → playback starts instantly, zero spinner.
+
+### Architecture (Services/PlayerManager.swift)
+- `startDetailPrefetch(item:season:episode:)` — DetailView .task after
+  loadDetails + on season-dropdown change (S{n}E1). Deduped per key; skipped
+  while any session active (currentItem != nil or PiP).
+- `runPrefetch`: fetchStreamsRealtime → flux-only: raceBestStream → prime →
+  buildWarmCore(key,url). Subtitles fetched in parallel and stashed.
+- Warm core = MPVController+MPVViewController built OUTSIDE SwiftUI, parked in
+  an invisible 160×90 host window (alpha 0.01, level -1, screen corner).
+  ⚠️ HOST WINDOW IS MANDATORY: this pipeline creates the mpv render context
+  lazily inside CAOpenGLLayer.draw() — a fully detached layer NEVER composites,
+  draw never fires, mpvGL stays nil, loadfile defers forever. Invisible-but-
+  onscreen window keeps the GL context alive so buffering proceeds.
+- Hold pattern: pause() BEFORE play(url:) → loads paused, demuxer cache fills.
+- `acquireSessionController()` — PlayerView.init swaps @StateObject for
+  @ObservedObject acquiring warm core when key AND resolved URL match
+  (⚠️ Instant-Replay uses an older URL — URL match prevents adopting a core
+  that buffers a DIFFERENT source than currentStreamURL). Else fresh controller.
+- PlayerView.onAppear: `mpv.hasLoadedMedia` (new flag set in play(url:), cleared
+  in stop()) → resume hold instead of second loadfile (double-load would
+  restart buffering at zero).
+- fetchAndRace fast-path (flux only): prefetchedKey==key & <10min old &
+  prefetchedStream exists → finishSelect instantly; availableStreams filled from
+  StreamManager cache for fallback picker; stashed subtitles applied.
+- TTL: warm core discarded after 5 min, on supersede, on close(), or on mismatch.
+- Manual-mode contract preserved: non-flux NEVER auto-selects; fast-path is
+  flux-only (auto mode).
+
+### TODO verify (runtime)
+- Open movie page ~10s → Play → instant start (log: "⚡ Prefetch HIT" +
+  "⚡ Adopting warm mpv core")
+- Flux OFF: Play → picker shows immediately with sources already listed
+- Season dropdown switch re-primes; PiP still works from adopted session;
+  no RAM growth beyond one held core
+
+---
+
+## Aug 26, 2026 (latest) — Library Pages Unified (user-directed)
+USER DIRECTIVE: library pages must follow ONE clean scheme — NO fancy
+multicolored icons. All four pages now share the same scaffold.
+
+### What changed
+- NEW `Components/LibraryViews.swift`: `LibraryScheme` (shared paddings) +
+  `LibraryEmptyState` — THE single empty-state component (monochrome icon in
+  clear glass circle, 22pt title, 14pt message, optional glass-capsule action).
+- WatchlistView / HistoryView / CollectionsView(hub+detail) / DownloadsView all
+  render LibraryEmptyState; every gradient icon removed (cyan→blue bookmark,
+  purple→blue clock, purple→indigo stacks, teal→cyan download/checkmark).
+- DownloadsView brought onto standard page scaffold: was missing
+  navigationBarBackButtonHidden + toolbarVisibility(.hidden), had stray
+  .ignoresSafeArea(.top), missing leading padding + wrong bottom padding.
+  Section headers .title3 → 20pt bold. Progress fill cyan → white 0.85;
+  completed tile gradient → neutral white 0.08 w/ plain checkmark.
+- Collections: poster-stack backdrop purple→indigo gradient → white 0.06;
+  popover checkmark purple → white; member-row tint purple → white 0.07;
+  create-plus purple → white. Semantic red kept ONLY on destructive trash.
+
+### Library page contract (keep this for future pages)
+Header: 44 heavy white + count badge (11 bold tracking 1.5, clear glass capsule)
+at .padding(.top, 48). Content: leading 268 / trailing 40 / bottom 60,
+ScrollView .background(Color.clear), navigationBarBackButtonHidden(true),
+toolbarVisibility(.hidden). Empty state = LibraryEmptyState. Monochrome only;
+red reserved for destructive actions.
+
+---
+
+## Aug 26, 2026 (later) — Collections (custom user lists) SHIPPED
+Builds clean, app relaunched — awaiting runtime test.
+
+### What shipped
+- **Model**: `UserCollection` (Models/UserCollection.swift) — id/name/createdAt/
+  items. Items stored as MediaItem dicts (SAME shape as watchlist/history) so
+  grids render offline with artwork; persisted via JSONSerialization blob inside
+  one UserDefaults array per profile.
+- **Storage**: UserDataService owns it (`profile.{uuid}.collections` key, scoped
+  by switchProfile like watchlist/history). API: create/rename/delete,
+  toggleCollectionMembership, removeFromCollection, isInCollection,
+  collectionIDs(containing:).
+- **Sidebar**: new `SidebarItem.collections` case → "Collections" row in Library
+  section (rectangle.stack icon, runtime-validated). Hub page via ContentView
+  switch + pushable `CollectionNavigation` destination.
+- **CollectionsView** (hub): Apple-TV header + count badge, "+ New List" glass
+  button (alert w/ TextField), dashed New tile leading the grid, empty-state
+  glass card. Cards = fanned poster stack (up to 3 members, CachedImage w/
+  content closure — NOTE: CachedImage REQUIRES @ViewBuilder content closure, no
+  plain init), name/count caption, hover pencil/trash actions + contextMenu,
+  rename/delete alerts (delete keeps titles, only removes list).
+- **CollectionDetailView**: pushed grid of members (GlassCard portrait,
+  NavigationLink→Detail works via existing MediaItem destination), X-badge on
+  hover to remove items, rename/delete in header, member-empty state.
+- **DetailView**: new glass circle button (rectangle.stack.badge.plus,
+  validated) next to Love → popover listing collections with live checkmarks +
+  inline "New list name" field that creates AND adds in one step.
+
+### Gotchas this round
+- CachedImage(url:) alone doesn't compile — needs trailing content closure
+  (phase.image pattern, see GlassCard).
+- Nested Button inside NavigationLink label intercepts its own tap (hover
+  actions don't navigate) — verify at runtime.
+
+### TODO verify (runtime)
+- Create/rename/delete lists from hub + detail; per-profile isolation
+- Poster stacks render; add/remove via DetailView popover checkmarks
+- Hover trash/pencil on cards navigate correctly (should NOT navigate)
+
+### REMAINING
+- Account system decision (Firebase vs alternatives) + login/signup + guests
+- Cascade personal Telegram debrid (future plan, personal-scale only)
+- Release build verification (size + playback)
+
+---
+
+## Aug 26, 2026 — PiP v2 (Cascade architecture) VERIFIED BY USER ✅
+"Perfect." Entry seamless, controls work, expand/close round-trip good.
+Next up: Collections (custom user lists).
+Builds clean, app relaunched. v1 worked for ENTRY but controls were dead + user
+wanted Cascade parity ("pip limited to that window").
+
+### Why v1's controls were dead (lesson)
+Borderless NSPanel with canBecomeKey=false → never becomes key window →
+tracking-area enter/exit NEVER delivered → hover chrome never appeared →
+"controls aren't working". Cascade uses [.titled, .closable,
+.fullSizeContentView, .nonactivatingPanel] + makeKeyAndOrderFront → key-capable,
+native traffic lights, working hover.
+
+### v2 = faithful port of Cascade Features/PictureInPictureWindow.swift
+CONTRACT: entering PiP ADOPTS the mpv core and CLOSES the player window — the
+panel is where playback lives. No zombie windows.
+- PiPManager RETAINS layer (MPVLayerView) + MPVViewController + MPVController
+  (PlayerView's @StateObject dies with the window; weak refs would dangle).
+- Teardown hazard #1: MPVVideoView.dismantleNSViewController skips cleanup while
+  PiPManager.isHosting(layer) (Cascade-exact pattern).
+- Teardown hazard #2: PlayerView.onDisappear guards on isHandingOffCore so the
+  handoff close neither saves progress nor stops mpv.
+- Panel: titled+closable+fullSizeContentView+nonactivating, hidden transparent
+  titlebar (traffic lights work), .floating, canJoinAllSpaces+fullScreenAuxiliary,
+  movable by background, aspect-sized (~400w cap 300h), remembers last position.
+- Mini chrome (SwiftUI in NSHostingView pinned bottom, hover via tracking area):
+  play/pause · live title · expand · 2pt progress line. Overlay binds to
+  @Published miniIsPlaying/miniProgress/miniTitle mirrored from the controller.
+- Duties taken over from PlayerView while floating:
+  - mpv.onPlaybackError → PlayerManager.tryNextStream() (auto-fallback works)
+  - $currentStreamURL.dropFirst() → play new URL in same core (⚠️ dropFirst is
+    CRITICAL — Combine replays current value; without it entering PiP restarts
+    playback at 0:00) + refresh miniTitle
+  - 0.5s timer: preload >0.9, auto-play-next at ≤1s remaining (respects
+    Settings toggle); playNextEpisode passes isAutoAdvance:true so it skips
+    intercept and keeps floating
+- Exit paths:
+  - Expand button / re-opening same title → full stop (layer.cleanup()) +
+    pendingResumeTime armed → PlayerWindowRouter.openPlayer(itemID) reopens
+    player window → PlayerView seek-once onChange(timePos>0.3) resumes exactly
+  - X / traffic light → save progress → PlayerManager.close() → full stop
+  - User plays a DIFFERENT title → play() top calls
+    interceptPlaybackRequest(): saves progress + tears down before refetch
+- PlayerWindowRouter.openPlayer captured from ContentView environment
+  (openWindow is env-only; static closure bridges AppKit→SwiftUI).
+
+### GOTCHAS hit (do not re-learn these)
+- NSColor has NO .opacity (AppKit) → withAlphaComponent. NSView has NO
+  insertSubview (UIKit). mouseEntered(_:) → mouseEntered(with:) newer SDK.
+- Subclassing NSView.init(frame:) EXACTLY needs `override` (different signature
+  doesn't).
+- Borderless panels break ALL input routing (see lesson above).
+- Combine @Published replays current value on subscribe → dropFirst() when the
+  side effect must only fire on CHANGES.
+
+### TODO verify (runtime)
+- Enter PiP: video continues seamlessly, NO restart at 0:00 (dropFirst check)
+- Hover shows strip; play/pause + expand + traffic-light close all work
+- Expand resumes at exact position; X saves progress and stops
+- Auto-next episode keeps floating; dead source falls through headlessly
+- Playing another title from browse UI tears down panel cleanly
+
+### REMAINING
+- Collections (custom user lists)
+- Account system decision (Firebase vs alternatives) + login/signup + guests
+- Cascade personal Telegram debrid (future plan, personal-scale only)
+- Release build verification (size + playback)
+
+---
+
+## Aug 25, 2026 (session 3) — Feature Wave: 7 features shipped
 Committed 7a83d76. Shipped: OpenSubtitles integration (addon + player picker),
 auto-play next episode (10s countdown + Cancel) & Skip Intro (first 90s),
 real Downloads (stream-to-file, progress, offline playback), Person pages

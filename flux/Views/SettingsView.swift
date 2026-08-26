@@ -25,28 +25,72 @@ struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
-    
+    @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
+
     var body: some View {
         Form {
             Section(header: Text("Account")) {
-                if let user = authManager.currentUser {
+                if authManager.isAuthenticated, let user = authManager.currentUser {
                     HStack {
-                         Text(user.email ?? "User")
-                         Spacer()
-                         Button("Sign Out") { authManager.signOut() }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(user.email ?? "User")
+                                .font(.system(size: 13, weight: .semibold))
+                            if let synced = authManager.lastSyncDate {
+                                Text("Synced \(synced.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Sync Now") { authManager.syncNow() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Button("Sign Out") { authManager.signOut() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                } else {
+                    HStack {
+                        Text(authManager.isLoading ? "Working…" : "Sign in to sync your library across Macs.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Sign In") { showAuth = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                    if let error = authManager.errorMessage {
+                        Text(error).font(.caption).foregroundStyle(.red)
                     }
                 }
             }
-            
+
             Section(header: Text("Discovery")) {
                 Toggle("Enable Flux Home Catalogue", isOn: $enableFluxCatalogue)
-                Text("Show Trending and Popular sections from TMDB at the top of Home.")
+                Text("Show Popular and New Release sections (powered by Cinemeta, Stremio's free catalogue) at the top of Home.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section(header: Text("Metadata (Optional)")) {
+                SecureField("TMDB API key", text: $tmdbApiKey)
+                    .textFieldStyle(.roundedBorder)
+                Text("Flux works out of the box with no key. Add your own free TMDB key to unlock richer detail: cast photos, similar titles, and genre discovery. Leave blank to stay fully keyless.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !tmdbApiKey.isEmpty {
+                    Button("Clear TMDB key") { tmdbApiKey = "" }
+                        .controlSize(.small)
+                }
+            }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $showAuth) {
+            AuthView()
+        }
     }
+
+    @State private var showAuth = false
 }
 
 // MARK: - 2. Streaming Settings
@@ -148,7 +192,10 @@ struct AdvancedSettingsView: View {
                     }
                 }
                 .onChange(of: stremioCacheGB) { _, newValue in
-                    Task { await StremioServerManager.shared.setCacheSize(gigabytes: newValue) }
+                    Task {
+                        await StremioServerManager.shared.setCacheSize(gigabytes: newValue)
+                        await StremioServerManager.shared.evictCacheIfNeeded()
+                    }
                 }
 
                 if !cacheUsage.isEmpty {
@@ -167,7 +214,26 @@ struct AdvancedSettingsView: View {
             }
 
             Section(header: Text("About")) {
-                Text("Version 1.0.0 (Beta)")
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.35), radius: 4, y: 2)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Flux")
+                            .font(.system(size: 15, weight: .bold))
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0") (Beta)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(.vertical, 2)
             }
         }
         .formStyle(.grouped)

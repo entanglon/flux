@@ -79,27 +79,13 @@ class AddonManager: ObservableObject {
     private func ensureDefaultAddons() {
         // Purge Hydra and dead addons from previous sessions
         addons.removeAll { $0.id == "hydra.local.server" || $0.url.contains("127.0.0.1:51546") || $0.url.contains("hayd.uk") }
-        
-        // Cinemeta — catalog + metadata (always needed for browsing)
-        let cinemetaID = "official.cinemeta"
-        if !addons.contains(where: { $0.id == cinemetaID }) {
-            let cinemeta = StremioAddon(
-                id: cinemetaID,
-                name: "Cinemeta",
-                description: "Movie and series catalog",
-                version: "3.0.0",
-                url: "https://v3-cinemeta.strem.io",
-                transportUrl: "https://v3-cinemeta.strem.io",
-                isEnabled: true,
-                catalogs: [
-                    StremioCatalog(type: "movie", id: "top", name: "Popular"),
-                    StremioCatalog(type: "series", id: "top", name: "Popular")
-                ],
-                resources: ["catalog", "meta"]
-            )
-            addons.append(cinemeta)
-        }
-        
+
+        // Cinemeta is no longer a user-facing addon: the built-in Flux Home
+        // Catalogue + search hit it directly (StremioService.cinemetaURL), so a
+        // seeded copy only produced duplicate "Popular" rails on Home. Remove any
+        // copy persisted by older builds.
+        addons.removeAll { $0.id == "official.cinemeta" || $0.url.contains("cinemeta.strem.io") }
+
         // Torrentio — torrent streams (the gold standard)
         let torrentioID = "com.stremio.torrentio"
         if !addons.contains(where: { $0.id == torrentioID || $0.url.contains("torrentio.strem.fun") }) {
@@ -187,15 +173,21 @@ class AddonManager: ObservableObject {
         }
 
         // OpenSubtitles v3 — online subtitle search (powers the player's subtitle picker)
+        // Migration: older builds shipped the dead "v3-opensubtitles" host — replace it.
         let openSubtitlesID = "opensubtitles3"
+        let openSubtitlesHost = "https://opensubtitles-v3.strem.io"
+        if let staleIdx = addons.firstIndex(where: { $0.url.contains("v3-opensubtitles") }) {
+            addons[staleIdx].url = openSubtitlesHost
+            addons[staleIdx].transportUrl = openSubtitlesHost
+        }
         if !addons.contains(where: { $0.id == openSubtitlesID || $0.url.contains("opensubtitles") }) {
             let openSubs = StremioAddon(
                 id: openSubtitlesID,
                 name: "OpenSubtitles",
                 description: "Online subtitle search",
                 version: "1.0.0",
-                url: "https://v3-opensubtitles.strem.io",
-                transportUrl: "https://v3-opensubtitles.strem.io",
+                url: openSubtitlesHost,
+                transportUrl: openSubtitlesHost,
                 isEnabled: true,
                 catalogs: nil,
                 resources: ["subtitles"]

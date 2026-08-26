@@ -25,7 +25,7 @@ struct DownloadsView: View {
                     }
                     Spacer()
                 }
-                .padding(.top, 48)
+                .padding(.top, LibraryScheme.headerTopPadding)
 
                 if downloadManager.activeDownloads.isEmpty && downloadManager.completedDownloads.isEmpty {
                     emptyState
@@ -33,8 +33,7 @@ struct DownloadsView: View {
                     if !downloadManager.activeDownloads.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Downloading")
-                                .font(.title3)
-                                .fontWeight(.bold)
+                                .font(.system(size: 20, weight: .bold))
                                 .foregroundStyle(.white)
 
                             ForEach(downloadManager.activeDownloads) { item in
@@ -46,8 +45,7 @@ struct DownloadsView: View {
                     if !downloadManager.completedDownloads.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Completed")
-                                .font(.title3)
-                                .fontWeight(.bold)
+                                .font(.system(size: 20, weight: .bold))
                                 .foregroundStyle(.white)
 
                             ForEach(downloadManager.completedDownloads) { item in
@@ -57,33 +55,24 @@ struct DownloadsView: View {
                     }
                 }
             }
-            .padding(.leading, 268)
-            .padding(.trailing, 40)
-            .padding(.bottom, 80)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
-        .ignoresSafeArea(edges: .top)
+        .background(Color.clear)
+        .navigationBarBackButtonHidden(true)
+        .toolbarVisibility(.hidden, for: .windowToolbar)
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 36, weight: .bold))
-                .foregroundStyle(LinearGradient(colors: [.teal, .cyan], startPoint: .top, endPoint: .bottom))
-
-            VStack(spacing: 6) {
-                Text("No Downloads")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Text("Download movies and episodes from any title's page to watch them offline.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .padding(.top, 40)
+        LibraryEmptyState(
+            icon: "arrow.down.circle",
+            title: "No Downloads",
+            message: "Download movies and episodes from any title's page to watch them offline."
+        )
     }
 
     // MARK: - Rows
@@ -111,7 +100,7 @@ struct DownloadsView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.15))
-                        Capsule().fill(Color.cyan)
+                        Capsule().fill(Color.white.opacity(0.85))
                             .frame(width: geo.size.width * progress)
                     }
                 }
@@ -141,12 +130,12 @@ struct DownloadsView: View {
     private func completedRow(_ item: DownloadItem) -> some View {
         HStack(spacing: 16) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(LinearGradient(colors: [.teal.opacity(0.5), .cyan.opacity(0.3)], startPoint: .top, endPoint: .bottom))
+                .fill(Color.white.opacity(0.08))
                 .frame(width: 64, height: 64)
                 .overlay {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.white)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
 
             VStack(alignment: .leading, spacing: 4) {

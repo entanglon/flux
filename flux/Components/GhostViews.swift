@@ -84,18 +84,21 @@ struct GhostCard: View {
     }
 }
 
-/// Full-bleed 16:9 hero ghost (featured carousel placeholder).
+/// Hero ghost matching FeaturedCarousel's exact footprint (fixed height —
+/// NOT aspect-fit, which drifted with window width and jumped on load).
 struct GhostHero: View {
+    var height: CGFloat = 680
+
     var body: some View {
-        Color.clear
-            .aspectRatio(16/9, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .overlay {
+        Rectangle()
+            .fill(
                 LinearGradient(
                     colors: [Color.white.opacity(0.07), Color.white.opacity(0.03)],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
-            }
+            )
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
             .shimmer()
     }
 }

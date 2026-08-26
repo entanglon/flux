@@ -100,6 +100,7 @@ struct HomeView: View {
 
                     // ... rest of content rows ...
                     fluxNativeRows
+                    exploreOTTRow
                     addonRows
                     watchlistRow
                     genreRow
@@ -140,6 +141,27 @@ struct HomeView: View {
         }
     }
     
+    @ViewBuilder private var exploreOTTRow: some View {
+        if enableFluxCatalogue {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Explore")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .padding(.leading, 268)
+                    .padding(.trailing, 40)
+
+                CarouselView(items: OTTPlatform.all, spacing: 16, itemWidth: 200) { platform in
+                    NavigationLink(value: MediaListView.ListType.ott(id: platform.id, name: platform.name)) {
+                        OTTCard(platform: platform)
+                            .frame(width: 200)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 16)
+        }
+    }
+
     @ViewBuilder private var addonRows: some View {
         ForEach(addonSections) { section in
             VStack(alignment: .leading, spacing: 16) {
@@ -219,13 +241,13 @@ struct HomeView: View {
 extension HomeView {
     private func loadData() async {
         do {
-            // 1. Featured Hero - Using Trending All for a perfect mix of Popularity + Newness
-            if let trending = try? await TMDBEnricher.shared.fetchTrendingAll() {
-                self.heroContent = Array(trending.filter { $0.isReleased }.prefix(20))
+            // 1. Featured Hero - Cinemeta's Popular movies (keyless)
+            if let popular = try? await StremioService.shared.fetchCatalog(type: "movie", id: "top") {
+                self.heroContent = Array(popular.filter { $0.isReleased }.prefix(20))
             }
             
             // 2. Load Sections
-            await fetchNativeTMDBSections()
+            await fetchNativeCinemetaSections()
             await fetchAddonSections() // Restore Addon support
             
             // 3. Background: Enrich History Items (fills missing thumbnails, writes back)
@@ -245,67 +267,43 @@ extension HomeView {
             }
         } catch {
             print("Error fetching data: \(error)")
-            await fetchNativeTMDBSections()
+            await fetchNativeCinemetaSections()
             await MainActor.run {
                 self.isLoading = false
             }
         }
     }
     
-    private func fetchNativeTMDBSections() async {
-        var fetchedSections: [CatalogSection] = []
-        
-        // We fetch these in parallel for speed
-        await withTaskGroup(of: CatalogSection?.self) { group in
-            // Trending
-            group.addTask {
-                 if let items = try? await TMDBEnricher.shared.fetchTrending(type: "movie"), !items.isEmpty {
-                     return CatalogSection(addonName: "TMDB", title: "Trending Movies", type: "movie", items: items)
-                 }
-                 return nil
-            }
-            
-            // Popular TV
-            group.addTask {
-                 if let items = try? await TMDBEnricher.shared.fetchPopular(type: "tv"), !items.isEmpty {
-                     return CatalogSection(addonName: "TMDB", title: "Popular Series", type: "series", items: items)
-                 }
-                 return nil
-            }
-            
-            // Upcoming
-            group.addTask {
-                 if let items = try? await TMDBEnricher.shared.fetchUpcomingMovies(), !items.isEmpty {
-                     return CatalogSection(addonName: "TMDB", title: "Upcoming Movies", type: "movie", items: items)
-                 }
-                 return nil
-            }
-            
-            // Top Rated TV
-            group.addTask {
-                if let items = try? await TMDBEnricher.shared.fetchTopRated(type: "tv"), !items.isEmpty {
-                    return CatalogSection(addonName: "TMDB", title: "Top Rated Shows", type: "series", items: items)
-                }
-                return nil
-            }
+    private func fetchNativeCinemetaSections() async {
+        // Cinemeta discovery rails — free, keyless (Stremio's own metadata source).
+        // (title, type, catalog id)
+        let defs: [(String, String, String)] = [
+            ("Popular Movies", "movie", "top"),
+            ("Popular Series", "series", "top"),
+            ("New Releases", "movie", "year"),
+            ("Top Rated Shows", "series", "imdbRating"),
+        ]
 
+        var fetchedSections: [CatalogSection] = []
+        await withTaskGroup(of: CatalogSection?.self) { group in
+            for (title, type, id) in defs {
+                group.addTask {
+                    if let items = try? await StremioService.shared.fetchCatalog(type: type, id: id), !items.isEmpty {
+                        return CatalogSection(addonName: "Cinemeta", title: title, type: type, items: items)
+                    }
+                    return nil
+                }
+            }
             for await section in group {
                 if let s = section { fetchedSections.append(s) }
             }
         }
-        
+
         await MainActor.run {
-            // Sort sections by a fixed preference
-            let order = ["Trending Movies", "Popular Series", "Upcoming Movies", "Top Rated Shows"]
-            // The dedicated "Upcoming Movies" row keeps ONLY genuinely unreleased
-            // titles (TMDB's upcoming endpoint leaks just-released ones) — every
-            // other row filters unreleased out (nothing to play yet). Empty
-            // sections are dropped entirely so no hollow rails render.
+            let order = defs.map { $0.0 }
+            // Nothing to play until it's released — drop unreleased, then hollow rails.
             let released = fetchedSections.map { section -> CatalogSection in
-                if section.title == "Upcoming Movies" {
-                    return CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { !$0.isReleased })
-                }
-                return CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
+                CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
             }
             .filter { !$0.items.isEmpty }
             self.nativeSections = released.sorted { s1, s2 in

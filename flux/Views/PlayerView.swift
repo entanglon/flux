@@ -2,7 +2,9 @@ import SwiftUI
 import Combine
 
 struct PlayerView: View {
-    @StateObject private var mpv = MPVController()
+    // Acquired at init: adopts the detail-page prefetch's warm mpv core when
+    // one matches this title (already buffering → instant start), else fresh.
+    @ObservedObject private var mpv: MPVController
     @ObservedObject private var playerManager = PlayerManager.shared
     @State private var showExitWarning = false
     @State private var animatedProgress: Double = 0.0
@@ -11,7 +13,14 @@ struct PlayerView: View {
     @State private var autoPlayCancelled = false
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
-    
+
+    init(item: MediaItem?) {
+        self.item = item
+        // Idempotent: re-inits (any PlayerManager @Published change rebuilds the
+        // root) always hand back the SAME session controller.
+        _mpv = ObservedObject(wrappedValue: PlayerManager.shared.beginSession())
+    }
+
     private let loadingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     
     var body: some View {
@@ -52,6 +61,9 @@ struct PlayerView: View {
                 onClose: {
                     playerManager.close()
                     dismiss() // Dismiss the window
+                },
+                onTogglePiP: {
+                    PiPManager.shared.toggle(mpv: mpv)
                 },
                 audioTracks: mpv.audioTracks,
                 subtitleTracks: mpv.subtitleTracks,
@@ -121,16 +133,27 @@ struct PlayerView: View {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
                 playerManager.tryNextStream()
             }
-            // If URL is already present (Instant Replay), start playing
-            if let url = playerManager.currentStreamURL {
+            if mpv.hasLoadedMedia {
+                // Warm core from the detail-page prefetch — already holding the
+                // stream buffered. Just release the hold; do NOT reload.
+                print("PlayerView: adopting warm core, releasing hold...")
+                mpv.play()
+                animatedProgress = 1.0
+            } else if let url = playerManager.currentStreamURL {
+                // If URL is already present (Instant Replay), start playing
                 print("PlayerView: onAppear found url, playing...")
                 mpv.play(url: url)
             }
         }
         .onDisappear {
+            // Entering PiP closes this window as a deliberate handoff — the
+            // floating panel owns the core now. Saving progress or stopping
+            // mpv here would kill playback mid-handoff.
+            guard !PiPManager.shared.isHandingOffCore else { return }
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             mpv.pause()
             mpv.stop()
+            playerManager.endSession()
         }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             if let url = newURL {
@@ -139,6 +162,17 @@ struct PlayerView: View {
                 animatedProgress = 0.0
                 autoPlayCancelled = false
                 mpv.play(url: url)
+            }
+        }
+        // Resume-after-PiP-expand: once the fresh stream is producing frames,
+        // jump to the position the floating panel was at (once).
+        .onChange(of: mpv.timePos) { _, t in
+            guard let resume = playerManager.pendingResumeTime else { return }
+            guard t > 0.3, mpv.duration > 0 else { return }
+            playerManager.pendingResumeTime = nil
+            if abs(t - resume) > 1.5 {
+                print("PlayerView: resuming after PiP expand at \(Int(resume))s")
+                mpv.seek(absolute: resume)
             }
         }
         .onChange(of: mpv.progress) { _, newProgress in

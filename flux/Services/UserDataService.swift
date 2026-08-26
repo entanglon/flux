@@ -6,6 +6,7 @@ class UserDataService: ObservableObject {
     
     @Published var watchlist: [MediaItem] = []
     @Published var history: [MediaItem] = []
+    @Published var collections: [UserCollection] = []
     
     // User Mock
     struct User { var id: String }
@@ -13,6 +14,7 @@ class UserDataService: ObservableObject {
     
     private var watchlistKey = "localWatchlistDataStremio" // New Key to prevent crash from old TMDB int IDs
     private var historyKey = "localHistoryDataStremio"
+    private var collectionsKey = "localCollectionsData"
 
     /// Scopes all history/watchlist storage to a profile. When `migrateLegacyData`
     /// is set (first profile ever created), pre-profile data is carried over so
@@ -21,6 +23,7 @@ class UserDataService: ObservableObject {
         if let profile {
             historyKey = "profile.\(profile.id.uuidString).history"
             watchlistKey = "profile.\(profile.id.uuidString).watchlist"
+            collectionsKey = "profile.\(profile.id.uuidString).collections"
 
             if migrateLegacyData,
                UserDefaults.standard.data(forKey: historyKey) == nil,
@@ -30,6 +33,7 @@ class UserDataService: ObservableObject {
         }
         watchlist = []
         history = []
+        collections = []
         loadInitialData()
     }
     
@@ -58,6 +62,8 @@ class UserDataService: ObservableObject {
         if let historyData = UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]] {
             self.history = parseItems(historyData)
         }
+
+        collections = loadCollections()
     }
 
     /// Fills in missing artwork/IDs for history items via TMDB and publishes the
@@ -222,6 +228,163 @@ class UserDataService: ObservableObject {
         let newItems = parseItems(currentData)
         DispatchQueue.main.async {
             self[keyPath: target] = newItems
+        }
+    }
+    
+    // MARK: - Collections (custom user lists)
+    //
+    // Storage shape (one key per profile): [[String: Any]] where each entry is
+    // { id, name, createdAt, items: Data } — `items` is JSON-serialized
+    // [[String: Any]] using the SAME dict shape as watchlist/history entries,
+    // so parseItems() decodes them and grids render with full artwork offline.
+    
+    private func loadCollections() -> [UserCollection] {
+        guard let raw = UserDefaults.standard.array(forKey: collectionsKey) as? [[String: Any]] else { return [] }
+        return raw.compactMap { decodeCollection($0) }.sorted { $0.createdAt < $1.createdAt }
+    }
+    
+    private func saveCollections() {
+        let raw: [[String: Any]] = collections.map { c in
+            let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
+            return [
+                "id": c.id,
+                "name": c.name,
+                "createdAt": c.createdAt.timeIntervalSince1970,
+                "itemsData": itemsData
+            ]
+        }
+        UserDefaults.standard.set(raw, forKey: collectionsKey)
+    }
+    
+    /// Same dict shape addToList() writes for watchlist/history entries.
+    private func itemDict(_ item: MediaItem) -> [String: Any] {
+        let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
+        let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
+        let backdropVal = item.backdropURL?.absoluteString ?? item.heroURL?.absoluteString ?? imageVal
+        return [
+            "id": item.id,
+            "type": typeString,
+            "title": item.title,
+            "image": imageVal,
+            "backdrop": backdropVal,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+    }
+    
+    private func decodeCollection(_ dict: [String: Any]) -> UserCollection? {
+        guard let id = dict["id"] as? String,
+              let name = dict["name"] as? String else { return nil }
+        let created = (dict["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
+        var items: [MediaItem] = []
+        if let data = dict["itemsData"] as? Data,
+           let dicts = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+            items = parseItems(dicts)
+        }
+        return UserCollection(id: id, name: name, createdAt: created, items: items)
+    }
+    
+    @discardableResult
+    func createCollection(name: String) -> UserCollection {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let collection = UserCollection(
+            id: UserCollection.newID(),
+            name: trimmed.isEmpty ? "New List" : trimmed,
+            createdAt: Date(),
+            items: []
+        )
+        collections.append(collection)
+        saveCollections()
+        return collection
+    }
+    
+    func renameCollection(id: String, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let idx = collections.firstIndex(where: { $0.id == id }) else { return }
+        collections[idx].name = trimmed
+        saveCollections()
+    }
+    
+    func deleteCollection(id: String) {
+        collections.removeAll { $0.id == id }
+        saveCollections()
+    }
+    
+    func isInCollection(collectionID: String, item: MediaItem) -> Bool {
+        collections.first(where: { $0.id == collectionID })?.items.contains { $0.id == item.id } ?? false
+    }
+    
+    func collectionIDs(containing item: MediaItem) -> Set<String> {
+        Set(collections.filter { c in c.items.contains { $0.id == item.id } }.map(\.id))
+    }
+    
+    func toggleCollectionMembership(collectionID: String, item: MediaItem) {
+        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        if collections[idx].items.contains(where: { $0.id == item.id }) {
+            collections[idx].items.removeAll { $0.id == item.id }
+        } else {
+            collections[idx].items.insert(item, at: 0)
+        }
+        saveCollections()
+    }
+    
+    func removeFromCollection(collectionID: String, item: MediaItem) {
+        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        collections[idx].items.removeAll { $0.id == item.id }
+        saveCollections()
+    }
+
+    // MARK: - Cloud sync payload
+
+    /// Full library snapshot for the cloud blob. Uses raw UserDefaults arrays so
+    /// it captures everything exactly as persisted (including episode metadata).
+    func exportCloudPayload() -> [String: Any] {
+        return [
+            "watchlist": UserDefaults.standard.array(forKey: watchlistKey) ?? [],
+            "history": UserDefaults.standard.array(forKey: historyKey) ?? [],
+            "collections": collections.map { c in
+                let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
+                return [
+                    "id": c.id,
+                    "name": c.name,
+                    "createdAt": c.createdAt.timeIntervalSince1970,
+                    "itemsData": itemsData.base64EncodedString()
+                ]
+            }
+        ]
+    }
+
+    var hasLibraryContent: Bool {
+        !watchlist.isEmpty || !history.isEmpty || !collections.isEmpty
+    }
+
+    /// Applies a cloud payload to the CURRENT profile (replaces local state).
+    func applyCloudPayload(_ payload: [String: Any]) {
+        let watchlistData = payload["watchlist"] as? [[String: Any]]
+        let historyData = payload["history"] as? [[String: Any]]
+
+        var imported: [UserCollection] = []
+        if let raw = payload["collections"] as? [[String: Any]] {
+            for dict in raw {
+                guard let id = dict["id"] as? String,
+                      let name = dict["name"] as? String else { continue }
+                let created = (dict["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
+                var items: [MediaItem] = []
+                if let b64 = dict["itemsData"] as? String,
+                   let data = Data(base64Encoded: b64),
+                   let dicts = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+                    items = parseItems(dicts)
+                }
+                imported.append(UserCollection(id: id, name: name, createdAt: created, items: items))
+            }
+        }
+
+        DispatchQueue.main.async {
+            // Persist first so disk matches memory.
+            self.collections = imported.sorted { $0.createdAt < $1.createdAt }
+            self.saveCollections()
+            if let w = watchlistData { self.watchlist = self.parseItems(w) }
+            if let h = historyData { self.history = self.parseItems(h) }
+            print("[UserDataService] Cloud payload applied")
         }
     }
 }

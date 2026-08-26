@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var refreshToken = 0
     @ObservedObject private var seasonDropdown = SeasonDropdownController.shared
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -15,11 +16,7 @@ struct ContentView: View {
             NavigationStack(path: $path) {
                 ZStack {
                     // Global dark mesh background
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    Color.black
                     .ignoresSafeArea()
                     
                     Group {
@@ -31,6 +28,7 @@ struct ContentView: View {
                             case .tvShows: TVShowsView()
                             case .trending: TrendingView()
                             case .watchlist: WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
+                            case .collections: CollectionsView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
                             case .history: HistoryView()
                             case .downloads: DownloadsView()
                             }
@@ -43,6 +41,9 @@ struct ContentView: View {
                 }
                 .navigationDestination(for: MediaItem.self) { item in
                     DetailView(item: item)
+                }
+                .navigationDestination(for: CollectionNavigation.self) { nav in
+                    CollectionDetailView(collectionID: nav.id)
                 }
                 .navigationDestination(for: GenreNavigation.self) { genreNav in
                     MediaListView(title: genreNav.name, type: .genre(id: genreNav.id, name: genreNav.name))
@@ -57,6 +58,11 @@ struct ContentView: View {
             .toolbar(removing: .title)
             .windowToolbarFullScreenVisibility(.onHover)
             .ignoresSafeArea(.all, edges: .all)
+            // Give PiPManager a way to reopen the player window on expand
+            // (openWindow is environment-only; capture it while ContentView lives).
+            .onAppear {
+                PlayerWindowRouter.openPlayer = { openWindow(id: "player", value: $0) }
+            }
             
             // MARK: - System Sidebar Material
             VStack(alignment: .leading, spacing: 0) {                // Traffic light clearance height
@@ -195,6 +201,7 @@ struct ContentView: View {
                 .padding(.top, 4)
             
             sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark", fillIcon: "bookmark.fill")
+            sidebarRow(.collections, title: "Collections", icon: "rectangle.stack", fillIcon: "rectangle.stack.fill")
             sidebarRow(.history, title: "Recently Added", icon: "clock", fillIcon: "clock.fill")
             sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
         }

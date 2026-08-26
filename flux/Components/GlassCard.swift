@@ -54,7 +54,7 @@ struct GlassCard: View {
                                     }
                                 }
                                 
-                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
+                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL, maxDimension: 800) { phase in
                                     if let img = phase.image {
                                         img.resizable()
                                             .aspectRatio(contentMode: .fit)
@@ -64,7 +64,9 @@ struct GlassCard: View {
                                 }
                             }
                         } else {
-                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL)) { phase in
+                            // Decode at render resolution — the 300px default
+                            // left cards soft on Retina (cards draw ~480px).
+                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 800) { phase in
                                 switch phase {
                                 case .empty:
                                     Rectangle()

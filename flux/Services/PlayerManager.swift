@@ -24,6 +24,242 @@ class PlayerManager: ObservableObject {
     /// Live health verification per stream (HTTP TTFB probe / seeder-based for torrents),
     /// keyed by stream.stableKey so results survive refetch snapshots.
     @Published var probeStatus: [String: StreamProbeResult] = [:]
+    /// Position to jump to once the next playback starts producing frames —
+    /// armed when expanding a PiP session back into the player window.
+    @Published var pendingResumeTime: Double? = nil
+
+    // MARK: - Detail-Page Prefetch (advanced loading)
+    //
+    // Opening a DetailView kicks off source resolution in the background:
+    //   - BOTH modes: streams are fetched (StreamManager cache) so the picker
+    //     appears instantly on Play.
+    //   - Flux Mode additionally resolves the best source, primes it (torrent
+    //     registration / HTTP edge warm) and builds a WARM mpv core that holds
+    //     the stream paused while buffering. Play adopts that core → instant
+    //     start. Core is discarded after 5 min or when superseded.
+
+    private struct WarmPlaybackCore {
+        let key: String
+        let url: URL
+        let controller: MPVController
+        let viewController: MPVViewController
+        let hostWindow: NSWindow?
+        let createdAt: Date
+    }
+
+    @Published private(set) var isPrefetching = false
+    private var prefetchTask: AsyncTask<Void, Never>?
+    private var inflightPrefetchKey: String?
+    private var prefetchedKey: String?
+    private var prefetchedStream: Stream?
+    private var prefetchedSubtitles: [StremioSubtitleTrack]?
+    private var prefetchedAt: Date?
+    private var warmCore: WarmPlaybackCore?
+    private var warmCoreDiscardTask: AsyncTask<Void, Never>?
+
+    func prefetchKey(for item: MediaItem, season: Int?, episode: Int?) -> String {
+        item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : item.id
+    }
+
+    /// DetailView .task hook — safe to call repeatedly; deduped per title.
+    /// Tiered: with NO active session the full pipeline runs (race + prime +
+    /// warm core). While something is playing/PiP'd, only the cheap stream
+    /// fetch runs — registering a second torrent would compete for the same
+    /// Stremio-server bandwidth as the active stream.
+    func startDetailPrefetch(item: MediaItem, season: Int? = nil, episode: Int? = nil) {
+        let sessionActive = currentItem != nil || PiPManager.shared.isActive
+        let key = prefetchKey(for: item, season: season, episode: episode)
+        if inflightPrefetchKey == key { return }
+        if prefetchedKey == key && warmCore?.key == key { return } // already primed
+
+        prefetchTask?.cancel()
+        inflightPrefetchKey = key
+        isPrefetching = true
+        print("[PlayerManager] Prefetch starting for \(key)\(sessionActive ? " (streams-only — session active)" : "")")
+        prefetchTask = AsyncTask { [weak self] in
+            await self?.runPrefetch(item: item, season: season, episode: episode, key: key, allowPrime: !sessionActive)
+        }
+    }
+
+    private func runPrefetch(item: MediaItem, season: Int?, episode: Int?, key: String, allowPrime: Bool) async {
+        async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
+
+        // Populates StreamManager's cache — the non-Flux picker reads from it
+        // on Play, so results show immediately instead of after addon fan-out.
+        let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { _ in }
+        guard !Task.isCancelled else { return }
+
+        let fluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+        defer {
+            if Task.isCancelled {
+                DispatchQueue.main.async { self.isPrefetching = false }
+            }
+        }
+        guard fluxEnabled, allowPrime, !streams.isEmpty else {
+            await MainActor.run {
+                self.prefetchedKey = key   // streams cached for instant picker
+                self.prefetchedAt = Date()
+                self.isPrefetching = false
+                self.inflightPrefetchKey = nil
+            }
+            return
+        }
+
+        guard let winner = await raceBestStream(from: streams), !Task.isCancelled else {
+            await MainActor.run {
+                self.isPrefetching = false
+                self.inflightPrefetchKey = nil
+            }
+            return
+        }
+
+        // Prime the pipeline so pieces/bytes are already flowing pre-Play:
+        // torrents register on the Stremio server (fire-and-forget per the
+        // Stremio-exact protocol); HTTP sources get a small ranged GET to warm
+        // proxy + CDN edge.
+        if winner.isTorrent {
+            AsyncTask { _ = await self.resolveTorrentStream(winner) }
+        } else {
+            Self.warmHTTP(url: getPlayableURL(for: winner))
+        }
+
+        let subs = await subsTask
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            // Session started while we were racing (user hit Play early) —
+            // playback is already resolving normally; don't build a warm core
+            // nobody will adopt (it would just buffer in the background).
+            guard self.currentItem == nil, !Task.isCancelled else {
+                self.isPrefetching = false
+                self.inflightPrefetchKey = nil
+                print("[PlayerManager] Prefetch aborted — playback started before priming finished")
+                return
+            }
+            self.prefetchedKey = key
+            self.prefetchedStream = winner
+            self.prefetchedSubtitles = subs
+            self.prefetchedAt = Date()
+            self.inflightPrefetchKey = nil
+            self.buildWarmCore(key: key, url: getPlayableURL(for: winner))
+            self.isPrefetching = false
+            print("[PlayerManager] ⚡ Prefetch primed: \(winner.cleanTitle) (\(winner.source)) — warm core holding")
+        }
+    }
+
+    private static func warmHTTP(url: URL) {
+        var request = URLRequest(url: url)
+        request.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
+        request.timeoutInterval = 4
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+    }
+
+    // MARK: Warm mpv core
+
+    private func buildWarmCore(key: String, url: URL) {
+        discardWarmCore()
+
+        let controller = MPVController()
+        let vc = MPVViewController(nibName: nil, bundle: nil)
+        vc.delegate = controller
+        controller.playerView = vc
+        _ = vc.view // forces loadView + viewDidLoad → mpv initialized + wired
+
+        // Park the render surface in an invisible corner window: detached
+        // CAOpenGLLayers never composite, and this pipeline creates the mpv
+        // render context lazily inside the layer's draw() — without a host
+        // window mpv would never start buffering.
+        let host = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 160, height: 90),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        host.alphaValue = 0.01
+        host.isOpaque = false
+        host.backgroundColor = .black
+        host.level = NSWindow.Level(rawValue: -1)
+        host.contentView = vc.view
+        if let visible = NSScreen.main?.visibleFrame {
+            host.setFrameOrigin(NSPoint(x: visible.minX, y: visible.minY))
+        }
+        host.orderFrontRegardless()
+
+        controller.pause()      // hold BEFORE loadfile → loads paused, cache fills
+        controller.play(url: url)
+
+        warmCore = WarmPlaybackCore(
+            key: key,
+            url: url,
+            controller: controller,
+            viewController: vc,
+            hostWindow: host,
+            createdAt: Date()
+        )
+
+        warmCoreDiscardTask?.cancel()
+        warmCoreDiscardTask = AsyncTask { [weak self] in
+            try? await AsyncTask.sleep(nanoseconds: 300_000_000_000) // 5 min TTL
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.discardWarmCore() }
+        }
+    }
+
+    /// Hands the warm core to a newly-opened player window (nil → build fresh).
+    /// Only adopted when the resolved URL matches what play() actually picked —
+    /// an Instant-Replay hit uses a different source and must NOT adopt.
+    /// A nil currentStreamURL (fast-path hasn't landed yet) adopts OPTIMISTICALLY:
+    /// the fast-path sets the very same URL moments later.
+    func acquireSessionController() -> MPVController {
+        if let core = warmCore,
+           let item = currentItem,
+           core.key == prefetchKey(for: item, season: currentSeason, episode: currentEpisode),
+           currentStreamURL == nil || core.url.absoluteString == currentStreamURL?.absoluteString {
+            print("[PlayerManager] ⚡ Adopting warm mpv core — playback ready")
+            let controller = core.controller
+            core.hostWindow?.orderOut(nil)
+            warmCore = nil
+            warmCoreDiscardTask?.cancel()
+            warmCoreDiscardTask = nil
+            return controller
+        }
+        discardWarmCore()
+        return MPVController()
+    }
+
+    // Session controller: PlayerView structs re-initialize constantly (the app
+    // root observes PlayerManager, so any @Published blip rebuilds them) — the
+    // session's mpv controller MUST be cached here so every init hands back the
+    // SAME instance instead of spawning replacements that orphan the video view.
+    private var sessionController: MPVController?
+
+    /// Idempotent per playback session — called from PlayerView.init.
+    func beginSession() -> MPVController {
+        if let controller = sessionController { return controller }
+        let controller = acquireSessionController()
+        sessionController = controller
+        return controller
+    }
+
+    func endSession() {
+        sessionController = nil
+    }
+
+    func discardWarmCore() {
+        warmCoreDiscardTask?.cancel()
+        warmCoreDiscardTask = nil
+        guard let core = warmCore else { return }
+        warmCore = nil
+        print("[PlayerManager] Discarding warm core (\(core.key)) age \(Int(Date().timeIntervalSince(core.createdAt)))s")
+        core.controller.stop()
+        let vc = core.viewController
+        let host = core.hostWindow
+        DispatchQueue.main.async {
+            host?.orderOut(nil)
+            vc.playerView.cleanup()
+        }
+    }
+
 
     /// Auto-failover safety valve: after this many consecutive dead sources, stop
     /// cascading silently and hand control back to the user (stream picker).
@@ -49,13 +285,29 @@ class PlayerManager: ObservableObject {
     /// so dead sources never cost us a second 12s timeout.
     private var recentlyDeadHashes: [String: Date] = [:]
 
+    // MARK: - Client firewall (engine perimeter defense)
+    //
+    // Magnet URIs originate from community addons — arbitrary third-party
+    // input. Validate EVERYTHING here before a request reaches the engine.
+
+    /// 40 hex chars, not zero, not degenerate (all-same-char).
+    static func validInfoHash(_ hash: String) -> Bool {
+        guard hash.count == 40,
+              hash.allSatisfy({ $0.isHexDigit }),
+              Set(hash).count > 1 else { return false }
+        return true
+    }
+
     private func torrentHash(_ stream: Stream) -> String? {
         guard stream.isTorrent else { return nil }
         let s = stream.url.absoluteString
         guard let range = s.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) else { return nil }
         // NOTE: must strip the "btih:" prefix — the raw match includes it, and
         // "/btih:<hash>/create" is a 404 on the Stremio server.
-        return String(s[range]).replacingOccurrences(of: "btih:", with: "")
+        let raw = String(s[range]).replacingOccurrences(of: "btih:", with: "")
+        // Normalize to canonical 40-hex; reject anything the engine can't take.
+        guard Self.validInfoHash(raw) else { return nil }
+        return raw
     }
 
     private func markHashDead(_ stream: Stream) {
@@ -130,7 +382,17 @@ class PlayerManager: ObservableObject {
     
     private init() {}
     
-    func play(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeImage: URL? = nil) {
+    func play(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeImage: URL? = nil, isAutoAdvance: Bool = false) {
+        // USER-initiated playback while a PiP session floats: same title =
+        // expand (resume at the floating position); different title = tear the
+        // floating session down first. Auto-advance skips this — the floating
+        // core just switches files and keeps playing.
+        var resumePos: Double?
+        if !isAutoAdvance {
+            resumePos = PiPManager.shared.interceptPlaybackRequest(item: item, season: season, episode: episode)
+        }
+        self.pendingResumeTime = resumePos
+
         self.currentItem = item
         self.currentSeason = season
         self.currentEpisode = episode
@@ -194,6 +456,26 @@ class PlayerManager: ObservableObject {
 
     private func fetchAndRace(item: MediaItem, season: Int?, episode: Int?) {
         self.isFetchingStreams = true
+
+        // ⚡ ADVANCED LOADING fast-path (Flux Mode): the detail page already
+        // resolved + primed + warm-buffered this exact title — start instantly.
+        let key = prefetchKey(for: item, season: season, episode: episode)
+        let isFluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+        if isFluxEnabled,
+           prefetchedKey == key,
+           let pf = prefetchedStream,
+           let at = prefetchedAt,
+           Date().timeIntervalSince(at) < 600 {
+            print("[PlayerManager] ⚡ Prefetch HIT — instant start: \(pf.cleanTitle)")
+            availableStreams = StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
+            verifyStreamHealth(availableStreams)
+            externalSubtitles = prefetchedSubtitles ?? []
+            isLoading = false
+            isFetchingStreams = false
+            finishSelect(pf)
+            return
+        }
+
         if let cachedStreams = StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode), !cachedStreams.isEmpty {
              print("[PlayerManager] Cache Hit! Ready to Race.")
              self.availableStreams = cachedStreams
@@ -370,12 +652,14 @@ class PlayerManager: ObservableObject {
 
     /// Builds the playable URL for a selected stream. For torrents, the Stremio server
     /// serves the file at /{infoHash}/{fileIdx} (torrent must be registered via /create first).
-    /// For HTTP streams with proxyHeaders, routes through the local StreamProxy.
+    /// For HTTP streams with proxyHeaders, routes through the local proxy.
     func getPlayableURL(for stream: Stream) -> URL {
         if stream.isTorrent {
             let str = stream.url.absoluteString
             if let hashRange = str.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) {
                 let hash = String(str[hashRange]).replacingOccurrences(of: "btih:", with: "")
+                // Firewall: never construct engine URLs from unvalidated hashes.
+                guard Self.validInfoHash(hash) else { return stream.url }
                 var components = URLComponents()
                 components.scheme = "http"
                 components.host = "127.0.0.1"
@@ -418,6 +702,12 @@ class PlayerManager: ObservableObject {
         }
 
         if stream.isTorrent {
+            // Client firewall: malformed hashes never reach the engine.
+            guard let hash = torrentHash(stream) else {
+                print("[PlayerManager] Rejecting torrent source with invalid infohash")
+                advancePast(stream)
+                return
+            }
             // Stremio-exact flow: register the torrent on the server (fire-and-forget)
             // and hand the URL to mpv IMMEDIATELY. The server blocks the file response
             // until pieces flow, mpv reports paused-for-cache → buffering overlay shows.
@@ -430,6 +720,12 @@ class PlayerManager: ObservableObject {
                 let serverUp = await StremioServerManager.shared.ensureRunning()
                 if serverUp {
                     // Fire-and-forget — do NOT block playback on metadata fetch.
+                    let magnetURL = stream.url.absoluteString
+                    StremioServerManager.shared.trackCreate(
+                        infoHash: hash,
+                        magnetURL: magnetURL,
+                        fileIdx: stream.fileIdx ?? 0
+                    )
                     AsyncTask { _ = await self.resolveTorrentStream(stream) }
                 }
                 await MainActor.run {
@@ -544,6 +840,13 @@ class PlayerManager: ObservableObject {
             self.currentSeason = nil
             self.currentEpisode = nil
             self.currentEpisodeImage = nil
+            self.pendingResumeTime = nil
+            // Session over — a held warm core is stale now.
+            self.prefetchedKey = nil
+            self.prefetchedStream = nil
+            self.prefetchedSubtitles = nil
+            self.discardWarmCore()
+            self.endSession()
         }
     }
     
@@ -588,7 +891,7 @@ class PlayerManager: ObservableObject {
             let finalImage = nextEpisodeImage
             
             await MainActor.run {
-                self.play(item, season: next.season, episode: next.episode, episodeImage: finalImage)
+                self.play(item, season: next.season, episode: next.episode, episodeImage: finalImage, isAutoAdvance: true)
             }
         }
     }

@@ -54,6 +54,14 @@ Stremio streaming server (server.js) as the local torrent engine.
 3. WebStreamrMBG public instance has had uptime issues — HTTP streams depend on it.
 4. Downloads page is a stub. Account system (Firebase vs alternatives) undecided.
 
+### 🤖 AI Consultant Workflow
+- **Claude and Qwen are available as external consultants**: when stuck on a major
+  architectural decision, WRITE A SELF-CONTAINED PROMPT (full context, constraints,
+  specific questions — assume the consultant knows nothing about Flux). Give the
+  prompt to the USER, who sends it to each model and pastes back the replies.
+  Weigh all responses together with our own analysis before deciding.
+- Used for: Rust-vs-Go streaming-engine decision (Aug 26, 2026 — see task.md).
+
 ## 🛠️ Developer Handbook (Contributor Guide)
 
 ### 🚀 Setup & Execution

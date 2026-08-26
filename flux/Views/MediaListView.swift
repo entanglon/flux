@@ -8,6 +8,7 @@ struct MediaListView: View {
         case trendingTV
         case popularTV
         case genre(id: Int, name: String) // TMDB genre — real ID + display name
+        case ott(id: String, name: String) // OTT platform — catalog code + display name
         case fixed(title: String, items: [MediaItem])
 
         var title: String {
@@ -18,6 +19,7 @@ struct MediaListView: View {
             case .trendingTV: return "Trending TV Shows"
             case .popularTV: return "Popular TV Shows"
             case .genre(_, let name): return name
+            case .ott(_, let name): return name
             case .fixed(let title, _): return title
             }
         }
@@ -62,31 +64,9 @@ struct MediaListView: View {
                         .foregroundStyle(.white)
 
                     if case .genre = type {
-                        HStack(spacing: 0) {
-                            ForEach(["movie", "tv"], id: \.self) { mt in
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        if genreMediaType != mt {
-                                            genreMediaType = mt
-                                            items = []
-                                            skipCount = 0
-                                            canLoadMore = true
-                                            Task { await loadData() }
-                                        }
-                                    }
-                                } label: {
-                                    Text(mt == "movie" ? "Movies" : "TV Shows")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(genreMediaType == mt ? .black : .white.opacity(0.7))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 7)
-                                        .background(
-                                            Capsule().fill(genreMediaType == mt ? Color.white : Color.white.opacity(0.12))
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                        mediaTypeToggle
+                    } else if case .ott = type {
+                        mediaTypeToggle
                     }
 
                     Spacer()
@@ -103,7 +83,7 @@ struct MediaListView: View {
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(
-            LinearGradient(gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]), startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color.black
         )
         .task {
             await loadData()
@@ -116,6 +96,35 @@ struct MediaListView: View {
         }
     }
     
+    @ViewBuilder
+    private var mediaTypeToggle: some View {
+        HStack(spacing: 0) {
+            ForEach(["movie", "tv"], id: \.self) { mt in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if genreMediaType != mt {
+                            genreMediaType = mt
+                            items = []
+                            skipCount = 0
+                            canLoadMore = true
+                            Task { await loadData() }
+                        }
+                    }
+                } label: {
+                    Text(mt == "movie" ? "Movies" : "TV Shows")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(genreMediaType == mt ? .black : .white.opacity(0.7))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(genreMediaType == mt ? Color.white : Color.white.opacity(0.12))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         if isLoading && items.isEmpty {
@@ -185,6 +194,11 @@ struct MediaListView: View {
                 let page = (skipCount / 20) + 1
                 newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType)
                 if newItems.isEmpty { canLoadMore = false }
+            case .ott(let platformID, _):
+                // OTT platform catalog — full page in one request, no pagination
+                let ottType = genreMediaType == "tv" ? "series" : "movie"
+                newItems = (try? await StremioService.shared.fetchOTTCatalog(platformID: platformID, type: ottType)) ?? []
+                canLoadMore = false
             case .fixed(_, let fixedItems):
                 newItems = fixedItems
                 canLoadMore = false

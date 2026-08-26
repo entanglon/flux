@@ -51,11 +51,22 @@ class StremioService {
     
     // Cinemeta Addon URL (Default Stremio Meta and Catalog Addon)
     private let cinemetaURL = "https://v3-cinemeta.strem.io"
-    
+
+    // "Streaming Catalogs" community addon — per-OTT-platform catalogs. Each
+    // catalog id is a platform code (nfx=Netflix, dnp=Disney+, amp=Prime Video…).
+    private let ottCatalogBase = "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwbXAsaGx1LHBjcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHplZSxubHosdmlsLHNzdCxjcGQsc3R6LGRwZSxtYmksdmlrLHNnbyxzb255bGl2Ojo6MTc2MTkyMTY1ODU5Mw%3D%3D"
+
+    /// Fetch the catalog for a single OTT platform (movies or series). Preserves
+    /// the platform's native order — that order IS "what's popular on X right now",
+    /// so we must not re-sort it by IMDb rating.
+    func fetchOTTCatalog(platformID: String, type: String) async throws -> [MediaItem] {
+        return try await fetchCatalog(type: type, id: platformID, baseURL: ottCatalogBase, preserveOrder: true)
+    }
+
     private init() {}
     
     // MARK: - Catalogs Fetching
-    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0) async throws -> [MediaItem] {
+    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0, preserveOrder: Bool = false) async throws -> [MediaItem] {
         let base = baseURL ?? cinemetaURL
         var urlString = "\(base)/catalog/\(type)/\(id)"
         
@@ -95,6 +106,9 @@ class StremioService {
         }
         
         // Sorting by popularity after enrichment (unless it's a specific catalog that needs order)
+        if preserveOrder {
+            return enrichedItems
+        }
         return enrichedItems.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
     }
     
@@ -135,6 +149,14 @@ class StremioService {
         var allTVShows: [MediaItem] = []
         
         await withTaskGroup(of: (movies: [MediaItem], tvShows: [MediaItem]).self) { group in
+            // Cinemeta is the primary search source — query it directly (it's no
+            // longer a user-facing addon, so it won't appear in enabledAddons).
+            group.addTask {
+                let m = (try? await self.fetchCatalog(type: "movie", id: "top", search: query)) ?? []
+                let t = (try? await self.fetchCatalog(type: "series", id: "top", search: query)) ?? []
+                return (m, t)
+            }
+
             for addon in addons {
                 guard let catalogs = addon.catalogs, !catalogs.isEmpty else { continue }
                 
@@ -195,6 +217,29 @@ class StremioService {
 }
 
 // MARK: - Extensions to Convert to MediaItem
+
+/// Cinemeta ships poster URLs at `poster/small` (300×450) and the OTT addon uses
+/// JustWatch (`/s332/`, ~332px) — both pixelate. Metahub is keyed by IMDb id and
+/// scales to `poster/large` (780×1170), so prefer it whenever we have a `tt` id.
+fileprivate func sharpPosterURL(_ raw: String?, imdbID: String) -> URL? {
+    if imdbID.hasPrefix("tt"),
+       let u = URL(string: "https://images.metahub.space/poster/large/\(imdbID)/img") {
+        return u
+    }
+    guard let raw, !raw.isEmpty else { return nil }
+    return URL(string: raw.replacingOccurrences(of: "/poster/small/", with: "/poster/large/"))
+}
+
+/// Cinemeta backdrops arrive at `background/medium` (720p); `background/large`
+/// is up to 4K (3840×2160). Upgrade so heroes render sharp on Retina.
+fileprivate func sharpBackdropURL(_ raw: String?) -> URL? {
+    guard let raw, !raw.isEmpty else { return nil }
+    let upgraded = raw
+        .replacingOccurrences(of: "/background/small/", with: "/background/large/")
+        .replacingOccurrences(of: "/background/medium/", with: "/background/large/")
+    return URL(string: upgraded)
+}
+
 extension StremioMetaPreview {
     func toMediaItem() -> MediaItem {
         return MediaItem(
@@ -202,9 +247,9 @@ extension StremioMetaPreview {
             title: self.name,
             description: self.description ?? "",
             imageURL: nil,
-            posterURL: self.poster != nil ? URL(string: self.poster!) : nil,
-            backdropURL: self.background != nil ? URL(string: self.background!) : nil,
-            heroURL: self.background != nil ? URL(string: self.background!) : nil,
+            posterURL: sharpPosterURL(self.poster, imdbID: self.id),
+            backdropURL: sharpBackdropURL(self.background),
+            heroURL: sharpBackdropURL(self.background),
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
@@ -267,9 +312,9 @@ extension StremioMetaDetail {
             title: self.name,
             description: self.description ?? "",
             imageURL: nil,
-            posterURL: self.poster != nil ? URL(string: self.poster!) : nil,
-            backdropURL: self.background != nil ? URL(string: self.background!) : nil,
-            heroURL: self.background != nil ? URL(string: self.background!) : nil,
+            posterURL: sharpPosterURL(self.poster, imdbID: self.id),
+            backdropURL: sharpBackdropURL(self.background),
+            heroURL: sharpBackdropURL(self.background),
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             cast: finalCast,

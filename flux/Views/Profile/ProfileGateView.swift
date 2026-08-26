@@ -12,11 +12,7 @@ struct ProfileGateView: View {
     var body: some View {
         ZStack {
             // Same mesh background as the main app
-            LinearGradient(
-                gradient: Gradient(colors: [Color(#colorLiteral(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)), .black]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color.black
             .ignoresSafeArea()
 
             if isCreating || editingProfile != nil || profileManager.isFirstRun {

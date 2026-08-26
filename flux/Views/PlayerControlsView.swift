@@ -16,6 +16,7 @@ struct PlayerControlsView: View {
     var onSkipForward: () -> Void
     var onSkipBackward: () -> Void
     var onClose: () -> Void
+    var onTogglePiP: (() -> Void)? = nil
     
     // Track Support
     var audioTracks: [Track]
@@ -55,7 +56,7 @@ struct PlayerControlsView: View {
                     HStack(alignment: .top) {
                         // Left Group: PIP/Share
                         HStack(spacing: 0) {
-                            Button(action: {}) {
+                            Button(action: { onTogglePiP?() }) {
                                 Image(systemName: "rectangle.on.rectangle")
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.white.opacity(0.9))
@@ -63,6 +64,7 @@ struct PlayerControlsView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .help("Picture in Picture")
                             
                             Divider()
                                 .frame(height: 16)
@@ -298,28 +300,49 @@ struct PlayerControlsView: View {
                             
                             // Custom Slider
                             GeometryReader { geo in
+                                let seekTo: (CGFloat) -> Void = { x in
+                                    let newProgress = min(max(x / max(geo.size.width, 1), 0), 1)
+                                    progress = newProgress
+                                    currentTime = newProgress * duration
+                                }
                                 ZStack(alignment: .leading) {
                                     Capsule()
                                         .fill(.white.opacity(0.3))
                                         .frame(height: 5)
-                                    
+
                                     Capsule()
                                         .fill(Color.white)
                                         .frame(width: geo.size.width * progress, height: 5)
                                         .shadow(color: .white.opacity(0.5), radius: 4)
-                                    
+
                                     Circle()
                                         .fill(Color.white)
                                         .frame(width: 18, height: 18)
                                         .offset(x: geo.size.width * progress - 9)
                                         .shadow(radius: 4)
                                 }
+                                .contentShape(Rectangle())
+                                .onHover { hovering in
+                                    if hovering {
+                                        NSCursor.pointingHand.push()
+                                    } else {
+                                        NSCursor.pop()
+                                    }
+                                }
+                                // Click anywhere on the bar to seek.
                                 .gesture(
-                                    DragGesture()
+                                    SpatialTapGesture()
+                                        .onEnded { value in
+                                            seekTo(value.location.x)
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 1)
                                         .onChanged { value in
-                                            let newProgress = value.location.x / geo.size.width
-                                            progress = min(max(newProgress, 0), 1)
-                                            currentTime = progress * duration
+                                            seekTo(value.location.x)
+                                        }
+                                        .onEnded { value in
+                                            seekTo(value.location.x)
                                         }
                                 )
                             }

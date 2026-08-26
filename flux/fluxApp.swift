@@ -52,7 +52,12 @@ struct fluxApp: App {
     
     var body: some Scene {
         WindowGroup {
-            if profileManager.currentProfile != nil {
+            if authManager.needsGate {
+                AuthGateView()
+                    .environmentObject(authManager)
+                    .preferredColorScheme(.dark)
+                    .containerBackground(.clear, for: .window)
+            } else if profileManager.currentProfile != nil {
                 ContentView()
                     .environmentObject(playerManager)
                     .environmentObject(authManager)

@@ -44,7 +44,12 @@ class TMDBEnricher {
         let key = UserDefaults.standard.string(forKey: "tmdbApiKey") ?? ""
         return key.isEmpty ? Secrets.tmdbAPIKey : key
     }
-    
+
+    /// Whether a TMDB key is available. Flux is Cinemeta-first and ships with no
+    /// key; TMDB is an optional enhancement a user can enable in Settings. When
+    /// absent, enrichment is skipped and Cinemeta data is used as-is.
+    var hasKey: Bool { !apiKey.isEmpty }
+
     private init() {}
     
     // MARK: - ID Translation
@@ -92,6 +97,7 @@ class TMDBEnricher {
 
     /// Quick enrichment for catalog carousels
     func quickEnrich(_ item: MediaItem) async -> MediaItem {
+        guard hasKey else { return item }
         if let cached = itemCache[item.id] { return cached }
         
         var enriched = item
@@ -129,6 +135,7 @@ class TMDBEnricher {
 
     /// Full enrichment for DetailView
     func fullEnrich(_ item: MediaItem) async -> MediaItem {
+        guard hasKey else { return item }
         var enriched = await quickEnrich(item)
         
         // Preserve essential metadata from the source (Cinemeta/Addon)
