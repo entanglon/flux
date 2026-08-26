@@ -174,7 +174,7 @@ struct SearchView: View {
             if let results = try? await StremioService.shared.searchMulti(query: searchText) {
                 let combined = (results.0 + results.1).filter { $0.isReleased }
                 if !Task.isCancelled {
-                    suggestions = Array(combined.sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }.prefix(6))
+                    suggestions = Array(sortByRelevance(combined, query: searchText).prefix(6))
                 }
             }
             // Full search: 300ms total
@@ -195,9 +195,10 @@ struct SearchView: View {
             let (movies, tvShows) = try await StremioService.shared.searchMulti(query: searchText)
             
             await MainActor.run {
-                self.searchResults = (movies + tvShows)
-                    .filter { $0.isReleased }
-                    .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
+                self.searchResults = sortByRelevance(
+                    (movies + tvShows).filter { $0.isReleased },
+                    query: searchText
+                )
                 self.isLoading = false
             }
         } catch {
@@ -327,6 +328,59 @@ struct RecentSearchCard: View {
             parts.append(year)
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Search Relevance Scoring
+
+extension SearchView {
+    /// Score how relevant a MediaItem is to the search query.
+    /// Higher score = more relevant. Used to sort results instead of raw popularity.
+    private func relevanceScore(_ item: MediaItem, query: String) -> Double {
+        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = item.title.lowercased()
+        guard !q.isEmpty else { return item.popularity ?? 0 }
+
+        var score: Double = 0
+
+        // Exact title match — highest priority
+        if title == q { return 10000 }
+
+        // Title starts with query
+        if title.hasPrefix(q) { score += 5000 }
+
+        // Title contains query as a whole word
+        if title.contains(q) { score += 3000 }
+
+        // Query words match title words (ordered)
+        let queryWords = q.split(separator: " ")
+        let titleWords = title.split(separator: " ")
+        var matchedWords = 0
+        for qw in queryWords {
+            if titleWords.contains(where: { $0.hasPrefix(qw) }) {
+                matchedWords += 1
+            }
+        }
+        score += Double(matchedWords) * 500
+
+        // Boost if all query words matched
+        if matchedWords == queryWords.count && queryWords.count > 1 {
+            score += 2000
+        }
+
+        // Tiebreaker: popularity (only if relevance is low)
+        if score > 0 {
+            score += (item.popularity ?? 0) * 0.1
+        } else {
+            score = item.popularity ?? 0
+        }
+
+        return score
+    }
+
+    /// Sort items by relevance to query, not just popularity.
+    private func sortByRelevance(_ items: [MediaItem], query: String) -> [MediaItem] {
+        items.sorted { relevanceScore($0, query: query) > relevanceScore($1, query: query) }
     }
 }
 
