@@ -44,6 +44,7 @@ struct CachedImage<Content: View>: View {
 
             // 1. In-memory NSCache (instant)
             if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: nsURL) {
+                ImageDebugLog.log("Memory hit: \(candidate.absoluteString.prefix(100))")
                 phase = .success(Image(nsImage: cachedNSImage))
                 return
             }
@@ -55,6 +56,7 @@ struct CachedImage<Content: View>: View {
             //    cache and can hold stale redirect/HTML responses that fail decode).
             if let cachedResponse = session.configuration.urlCache?.cachedResponse(for: request),
                let downsampled = downsample(data: cachedResponse.data, maxDimension: maxDimension) {
+                ImageDebugLog.log("Disk hit: \(candidate.absoluteString.prefix(100))")
                 ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
                 withTransaction(transaction) {
                     phase = .success(Image(nsImage: downsampled))
@@ -63,12 +65,15 @@ struct CachedImage<Content: View>: View {
             }
 
             // 3. Network
+            ImageDebugLog.log("Fetching: \(candidate.absoluteString.prefix(100))")
             do {
                 let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    ImageDebugLog.log("HTTP \(http.statusCode) for \(candidate.absoluteString.prefix(100))")
                     continue // dead URL — try the next candidate
                 }
                 guard let downsampled = downsample(data: data, maxDimension: maxDimension) else {
+                    ImageDebugLog.log("Decode failed: \(candidate.absoluteString.prefix(100))")
                     continue // undecodable — try the next candidate
                 }
                 ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
@@ -88,17 +93,24 @@ struct CachedImage<Content: View>: View {
     // Efficient Downsampling using ImageIO
     private func downsample(data: Data, maxDimension: CGFloat) -> NSImage? {
         let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceThumbnailMaxPixelSize: maxDimension
         ]
 
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-
-        // Convert to NSImage
-        return NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            ImageDebugLog.log("Failed to create image source from \(data.count) bytes")
+            return nil
+        }
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            ImageDebugLog.log("Failed to create thumbnail from \(data.count) bytes, maxDim=\(maxDimension)")
+            return nil
+        }
+        
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        ImageDebugLog.log("Decoded \(cgImage.width)x\(cgImage.height) from \(data.count) bytes (maxDim=\(maxDimension))")
+        return nsImage
     }
 }
 
@@ -114,4 +126,22 @@ class ImageSession {
 
 final class ImageInMemoryCache {
     static let shared = NSCache<NSURL, NSImage>()
+}
+
+/// Debug logger for image loading — writes to /tmp/flux_image_debug.log
+enum ImageDebugLog {
+    static func log(_ message: String) {
+        let ts = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(ts)] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            let path = "/tmp/flux_image_debug.log"
+            if let fh = FileHandle(forWritingAtPath: path) {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                fh.closeFile()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+    }
 }

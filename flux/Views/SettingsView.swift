@@ -207,9 +207,21 @@ struct AdvancedSettingsView: View {
                 }
 
                 Button("Clear Image Cache") {
-                    if let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-                         try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("ImageCache"))
+                    // Clear URLCache (in-memory + on-disk)
+                    ImageSession.shared.configuration.urlCache?.removeAllCachedResponses()
+                    // Clear the in-memory NSCache
+                    ImageInMemoryCache.shared.removeAllObjects()
+                    // Remove the on-disk FluxImageCache directory
+                    let container = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                        .deletingLastPathComponent().appendingPathComponent("Caches")
+                    if let container {
+                        try? FileManager.default.removeItem(at: container.appendingPathComponent("FluxImageCache"))
                     }
+                    let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+                    if let caches {
+                        try? FileManager.default.removeItem(at: caches.appendingPathComponent("FluxImageCache"))
+                    }
+                    cacheUsage = "0 KB"
                 }
             }
 
