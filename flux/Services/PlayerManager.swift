@@ -543,7 +543,6 @@ class PlayerManager: ObservableObject {
                 if let winner = await self.raceBestStream(from: streams) {
                     print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
                     await MainActor.run {
-                        self.isLoading = false
                         self.finishSelect(winner)
                     }
                     return
@@ -744,7 +743,6 @@ class PlayerManager: ObservableObject {
             // and time out — the torrent still registers server-side, which is why a
             // second click "suddenly works".
             DispatchQueue.main.async { self.statusText = "Connecting to source…" }
-            self.isLoading = true
             AsyncTask {
                 let serverUp = await StremioServerManager.shared.ensureRunning()
                 if serverUp {
@@ -758,7 +756,6 @@ class PlayerManager: ObservableObject {
                     AsyncTask { _ = await self.resolveTorrentStream(stream) }
                 }
                 await MainActor.run {
-                    self.isLoading = false
                     self.statusText = nil
                     if serverUp {
                         self.consecutiveFallbacks = 0
@@ -766,6 +763,7 @@ class PlayerManager: ObservableObject {
                     } else if isFluxEnabled {
                         advancePast(stream)
                     } else {
+                        self.isLoading = false
                         self.errorMessage = "Streaming server unavailable"
                     }
                 }
@@ -779,6 +777,7 @@ class PlayerManager: ObservableObject {
     private func finishSelect(_ stream: Stream) {
         let targetURL = getPlayableURL(for: stream)
         self.currentStreamURL = targetURL
+        self.isLoading = false
         self.errorMessage = nil
 
         self.saveLastPlayedStream(url: targetURL)

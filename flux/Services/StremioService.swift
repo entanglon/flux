@@ -108,6 +108,7 @@ class StremioService {
         // Sorting by popularity after enrichment (unless it's a specific catalog that needs order)
         if preserveOrder {
             // TaskGroup shuffles order — rebuild using original positions by matching IDs
+            guard !enrichedItems.isEmpty else { return enrichedItems }
             var ordered: [MediaItem] = Array(repeating: enrichedItems[0], count: items.count)
             var lookup: [String: MediaItem] = [:]
             for e in enrichedItems { lookup[e.id] = e }

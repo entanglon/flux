@@ -180,6 +180,7 @@ struct SearchView: View {
             // Full search: 300ms total
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
+            suggestions = []  // Clear suggestions before showing results
             await performSearch()
         }
     }
