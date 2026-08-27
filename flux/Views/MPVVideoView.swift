@@ -633,8 +633,8 @@ final class MPVLayerView: NSView {
         
         mpv_set_property_string(mpv, "cache", "yes")
         mpv_set_property_string(mpv, "cache-secs", "10")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "104857600")     // 100 MB demuxer buffer
-        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "20971520") // 20 MB backward buffer
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "52428800")      // 50 MB demuxer buffer
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "10485760") // 10 MB backward buffer
         mpv_set_property_string(mpv, "demuxer-readahead-secs", "10")
         mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
         mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll", "yes")

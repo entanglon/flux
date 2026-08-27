@@ -59,7 +59,7 @@ struct DetailView: View {
                             // We use a single CachedImage that tracks displayItem.heroURL.
                             // Since displayItem defaults to fullItem ?? item, this handles the transition
                             // from initial metadata to enriched metadata seamlessly without a view swap.
-                            CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 4096) { phase in
+                            CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 1920) { phase in
                                 if let image = phase.image {
                                     HeroBackdrop.banner(
                                         image: image,
