@@ -7,6 +7,7 @@ struct PlayerView: View {
     @ObservedObject private var mpv: MPVController
     @ObservedObject private var playerManager = PlayerManager.shared
     @State private var showExitWarning = false
+    @State private var isControlsVisible = true
     @State private var animatedProgress: Double = 0.0
     @State private var pulseScale: CGFloat = 0.96
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
@@ -53,6 +54,7 @@ struct PlayerView: View {
                     get: { mpv.volume },
                     set: { mpv.setVolume($0) }
                 ),
+                isControlsVisible: $isControlsVisible,
                 title: item?.title ?? "Unknown Title",
                 subtitle: getSubtitle(),
                 onPlayPause: { mpv.togglePlayPause() },
@@ -73,14 +75,7 @@ struct PlayerView: View {
                 },
                 onSelectExternalSub: { sub in
                     mpv.addExternalSubtitle(sub)
-                },
-                showSkipIntro: item?.category == "TV Show" && mpv.isPlaying && !mpv.isUserPaused
-                    && mpv.timePos > 4 && mpv.timePos < 90 && mpv.duration > 120,
-                onSkipIntro: { mpv.seek(absolute: 95) },
-                showNextEpisode: playerManager.nextEpisodeInfo != nil && mpv.progress > 0.90 && mpv.progress < 1.0,
-                nextEpisodeSeason: playerManager.nextEpisodeInfo?.season ?? 0,
-                nextEpisodeEpisode: playerManager.nextEpisodeInfo?.episode ?? 0,
-                onNextEpisode: { playerManager.playNextEpisode() }
+                }
             )
             // Exit Warning Overlay
             if showExitWarning {
@@ -92,6 +87,53 @@ struct PlayerView: View {
                     .cornerRadius(12)
                     .transition(.opacity)
                     .zIndex(200)
+            }
+
+            // Skip Intro / Next Episode — bottom-right floating button (Apple TV style)
+            // Only visible when player controls are hidden
+            if !isControlsVisible {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        if item?.category == "TV Show" && mpv.isPlaying && !mpv.isUserPaused
+                            && mpv.timePos > 4 && mpv.timePos < 90 && mpv.duration > 120 {
+                            Button {
+                                mpv.seek(absolute: 95)
+                            } label: {
+                                Text("Skip Intro")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity)
+                        }
+
+                        if let next = playerManager.nextEpisodeInfo, mpv.isPlaying && mpv.progress > 0.90 && mpv.progress < 1.0 {
+                            Button {
+                                playerManager.playNextEpisode()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "forward.end.fill")
+                                        .font(.system(size: 11))
+                                    Text("Next: S\(next.season) E\(next.episode)")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity)
+                        }
+                    }
+                    .padding(.trailing, 40)
+                    .padding(.bottom, 40)
+                }
             }
         }
         .focusable() // Make the view capable of receiving key presses

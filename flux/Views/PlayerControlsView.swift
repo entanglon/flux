@@ -9,6 +9,7 @@ struct PlayerControlsView: View {
     @Binding var currentTime: Double
     @Binding var duration: Double
     @Binding var volume: Double
+    @Binding var isControlsVisible: Bool
     var title: String
     var subtitle: String
     
@@ -25,22 +26,11 @@ struct PlayerControlsView: View {
     var onSelectTrack: (Track) -> Void
     var onSelectExternalSub: (StremioSubtitleTrack) -> Void
 
-    // Skip Intro
-    var showSkipIntro: Bool = false
-    var onSkipIntro: () -> Void = {}
-
-    // Next Episode
-    var showNextEpisode: Bool = false
-    var nextEpisodeSeason: Int = 0
-    var nextEpisodeEpisode: Int = 0
-    var onNextEpisode: () -> Void = {}
-
     // Online subtitle search state
     @State private var onlineSubtitles: [StremioSubtitleTrack] = []
     @State private var isSearchingSubtitles = false
     @State private var subtitleSearchDone = false
     
-    @State private var isControlsVisible = true
     @State private var hoverTimer: Timer?
     @State private var showSubtitlePopover = false
     @State private var showAudioPopover = false
@@ -169,48 +159,6 @@ struct PlayerControlsView: View {
                             // Audio/Subtitle/Settings Pill
                             // Audio/Subtitle Pill
                             HStack(spacing: 0) {
-                                // Skip Intro Button
-                                if showSkipIntro {
-                                    Button {
-                                        onSkipIntro()
-                                    } label: {
-                                        Text("Skip Intro")
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundColor(.white)
-                                    }
-                                    .frame(height: 36)
-                                    .padding(.horizontal, 14)
-                                    .contentShape(Rectangle())
-                                    .buttonStyle(.plain)
-
-                                    Divider()
-                                        .frame(height: 20)
-                                        .background(Color.white.opacity(0.2))
-                                }
-
-                                // Next Episode Button
-                                if showNextEpisode {
-                                    Button {
-                                        onNextEpisode()
-                                    } label: {
-                                        HStack(spacing: 5) {
-                                            Image(systemName: "forward.end.fill")
-                                                .font(.system(size: 10))
-                                            Text("Next: S\(nextEpisodeSeason) E\(nextEpisodeEpisode)")
-                                                .font(.system(size: 12, weight: .bold))
-                                        }
-                                        .foregroundColor(.white)
-                                    }
-                                    .frame(height: 36)
-                                    .padding(.horizontal, 14)
-                                    .contentShape(Rectangle())
-                                    .buttonStyle(.plain)
-
-                                    Divider()
-                                        .frame(height: 20)
-                                        .background(Color.white.opacity(0.2))
-                                }
-
                                 // Subtitles Button
                                 Button {
                                     showSubtitlePopover.toggle()
