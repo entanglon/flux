@@ -28,6 +28,10 @@ class PlayerManager: ObservableObject {
     /// armed when expanding a PiP session back into the player window.
     @Published var pendingResumeTime: Double? = nil
 
+    /// Tracks the currently-active torrent hash so we can remove it before
+    /// registering a new one (prevents double downloads).
+    private var activeTorrentHash: String?
+
     // MARK: - Detail-Page Prefetch (advanced loading)
     //
     // Opening a DetailView kicks off source resolution in the background:
@@ -434,6 +438,16 @@ class PlayerManager: ObservableObject {
         self.isManualSelection = false
         self.probeStatus = [:]
         self.resetPreloadState()
+
+        // Cancel any in-flight prefetch and remove its torrent to prevent
+        // the prefetch's fire-and-forget /create from competing with play.
+        cancelDetailPrefetch()
+
+        // Remove the previously-playing torrent so only one downloads at a time.
+        if let oldHash = activeTorrentHash {
+            StremioServerManager.shared.removeTorrent(infoHash: oldHash)
+            activeTorrentHash = nil
+        }
         
         // 0. Offline Check
         if let localUrl = DownloadManager.shared.getLocalUrl(for: item) {
@@ -736,6 +750,12 @@ class PlayerManager: ObservableObject {
                 advancePast(stream)
                 return
             }
+            // Remove the old torrent before registering a new one to prevent
+            // double downloads when auto-falling-back to a different source.
+            if let oldHash = activeTorrentHash, oldHash != hash {
+                StremioServerManager.shared.removeTorrent(infoHash: oldHash)
+            }
+            activeTorrentHash = hash
             // Stremio-exact flow: register the torrent on the server (fire-and-forget)
             // and hand the URL to mpv IMMEDIATELY. The server blocks the file response
             // until pieces flow, mpv reports paused-for-cache → buffering overlay shows.
@@ -857,6 +877,11 @@ class PlayerManager: ObservableObject {
     
     func close() {
         DispatchQueue.main.async {
+            // Remove the active torrent so it stops downloading immediately.
+            if let hash = self.activeTorrentHash {
+                StremioServerManager.shared.removeTorrent(infoHash: hash)
+                self.activeTorrentHash = nil
+            }
             self.currentItem = nil
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
