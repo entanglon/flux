@@ -18,6 +18,7 @@ struct DetailView: View {
     @ObservedObject private var tasteProfile = TasteProfileManager.shared
     @State private var isDownloading = false
     @State private var showCollectionsPopover = false
+    @State private var trailerURL: URL? = nil
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -255,6 +256,22 @@ struct DetailView: View {
                                 .buttonStyle(.plain)
                                 .disabled(isDownloading)
                                 .help("Download best stream for offline")
+
+                                // Play Trailer (opens YouTube in browser)
+                                if let trailer = trailerURL {
+                                    Button {
+                                        NSWorkspace.shared.open(trailer)
+                                    } label: {
+                                        Image(systemName: "play.rectangle.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(.white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Play trailer")
+                                }
                             }
                             .padding(.top, 10)
                         }
@@ -641,6 +658,14 @@ struct DetailView: View {
                 let related = try? await StremioService.shared.fetchRelated(type: type, genres: detailedItem.genres)
                 relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
             }
+
+            // Fetch trailer in the background (non-blocking)
+            Task {
+                if let url = await TMDBEnricher.shared.fetchTrailerURL(item: detailedItem) {
+                    await MainActor.run { self.trailerURL = url }
+                }
+            }
+
             isLoadingDetails = false
         } catch {
             print("Error loading detailed metadata: \(error)")

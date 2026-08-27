@@ -382,6 +382,28 @@ class TMDBEnricher {
         return []
     }
 
+    /// Returns the best YouTube trailer URL for a title, or nil if none.
+    /// Prefers an official "Trailer"; falls back to any YouTube trailer/teaser.
+    func fetchTrailerURL(item: MediaItem) async -> URL? {
+        guard hasKey else { return nil }
+        let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
+        let tmdbID = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        guard let id = tmdbID else { return nil }
+
+        let videosURL = "\(baseURL)/\(type)/\(id)/videos?api_key=\(apiKey)"
+        guard let url = URL(string: videosURL),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let response = try? JSONDecoder().decode(TMDBVideoResponse.self, from: data) else {
+            return nil
+        }
+
+        let youtube = response.results.filter { $0.site == "YouTube" }
+        let best = youtube.first { $0.type == "Trailer" }
+            ?? youtube.first { $0.type == "Teaser" }
+            ?? youtube.first
+        return best?.youtubeURL
+    }
+
     // Generic Internal Fetcher
     private func fetchCatalog(from urlString: String, type mediaType: String) async throws -> [MediaItem] {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
