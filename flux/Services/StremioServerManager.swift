@@ -396,9 +396,9 @@ class StremioServerManager: ObservableObject {
             env["HTTP_PORT"] = String(assignedPort)
             env["NO_CORS"] = "1"
             env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
-            env["STREMIO_MEM_LIMIT"] = "1073741824"
-            env["GOMEMLIMIT"] = "1073741824"
-            env["GOGC"] = "50"
+            env["STREMIO_MEM_LIMIT"] = "524288000"
+            env["GOMEMLIMIT"] = "524288000"
+            env["GOGC"] = "20"
             if UserDefaults.standard.bool(forKey: "ramCacheMode") {
                 env["STREMIO_MEMORY_CACHE_SIZE"] = "536870912"
                 print("[StremioServer] RAM cache mode ON — 512MB in-memory piece cache")
