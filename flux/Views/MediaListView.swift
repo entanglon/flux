@@ -195,10 +195,11 @@ struct MediaListView: View {
                 newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType)
                 if newItems.isEmpty { canLoadMore = false }
             case .ott(let platformID, _):
-                // OTT platform catalog — full page in one request, no pagination
+                // OTT platform catalog — TMDB watch providers, page-based endless scroll
                 let ottType = genreMediaType == "tv" ? "series" : "movie"
-                newItems = (try? await StremioService.shared.fetchOTTCatalog(platformID: platformID, type: ottType)) ?? []
-                canLoadMore = false
+                let page = (skipCount / 20) + 1
+                newItems = (try? await StremioService.shared.fetchOTTCatalog(platformID: platformID, type: ottType, page: page)) ?? []
+                if newItems.isEmpty { canLoadMore = false }
             case .fixed(_, let fixedItems):
                 newItems = fixedItems
                 canLoadMore = false

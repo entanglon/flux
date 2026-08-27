@@ -57,14 +57,17 @@ class StremioService {
     private let ottCatalogBase = "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwbXAsaGx1LHBjcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHplZSxubHosdmlsLHNzdCxjcGQsc3R6LGRwZSxtYmksdmlrLHNnbyxzb255bGl2Ojo6MTc2MTkyMTY1ODU5Mw%3D%3D"
 
     /// Fetch the catalog for a single OTT platform (movies or series). Prefers
-    /// TMDB watch providers (always fresh) when a key is configured; falls back
-    /// to the third-party Streaming Catalogs addon otherwise. Preserves the
-    /// platform's native popularity order — we must not re-sort by IMDb rating.
-    func fetchOTTCatalog(platformID: String, type: String) async throws -> [MediaItem] {
+    /// TMDB watch providers (always fresh, paginated) when a key is configured;
+    /// falls back to the third-party Streaming Catalogs addon otherwise (single
+    /// page only). Preserves the platform's native popularity order — we must
+    /// not re-sort by IMDb rating.
+    func fetchOTTCatalog(platformID: String, type: String, page: Int = 1) async throws -> [MediaItem] {
         if TMDBEnricher.shared.hasKey {
-            let tmdbItems = await TMDBEnricher.shared.fetchWatchProviderCatalog(platformID: platformID, type: type)
+            let tmdbItems = await TMDBEnricher.shared.fetchWatchProviderCatalog(platformID: platformID, type: type, page: page)
             if !tmdbItems.isEmpty { return tmdbItems }
         }
+        // Addon returns the full catalog in one request — only serve it on page 1.
+        guard page == 1 else { return [] }
         return try await fetchCatalog(type: type, id: platformID, baseURL: ottCatalogBase, preserveOrder: true)
     }
 

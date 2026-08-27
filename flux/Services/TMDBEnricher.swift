@@ -334,10 +334,10 @@ class TMDBEnricher {
         "cru": 1112,   // Crunchyroll
     ]
 
-    func fetchWatchProviderCatalog(platformID: String, type: String) async -> [MediaItem] {
+    func fetchWatchProviderCatalog(platformID: String, type: String, page: Int = 1) async -> [MediaItem] {
         guard hasKey, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
         let mediaType = type == "series" ? "tv" : "movie"
-        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=US&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
+        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=US&sort_by=popularity.desc&include_adult=false&vote_count.gte=50&page=\(page)"
         return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
     }
 
