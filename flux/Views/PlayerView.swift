@@ -73,7 +73,14 @@ struct PlayerView: View {
                 },
                 onSelectExternalSub: { sub in
                     mpv.addExternalSubtitle(sub)
-                }
+                },
+                showSkipIntro: item?.category == "TV Show" && mpv.isPlaying && !mpv.isUserPaused
+                    && mpv.timePos > 4 && mpv.timePos < 90 && mpv.duration > 120,
+                onSkipIntro: { mpv.seek(absolute: 95) },
+                showNextEpisode: playerManager.nextEpisodeInfo != nil && mpv.progress > 0.90 && mpv.progress < 1.0,
+                nextEpisodeSeason: playerManager.nextEpisodeInfo?.season ?? 0,
+                nextEpisodeEpisode: playerManager.nextEpisodeInfo?.episode ?? 0,
+                onNextEpisode: { playerManager.playNextEpisode() }
             )
             // Exit Warning Overlay
             if showExitWarning {
@@ -204,39 +211,12 @@ struct PlayerView: View {
         if !playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.availableStreams.isEmpty {
             streamSelectionView
         }
-        
-        // Skip Intro (episodes, first 90 seconds)
-        if item?.category == "TV Show", mpv.isPlaying, !mpv.isUserPaused,
-           mpv.timePos > 4, mpv.timePos < 90, mpv.duration > 120 {
-            VStack {
-                HStack {
-                    Button {
-                        mpv.seek(absolute: 95)
-                    } label: {
-                        Text("Skip Intro")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Capsule())
-                }
-                Spacer()
-            }
-            .padding(.leading, 40)
-            .padding(.bottom, 90)
-        }
 
-        // Next Episode Overlay — countdown auto-play (last 10s), manual button before
+        // Next Episode Overlay — countdown auto-play (last 10s)
         if let next = playerManager.nextEpisodeInfo, mpv.isPlaying {
             let remaining = mpv.duration > 0 ? mpv.duration - mpv.timePos : 999
             if autoPlayNextEnabled && !autoPlayCancelled && remaining <= 10 && remaining > 0.8 {
                 autoPlayCountdownView(season: next.season, episode: next.episode, seconds: Int(ceil(remaining)))
-            } else if mpv.progress > 0.95 {
-                nextEpisodeButton(season: next.season, episode: next.episode)
             }
         }
     }
@@ -298,37 +278,6 @@ struct PlayerView: View {
         let isMidPlayBuffer = mpv.isBuffering || mpv.isSeeking
         
         return isInitialLoad || isMidPlayBuffer
-    }
-    
-    @ViewBuilder
-    private func nextEpisodeButton(season: Int, episode: Int) -> some View {
-        VStack {
-            Spacer()
-            HStack {
-                Spacer()
-                Button(action: {
-                    playerManager.playNextEpisode()
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "forward.end.fill")
-                        Text("Next: S\(season) E\(episode)")
-                            .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.2))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 60)
-                .padding(.trailing, 40)
-            }
-        }
-        .transition(.opacity)
     }
     
     private var loadingView: some View {
