@@ -318,6 +318,29 @@ class TMDBEnricher {
         return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
     }
 
+    /// OTT platform catalogs via TMDB watch providers — always fresh, unlike the
+    /// stale third-party Streaming Catalogs addon. Maps our platform codes to
+    /// TMDB provider IDs (US region) and queries /discover with
+    /// `with_watch_providers`. Returns popularity-sorted results.
+    static let tmdbProviderIDs: [String: Int] = [
+        "nfx": 8,      // Netflix
+        "dnp": 337,    // Disney+
+        "amp": 9,      // Prime Video
+        "atp": 350,    // Apple TV+
+        "hbm": 1899,   // Max (HBO Max)
+        "hlu": 15,     // Hulu
+        "pcp": 386,    // Peacock
+        "pmp": 531,    // Paramount+
+        "cru": 1112,   // Crunchyroll
+    ]
+
+    func fetchWatchProviderCatalog(platformID: String, type: String) async -> [MediaItem] {
+        guard hasKey, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
+        let mediaType = type == "series" ? "tv" : "movie"
+        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=US&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
+        return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
+    }
+
     func fetchUpcomingMovies() async throws -> [MediaItem] {        // /movie/upcoming mixes in titles whose PRIMARY date already passed
         // (earlier foreign release), which breaks unreleased-only filtering.
         // discover with primary_release_date.gte=today guarantees genuinely

@@ -56,10 +56,15 @@ class StremioService {
     // catalog id is a platform code (nfx=Netflix, dnp=Disney+, amp=Prime Video…).
     private let ottCatalogBase = "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwbXAsaGx1LHBjcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHplZSxubHosdmlsLHNzdCxjcGQsc3R6LGRwZSxtYmksdmlrLHNnbyxzb255bGl2Ojo6MTc2MTkyMTY1ODU5Mw%3D%3D"
 
-    /// Fetch the catalog for a single OTT platform (movies or series). Preserves
-    /// the platform's native order — that order IS "what's popular on X right now",
-    /// so we must not re-sort it by IMDb rating.
+    /// Fetch the catalog for a single OTT platform (movies or series). Prefers
+    /// TMDB watch providers (always fresh) when a key is configured; falls back
+    /// to the third-party Streaming Catalogs addon otherwise. Preserves the
+    /// platform's native popularity order — we must not re-sort by IMDb rating.
     func fetchOTTCatalog(platformID: String, type: String) async throws -> [MediaItem] {
+        if TMDBEnricher.shared.hasKey {
+            let tmdbItems = await TMDBEnricher.shared.fetchWatchProviderCatalog(platformID: platformID, type: type)
+            if !tmdbItems.isEmpty { return tmdbItems }
+        }
         return try await fetchCatalog(type: type, id: platformID, baseURL: ottCatalogBase, preserveOrder: true)
     }
 
