@@ -48,15 +48,16 @@
 ---
 
 ## Open Issues
-1. **OTT catalog data stale** — third-party addon not updating. Options: switch addon or accept limitation
-2. **Search card art** — some titles have no metahub poster (shows gray placeholder)
-3. **Release build** — needs size + playback re-verification
+1. **Search card art** — some titles have no metahub poster (shows gray placeholder)
 
 ## Done this session
 - ✅ Downloads page — fully implemented (DownloadManager + DownloadsView + DetailView button)
 - ✅ For You rail — live-refreshes after ♥ toggle (600ms debounce)
 - ✅ RAM management — bounded caches, proxy backpressure, prefetch ownership (Codex)
 - ✅ Continue Watching — progress bar already working (saved on player close)
+- ✅ OTT catalogs — now via TMDB watch providers (always fresh), fixes stale addon
+- ✅ Play Trailer — button on detail pages, opens YouTube trailer in browser
+- ✅ Release build + DMG rebuilt (100MB app / 40MB DMG)
 
 ## What to test next
 - Play a video → verify skip intro / next episode appear as floating bottom-right buttons
