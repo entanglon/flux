@@ -58,6 +58,12 @@ class StreamProxyManager {
         listener?.cancel()
         listener = nil
         isRunning = false
+
+        activePipesLock.lock()
+        let pipes = Array(activePipes.values)
+        activePipes.removeAll()
+        activePipesLock.unlock()
+        pipes.forEach { $0.cancel() }
     }
     
     /// Creates a proxy URL that MPV can play. The proxy will fetch `originalURL` with the given `headers`.
@@ -251,14 +257,24 @@ class StreamProxyManager {
 }
 
 private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
+    private static let highWaterMark = 2 * 1024 * 1024
+    private static let lowWaterMark = 1 * 1024 * 1024
+
     private let id: UUID
     private let connection: NWConnection
     private let onComplete: (UUID) -> Void
     private let sendQueue = DispatchQueue(label: "StreamProxyDataPipe.send", qos: .userInitiated)
+    private let stateLock = NSLock()
     private var session: URLSession?
     private var task: URLSessionDataTask?
     private var didSendResponseHeaders = false
     private var isCompleted = false
+    private var pendingSends: [Data] = []
+    private var isSending = false
+    /// Includes the item currently being sent plus every item awaiting a local
+    /// socket completion. This is the actual memory budget for the pipe.
+    private var queuedBytes = 0
+    private var upstreamSuspended = false
 
     init(id: UUID, connection: NWConnection, configuration: URLSessionConfiguration, onComplete: @escaping (UUID) -> Void) {
         self.id = id
@@ -282,6 +298,10 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         task?.resume()
     }
 
+    func cancel() {
+        finish(cancelConnection: true)
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let httpResponse = response as? HTTPURLResponse else {
             sendError(status: 502, message: "Invalid upstream response")
@@ -292,7 +312,7 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         let headerData = makeResponseHeaders(from: httpResponse).data(using: .utf8)
         didSendResponseHeaders = true
         if let headerData {
-            send(headerData)
+            enqueue(headerData, from: dataTask)
         }
         completionHandler(.allow)
     }
@@ -302,7 +322,7 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
             sendError(status: 502, message: "Upstream response missing headers")
             return
         }
-        send(data)
+        enqueue(data, from: dataTask)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -338,16 +358,67 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         return responseHeaders
     }
 
-    private func send(_ data: Data) {
+    /// Bounded, completion-driven delivery. URLSession may read upstream data
+    /// considerably faster than mpv drains the loopback socket; suspending the
+    /// upstream task prevents an unbounded queue of Data buffers in that case.
+    private func enqueue(_ data: Data, from dataTask: URLSessionDataTask) {
+        var shouldSuspend = false
+        stateLock.lock()
+        if !isCompleted {
+            queuedBytes += data.count
+            if !upstreamSuspended && queuedBytes >= Self.highWaterMark {
+                upstreamSuspended = true
+                shouldSuspend = true
+            }
+        }
+        let completed = isCompleted
+        stateLock.unlock()
+
+        guard !completed else { return }
+        if shouldSuspend {
+            #if DEBUG
+            print("[StreamProxy] Pausing upstream at \(queuedBytes / 1024) KB queued")
+            #endif
+            dataTask.suspend()
+        }
+
         sendQueue.async { [weak self] in
             guard let self, !self.isCompleted else { return }
-            self.connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            self.pendingSends.append(data)
+            self.sendNextIfNeeded()
+        }
+    }
+
+    private func sendNextIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(sendQueue))
+        guard !isCompleted, !isSending, !pendingSends.isEmpty else { return }
+        isSending = true
+        let data = pendingSends.removeFirst()
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            self.sendQueue.async {
+                self.isSending = false
+                self.completeSend(byteCount: data.count)
                 if let error {
                     print("[StreamProxy] Client send failed: \(error)")
-                    self?.finish(cancelConnection: false)
+                    self.finish(cancelConnection: false)
+                    return
                 }
-            })
+                self.sendNextIfNeeded()
+            }
+        })
+    }
+
+    private func completeSend(byteCount: Int) {
+        var taskToResume: URLSessionDataTask?
+        stateLock.lock()
+        queuedBytes = max(0, queuedBytes - byteCount)
+        if upstreamSuspended, queuedBytes <= Self.lowWaterMark, !isCompleted {
+            upstreamSuspended = false
+            taskToResume = task
         }
+        stateLock.unlock()
+        taskToResume?.resume()
     }
 
     private func sendError(status: Int, message: String) {
@@ -367,11 +438,24 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     }
 
     private func finish(cancelConnection: Bool) {
+        stateLock.lock()
+        guard !isCompleted else {
+            stateLock.unlock()
+            return
+        }
+        isCompleted = true
+        queuedBytes = 0
+        upstreamSuspended = false
+        let task = task
+        let session = session
+        stateLock.unlock()
+
+        task?.cancel()
+        session?.invalidateAndCancel()
         sendQueue.async { [weak self] in
-            guard let self, !self.isCompleted else { return }
-            self.isCompleted = true
-            self.task?.cancel()
-            self.session?.invalidateAndCancel()
+            guard let self else { return }
+            self.pendingSends.removeAll(keepingCapacity: false)
+            self.isSending = false
             self.session = nil
             if cancelConnection {
                 self.connection.cancel()

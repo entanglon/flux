@@ -2,6 +2,11 @@ import SwiftUI
 import ImageIO
 
 struct CachedImage<Content: View>: View {
+    private struct DecodedImage {
+        let image: NSImage
+        let cost: Int
+    }
+
     let url: URL?
     var fallbacks: [URL?] = []
     let transaction: Transaction
@@ -40,10 +45,13 @@ struct CachedImage<Content: View>: View {
         // Walk the ladder: first candidate that produces a decoded image wins.
         // A dead CDN, 404, or corrupt cache entry falls through to the next URL.
         for candidate in candidates {
-            let nsURL = candidate as NSURL
+            // A 4K hero and a 100px search thumbnail must not share a decoded
+            // object. Sharing by URL alone lets a small card keep a full-size
+            // hero image resident for the rest of the session.
+            let cacheKey = "\(candidate.absoluteString)#\(Int(maxDimension.rounded()))" as NSString
 
             // 1. In-memory NSCache (instant)
-            if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: nsURL) {
+            if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: cacheKey) {
                 ImageDebugLog.log("Memory hit: \(candidate.absoluteString.prefix(100))")
                 phase = .success(Image(nsImage: cachedNSImage))
                 return
@@ -57,9 +65,9 @@ struct CachedImage<Content: View>: View {
             if let cachedResponse = session.configuration.urlCache?.cachedResponse(for: request),
                let downsampled = downsample(data: cachedResponse.data, maxDimension: maxDimension) {
                 ImageDebugLog.log("Disk hit: \(candidate.absoluteString.prefix(100))")
-                ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
+                ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
                 withTransaction(transaction) {
-                    phase = .success(Image(nsImage: downsampled))
+                    phase = .success(Image(nsImage: downsampled.image))
                 }
                 return
             }
@@ -76,9 +84,9 @@ struct CachedImage<Content: View>: View {
                     ImageDebugLog.log("Decode failed: \(candidate.absoluteString.prefix(100))")
                     continue // undecodable — try the next candidate
                 }
-                ImageInMemoryCache.shared.setObject(downsampled, forKey: nsURL)
+                ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
                 withTransaction(transaction) {
-                    phase = .success(Image(nsImage: downsampled))
+                    phase = .success(Image(nsImage: downsampled.image))
                 }
                 return
             } catch {
@@ -91,7 +99,7 @@ struct CachedImage<Content: View>: View {
     }
 
     // Efficient Downsampling using ImageIO
-    private func downsample(data: Data, maxDimension: CGFloat) -> NSImage? {
+    private func downsample(data: Data, maxDimension: CGFloat) -> DecodedImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -110,7 +118,10 @@ struct CachedImage<Content: View>: View {
         
         let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
         ImageDebugLog.log("Decoded \(cgImage.width)x\(cgImage.height) from \(data.count) bytes (maxDim=\(maxDimension))")
-        return nsImage
+        return DecodedImage(
+            image: nsImage,
+            cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
+        )
     }
 }
 
@@ -125,12 +136,22 @@ class ImageSession {
 }
 
 final class ImageInMemoryCache {
-    static let shared: NSCache<NSURL, NSImage> = {
-        let cache = NSCache<NSURL, NSImage>()
+    static let shared: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 80
-        cache.totalCostLimit = 30 * 1024 * 1024  // 30 MB
+        cache.totalCostLimit = 30 * 1024 * 1024  // 30 MB of decoded pixels
         return cache
     }()
+
+    /// NSCache only enforces totalCostLimit when every insertion supplies a
+    /// cost. Decoded image memory is approximately width × height × 4 bytes.
+    static func decodedImageCost(width: Int, height: Int) -> Int {
+        guard width > 0, height > 0 else { return 1 }
+        let (pixels, pixelsOverflow) = width.multipliedReportingOverflow(by: height)
+        guard !pixelsOverflow else { return Int.max }
+        let (bytes, bytesOverflow) = pixels.multipliedReportingOverflow(by: 4)
+        return bytesOverflow ? Int.max : max(1, bytes)
+    }
 }
 
 /// Debug logger for image loading — writes to /tmp/flux_image_debug.log

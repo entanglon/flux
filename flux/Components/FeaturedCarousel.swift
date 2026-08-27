@@ -21,7 +21,11 @@ struct FeaturedCarousel: View {
                     ZStack {
                         // Logic: Only use backdrop/hero (landscape). Never stretch a poster.
                         if let heroURL = item.heroURL ?? item.backdropURL {
-                            CachedImage(url: heroURL.highQuality(), maxDimension: 3840) { phase in
+                            // The carousel is visually full-width, but decoding a 4K
+                            // image for every slide can retain ~32 MB per image. 1920px
+                            // remains crisp for this view while keeping the image cache
+                            // within its byte budget.
+                            CachedImage(url: heroURL.highQuality(), maxDimension: 1920) { phase in
                                 if let image = phase.image {
                                     HeroBackdrop.banner(
                                         image: image,

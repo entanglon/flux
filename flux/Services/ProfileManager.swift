@@ -68,7 +68,8 @@ final class ProfileManager: ObservableObject {
     private var playbackSettingKeys: [String] {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
-         "streamingSourceMode", "enableFluxMode", "enableFluxCatalogue", "stremioCacheGB"]
+         "streamingSourceMode", "enableFluxMode", "enableFluxCatalogue", "stremioCacheGB",
+         "ramCacheMode", "ramCacheLimitMB"]
     }
 
     private func snapshotSettings(for profileID: UUID) {

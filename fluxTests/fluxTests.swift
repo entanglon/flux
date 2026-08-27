@@ -10,8 +10,13 @@ import Testing
 
 struct fluxTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test func decodedImageCostUsesFourBytesPerPixel() {
+        #expect(ImageInMemoryCache.decodedImageCost(width: 1920, height: 1080) == 8_294_400)
+        #expect(ImageInMemoryCache.decodedImageCost(width: 0, height: 1080) == 1)
+    }
+
+    @Test func decodedImageCostSaturatesOnOverflow() {
+        #expect(ImageInMemoryCache.decodedImageCost(width: Int.max, height: 2) == Int.max)
     }
 
 }

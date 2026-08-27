@@ -68,8 +68,17 @@ class StreamManager {
         return URLSession(configuration: config)
     }()
     
-    // In-memory cache: "tmdbID:season:episode" -> [Stream]
-    private var streamCache: [String: [Stream]] = [:]
+    // In-memory cache: "tmdbID:season:episode" -> [Stream]. Stream lists can
+    // contain long addon-provided titles and URLs, so keep this strictly bounded
+    // for long browsing sessions.
+    private struct StreamCacheEntry {
+        let streams: [Stream]
+        var lastAccessed: Date
+    }
+    private let streamCacheLock = NSLock()
+    private var streamCache: [String: StreamCacheEntry] = [:]
+    private let streamCacheLimit = 40
+    private let streamCacheTTL: TimeInterval = 15 * 60
     
     func preloadStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async {
         _ = await fetchStreams(for: item, season: season, episode: episode)
@@ -82,10 +91,7 @@ class StreamManager {
         let isSeries = item.category == "TV Show"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        if let cached = streamCache[cacheKey], !cached.isEmpty {
-             return cached
-        }
-        return nil
+        return cachedStreams(forKey: cacheKey)
     }
     
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
@@ -99,7 +105,7 @@ class StreamManager {
         let type = isSeries ? "series" : "movie"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        if let cached = streamCache[cacheKey], !cached.isEmpty {
+        if let cached = cachedStreams(forKey: cacheKey) {
             onStreamsUpdated(cached)
             return cached
         }
@@ -168,8 +174,33 @@ class StreamManager {
             streamSortComparator(s1, s2)
         }
 
-        streamCache[cacheKey] = sortedStreams
+        storeCachedStreams(sortedStreams, forKey: cacheKey)
         return sortedStreams
+    }
+
+    private func cachedStreams(forKey key: String) -> [Stream]? {
+        streamCacheLock.lock()
+        defer { streamCacheLock.unlock() }
+        guard var entry = streamCache[key] else { return nil }
+        guard Date().timeIntervalSince(entry.lastAccessed) < streamCacheTTL else {
+            streamCache.removeValue(forKey: key)
+            return nil
+        }
+        entry.lastAccessed = Date()
+        streamCache[key] = entry
+        return entry.streams.isEmpty ? nil : entry.streams
+    }
+
+    private func storeCachedStreams(_ streams: [Stream], forKey key: String) {
+        streamCacheLock.lock()
+        defer { streamCacheLock.unlock() }
+        let now = Date()
+        streamCache = streamCache.filter { now.timeIntervalSince($0.value.lastAccessed) < streamCacheTTL }
+        if streamCache[key] == nil, streamCache.count >= streamCacheLimit,
+           let leastRecentKey = streamCache.min(by: { $0.value.lastAccessed < $1.value.lastAccessed })?.key {
+            streamCache.removeValue(forKey: leastRecentKey)
+        }
+        streamCache[key] = StreamCacheEntry(streams: streams, lastAccessed: now)
     }
 
     /// Collapses duplicate entries for the same underlying source (same torrent from

@@ -57,6 +57,9 @@ class PlayerManager: ObservableObject {
     private var prefetchedKey: String?
     private var prefetchedStream: Stream?
     private var prefetchedSubtitles: [StremioSubtitleTrack]?
+    /// Ownership is recorded before `/create` starts. This lets cancellation
+    /// remove a prefetch torrent even while subtitle fetching is still pending.
+    private var prefetchTorrentHash: String?
     private var prefetchedAt: Date?
     private var warmCore: WarmPlaybackCore?
     private var warmCoreDiscardTask: AsyncTask<Void, Never>?
@@ -76,7 +79,9 @@ class PlayerManager: ObservableObject {
         if inflightPrefetchKey == key { return }
         if prefetchedKey == key && warmCore?.key == key { return } // already primed
 
-        prefetchTask?.cancel()
+        // A new detail page supersedes every resource owned by the old one,
+        // including a torrent whose `/create` request is still running.
+        cancelDetailPrefetch()
         inflightPrefetchKey = key
         isPrefetching = true
         print("[PlayerManager] Prefetch starting for \(key)\(sessionActive ? " (streams-only — session active)" : "")")
@@ -89,7 +94,7 @@ class PlayerManager: ObservableObject {
     /// in-flight prefetch and tells the engine to drop the torrent immediately
     /// instead of waiting for the idle timeout.
     func cancelDetailPrefetch() {
-        guard inflightPrefetchKey != nil || prefetchedKey != nil else { return }
+        guard inflightPrefetchKey != nil || prefetchedKey != nil || prefetchTorrentHash != nil else { return }
         let keyToCancel = inflightPrefetchKey ?? prefetchedKey
         print("[PlayerManager] Cancelling prefetch for \(keyToCancel ?? "?")")
         prefetchTask?.cancel()
@@ -103,10 +108,14 @@ class PlayerManager: ObservableObject {
             warmCore = nil
         }
 
-        // Tell the engine to stop downloading the torrent immediately
-        if let stream = prefetchedStream, stream.isTorrent,
-           let hash = torrentHash(stream) {
-            StremioServerManager.shared.removeTorrent(infoHash: hash)
+        // Tell the engine to stop downloading the torrent immediately. The
+        // hash is recorded before `/create`, so this also covers cancellation
+        // while that request is in flight.
+        if let hash = prefetchTorrentHash {
+            prefetchTorrentHash = nil
+            if activeTorrentHash != hash {
+                StremioServerManager.shared.removeTorrent(infoHash: hash)
+            }
         }
         prefetchedStream = nil
         prefetchedKey = nil
@@ -151,7 +160,44 @@ class PlayerManager: ObservableObject {
         // Stremio-exact protocol); HTTP sources get a small ranged GET to warm
         // proxy + CDN edge.
         if winner.isTorrent {
-            AsyncTask { _ = await self.resolveTorrentStream(winner) }
+            guard let hash = torrentHash(winner) else {
+                await MainActor.run {
+                    self.isPrefetching = false
+                    self.inflightPrefetchKey = nil
+                }
+                return
+            }
+
+            // Register ownership before beginning the request. Do not spawn an
+            // unstructured child task here: it would outlive cancellation and
+            // could create an orphan torrent after the detail page disappeared.
+            await MainActor.run {
+                guard self.inflightPrefetchKey == key else { return }
+                self.prefetchTorrentHash = hash
+                StremioServerManager.shared.trackCreate(
+                    infoHash: hash,
+                    magnetURL: winner.url.absoluteString,
+                    fileIdx: winner.fileIdx ?? 0
+                )
+            }
+            guard !Task.isCancelled, inflightPrefetchKey == key else { return }
+
+            let creationError = await resolveTorrentStream(winner)
+            guard !Task.isCancelled,
+                  inflightPrefetchKey == key,
+                  creationError == nil else {
+                await MainActor.run {
+                    if self.prefetchTorrentHash == hash {
+                        self.prefetchTorrentHash = nil
+                        if self.activeTorrentHash != hash {
+                            StremioServerManager.shared.removeTorrent(infoHash: hash)
+                        }
+                    }
+                    self.isPrefetching = false
+                    if self.inflightPrefetchKey == key { self.inflightPrefetchKey = nil }
+                }
+                return
+            }
         } else {
             Self.warmHTTP(url: getPlayableURL(for: winner))
         }
@@ -254,6 +300,12 @@ class PlayerManager: ObservableObject {
             warmCore = nil
             warmCoreDiscardTask?.cancel()
             warmCoreDiscardTask = nil
+            // The warm core is now the active playback core. Transfer torrent
+            // ownership so close/fallback cleans it up as a normal stream.
+            if let hash = prefetchTorrentHash {
+                activeTorrentHash = hash
+                prefetchTorrentHash = nil
+            }
             return controller
         }
         discardWarmCore()
@@ -285,6 +337,12 @@ class PlayerManager: ObservableObject {
         warmCore = nil
         print("[PlayerManager] Discarding warm core (\(core.key)) age \(Int(Date().timeIntervalSince(core.createdAt)))s")
         core.controller.stop()
+        if let hash = prefetchTorrentHash {
+            prefetchTorrentHash = nil
+            if activeTorrentHash != hash {
+                StremioServerManager.shared.removeTorrent(infoHash: hash)
+            }
+        }
         let vc = core.viewController
         let host = core.hostWindow
         DispatchQueue.main.async {
@@ -318,6 +376,21 @@ class PlayerManager: ObservableObject {
     /// so dead sources never cost us a second 12s timeout.
     private var recentlyDeadHashes: [String: Date] = [:]
 
+    private func pruneSessionCaches() {
+        let now = Date()
+        lastPlayedStreams = lastPlayedStreams.filter { now.timeIntervalSince($0.value.timestamp) < 60 * 60 }
+        recentlyDeadHashes = recentlyDeadHashes.filter { now.timeIntervalSince($0.value) < 10 * 60 }
+
+        while lastPlayedStreams.count > 50,
+              let oldestKey = lastPlayedStreams.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
+            lastPlayedStreams.removeValue(forKey: oldestKey)
+        }
+        while recentlyDeadHashes.count > 200,
+              let oldestKey = recentlyDeadHashes.min(by: { $0.value < $1.value })?.key {
+            recentlyDeadHashes.removeValue(forKey: oldestKey)
+        }
+    }
+
     // MARK: - Client firewall (engine perimeter defense)
     //
     // Magnet URIs originate from community addons — arbitrary third-party
@@ -344,6 +417,7 @@ class PlayerManager: ObservableObject {
     }
 
     private func markHashDead(_ stream: Stream) {
+        pruneSessionCaches()
         if let hash = torrentHash(stream) {
             recentlyDeadHashes[hash] = Date()
         }
@@ -416,6 +490,7 @@ class PlayerManager: ObservableObject {
     private init() {}
     
     func play(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeImage: URL? = nil, isAutoAdvance: Bool = false) {
+        pruneSessionCaches()
         // USER-initiated playback while a PiP session floats: same title =
         // expand (resume at the floating position); different title = tear the
         // floating session down first. Auto-advance skips this — the floating
@@ -439,9 +514,13 @@ class PlayerManager: ObservableObject {
         self.probeStatus = [:]
         self.resetPreloadState()
 
-        // Cancel any in-flight prefetch and remove its torrent to prevent
-        // the prefetch's fire-and-forget /create from competing with play.
-        cancelDetailPrefetch()
+        // Cancel any in-flight prefetch and remove its torrent to prevent a
+        // competing `/create`. A completed warm core for this exact item is
+        // intentionally retained and adopted by PlayerView below.
+        let playbackKey = prefetchKey(for: item, season: season, episode: episode)
+        if warmCore?.key != playbackKey {
+            cancelDetailPrefetch()
+        }
 
         // Remove the previously-playing torrent so only one downloads at a time.
         if let oldHash = activeTorrentHash {
@@ -877,6 +956,7 @@ class PlayerManager: ObservableObject {
     
     func close() {
         DispatchQueue.main.async {
+            self.cancelDetailPrefetch()
             // Remove the active torrent so it stops downloading immediately.
             if let hash = self.activeTorrentHash {
                 StremioServerManager.shared.removeTorrent(infoHash: hash)

@@ -178,6 +178,7 @@ struct PlaybackSettingsView: View {
 struct AdvancedSettingsView: View {
     @AppStorage("stremioCacheGB") private var stremioCacheGB = 2
     @AppStorage("ramCacheMode") private var ramCacheMode = false
+    @AppStorage("ramCacheLimitMB") private var ramCacheLimitMB = 128
     @State private var cacheUsage = ""
 
     /// Mirrors Stremio's cache size options (disk LRU — oldest torrents evicted first).
@@ -191,7 +192,12 @@ struct AdvancedSettingsView: View {
                     .tint(.cyan)
 
                 if ramCacheMode {
-                    Text("Pieces buffer in RAM instead of disk. Reduces SSD wear. May cause brief stalls on backward seeks with poorly-seeded torrents. Requires app restart.")
+                    Picker("RAM Piece Cache", selection: $ramCacheLimitMB) {
+                        ForEach([64, 128, 256, 512], id: \.self) { mb in
+                            Text("\(mb) MB").tag(mb)
+                        }
+                    }
+                    Text("Pieces buffer in RAM instead of disk. This reserves up to \(ramCacheLimitMB) MB in addition to mpv, image caching, and the Go runtime. Requires app restart.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -400,8 +400,11 @@ class StremioServerManager: ObservableObject {
             env["GOMEMLIMIT"] = "524288000"
             env["GOGC"] = "20"
             if UserDefaults.standard.bool(forKey: "ramCacheMode") {
-                env["STREMIO_MEMORY_CACHE_SIZE"] = "536870912"
-                print("[StremioServer] RAM cache mode ON — 512MB in-memory piece cache")
+                let configuredMB = UserDefaults.standard.object(forKey: "ramCacheLimitMB") as? Int ?? 128
+                let ramCacheMB = min(max(configuredMB, 64), 512)
+                let ramCacheBytes = ramCacheMB * 1024 * 1024
+                env["STREMIO_MEMORY_CACHE_SIZE"] = String(ramCacheBytes)
+                print("[StremioServer] RAM cache mode ON — \(ramCacheMB)MB in-memory piece cache")
             }
             engineIsFluxEngine = true
             print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort)")
