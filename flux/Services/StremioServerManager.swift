@@ -398,7 +398,7 @@ class StremioServerManager: ObservableObject {
             env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
             env["STREMIO_MEM_LIMIT"] = "1073741824"
             env["GOMEMLIMIT"] = "1073741824"
-            env["GOGC"] = "off"
+            env["GOGC"] = "50"
             if UserDefaults.standard.bool(forKey: "ramCacheMode") {
                 env["STREMIO_MEMORY_CACHE_SIZE"] = "536870912"
                 print("[StremioServer] RAM cache mode ON — 512MB in-memory piece cache")

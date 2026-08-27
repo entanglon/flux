@@ -117,15 +117,20 @@ struct CachedImage<Content: View>: View {
 class ImageSession {
     static let shared: URLSession = {
         let config = URLSessionConfiguration.default
-        config.urlCache = URLCache(memoryCapacity: 256 * 1024 * 1024, // 256 MB memory (Increased)
-                                   diskCapacity: 1024 * 1024 * 1024,  // 1 GB disk (Increased)
+        config.urlCache = URLCache(memoryCapacity: 128 * 1024 * 1024, // 128 MB memory
+                                   diskCapacity: 1024 * 1024 * 1024,  // 1 GB disk
                                    diskPath: "FluxImageCache")
         return URLSession(configuration: config)
     }()
 }
 
 final class ImageInMemoryCache {
-    static let shared = NSCache<NSURL, NSImage>()
+    static let shared: NSCache<NSURL, NSImage> = {
+        let cache = NSCache<NSURL, NSImage>()
+        cache.countLimit = 200
+        cache.totalCostLimit = 100 * 1024 * 1024  // 100 MB
+        return cache
+    }()
 }
 
 /// Debug logger for image loading — writes to /tmp/flux_image_debug.log
