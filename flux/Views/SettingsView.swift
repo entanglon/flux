@@ -191,7 +191,7 @@ struct AdvancedSettingsView: View {
                     .tint(.cyan)
 
                 if ramCacheMode {
-                    Text("Pieces buffer in RAM instead of disk. Reduces SSD wear. May cause brief stalls on backward seeks with poorly-seeded torrents. Requires app restart.")
+                    Text("Pieces buffer in 512MB of RAM instead of disk. Reduces SSD wear. May cause brief stalls on backward seeks with poorly-seeded torrents. Requires app restart.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -217,11 +217,9 @@ struct AdvancedSettingsView: View {
                 }
 
                 Button("Clear Image Cache") {
-                    // Clear URLCache (in-memory + on-disk)
-                    ImageSession.shared.configuration.urlCache?.removeAllCachedResponses()
-                    // Clear the in-memory NSCache
-                    ImageInMemoryCache.shared.removeAllObjects()
-                    // Remove the on-disk FluxImageCache directory
+                    // Clear on-disk thumbnail cache
+                    ThumbnailDiskCache.shared.clearCache()
+                    // Remove the old FluxImageCache directory (legacy)
                     let container = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
                         .deletingLastPathComponent().appendingPathComponent("Caches")
                     if let container {
