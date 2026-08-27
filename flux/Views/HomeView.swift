@@ -117,6 +117,31 @@ struct HomeView: View {
         .task {
             await loadData()
         }
+        // Live-refresh the For You rail when the user toggles ♥ anywhere.
+        .onReceive(TasteProfileManager.shared.$lovedItems) { _ in
+            refreshForYouTask?.cancel()
+            refreshForYouTask = Task {
+                // Debounce rapid ♥ toggles so we don't spam TMDB.
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if Task.isCancelled { return }
+                await refreshForYou()
+            }
+        }
+    }
+
+    @State private var refreshForYouTask: Task<Void, Never>?
+
+    private func refreshForYou() async {
+        guard TasteProfileManager.shared.hasEnoughSignal else {
+            forYouItems = []
+            becauseTitle = nil
+            return
+        }
+        let (recs, because) = await TasteProfileManager.shared.forYouRecommendations()
+        if !Task.isCancelled {
+            forYouItems = recs
+            becauseTitle = because?.title
+        }
     }
     
     // Extracted subviews for readability
