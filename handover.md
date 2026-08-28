@@ -56,11 +56,13 @@
 - **Sidebar Reset:** `sidebarRow` now unconditionally resets `path = NavigationPath()` on tab switch, instantly popping any open subpages when switching categories.
 
 ### Apple TV Continue Watching & Recently Watched Landscape Cards
-- **Redesign:** Rebuilt `ContinueWatchingCard` with pixel-perfect Apple TV styling supporting both `.continueWatching` and `.recentlyWatched` modes:
-  - **16:9 Landscape Layout:** 290x163pt with continuous 18pt rounded corners, drop shadows, and spring hover scaling (1.025x).
-  - **Continue Watching Mode:** Solid play icon `▶`, horizontal progress capsule bar (52x4pt with white active fill), season/episode/runtime subtitle (`S2, E1 · 59m`), and trailing context menu `•••`.
-  - **Recently Watched Mode:** Circular replay icon `↺`, season/episode/runtime details (`S2, E10 · 52m`), and trailing context menu `•••`.
-  - **Episode Metadata & Stills:** `TMDBEnricher.fetchEpisodeInfo()` fetches episode backdrop stills and actual episode runtimes in minutes (`59m`, `52m`).
+- **Redesign:** Rebuilt `ContinueWatchingCard` with authentic Apple TV styling supporting both `.continueWatching` and `.recentlyWatched` modes:
+  - **16:9 Landscape Layout:** 290x163pt with continuous 18pt rounded corners, drop shadows, and static clean hover border (removed zoom/scale on hover).
+  - **Transparent Title Logo Overlay:** Dynamically fetches official transparent English PNG title logos from TMDB (`/images`) and Metahub (`/logo/medium/{id}/img`), rendering sharp logo graphics with typographic fallbacks.
+  - **Movie & Series Runtimes:** Dynamically fetches movie durations (`TMDBEnricher.fetchMovieRuntime()`) and episode runtimes (`fetchEpisodeInfo()`), showing exact runtimes (`2h 18m`, `S2, E1 · 59m`) beside the play icon and progress bar.
+  - **Real Progress Bar:** Capsule progress track directly reflecting recorded playback timestamp (`time / duration`).
+  - **Continue Watching Mode:** Solid play icon `▶`, horizontal progress capsule bar (52x4pt with active white fill), season/episode/runtime subtitle (`S2, E1 · 59m` or `2h 18m`), and trailing context menu `•••`.
+  - **Recently Watched Mode:** Circular replay icon `↺`, season/episode/runtime details (`S2, E10 · 52m` or `2026 · 2h 18m`), and trailing context menu `•••`.
   - **Home & History Views:** Upgraded `HomeView.historyRow` and `HistoryView` from basic portrait cards to the new landscape card system.
 
 ---

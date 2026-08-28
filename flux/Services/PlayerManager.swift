@@ -949,8 +949,18 @@ class PlayerManager: ObservableObject {
     }
     
     func updateWatchProgress(time: Double, duration: Double) {
-        guard let item = currentItem, duration > 0 else { return }
+        guard var item = currentItem, duration > 0 else { return }
         let progress = time / duration
+        if item.runtime == nil || item.runtime?.isEmpty == true {
+            let totalMinutes = Int(duration) / 60
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
+            if hours > 0 {
+                item.runtime = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+            } else if minutes > 0 {
+                item.runtime = "\(minutes)m"
+            }
+        }
         UserDataService.shared.addToHistory(item, progress: progress, season: currentSeason, episode: currentEpisode, episodeImage: currentEpisodeImage)
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }

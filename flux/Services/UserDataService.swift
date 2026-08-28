@@ -145,6 +145,12 @@ class UserDataService: ObservableObject {
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
                 item.lastEpisodeImage = url
             }
+            if let r = dict["runtime"] as? String {
+                item.runtime = r
+            }
+            if let l = dict["logo"] as? String, let u = URL(string: l) {
+                item.logoURL = u
+            }
             
             return (item, timestamp)
         }
@@ -199,6 +205,8 @@ class UserDataService: ObservableObject {
         if let e = episode { finalItem["lastEpisode"] = e }
         if let et = episodeTitle { finalItem["lastEpisodeTitle"] = et }
         if let ei = episodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
+        if let r = item.runtime { finalItem["runtime"] = r }
+        if let l = item.logoURL?.absoluteString { finalItem["logo"] = l }
         
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
         // Remove existing item if present

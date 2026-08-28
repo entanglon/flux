@@ -286,6 +286,37 @@ class TMDBEnricher {
         let rt = response.runtime.map { "\($0)m" }
         return (still, rt)
     }
+
+    func fetchLogoURL(tmdbID: String, type: String) async -> URL? {
+        let mediaType = type.contains("tv") || type.contains("series") ? "tv" : "movie"
+        let urlString = "\(baseURL)/\(mediaType)/\(tmdbID)/images?api_key=\(apiKey)&include_image_language=en,null"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let logos = json["logos"] as? [[String: Any]], !logos.isEmpty else {
+            return nil
+        }
+        let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
+        guard let path = enLogo?["file_path"] as? String else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+    }
+
+    func fetchMovieRuntime(tmdbID: String) async -> String? {
+        let urlString = "\(baseURL)/movie/\(tmdbID)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let runtime = json["runtime"] as? Int, runtime > 0 else {
+            return nil
+        }
+        let hours = runtime / 60
+        let minutes = runtime % 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        } else {
+            return "\(minutes)m"
+        }
+    }
     
     func fetchSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: String] {
         let urlString = "\(baseURL)/tv/\(tvId)/season/\(seasonNumber)?api_key=\(apiKey)"

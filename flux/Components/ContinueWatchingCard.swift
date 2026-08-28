@@ -15,6 +15,7 @@ struct ContinueWatchingCard: View {
 
     @State private var fetchedImage: URL?
     @State private var fetchedRuntime: String?
+    @State private var fetchedLogo: URL?
 
     /// Full thumbnail ladder — CachedImage walks it and only shows the
     /// placeholder if EVERY candidate fails.
@@ -45,6 +46,15 @@ struct ContinueWatchingCard: View {
             }
         }
         return out
+    }
+
+    private var activeLogoURL: URL? {
+        if let logo = fetchedLogo { return logo }
+        if let logo = item.logoURL { return logo }
+        if item.id.starts(with: "tt") {
+            return URL(string: "https://images.metahub.space/logo/medium/\(item.id)/img")
+        }
+        return nil
     }
 
     private var subtitleText: String {
@@ -92,13 +102,13 @@ struct ContinueWatchingCard: View {
             .frame(width: 290, height: 163)
             .clipped()
 
-            // Gradient Overlay for Text Legibility
+            // Gradient Overlay for Text & Logo Legibility
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.35),
-                    .init(color: .black.opacity(0.4), location: 0.65),
-                    .init(color: .black.opacity(0.88), location: 1.0)
+                    .init(color: .clear, location: 0.30),
+                    .init(color: .black.opacity(0.45), location: 0.65),
+                    .init(color: .black.opacity(0.90), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -108,16 +118,29 @@ struct ContinueWatchingCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer()
 
-                // Title
-                Text(item.title)
-                    .font(.system(size: mode == .continueWatching ? 15 : 14, weight: mode == .continueWatching ? .bold : .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .shadow(color: .black.opacity(0.7), radius: 3, x: 0, y: 1)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 6)
+                // Title Treatment: Transparent Logo with Typographic Fallback
+                Group {
+                    if let logo = activeLogoURL {
+                        CachedImage(url: logo) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 160, maxHeight: 36, alignment: .leading)
+                                    .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
+                            default:
+                                fallbackTitleText
+                            }
+                        }
+                    } else {
+                        fallbackTitleText
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
 
-                // Subtitle Row
+                // Subtitle / Bottom Control Row
                 HStack(spacing: 8) {
                     if mode == .continueWatching {
                         // Play triangle
@@ -125,7 +148,7 @@ struct ContinueWatchingCard: View {
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white)
 
-                        // Progress capsule bar
+                        // Real Progress capsule bar
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(Color.white.opacity(0.35))
@@ -207,35 +230,55 @@ struct ContinueWatchingCard: View {
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
-        .scaleEffect(isHovering ? 1.025 : 1.0)
+        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 14 : 8, x: 0, y: isHovering ? 6 : 4)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isHovering)
+        .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }
         .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
             fetchedImage = nil
             fetchedRuntime = nil
+            fetchedLogo = nil
 
-            if item.category == "TV Show",
-               let season = item.lastSeason,
-               let episode = item.lastEpisode {
+            let isTV = item.category == "TV Show" || item.lastSeason != nil
+            let type = isTV ? "tv" : "movie"
 
-                var tmdbIDToUse: String? = nil
-                if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
-                    tmdbIDToUse = item.id
-                } else if item.id.starts(with: "tt") {
-                    tmdbIDToUse = await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: "tv")
+            var tmdbIDToUse: String? = nil
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
+                tmdbIDToUse = item.id
+            } else if item.id.starts(with: "tt") {
+                tmdbIDToUse = await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: type)
+            }
+
+            if let id = tmdbIDToUse {
+                // Fetch logo
+                if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                    await MainActor.run { self.fetchedLogo = logo }
                 }
 
-                if let id = tmdbIDToUse {
+                if isTV, let season = item.lastSeason, let episode = item.lastEpisode {
                     let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: season, episode: episode)
                     await MainActor.run {
                         if let still = info.stillURL { self.fetchedImage = still }
                         if let rt = info.runtime { self.fetchedRuntime = rt }
                     }
+                } else if !isTV {
+                    // Movie: fetch runtime if not already present
+                    if item.runtime == nil || item.runtime?.isEmpty == true {
+                        if let rt = await TMDBEnricher.shared.fetchMovieRuntime(tmdbID: id) {
+                            await MainActor.run { self.fetchedRuntime = rt }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private var fallbackTitleText: some View {
+        Text(item.title)
+            .font(.system(size: mode == .continueWatching ? 15 : 14, weight: mode == .continueWatching ? .bold : .semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .shadow(color: .black.opacity(0.8), radius: 3, x: 0, y: 1)
     }
 }
