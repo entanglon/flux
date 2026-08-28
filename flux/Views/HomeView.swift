@@ -49,6 +49,7 @@ struct HomeView: View {
                         GhostRail()
                     }
                     .padding(.bottom, 40)
+                    .transition(.opacity)
                 } else {
                     // Featured Carousel (Trending / Hero Content)
                     if !heroContent.isEmpty {
@@ -288,13 +289,17 @@ extension HomeView {
             }
             
             await MainActor.run {
-                self.isLoading = false
+                withAnimation(.easeOut(duration: 0.3)) {
+                    self.isLoading = false
+                }
             }
         } catch {
             print("Error fetching data: \(error)")
             await fetchNativeCinemetaSections()
             await MainActor.run {
-                self.isLoading = false
+                withAnimation(.easeOut(duration: 0.3)) {
+                    self.isLoading = false
+                }
             }
         }
     }

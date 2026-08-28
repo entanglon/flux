@@ -227,8 +227,8 @@ struct FeaturedCarousel: View {
             withAnimation { isHovering = hovering }
         }
         .onReceive(timer) { _ in
-            guard !items.isEmpty else { return }
-            withAnimation {
+            guard !items.isEmpty, !isHovering else { return }
+            withAnimation(.easeInOut(duration: 0.5)) {
                 currentIndex = (currentIndex + 1) % items.count
             }
         }

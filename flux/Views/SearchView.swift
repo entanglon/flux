@@ -28,6 +28,7 @@ struct SearchView: View {
                                     GhostCard()
                                 }
                             }
+                            .transition(.opacity)
                         } else if searchResults.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
@@ -40,11 +41,14 @@ struct SearchView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: 300)
+                            .transition(.opacity)
                         } else {
                             searchResultsView
+                                .transition(.opacity)
                         }
                     } else {
                         defaultBrowseView
+                            .transition(.opacity)
                     }
                 }
                 .padding(.leading, 268)
@@ -193,24 +197,30 @@ struct SearchView: View {
     private func performSearch() async {
         guard !searchText.isEmpty else { return }
         await MainActor.run {
-            isSearching = true
-            isLoading = true
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSearching = true
+                isLoading = true
+            }
         }
         
         do {
             let (movies, tvShows) = try await StremioService.shared.searchMulti(query: searchText)
             
             await MainActor.run {
-                self.searchResults = sortByRelevance(
-                    (movies + tvShows).filter { $0.isReleased },
-                    query: searchText
-                )
-                self.isLoading = false
+                withAnimation(.easeOut(duration: 0.25)) {
+                    self.searchResults = sortByRelevance(
+                        (movies + tvShows).filter { $0.isReleased },
+                        query: searchText
+                    )
+                    self.isLoading = false
+                }
             }
         } catch {
             print("Error searching: \(error)")
             await MainActor.run {
-                self.isLoading = false
+                withAnimation(.easeOut(duration: 0.2)) {
+                    self.isLoading = false
+                }
             }
         }
     }

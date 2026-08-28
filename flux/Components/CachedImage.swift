@@ -63,7 +63,7 @@ struct CachedImage<Content: View>: View {
             // 2. Session's own disk cache (NOT URLCache.shared — that's a different
             //    cache and can hold stale redirect/HTML responses that fail decode).
             if let cachedResponse = session.configuration.urlCache?.cachedResponse(for: request),
-               let downsampled = downsample(data: cachedResponse.data, maxDimension: maxDimension) {
+               let downsampled = await downsample(data: cachedResponse.data, maxDimension: maxDimension) {
                 ImageDebugLog.log("Disk hit: \(candidate.absoluteString.prefix(100))")
                 ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
                 withTransaction(transaction) {
@@ -80,7 +80,7 @@ struct CachedImage<Content: View>: View {
                     ImageDebugLog.log("HTTP \(http.statusCode) for \(candidate.absoluteString.prefix(100))")
                     continue // dead URL — try the next candidate
                 }
-                guard let downsampled = downsample(data: data, maxDimension: maxDimension) else {
+                guard let downsampled = await downsample(data: data, maxDimension: maxDimension) else {
                     ImageDebugLog.log("Decode failed: \(candidate.absoluteString.prefix(100))")
                     continue // undecodable — try the next candidate
                 }
@@ -98,30 +98,32 @@ struct CachedImage<Content: View>: View {
         phase = .failure(URLError(.cannotFindHost))
     }
 
-    // Efficient Downsampling using ImageIO
-    private func downsample(data: Data, maxDimension: CGFloat) -> DecodedImage? {
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension
-        ]
+    // Efficient Downsampling using ImageIO on a background task
+    private func downsample(data: Data, maxDimension: CGFloat) async -> DecodedImage? {
+        await Task.detached(priority: .userInitiated) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDimension
+            ]
 
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-            ImageDebugLog.log("Failed to create image source from \(data.count) bytes")
-            return nil
-        }
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            ImageDebugLog.log("Failed to create thumbnail from \(data.count) bytes, maxDim=\(maxDimension)")
-            return nil
-        }
-        
-        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
-        ImageDebugLog.log("Decoded \(cgImage.width)x\(cgImage.height) from \(data.count) bytes (maxDim=\(maxDimension))")
-        return DecodedImage(
-            image: nsImage,
-            cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
-        )
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+                ImageDebugLog.log("Failed to create image source from \(data.count) bytes")
+                return nil
+            }
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                ImageDebugLog.log("Failed to create thumbnail from \(data.count) bytes, maxDim=\(maxDimension)")
+                return nil
+            }
+            
+            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+            ImageDebugLog.log("Decoded \(cgImage.width)x\(cgImage.height) from \(data.count) bytes (maxDim=\(maxDimension))")
+            return DecodedImage(
+                image: nsImage,
+                cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
+            )
+        }.value
     }
 }
 

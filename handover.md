@@ -1,6 +1,6 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 28, 2026 — CRASH FIX + TMDB KEY VALIDATION
+## LATEST: Aug 28, 2026 — CRASH FIX + CACHE EVICTION + AUTH FLASH + UI/UX POLISH
 
 ### Warm-Core NSWindow Double-Release Crash Fix
 - **Root cause:** `cancelDetailPrefetch()` called `hostWindow?.close()` which auto-releases the window (`isReleasedWhenClosed = true`), then `warmCore = nil` released it again via ARC → crash
@@ -25,6 +25,22 @@
 - Red X + "Key didn't work — hasn't been saved" on failure
 - Editing the field resets the status indicator
 - Default TMDB key provided as a fallback (pre-filled as placeholder)
+
+### Login Screen Flash Fix
+- **Root cause:** `AuthManager.init()` restored the saved auth token via `DispatchQueue.main.async`, so `isAuthenticated` was `false` on the first SwiftUI render → `AuthGateView` flashed for one frame before switching to `ContentView`
+- **Fix:** Set `isAuthenticated`, `currentUser`, and `isGuestMode` synchronously in `init()` instead of dispatching — safe because `init()` runs on the main thread before `@StateObject` observation begins
+
+### Torrent Cache Eviction Fix
+- **Root cause:** `cacheUsage()` and `evictCacheIfNeeded()` scanned `appPath/stremio-cache/` which doesn't exist with FluxEngine — the Go engine stores `{infoHash}/` dirs directly under `appPath`. Cache limit was **never enforced** and Settings always showed "0 KB"
+- **Fix 1:** `torrentCacheDir` auto-detects layout (legacy `stremio-cache/` vs FluxEngine direct)
+- **Fix 2:** `isTorrentHashDir()` — only targets 40-char hex dirs, protects config files
+- **Fix 3:** `diskSize(of:)` — uses `totalFileAllocatedSize` for sparse `.part` files (actual disk blocks, not logical/pre-allocated size)
+- **Fix 4:** Eviction now skips the currently-active torrent
+
+### UI/UX Performance & Animation Polish
+- **Main-Thread Scrolling Jank Fix (`CachedImage.swift`):** `downsample` now runs asynchronously via detached background tasks (`Task.detached(priority: .userInitiated)`) instead of synchronously on `@MainActor`, preventing scroll stutter when decoding heavy 4K / retina posters.
+- **Carousel Interaction Guard (`FeaturedCarousel.swift`):** Auto-scrolling timer now pauses while the user is actively hovering (`!isHovering`) to prevent abrupt slide changes while reading or clicking, and uses smooth `.easeInOut(duration: 0.5)` transitions.
+- **Smooth Skeleton/Loading Crossfades:** Added `.transition(.opacity)` and animated state updates (`withAnimation`) to `HomeView`, `DetailView`, `SearchView`, `MoviesView`, `TVShowsView`, and `TrendingView` to eliminate abrupt layout snapping when skeletons resolve to content.
 
 ---
 

@@ -520,16 +520,46 @@ class StremioServerManager: ObservableObject {
         }
     }
 
+    /// The directory that contains torrent data. FluxEngine stores {hash}/ dirs
+    /// directly under appPath; the legacy Node server.js uses appPath/stremio-cache.
+    private var torrentCacheDir: String {
+        let legacy = appPath + "/stremio-cache"
+        if FileManager.default.fileExists(atPath: legacy) { return legacy }
+        return appPath   // FluxEngine layout
+    }
+
+    /// Returns true when `name` looks like a 40-char hex info-hash directory —
+    /// the only things we should ever consider evicting.
+    private func isTorrentHashDir(_ name: String) -> Bool {
+        name.count == 40 && name.allSatisfy { $0.isHexDigit }
+    }
+
+    /// Actual on-disk bytes consumed by a directory tree. Uses `totalFileAllocatedSize`
+    /// so sparse `.part` files report real disk blocks, not the logical (pre-allocated) size.
+    private func diskSize(of dirPath: String) -> Int64 {
+        let fm = FileManager.default
+        let url = URL(fileURLWithPath: dirPath)
+        guard let enumerator = fm.enumerator(at: url,
+                                              includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+                                              options: [.skipsHiddenFiles]) else { return 0 }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            if let values = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey]),
+               let allocated = values.totalFileAllocatedSize {
+                total += Int64(allocated)
+            }
+        }
+        return total
+    }
+
     /// Current on-disk torrent cache usage, formatted ("2.1 GB").
     func cacheUsage() async -> String {
-        let cacheDir = appPath + "/stremio-cache"
-        guard let enumerator = FileManager.default.enumerator(atPath: cacheDir) else { return "0 KB" }
+        let cacheDir = torrentCacheDir
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: cacheDir) else { return "0 KB" }
         var total: Int64 = 0
-        for case let path as String in enumerator {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: cacheDir + "/" + path),
-               let size = attrs[.size] as? Int64 {
-                total += size
-            }
+        for name in contents where isTorrentHashDir(name) {
+            total += diskSize(of: cacheDir + "/" + name)
         }
         return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
     }
@@ -539,36 +569,30 @@ class StremioServerManager: ObservableObject {
     func evictCacheIfNeeded() async {
         let savedGB = UserDefaults.standard.object(forKey: "stremioCacheGB") as? Int ?? 2
         let limitBytes = Int64(savedGB) * 1024 * 1024 * 1024
-        let cacheDir = appPath + "/stremio-cache"
+        let cacheDir = torrentCacheDir
         let fm = FileManager.default
 
         guard let contents = try? fm.contentsOfDirectory(atPath: cacheDir) else { return }
 
-        // Calculate total + collect per-directory sizes with modification dates
+        // Calculate total + collect per-directory sizes with modification dates.
+        // Only consider directories whose name is a 40-char hex info-hash.
         struct TorrentDir { let path: String; let size: Int64; let modified: Date }
         var dirs: [TorrentDir] = []
         var totalBytes: Int64 = 0
 
         for name in contents {
+            guard isTorrentHashDir(name) else { continue }
             let fullPath = cacheDir + "/" + name
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
 
-            var dirSize: Int64 = 0
-            if let enumerator = fm.enumerator(atPath: fullPath) {
-                for case let file as String in enumerator {
-                    if let attrs = try? fm.attributesOfItem(atPath: fullPath + "/" + file),
-                       let s = attrs[.size] as? Int64 {
-                        dirSize += s
-                    }
-                }
-            }
-
+            let dirSize = diskSize(of: fullPath)
             let modDate = (try? fm.attributesOfItem(atPath: fullPath))?[.modificationDate] as? Date ?? .distantPast
             dirs.append(TorrentDir(path: fullPath, size: dirSize, modified: modDate))
             totalBytes += dirSize
         }
 
+        print("[StremioServer] Cache: \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)) used / \(savedGB) GB limit (\(dirs.count) torrent(s))")
         guard totalBytes > limitBytes else { return }
 
         // Sort oldest first, evict until under limit
@@ -578,11 +602,16 @@ class StremioServerManager: ObservableObject {
 
         for dir in dirs {
             guard freed < needToFree else { break }
+            // Don't evict the currently-active torrent
+            let hash = (dir.path as NSString).lastPathComponent
+            if hash == activeRegistrations.keys.first { continue }
             try? fm.removeItem(atPath: dir.path)
             freed += dir.size
-            print("[StremioServer] Evicted cache: \((dir.path as NSString).lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: dir.size, countStyle: .file)))")
+            print("[StremioServer] Evicted cache: \(hash.prefix(12))… (\(ByteCountFormatter.string(fromByteCount: dir.size, countStyle: .file)))")
         }
-        print("[StremioServer] Evicted \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)) of cache")
+        if freed > 0 {
+            print("[StremioServer] Evicted \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)) of cache")
+        }
     }
 
     deinit { stopServer() }

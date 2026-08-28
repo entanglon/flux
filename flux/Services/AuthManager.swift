@@ -40,11 +40,12 @@ class AuthManager: ObservableObject {
         if Self.isConfigured, let token = UserDefaults.standard.string(forKey: Self.tokenKey),
            let uid = UserDefaults.standard.string(forKey: Self.userUIDKey),
            let email = UserDefaults.standard.string(forKey: Self.userEmailKey) {
-            DispatchQueue.main.async {
-                self.currentUser = User(id: uid, email: email, displayName: email.components(separatedBy: "@").first)
-                self.isAuthenticated = true
-                self.isGuestMode = false
-            }
+            // Set synchronously — init() runs on the main thread before any
+            // @StateObject observation begins, so this is safe and prevents
+            // AuthGateView from flashing for one frame on startup.
+            self.currentUser = User(id: uid, email: email, displayName: email.components(separatedBy: "@").first)
+            self.isAuthenticated = true
+            self.isGuestMode = false
         } else if UserDefaults.standard.bool(forKey: Self.guestModeKey) {
             self.isGuestMode = true
         }

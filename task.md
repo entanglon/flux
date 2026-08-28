@@ -1,6 +1,6 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 28, 2026 — CRASH FIX + PROCESS CLEANUP + TMDB VALIDATION
+## LATEST: Aug 28, 2026 — CRASH FIX + PROCESS CLEANUP + TMDB VALIDATION + CACHE EVICTION + UI/UX POLISH
 
 ### What was done this session
 
@@ -25,6 +25,21 @@
 - Green checkmark on success, red X on failure
 - Default TMDB key provided as placeholder fallback
 
+#### 4. Login Screen Flash Fix
+- **Bug:** On app startup, the login screen flashed for a single frame before showing main content
+- **Root cause:** `AuthManager.init()` restored authentication state via `DispatchQueue.main.async`, causing the first render pass to see `isAuthenticated = false`
+- **Fix:** Restored auth state synchronously in `AuthManager.init()`
+
+#### 5. Torrent Cache Eviction Fix
+- **Bug:** Torrent cache was never evicted and settings showed "0 KB" used
+- **Root cause:** `cacheUsage()` and `evictCacheIfNeeded()` looked in `StremioServer/stremio-cache/` which does not exist with FluxEngine (stores `{infoHash}/` directly under appPath)
+- **Fix:** Updated cache directory resolution, switched to allocated disk block measurement for sparse `.part` files, guarded 40-character hex directories, and protected actively streaming torrents
+
+#### 6. UI/UX Performance & Animation Polish
+- **Fix:** Offloaded `CachedImage` downsampling to background tasks (`Task.detached(priority: .userInitiated)`) to ensure 60/120fps scrolling without main-thread blocking
+- **Fix:** Paused `FeaturedCarousel` timer on user hover (`!isHovering`) and smoothed slide animations
+- **Fix:** Added `.transition(.opacity)` and `withAnimation` crossfades to `HomeView`, `DetailView`, `SearchView`, `MoviesView`, `TVShowsView`, and `TrendingView`
+
 ---
 
 ## Open Issues
@@ -45,6 +60,9 @@
 - ✅ Warm-core crash fix — NSWindow double-release resolved
 - ✅ FluxEngine orphan process fix — clean exit guaranteed
 - ✅ TMDB key validation — verify-before-save UI
+- ✅ Login screen flash fix — synchronous auth restore in init()
+- ✅ Torrent cache eviction fix — correct path for FluxEngine, sparse file accounting, config file protection
+- ✅ UI/UX performance & animation polish — detached background image decoding, carousel hover guard, smooth skeleton crossfades
 
 ## What to test next
 - Play a video → verify skip intro / next episode appear as floating bottom-right buttons
