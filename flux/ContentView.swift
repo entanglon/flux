@@ -214,7 +214,7 @@ struct ContentView: View {
             
             sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark", fillIcon: "bookmark.fill")
             sidebarRow(.collections, title: "Collections", icon: "rectangle.stack", fillIcon: "rectangle.stack.fill")
-            sidebarRow(.history, title: "Recently Added", icon: "clock", fillIcon: "clock.fill")
+            sidebarRow(.history, title: "Recently Watched", icon: "clock", fillIcon: "clock.fill")
             sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
         }
     }

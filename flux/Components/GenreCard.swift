@@ -5,12 +5,13 @@ struct GenreCard: View {
     let genre: Genre
     @State private var isHovering = false
 
-    /// Bundled, pre-optimized Unsplash artwork (downloaded into Assets.xcassets —
-    /// zero network at runtime, the old Unsplash download-links never loaded).
+    /// Bundled high-resolution artwork from Assets.xcassets
     private var assetName: String {
         switch genre.name {
         case "Sci-Fi": return "genre-scifi"
-        default: return "genre-\(genre.name.lowercased())"
+        case "Short Films": return "genre-shortfilms"
+        case "K-Drama": return "genre-kdrama"
+        default: return "genre-\(genre.name.lowercased().replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: ""))"
         }
     }
 
@@ -19,16 +20,13 @@ struct GenreCard: View {
     }
 
     var body: some View {
-        // Color.clear + aspectRatio defines the layout bounds; the fill image is
-        // an overlay constrained to those bounds and clipped — its intrinsic
-        // size can never leak into layout (which broke shapes and edge clicks).
         Color.clear
             .aspectRatio(2/3, contentMode: .fit)
             .overlay {
                 if hasArtwork {
                     Image(assetName)
                         .resizable()
-                        .scaledToFill()
+                        .aspectRatio(contentMode: .fill)
                 } else {
                     LinearGradient(
                         colors: [Color(red: 0.30, green: 0.34, blue: 0.55), Color(red: 0.10, green: 0.12, blue: 0.25)],
@@ -37,38 +35,45 @@ struct GenreCard: View {
                     )
                 }
 
-                // Legibility gradient behind the title
+                // Apple TV style smooth bottom gradient scrim
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.75)],
-                    startPoint: .center,
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .clear, location: 0.38),
+                        .init(color: .black.opacity(0.35), location: 0.65),
+                        .init(color: .black.opacity(0.85), location: 1.0)
+                    ],
+                    startPoint: .top,
                     endPoint: .bottom
                 )
 
-                // Bottom-left aligned title
+                // Bottom-left aligned genre title (matches reference design)
                 VStack(alignment: .leading) {
                     Spacer()
                     Text(genre.name)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.7), radius: 4, x: 0, y: 2)
-                        .padding(.leading, 14)
-                        .padding(.bottom, 14)
+                        .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
+                        .padding(.leading, 16)
+                        .padding(.bottom, 16)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
                         LinearGradient(
-                            colors: [.white.opacity(0.25), .white.opacity(0.05)],
+                            colors: isHovering ? [.white.opacity(0.55), .white.opacity(0.2)] : [.white.opacity(0.12), .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 1
+                        lineWidth: isHovering ? 1.5 : 0.75
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(isHovering ? 0.45 : 0.25), radius: isHovering ? 14 : 8, x: 0, y: isHovering ? 8 : 4)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(isHovering ? 0.45 : 0.25), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 6 : 3)
+            .animation(.easeOut(duration: 0.2), value: isHovering)
             .onHover { hovering in
                 isHovering = hovering
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }

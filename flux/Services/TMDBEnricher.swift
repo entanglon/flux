@@ -367,8 +367,23 @@ class TMDBEnricher {
     /// TMDB discover by genre — real genre-accurate titles, page-based pagination
     /// (pages 1..500). Used by the genre pages for endless scroll.
     func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie") async -> [MediaItem] {
-        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_genres=\(tmdbGenreID)&page=\(page)&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
-        return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
+        let type = mediaType.lowercased().contains("tv") || mediaType.lowercased().contains("series") ? "tv" : "movie"
+        let urlString: String
+        switch tmdbGenreID {
+        case 10001: // Anime
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_genres=16&with_original_language=ja&page=\(page)&sort_by=popularity.desc&include_adult=false"
+        case 10002: // Bollywood
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_original_language=hi&page=\(page)&sort_by=popularity.desc&include_adult=false"
+        case 10003: // Classics
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&primary_release_date.lte=1980-01-01&page=\(page)&sort_by=popularity.desc&include_adult=false"
+        case 10004: // K-Drama
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_original_language=ko&page=\(page)&sort_by=popularity.desc&include_adult=false"
+        case 10005: // Short Films
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_runtime.lte=40&page=\(page)&sort_by=popularity.desc&include_adult=false"
+        default:
+            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_genres=\(tmdbGenreID)&page=\(page)&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
+        }
+        return (try? await fetchCatalog(from: urlString, type: type)) ?? []
     }
 
     /// OTT platform catalogs via TMDB watch providers — always fresh, unlike the
