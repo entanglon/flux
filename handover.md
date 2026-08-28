@@ -63,7 +63,9 @@
   - **Real Progress Bar:** Capsule progress track directly reflecting recorded playback timestamp (`time / duration`).
   - **Continue Watching Mode:** Solid play icon `▶`, horizontal progress capsule bar (52x4pt with active white fill), season/episode/runtime subtitle (`S2, E1 · 59m` or `2h 18m`), and trailing context menu `•••`.
   - **Recently Watched Mode:** Circular replay icon `↺`, season/episode/runtime details (`S2, E10 · 52m` or `2026 · 2h 18m`), and trailing context menu `•••`.
-  - **Home & History Views:** Upgraded `HomeView.historyRow` and `HistoryView` from basic portrait cards to the new landscape card system.
+### Floating Back Button on Subpages & Genre TV Mapping Fixes
+- **Floating Back Button:** Moved back button in `MediaListView` (Genre & OTT pages), `CastListView` (Cast & Crew), and `CollectionDetailView` into a pinned floating `.overlay(alignment: .topLeading)` at `(leading: 268, top: 24)`. The button now stays permanently fixed on screen across infinite scrolling, exactly like `DetailView` and `PersonView`.
+- **TMDB TV Genre ID Translation:** Fixed missing content on TV genre views (Adventure, Sci-Fi, Fantasy, Horror, Thriller) by mapping movie genre IDs to TMDB's distinct TV genre IDs (e.g. 10759 for Action & Adventure, 10765 for Sci-Fi & Fantasy, 9648 for Mystery/Thriller). All 18 genres now load rich content for both Movies and TV Shows.
 
 ---
 

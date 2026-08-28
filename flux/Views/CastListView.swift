@@ -12,25 +12,15 @@ struct CastListView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                // Header — matches MediaListView
+                // Header
                 HStack(spacing: 16) {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .contentShape(Circle())
-                            .glassEffect(.regular.interactive(), in: .circle)
-                    }
-                    .buttonStyle(.plain)
-
                     Text("Cast & Crew")
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
 
                     Spacer()
                 }
-                .padding(.top, 24)
+                .padding(.top, 48)
 
                 LazyVGrid(columns: columns, spacing: 40) {
                     ForEach(cast) { member in
@@ -66,6 +56,19 @@ struct CastListView: View {
             .padding(.trailing, 40)
             .padding(.top, 40)
             .padding(.bottom, 40)
+        }
+        .overlay(alignment: .topLeading) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 268)
+            .padding(.top, 24)
         }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)

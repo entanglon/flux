@@ -361,6 +361,19 @@ struct CollectionDetailView: View {
             .padding(.top, 40)
             .padding(.bottom, 60)
         }
+        .overlay(alignment: .topLeading) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 268)
+            .padding(.top, 24)
+        }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
