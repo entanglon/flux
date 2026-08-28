@@ -272,12 +272,19 @@ class TMDBEnricher {
     
     // MARK: - Specific Asset Fetching
     func fetchEpisodeStill(tmdbID: String, season: Int, episode: Int) async -> URL? {
+        let (still, _) = await fetchEpisodeInfo(tmdbID: tmdbID, season: season, episode: episode)
+        return still
+    }
+
+    func fetchEpisodeInfo(tmdbID: String, season: Int, episode: Int) async -> (stillURL: URL?, runtime: String?) {
         let urlString = "\(baseURL)/tv/\(tmdbID)/season/\(season)/episode/\(episode)?api_key=\(apiKey)"
         guard let url = URL(string: urlString), 
               let (data, _) = try? await URLSession.shared.data(from: url),
-              let response = try? JSONDecoder().decode(TMDBEpisodeDetail.self, from: data) else { return nil }
+              let response = try? JSONDecoder().decode(TMDBEpisodeDetail.self, from: data) else { return (nil, nil) }
         
-        return adaptiveURL(path: response.still_path, quality: .backdrop)
+        let still = adaptiveURL(path: response.still_path, quality: .backdrop)
+        let rt = response.runtime.map { "\($0)m" }
+        return (still, rt)
     }
     
     func fetchSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: String] {
@@ -554,4 +561,5 @@ struct TMDBEpisodeDetail: Codable {
     let name: String
     let overview: String
     let still_path: String?
+    let runtime: Int?
 }

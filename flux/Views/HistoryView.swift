@@ -7,11 +7,7 @@ struct HistoryView: View {
     @Environment(\.openWindow) private var openWindow
     
     var columns: [GridItem] {
-        if showAsContinueWatching {
-            return [GridItem(.adaptive(minimum: 280), spacing: 24)]
-        } else {
-            return [GridItem(.adaptive(minimum: 160), spacing: 24)]
-        }
+        [GridItem(.adaptive(minimum: 280), spacing: 24)]
     }
     
     var body: some View {
@@ -19,7 +15,7 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 32) {
                 // Header
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(showAsContinueWatching ? "Continue Watching" : "Recently Added")
+                    Text(showAsContinueWatching ? "Continue Watching" : "Recently Watched")
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
                     
@@ -45,22 +41,16 @@ struct HistoryView: View {
                         message: "Movies and TV shows you start watching will automatically appear here."
                     )
                 } else {
-                    LazyVGrid(columns: columns, spacing: 40) {
+                    LazyVGrid(columns: columns, spacing: 32) {
                         ForEach(userData.history) { item in
-                            if showAsContinueWatching {
-                                Button(action: {
-                                    PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
-                                    openWindow(id: "player", value: item.id)
-                                }) {
-                                    ContinueWatchingCard(item: item)
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait)
-                                }
-                                .buttonStyle(.plain)
+                            Button(action: {
+                                PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                                openWindow(id: "player", value: item.id)
+                            }) {
+                                ContinueWatchingCard(item: item, mode: showAsContinueWatching ? .continueWatching : .recentlyWatched)
                             }
+                            .buttonStyle(.plain)
+                            .focusEffectDisabled()
                         }
                     }
                 }

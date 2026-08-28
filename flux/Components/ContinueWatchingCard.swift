@@ -1,15 +1,23 @@
 import SwiftUI
 
 struct ContinueWatchingCard: View {
+    enum Mode {
+        case continueWatching
+        case recentlyWatched
+    }
+
     let item: MediaItem
+    var mode: Mode = .continueWatching
+
     @State private var isHovering = false
     @ObservedObject private var userData = UserDataService.shared
-    
+    @Environment(\.openWindow) private var openWindow
+
     @State private var fetchedImage: URL?
+    @State private var fetchedRuntime: String?
 
     /// Full thumbnail ladder — CachedImage walks it and only shows the
-    /// placeholder if EVERY candidate fails. Selection-time fallbacks that
-    /// 404 at load time used to kill the whole chain.
+    /// placeholder if EVERY candidate fails.
     private var imageCandidates: [URL] {
         let cinemetaBackdrop = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/background/medium/\(item.id)/img") : nil
         let cinemetaPoster = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/poster/medium/\(item.id)/img") : nil
@@ -39,9 +47,22 @@ struct ContinueWatchingCard: View {
         return out
     }
 
+    private var subtitleText: String {
+        var parts: [String] = []
+        if let season = item.lastSeason, let episode = item.lastEpisode {
+            parts.append("S\(season), E\(episode)")
+        }
+        if let rt = fetchedRuntime ?? item.runtime, !rt.isEmpty {
+            parts.append(rt)
+        } else if item.lastSeason == nil, let year = item.releaseDateYear, !year.isEmpty {
+            parts.append(year)
+        }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         ZStack {
-            // Background Image — walks the candidate ladder on failure
+            // Background Image
             CachedImage(
                 url: imageCandidates.first,
                 fallbacks: Array(imageCandidates.dropFirst()),
@@ -53,7 +74,6 @@ struct ContinueWatchingCard: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 default:
-                    // Every candidate failed — deterministic placeholder, never a spinner.
                     Rectangle()
                         .fill(
                             LinearGradient(
@@ -69,181 +89,150 @@ struct ContinueWatchingCard: View {
                         )
                 }
             }
-            .frame(width: 280, height: 157.5) // 16:9 Aspect Ratio
+            .frame(width: 290, height: 163)
             .clipped()
-            
-            // Gradient Overlay
+
+            // Gradient Overlay for Text Legibility
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .black.opacity(0.2), location: 0.5),
-                    .init(color: .black.opacity(0.8), location: 1.0)
+                    .init(color: .clear, location: 0.35),
+                    .init(color: .black.opacity(0.4), location: 0.65),
+                    .init(color: .black.opacity(0.88), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            
-            // Hover Overlay (Dim + Play Button)
-            if isHovering {
-                Color.black.opacity(0.3)
-                    .transition(.opacity)
-                
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundColor(.white)
-                    .shadow(radius: 10)
-                    .transition(.scale.combined(with: .opacity))
-            }
-            
-            // Text & Progress Content
-            VStack {
-                // Top Right Menu (Visible on Hover)
-                HStack {
-                    Spacer()
-                    if isHovering {
-                        Menu {
-                            Button(action: {
-                                userData.toggleWatchlist(item)
-                            }) {
-                                let isInWatchlist = userData.isInWatchlist(item)
-                                Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
-                                      systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
-                            }
-                            
-                            Divider()
-                            
-                            Button(role: .destructive, action: {
-                                userData.removeFromHistory(item)
-                            }) {
-                                Label("Remove from Continue Watching", systemImage: "xmark.circle")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .glassEffect(.regular.interactive(), in: .circle)
-                                .contentShape(Rectangle())
-                        }
-                        .menuStyle(.button)
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
-                    }
-                }
-                .padding(8)
-                
+
+            // Content Overlay
+            VStack(alignment: .leading, spacing: 0) {
                 Spacer()
-                
-                // Bottom Metadata
-                VStack(alignment: .leading, spacing: 4) {
-                    
-                    // Show Title Only (Clean Look) or Episode Logic?
-                    // User requested "Same S, E, time".
-                    
-                    // Logo/Title area
-                    if let season = item.lastSeason, let episode = item.lastEpisode {
-                        Text(item.title) // Show Title
-                            .font(.headline)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .shadow(radius: 2)
-                        
-                        HStack(spacing: 6) {
-                            Text("S\(season):E\(episode)")
-                                .fontWeight(.semibold)
-                            if let time = item.progress, time > 0 {
-                                // We don't have total duration stored nicely to verify "50m" left easily without extra fields.
-                                // For now just showing "Resume" or "XX%".
-                                // User asked for "time". We stored progress (0.0-1.0).
-                                // To show "50m" we need (1.0 - progress) * duration. We didn't store duration.
-                                // Future improvement: Store duration. For now, mimic style.
-                                Text("•")
-                                Text("Resume")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.9))
-                        .shadow(radius: 2)
-                    } else {
-                        // Fallback for movies / no history data yet
-                       Text(item.title)
-                            .font(.headline)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .shadow(radius: 2)
-                        
-                       if item.category == "Movie" {
-                            Text(item.releaseDateYear ?? "Movie")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.9))
-                       }
-                    }
-                    
-                    // Progress Bar
-                    GeometryReader { geo in
+
+                // Title
+                Text(item.title)
+                    .font(.system(size: mode == .continueWatching ? 15 : 14, weight: mode == .continueWatching ? .bold : .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.7), radius: 3, x: 0, y: 1)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+
+                // Subtitle Row
+                HStack(spacing: 8) {
+                    if mode == .continueWatching {
+                        // Play triangle
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+
+                        // Progress capsule bar
                         ZStack(alignment: .leading) {
-                            // Track
                             Capsule()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(height: 4)
-                            
-                            // Fill (Apple TV White Progress)
-                            if let progress = item.progress {
+                                .fill(Color.white.opacity(0.35))
+                                .frame(width: 52, height: 4)
+
+                            if let progress = item.progress, progress > 0 {
                                 Capsule()
                                     .fill(Color.white)
-                                    .frame(width: geo.size.width * max(progress, 0.05), height: 4)
+                                    .frame(width: 52 * max(min(progress, 1.0), 0.08), height: 4)
                             }
                         }
+                    } else {
+                        // Replay circular arrow
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.8))
                     }
-                    .frame(height: 4)
-                    .padding(.top, 4)
+
+                    if !subtitleText.isEmpty {
+                        Text(subtitleText)
+                            .font(.system(size: 12, weight: mode == .continueWatching ? .semibold : .medium))
+                            .foregroundStyle(mode == .continueWatching ? .white.opacity(0.95) : .white.opacity(0.8))
+                            .lineLimit(1)
+                            .shadow(color: .black.opacity(0.6), radius: 2, x: 0, y: 1)
+                    }
+
+                    Spacer()
+
+                    // Ellipsis Context Menu Button
+                    Menu {
+                        Button {
+                            PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                            openWindow(id: "player", value: item.id)
+                        } label: {
+                            Label(mode == .continueWatching ? "Resume" : "Play Again",
+                                  systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
+                        }
+
+                        Button {
+                            userData.toggleWatchlist(item)
+                        } label: {
+                            let isInWatchlist = userData.isInWatchlist(item)
+                            Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
+                                  systemImage: isInWatchlist ? "bookmark.slash" : "bookmark")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            userData.removeFromHistory(item)
+                        } label: {
+                            Label(mode == .continueWatching ? "Remove from Continue Watching" : "Remove from History",
+                                  systemImage: "xmark.circle")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.75))
+                            .padding(4)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
                 }
-                .padding(12)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
             }
         }
-        .frame(width: 280, height: 157.5)
-        .cornerRadius(12)
+        .frame(width: 290, height: 163)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: isHovering ? [.white.opacity(0.5), .white.opacity(0.15)] : [.white.opacity(0.1), .clear],
+                        colors: isHovering ? [.white.opacity(0.55), .white.opacity(0.2)] : [.white.opacity(0.1), .clear],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isHovering ? 1.5 : 0.5
+                    lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 10 : 4)
-        .contentShape(Rectangle())
-        .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
+        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
+        .scaleEffect(isHovering ? 1.025 : 1.0)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isHovering)
         .onHover { isHovering = $0 }
         .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
             fetchedImage = nil
-            // Priority: Resolve thumbnails for TV Shows (especially Trakt sync items)
+            fetchedRuntime = nil
+
             if item.category == "TV Show",
                let season = item.lastSeason,
                let episode = item.lastEpisode {
-                
+
                 var tmdbIDToUse: String? = nil
-                
-                // Case 1: ID is already numerical (TMDB ID)
                 if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
                     tmdbIDToUse = item.id
-                } 
-                // Case 2: ID is IMDb ID (Trakt Sync)
-                else if item.id.starts(with: "tt") {
+                } else if item.id.starts(with: "tt") {
                     tmdbIDToUse = await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: "tv")
                 }
-                
+
                 if let id = tmdbIDToUse {
-                    if let stillURL = await TMDBEnricher.shared.fetchEpisodeStill(tmdbID: id, season: season, episode: episode) {
-                        await MainActor.run {
-                            self.fetchedImage = stillURL
-                        }
+                    let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: season, episode: episode)
+                    await MainActor.run {
+                        if let still = info.stillURL { self.fetchedImage = still }
+                        if let rt = info.runtime { self.fetchedRuntime = rt }
                     }
                 }
             }

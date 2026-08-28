@@ -64,12 +64,12 @@ struct HomeView: View {
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
-                            CarouselView(items: userData.history, itemWidth: 280) { item in
+                            CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
                                 Button(action: {
                                     PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
                                     openWindow(id: "player", value: item.id)
                                 }) {
-                                    ContinueWatchingCard(item: item)
+                                    ContinueWatchingCard(item: item, mode: .continueWatching)
                                 }
                                 .buttonStyle(.plain)
                                 .focusEffectDisabled()
@@ -252,12 +252,15 @@ struct HomeView: View {
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
-                CarouselView(items: userData.history) { item in
-                    NavigationLink(value: item) {
-                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                            .frame(width: 180)
+                CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
+                    Button(action: {
+                        PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                        openWindow(id: "player", value: item.id)
+                    }) {
+                        ContinueWatchingCard(item: item, mode: .recentlyWatched)
                     }
                     .buttonStyle(.plain)
+                    .focusEffectDisabled()
                 }
             }
         }
