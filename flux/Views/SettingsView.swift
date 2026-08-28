@@ -25,7 +25,12 @@ struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
-    @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
+    @AppStorage("tmdbApiKey") private var tmdbApiKey = ""   // the saved (validated) key
+    @State private var draftKey = ""                        // what the user is typing
+    @State private var isValidating = false
+    @State private var keyStatus: KeyStatus = .idle
+
+    private enum KeyStatus { case idle, valid, invalid }
 
     var body: some View {
         Form {
@@ -73,21 +78,87 @@ struct GeneralSettingsView: View {
             }
 
             Section(header: Text("Metadata (Optional)")) {
-                SecureField("TMDB API key", text: $tmdbApiKey)
-                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    SecureField("TMDB API key", text: $draftKey)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { saveTmdbKey() }
+
+                    // Live status indicator
+                    if isValidating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        switch keyStatus {
+                        case .valid:
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        case .invalid:
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                        case .idle:
+                            EmptyView()
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button("Save Key") { saveTmdbKey() }
+                        .controlSize(.small)
+                        .disabled(draftKey.trimmingCharacters(in: .whitespaces).isEmpty || isValidating)
+                    if !tmdbApiKey.isEmpty {
+                        Button("Clear Key") { clearTmdbKey() }
+                            .controlSize(.small)
+                    }
+                    Spacer()
+                }
+
+                if keyStatus == .invalid {
+                    Text("That key didn't work — double-check it and try again. It hasn't been saved.")
+                        .font(.caption).foregroundStyle(.red)
+                } else if keyStatus == .valid {
+                    Text("Key verified and saved.")
+                        .font(.caption).foregroundStyle(.green)
+                }
+
                 Text("Flux works out of the box with no key. Add your own free TMDB key to unlock richer detail: cast photos, similar titles, and genre discovery. Leave blank to stay fully keyless.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if !tmdbApiKey.isEmpty {
-                    Button("Clear TMDB key") { tmdbApiKey = "" }
-                        .controlSize(.small)
-                }
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            draftKey = tmdbApiKey
+            keyStatus = tmdbApiKey.isEmpty ? .idle : .valid
+        }
+        .onChange(of: draftKey) { _, _ in
+            // Any edit invalidates the saved state until re-verified.
+            if keyStatus != .idle { keyStatus = .idle }
+        }
         .sheet(isPresented: $showAuth) {
             AuthView()
         }
+    }
+
+    private func saveTmdbKey() {
+        let key = draftKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !isValidating else { return }
+        isValidating = true
+        keyStatus = .idle
+        Task {
+            let ok = await TMDBEnricher.shared.validateKey(key)
+            await MainActor.run {
+                isValidating = false
+                if ok {
+                    tmdbApiKey = key      // persist only when verified
+                    keyStatus = .valid
+                } else {
+                    keyStatus = .invalid  // leave the saved key untouched
+                }
+            }
+        }
+    }
+
+    private func clearTmdbKey() {
+        tmdbApiKey = ""
+        draftKey = ""
+        keyStatus = .idle
     }
 
     @State private var showAuth = false

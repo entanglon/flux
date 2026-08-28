@@ -63,6 +63,21 @@ class TMDBEnricher {
     /// absent, enrichment is skipped and Cinemeta data is used as-is.
     var hasKey: Bool { !apiKey.isEmpty }
 
+    /// Validates a candidate API key against TMDB's lightweight /configuration
+    /// endpoint. Returns true only on a 200 (valid key); 401/other = invalid.
+    /// Used by Settings so a key is saved only after it's confirmed to work.
+    func validateKey(_ key: String) async -> Bool {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: "\(baseURL)/configuration?api_key=\(trimmed)") else { return false }
+        do {
+            let (_, response) = try await URLSession.shared.data(from: url)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
+    }
+
     private init() {}
     
     // MARK: - ID Translation
