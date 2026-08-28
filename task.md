@@ -40,6 +40,13 @@
 - **Fix:** Paused `FeaturedCarousel` timer on user hover (`!isHovering`) and smoothed slide animations
 - **Fix:** Added `.transition(.opacity)` and `withAnimation` crossfades to `HomeView`, `DetailView`, `SearchView`, `MoviesView`, `TVShowsView`, and `TrendingView`
 
+#### 7. Database & "For You" Taste Profile Cloud Sync
+- **Bug:** Data was never uploaded to the cloud database on new accounts (`{"notFound":true}` was treated as error), and no auto-sync ran on library mutations or app startup.
+- **Fix:** Handled `{ notFound: true }` in `FluxCloudClient.fetchData`.
+- **Fix:** Added `scheduleAutoSync(delay: 2.0)` debouncer and `syncOnLaunch()` to `AuthManager`.
+- **Fix:** Added `tasteLoved` and `tasteSnapshots` from `TasteProfileManager` into `exportCloudPayload()` and `applyCloudPayload()`.
+- **Fix:** Connected profile switching on startup in `ProfileManager.applyProfileDataScope()`.
+
 ---
 
 ## Open Issues
@@ -63,6 +70,7 @@
 - ✅ Login screen flash fix — synchronous auth restore in init()
 - ✅ Torrent cache eviction fix — correct path for FluxEngine, sparse file accounting, config file protection
 - ✅ UI/UX performance & animation polish — detached background image decoding, carousel hover guard, smooth skeleton crossfades
+- ✅ Database & "For You" taste profile sync — automatic debounced sync, launch sync, taste signals in cloud payload
 
 ## What to test next
 - Play a video → verify skip intro / next episode appear as floating bottom-right buttons

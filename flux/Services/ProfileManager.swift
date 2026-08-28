@@ -34,6 +34,7 @@ final class ProfileManager: ObservableObject {
         profiles.append(profile)
         saveProfiles()
         selectProfile(profile, migrateLegacyData: profiles.count == 1)
+        AuthManager.shared.scheduleAutoSync()
     }
 
     func selectProfile(_ profile: UserProfile, migrateLegacyData: Bool = false) {
@@ -104,6 +105,7 @@ final class ProfileManager: ObservableObject {
                 UserDefaults.standard.set(data, forKey: currentProfileKey)
             }
         }
+        AuthManager.shared.scheduleAutoSync()
     }
 
     func deleteProfile(_ profile: UserProfile) {
@@ -117,16 +119,53 @@ final class ProfileManager: ObservableObject {
         if currentProfile?.id == profile.id {
             switchToProfileSelection()
         }
+        AuthManager.shared.scheduleAutoSync()
     }
 
     private func applyProfileDataScope(_ profile: UserProfile?) {
-        // Hook for services that need the scope change; the services themselves
-        // are switched in selectProfile/switchToProfileSelection.
+        UserDataService.shared.switchProfile(to: profile, migrateLegacyData: profiles.count <= 1)
+        TasteProfileManager.shared.switchProfile(to: profile)
     }
 
     private func saveProfiles() {
         if let data = try? JSONEncoder().encode(profiles) {
             UserDefaults.standard.set(data, forKey: profilesKey)
+        }
+    }
+
+    // MARK: - Cloud Sync
+
+    func exportProfilesData() -> [[String: Any]] {
+        return profiles.map { p in
+            [
+                "id": p.id.uuidString,
+                "name": p.name,
+                "avatarID": p.avatarID,
+                "createdAt": p.createdAt.timeIntervalSince1970
+            ]
+        }
+    }
+
+    func applyCloudProfilesData(_ raw: [[String: Any]]?) {
+        guard let raw, !raw.isEmpty else { return }
+        var imported: [UserProfile] = []
+        for dict in raw {
+            guard let idStr = dict["id"] as? String,
+                  let id = UUID(uuidString: idStr),
+                  let name = dict["name"] as? String,
+                  let avatarID = dict["avatarID"] as? String else { continue }
+            let created = (dict["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
+            imported.append(UserProfile(id: id, name: name, avatarID: avatarID, createdAt: created))
+        }
+        guard !imported.isEmpty else { return }
+        DispatchQueue.main.async {
+            self.profiles = imported
+            self.saveProfiles()
+            if self.currentProfile == nil || !imported.contains(where: { $0.id == self.currentProfile?.id }) {
+                if let first = imported.first {
+                    self.selectProfile(first)
+                }
+            }
         }
     }
 

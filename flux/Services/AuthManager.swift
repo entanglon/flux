@@ -134,6 +134,31 @@ class AuthManager: ObservableObject {
 
     // MARK: - Library sync
 
+    private var autoSyncTask: Task<Void, Never>?
+
+    /// Schedules a debounced sync after state changes (e.g. watchlist, history, collections, taste signals).
+    func scheduleAutoSync(delay: TimeInterval = 2.0) {
+        guard isAuthenticated, Self.isConfigured else { return }
+        autoSyncTask?.cancel()
+        autoSyncTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                await self.syncNowInternal(pullFirst: false)
+            } catch {
+                // Task cancelled
+            }
+        }
+    }
+
+    /// Called on app startup for authenticated users.
+    func syncOnLaunch() {
+        guard isAuthenticated, Self.isConfigured else { return }
+        Task {
+            await syncNowInternal(pullFirst: true)
+        }
+    }
+
     func syncOnLogin() {
         Task { await syncNowInternal(pullFirst: true) }
     }
@@ -153,13 +178,16 @@ class AuthManager: ObservableObject {
                 }
             }
 
+            let payload = UserDataService.shared.exportCloudPayload()
+            let now = Date().timeIntervalSince1970
             _ = try await client.pushData(
                 token: token,
-                payload: UserDataService.shared.exportCloudPayload(),
-                updatedAt: Date().timeIntervalSince1970
+                payload: payload,
+                updatedAt: now
             )
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "cloudLastSyncAt")
+            UserDefaults.standard.set(now, forKey: "cloudLastSyncAt")
             await MainActor.run { self.lastSyncDate = Date() }
+            print("[Auth] Cloud library pushed successfully (\(now))")
         } catch {
             print("[Auth] Sync failed:", error.localizedDescription)
         }

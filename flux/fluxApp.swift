@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // App lifecycle configuration
     }
     func applicationWillTerminate(_ notification: Notification) {
+        AuthManager.shared.syncNow()
         StremioServerManager.shared.stopServer()
         StreamProxyManager.shared.stop()
     }
@@ -52,6 +53,7 @@ struct fluxApp: App {
 
         StremioServerManager.shared.startServerIfNeeded()
         StreamProxyManager.shared.start()
+        AuthManager.shared.syncOnLaunch()
     }
     
     var body: some Scene {

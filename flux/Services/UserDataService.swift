@@ -210,6 +210,7 @@ class UserDataService: ObservableObject {
         DispatchQueue.main.async {
             self[keyPath: target] = newItems
         }
+        AuthManager.shared.scheduleAutoSync()
     }
     
     func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
@@ -229,6 +230,7 @@ class UserDataService: ObservableObject {
         DispatchQueue.main.async {
             self[keyPath: target] = newItems
         }
+        AuthManager.shared.scheduleAutoSync()
     }
     
     // MARK: - Collections (custom user lists)
@@ -294,6 +296,7 @@ class UserDataService: ObservableObject {
         )
         collections.append(collection)
         saveCollections()
+        AuthManager.shared.scheduleAutoSync()
         return collection
     }
     
@@ -302,11 +305,13 @@ class UserDataService: ObservableObject {
         guard !trimmed.isEmpty, let idx = collections.firstIndex(where: { $0.id == id }) else { return }
         collections[idx].name = trimmed
         saveCollections()
+        AuthManager.shared.scheduleAutoSync()
     }
     
     func deleteCollection(id: String) {
         collections.removeAll { $0.id == id }
         saveCollections()
+        AuthManager.shared.scheduleAutoSync()
     }
     
     func isInCollection(collectionID: String, item: MediaItem) -> Bool {
@@ -325,12 +330,14 @@ class UserDataService: ObservableObject {
             collections[idx].items.insert(item, at: 0)
         }
         saveCollections()
+        AuthManager.shared.scheduleAutoSync()
     }
     
     func removeFromCollection(collectionID: String, item: MediaItem) {
         guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else { return }
         collections[idx].items.removeAll { $0.id == item.id }
         saveCollections()
+        AuthManager.shared.scheduleAutoSync()
     }
 
     // MARK: - Cloud sync payload
@@ -338,9 +345,17 @@ class UserDataService: ObservableObject {
     /// Full library snapshot for the cloud blob. Uses raw UserDefaults arrays so
     /// it captures everything exactly as persisted (including episode metadata).
     func exportCloudPayload() -> [String: Any] {
+        let watchlistData = (UserDefaults.standard.array(forKey: watchlistKey) as? [[String: Any]])
+            ?? (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]])
+            ?? []
+        let historyData = (UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]])
+            ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
+            ?? []
+
         return [
-            "watchlist": UserDefaults.standard.array(forKey: watchlistKey) ?? [],
-            "history": UserDefaults.standard.array(forKey: historyKey) ?? [],
+            "version": 2,
+            "watchlist": watchlistData,
+            "history": historyData,
             "collections": collections.map { c in
                 let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
                 return [
@@ -349,7 +364,10 @@ class UserDataService: ObservableObject {
                     "createdAt": c.createdAt.timeIntervalSince1970,
                     "itemsData": itemsData.base64EncodedString()
                 ]
-            }
+            },
+            "tasteLoved": TasteProfileManager.shared.exportLovedData(),
+            "tasteSnapshots": TasteProfileManager.shared.exportSnapshotsData(),
+            "profiles": ProfileManager.shared.exportProfilesData()
         ]
     }
 
@@ -378,13 +396,25 @@ class UserDataService: ObservableObject {
             }
         }
 
+        let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
+        let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
+        let profilesData = payload["profiles"] as? [[String: Any]]
+
         DispatchQueue.main.async {
             // Persist first so disk matches memory.
             self.collections = imported.sorted { $0.createdAt < $1.createdAt }
             self.saveCollections()
-            if let w = watchlistData { self.watchlist = self.parseItems(w) }
-            if let h = historyData { self.history = self.parseItems(h) }
-            print("[UserDataService] Cloud payload applied")
+            if let w = watchlistData {
+                UserDefaults.standard.set(w, forKey: self.watchlistKey)
+                self.watchlist = self.parseItems(w)
+            }
+            if let h = historyData {
+                UserDefaults.standard.set(h, forKey: self.historyKey)
+                self.history = self.parseItems(h)
+            }
+            TasteProfileManager.shared.applyCloudData(loved: tasteLoved, snapshots: tasteSnapshots)
+            ProfileManager.shared.applyCloudProfilesData(profilesData)
+            print("[UserDataService] Cloud payload applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
         }
     }
 }

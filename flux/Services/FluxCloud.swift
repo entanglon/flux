@@ -94,8 +94,13 @@ struct FluxCloudClient {
         guard let http = resp as? HTTPURLResponse else { throw FluxCloudError.network }
         if http.statusCode == 404 { return nil }
         guard (200...299).contains(http.statusCode) else { throw FluxCloudError.unauthorized }
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let payload = obj["payload"] as? [String: Any],
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw FluxCloudError.server("bad_response")
+        }
+        if obj["notFound"] as? Bool == true {
+            return nil
+        }
+        guard let payload = obj["payload"] as? [String: Any],
               let updatedAt = obj["updatedAt"] as? Double else {
             throw FluxCloudError.server("bad_response")
         }

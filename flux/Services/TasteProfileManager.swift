@@ -92,6 +92,7 @@ final class TasteProfileManager: ObservableObject {
             if lovedItems.count > 50 { lovedItems.removeLast() }
         }
         save()
+        AuthManager.shared.scheduleAutoSync()
     }
 
     func isLoved(_ item: MediaItem) -> Bool {
@@ -112,6 +113,39 @@ final class TasteProfileManager: ObservableObject {
         snapshots.insert(snap, at: 0)
         if snapshots.count > 100 { snapshots.removeLast() }
         save()
+        AuthManager.shared.scheduleAutoSync()
+    }
+
+    // MARK: - Cloud Sync
+
+    func exportLovedData() -> [[String: Any]] {
+        guard let data = try? JSONEncoder().encode(lovedItems),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return arr
+    }
+
+    func exportSnapshotsData() -> [[String: Any]] {
+        guard let data = try? JSONEncoder().encode(snapshots),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return arr
+    }
+
+    func applyCloudData(loved: [[String: Any]]?, snapshots: [[String: Any]]?) {
+        DispatchQueue.main.async {
+            if let loved, let data = try? JSONSerialization.data(withJSONObject: loved),
+               let items = try? JSONDecoder().decode([MediaItem].self, from: data) {
+                self.lovedItems = items
+            }
+            if let snapshots, let data = try? JSONSerialization.data(withJSONObject: snapshots),
+               let snaps = try? JSONDecoder().decode([WatchSnapshot].self, from: data) {
+                self.snapshots = snaps
+            }
+            self.save()
+        }
     }
 
     // MARK: - Profile

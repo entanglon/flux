@@ -1,6 +1,6 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 28, 2026 — CRASH FIX + CACHE EVICTION + AUTH FLASH + UI/UX POLISH
+## LATEST: Aug 28, 2026 — CRASH FIX + CACHE EVICTION + AUTH FLASH + UI/UX POLISH + DATABASE CLOUD SYNC
 
 ### Warm-Core NSWindow Double-Release Crash Fix
 - **Root cause:** `cancelDetailPrefetch()` called `hostWindow?.close()` which auto-releases the window (`isReleasedWhenClosed = true`), then `warmCore = nil` released it again via ARC → crash
@@ -41,6 +41,14 @@
 - **Main-Thread Scrolling Jank Fix (`CachedImage.swift`):** `downsample` now runs asynchronously via detached background tasks (`Task.detached(priority: .userInitiated)`) instead of synchronously on `@MainActor`, preventing scroll stutter when decoding heavy 4K / retina posters.
 - **Carousel Interaction Guard (`FeaturedCarousel.swift`):** Auto-scrolling timer now pauses while the user is actively hovering (`!isHovering`) to prevent abrupt slide changes while reading or clicking, and uses smooth `.easeInOut(duration: 0.5)` transitions.
 - **Smooth Skeleton/Loading Crossfades:** Added `.transition(.opacity)` and animated state updates (`withAnimation`) to `HomeView`, `DetailView`, `SearchView`, `MoviesView`, `TVShowsView`, and `TrendingView` to eliminate abrupt layout snapping when skeletons resolve to content.
+
+### Database & "For You" Taste Profile Cloud Sync
+- **Root cause:** `FluxCloudClient.fetchData` crashed on empty accounts because Worker returns `{ notFound: true, updatedAt: 0 }` (HTTP 200 without a `payload` field), throwing `"bad_response"` and aborting before `pushData` could ever run.
+- **Auto-Sync:** Added `scheduleAutoSync(delay: 2.0)` to `AuthManager` to debounced-push library state on every watchlist toggle, watch progress update, liked item (♥), collection change, and profile change.
+- **"For You" Sync:** Expanded `UserDataService.exportCloudPayload()` and `applyCloudPayload()` to synchronize `tasteLoved` and `tasteSnapshots` from `TasteProfileManager` across devices.
+- **Startup Sync:** Added `AuthManager.syncOnLaunch()` to `fluxApp.init()`.
+- **Profile Scope:** Fixed `ProfileManager.applyProfileDataScope()` to switch `UserDataService` and `TasteProfileManager` to active profile keys on launch.
+- **Live verification:** Successfully pushed and verified live JSON payload on Cloudflare D1.
 
 ---
 
