@@ -1,6 +1,27 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 27, 2026 — PLAYER UI + MEMORY + TORRENT CLEANUP
+## LATEST: Aug 28, 2026 — CRASH FIX + TMDB KEY VALIDATION
+
+### Warm-Core NSWindow Double-Release Crash Fix
+- **Root cause:** `cancelDetailPrefetch()` called `hostWindow?.close()` which auto-releases the window (`isReleasedWhenClosed = true`), then `warmCore = nil` released it again via ARC → crash
+- Only crashed with Flux mode ON (only path that creates a warm-core host window)
+- Repro: open detail page → scroll → back button → crash
+- **Fix 1:** `buildWarmCore()` — added `host.isReleasedWhenClosed = false` at creation
+- **Fix 2:** `cancelDetailPrefetch()` — changed `close()` to `orderOut(nil)` (matches safe `discardWarmCore()`)
+- Diagnosed via Zombie Objects + MallocScribble (`NSZombieEnabled=YES MallocScribble=YES`)
+- Zombie log caught: `*** -[NSWindow release]: message sent to deallocated instance`
+
+### TMDB Key Validation UI
+- Settings → General now has a **Save Key** button (no more auto-save on typing)
+- Validates key against TMDB API before saving — invalid keys never persisted
+- Green checkmark + "Key verified and saved" on success
+- Red X + "Key didn't work — hasn't been saved" on failure
+- Editing the field resets the status indicator
+- Default TMDB key provided as a fallback (pre-filled as placeholder)
+
+---
+
+## Previous Sessions
 
 ### Player UI — Skip Intro & Next Episode (Apple TV style)
 - Moved from floating overlays to **bottom-right floating capsules** (like Apple TV's "Skip Recap")
@@ -86,7 +107,7 @@ Flux.app (SwiftUI + mpv)
 ├── StreamManager — fans out to Torrentio, Comet, WebStreamrMBG
 ├── PlayerManager — session controller, prefetch, auto-fallback
 │   ├── activeTorrentHash tracking (prevents double downloads)
-│   ├── warm mpv core (prefetch)
+│   ├── warm mpv core (prefetch) — isReleasedWhenClosed=false, orderOut cleanup
 │   └── PiP handoff
 ├── CachedImage — disk-backed with in-memory NSCache
 ├── TMDBEnricher — IMDb→TMDB resolution, quickEnrich/fullEnrich
@@ -114,7 +135,8 @@ open "$DEBUG_APP"
 - `flux/Views/PlayerControlsView.swift` — controls bar, subtitle/audio popovers
 - `flux/Views/DetailView.swift` — detail page, prefetch trigger
 - `flux/Views/SearchView.swift` — search with dropdown suggestions
+- `flux/Views/SettingsView.swift` — settings (TMDB key validation UI)
 - `flux/Components/CachedImage.swift` — image loading + caching
 - `flux/Components/GlassCard.swift` — card component with image loading
 
-*Last Updated: Aug 27, 2026*
+*Last Updated: Aug 28, 2026*

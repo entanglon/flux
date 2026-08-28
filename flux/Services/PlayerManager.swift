@@ -104,7 +104,7 @@ class PlayerManager: ObservableObject {
         // Drop the warm core if it was built for this prefetch
         if let core = warmCore, core.key == keyToCancel {
             core.controller.stop()
-            core.hostWindow?.close()
+            core.hostWindow?.orderOut(nil)   // orderOut hides; close() would double-release via isReleasedWhenClosed
             warmCore = nil
         }
 
@@ -262,6 +262,7 @@ class PlayerManager: ObservableObject {
         if let visible = NSScreen.main?.visibleFrame {
             host.setFrameOrigin(NSPoint(x: visible.minX, y: visible.minY))
         }
+        host.isReleasedWhenClosed = false   // we manage the lifecycle; close() must not release
         host.orderFrontRegardless()
 
         controller.pause()      // hold BEFORE loadfile → loads paused, cache fills
