@@ -361,7 +361,7 @@ struct DetailView: View {
                         
                         if !relatedItems.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
-                                SectionHeader(title: "Related", destination: MediaListView(title: "Related", type: .fixed(title: "Related", items: relatedItems)))
+                                ListSectionHeader(title: "Related", value: MediaListView.ListType.fixed(title: "Related", items: relatedItems))
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
                                 
@@ -377,12 +377,12 @@ struct DetailView: View {
                         
                         if let cast = displayItem.cast, !cast.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
-                                SectionHeader(title: "Cast & Crew", destination: CastListView(cast: cast))
+                                ListSectionHeader(title: "Cast & Crew", value: CastListNavigation(cast: cast))
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
 
                                 DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 200) { member in
-                                    NavigationLink(destination: PersonView(personID: member.personID ?? 0, fallbackName: member.name)) {
+                                    NavigationLink(value: PersonNavigation(id: member.personID ?? 0, fallbackName: member.name)) {
                                         VStack(spacing: 8) {
                                             CastCircle(name: member.name, imageURL: member.imageURL, size: 80)
 

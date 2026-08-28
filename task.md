@@ -47,6 +47,12 @@
 - **Fix:** Added `tasteLoved` and `tasteSnapshots` from `TasteProfileManager` into `exportCloudPayload()` and `applyCloudPayload()`.
 - **Fix:** Connected profile switching on startup in `ProfileManager.applyProfileDataScope()`.
 
+#### 8. Genre & Subpage Navigation Stack Fix
+- **Bug:** Genre card opened from Search remained stuck on screen when clicking Home or any other sidebar tab until the back button was clicked.
+- **Root cause:** `SearchView` used legacy `NavigationLink(destination:)` which bypassed `NavigationStack(path: $path)` state, preventing `path = NavigationPath()` from dismissing the view on tab switch.
+- **Fix:** Converted all view-based navigation links (`SearchView` genres, `DetailView` related/cast, `CastListView`, `PersonView`, `MoviesView`, `TVShowsView`, `HomeView`) to value-based `NavigationLink(value:)` with registered `.navigationDestination` handlers in `ContentView.swift`.
+- **Fix:** `sidebarRow` now unconditionally clears `path` on any tab click.
+
 ---
 
 ## Open Issues
@@ -71,6 +77,7 @@
 - ✅ Torrent cache eviction fix — correct path for FluxEngine, sparse file accounting, config file protection
 - ✅ UI/UX performance & animation polish — detached background image decoding, carousel hover guard, smooth skeleton crossfades
 - ✅ Database & "For You" taste profile sync — automatic debounced sync, launch sync, taste signals in cloud payload
+- ✅ Genre & Subpage Navigation Stack fix — value-based NavigationLinks and instantaneous sidebar tab resets
 
 ## What to test next
 - Play a video → verify skip intro / next episode appear as floating bottom-right buttons

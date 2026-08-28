@@ -23,7 +23,7 @@ struct TVShowsView: View {
                     // Popular Shows Grid
                     if !popularShows.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Popular Shows", destination: MediaListView(type: .popularTV))
+                            ListSectionHeader(title: "Popular Shows", value: MediaListView.ListType.popularTV)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
@@ -43,7 +43,7 @@ struct TVShowsView: View {
                     // Trending Shows Grid
                     if !trendingShows.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Trending Now", destination: MediaListView(type: .trendingTV))
+                            ListSectionHeader(title: "Trending Now", value: MediaListView.ListType.trendingTV)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             

@@ -280,7 +280,7 @@ struct SearchView: View {
                 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                     ForEach(Genre.allGenres, id: \.id) { genre in
-                        NavigationLink(destination: MediaListView(title: genre.name, type: .genre(id: genre.id, name: genre.name))) {
+                        NavigationLink(value: GenreNavigation(name: genre.name, id: genre.id)) {
                             GenreCard(genre: genre)
                         }
                         .buttonStyle(.plain)

@@ -218,7 +218,7 @@ struct PersonView: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                     ForEach(credits) { item in
-                        NavigationLink(destination: DetailView(item: item)) {
+                        NavigationLink(value: item) {
                             GlassCard(item: item, aspectRatio: .portrait, showTitle: true)
                         }
                         .buttonStyle(.plain)

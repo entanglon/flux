@@ -23,7 +23,7 @@ struct MoviesView: View {
                     // Popular Movies Grid
                     if !popularMovies.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Popular Movies", destination: MediaListView(type: .popularMovies))
+                            ListSectionHeader(title: "Popular Movies", value: MediaListView.ListType.popularMovies)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
@@ -43,7 +43,7 @@ struct MoviesView: View {
                     // Top Rated Grid
                     if !topRatedMovies.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Top Rated", destination: MediaListView(type: .topRatedMovies))
+                            ListSectionHeader(title: "Top Rated", value: MediaListView.ListType.topRatedMovies)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             

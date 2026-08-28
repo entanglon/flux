@@ -17,6 +17,21 @@ struct CollectionNavigation: Hashable {
     let id: String
 }
 
+struct PersonNavigation: Hashable {
+    let id: Int
+    let fallbackName: String
+}
+
+struct CastListNavigation: Hashable {
+    let cast: [CastMember]
+}
+
+struct HistoryNavigation: Hashable {
+    let showAsContinueWatching: Bool
+}
+
+struct WatchlistNavigation: Hashable {}
+
 enum SidebarItem: String, CaseIterable, Identifiable {
     case search = "Search"
     case home = "Home"

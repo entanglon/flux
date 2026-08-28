@@ -51,6 +51,18 @@ struct ContentView: View {
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)
                 }
+                .navigationDestination(for: PersonNavigation.self) { person in
+                    PersonView(personID: person.id, fallbackName: person.fallbackName)
+                }
+                .navigationDestination(for: CastListNavigation.self) { nav in
+                    CastListView(cast: nav.cast)
+                }
+                .navigationDestination(for: HistoryNavigation.self) { nav in
+                    HistoryView(showAsContinueWatching: nav.showAsContinueWatching)
+                }
+                .navigationDestination(for: WatchlistNavigation.self) { _ in
+                    WatchlistView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
+                }
             }
             .navigationBarBackButtonHidden(true)
             .toolbarVisibility(.visible, for: .windowToolbar)
@@ -213,9 +225,7 @@ struct ContentView: View {
         
         Button(action: {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                if isSelected {
-                    path = NavigationPath()
-                }
+                path = NavigationPath()
                 selectedCategory = item
             }
         }) {

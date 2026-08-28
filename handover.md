@@ -50,6 +50,11 @@
 - **Profile Scope:** Fixed `ProfileManager.applyProfileDataScope()` to switch `UserDataService` and `TasteProfileManager` to active profile keys on launch.
 - **Live verification:** Successfully pushed and verified live JSON payload on Cloudflare D1.
 
+### Genre & Subpage Navigation Stack Fix
+- **Root cause:** `SearchView` genre cards used deprecated `NavigationLink(destination: MediaListView(...))` instead of value-based `NavigationLink(value: GenreNavigation(...))`. Destination-based NavigationLinks bypass the `NavigationStack(path: $path)` path binding, so when a user clicked a different sidebar tab (e.g. Home), resetting `path = NavigationPath()` had no effect on the presented view, causing the genre page to remain stuck on top.
+- **Fix:** Switched genre cards, cast views, related list headers, and category section headers across the entire app to value-based `NavigationLink(value:)` and registered corresponding `.navigationDestination` handlers in `ContentView.swift`.
+- **Sidebar Reset:** `sidebarRow` now unconditionally resets `path = NavigationPath()` on tab switch, instantly popping any open subpages when switching categories.
+
 ---
 
 ## Previous Sessions

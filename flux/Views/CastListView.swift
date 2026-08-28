@@ -34,7 +34,7 @@ struct CastListView: View {
 
                 LazyVGrid(columns: columns, spacing: 40) {
                     ForEach(cast) { member in
-                        NavigationLink(destination: PersonView(personID: member.personID ?? 0, fallbackName: member.name)) {
+                        NavigationLink(value: PersonNavigation(id: member.personID ?? 0, fallbackName: member.name)) {
                             VStack(spacing: 12) {
                                 CastCircle(name: member.name, imageURL: member.imageURL, size: 120)
 

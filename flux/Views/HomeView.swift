@@ -60,7 +60,7 @@ struct HomeView: View {
                     // Continue Watching (Real Data)
                     if !userData.history.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            SectionHeader(title: "Continue Watching", destination: HistoryView(showAsContinueWatching: true))
+                            ListSectionHeader(title: "Continue Watching", value: HistoryNavigation(showAsContinueWatching: true))
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
@@ -210,7 +210,7 @@ struct HomeView: View {
     @ViewBuilder private var watchlistRow: some View {
         if !userData.watchlist.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "Watchlist", destination: WatchlistView(selectedTab: .constant(.watchlist)))
+                ListSectionHeader(title: "Watchlist", value: WatchlistNavigation())
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
@@ -248,7 +248,7 @@ struct HomeView: View {
     @ViewBuilder private var historyRow: some View {
         if !userData.history.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "Recently Watched", destination: HistoryView())
+                ListSectionHeader(title: "Recently Watched", value: HistoryNavigation(showAsContinueWatching: false))
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
