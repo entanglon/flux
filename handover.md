@@ -63,9 +63,20 @@
   - **Real Progress Bar:** Capsule progress track directly reflecting recorded playback timestamp (`time / duration`).
   - **Continue Watching Mode:** Solid play icon `▶`, horizontal progress capsule bar (52x4pt with active white fill), season/episode/runtime subtitle (`S2, E1 · 59m` or `2h 18m`), and trailing context menu `•••`.
   - **Recently Watched Mode:** Circular replay icon `↺`, season/episode/runtime details (`S2, E10 · 52m` or `2026 · 2h 18m`), and trailing context menu `•••`.
-### Floating Back Button on Subpages & Genre TV Mapping Fixes
-- **Floating Back Button:** Moved back button in `MediaListView` (Genre & OTT pages), `CastListView` (Cast & Crew), and `CollectionDetailView` into a pinned floating `.overlay(alignment: .topLeading)` at `(leading: 268, top: 24)`. The button now stays permanently fixed on screen across infinite scrolling, exactly like `DetailView` and `PersonView`.
-- **TMDB TV Genre ID Translation:** Fixed missing content on TV genre views (Adventure, Sci-Fi, Fantasy, Horror, Thriller) by mapping movie genre IDs to TMDB's distinct TV genre IDs (e.g. 10759 for Action & Adventure, 10765 for Sci-Fi & Fantasy, 9648 for Mystery/Thriller). All 18 genres now load rich content for both Movies and TV Shows.
+  - **Home & History Views:** Upgraded `HomeView.historyRow` and `HistoryView` from basic portrait cards to the new landscape card system.
+
+### Custom Genre Artwork & New Genres
+- **18 Optimized Genre Assets:** Processed, downsampled, and optimized all 18 artwork files from `/Users/zainulnazir/Projects/flux/genre` into 640×960 retina assets (`~60-170KB` each) bundled inside `Assets.xcassets/genre-{name}.imageset/`.
+- **6 New Custom Genres Added:** `Bollywood` (TMDB Hindi), `Anime` (TMDB Animation + Japanese), `K-Drama` (TMDB Korean), `Classics` (TMDB pre-1980/1990), `Short Films` (TMDB runtime <= 40m), and `Western` (TMDB 37).
+- **GenreCard UI Redesign:** 2:3 aspect ratio, 18pt continuous corner radius, subtle gradient stroke, deep dark bottom scrim, and bold bottom-left aligned typography.
+
+### Floating Back Button on Subpages & TV Genre ID Mapping
+- **Pinned Floating Back Button:** Moved back buttons in `MediaListView` (Genre & OTT pages), `CastListView` (Cast & Crew), and `CollectionDetailView` into a pinned floating `.overlay(alignment: .topLeading)` at `(leading: 268, top: 24)`. Stays fixed across infinite scrolling, matching `DetailView` and `PersonView`.
+- **TMDB TV Genre ID Translation:** Implemented composite genre translations in `TMDBEnricher.fetchGenrePage` for TV mode (mapping Action/Adventure to `10759`, Sci-Fi/Fantasy to `10765`, Mystery/Thriller to `9648`, etc.), guaranteeing rich results for all 18 genres in both Movie and TV modes.
+
+### OTT Explore Card & Sidebar Label Polish
+- **Netflix Card:** Optimized and installed `/Users/zainulnazir/Projects/flux/OTTs/netflix-new.png` into `ott-nfx.imageset` with 16pt continuous `.clipShape`.
+- **Sidebar Label:** Renamed history sidebar item in `ContentView.swift` from `"Recently Added"` to `"Recently Watched"`.
 
 ---
 
