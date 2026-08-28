@@ -213,6 +213,14 @@ class StremioServerManager: ObservableObject {
         }
 
         if shouldLaunch {
+            // Kill any lingering process before launching a new one
+            if let old = process {
+                old.terminate()
+                let pid = old.processIdentifier
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                    if old.isRunning && pid > 0 { kill(pid, SIGKILL) }
+                }
+            }
             process = nil
             await launchAndDiscoverPort()
             await MainActor.run { isLaunching = false }
@@ -318,6 +326,15 @@ class StremioServerManager: ObservableObject {
         }
         process = nil
         isRunning = false
+
+        // Safety net: kill ALL FluxEngine processes so orphans can't pile up
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-f", "FluxEngine"]
+        pkill.standardOutput = FileHandle.nullDevice
+        pkill.standardError = FileHandle.nullDevice
+        try? pkill.run()
+        pkill.waitUntilExit()
     }
 
     // MARK: - Startup

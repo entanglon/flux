@@ -11,6 +11,13 @@
 - Diagnosed via Zombie Objects + MallocScribble (`NSZombieEnabled=YES MallocScribble=YES`)
 - Zombie log caught: `*** -[NSWindow release]: message sent to deallocated instance`
 
+### FluxEngine Orphan Process Fix
+- **Root cause:** `ensureRunning()` nil'd `self.process` and launched a new FluxEngine without killing the old one. `stopServer()` only killed the last tracked process.
+- Result: 5 orphaned FluxEngine processes at 99% CPU each, surviving app close
+- **Fix 1:** `ensureRunning()` — kills old process (terminate + delayed SIGKILL) before launching new one
+- **Fix 2:** `stopServer()` — added `pkill -f FluxEngine` safety net after killing the tracked process
+- App exit now reliably kills all FluxEngine processes
+
 ### TMDB Key Validation UI
 - Settings → General now has a **Save Key** button (no more auto-save on typing)
 - Validates key against TMDB API before saving — invalid keys never persisted
