@@ -469,6 +469,9 @@ final class MPVLayerView: NSView {
     private var isCleaningUp = false
     private var lastTimePosDispatchTime: Double = 0
     private var lastTelemetryLogTime: Double = 0
+    /// Token into MPVCallbackRegistry so mpv's C callbacks never hold a raw,
+    /// unretained pointer to this view (use-after-free on teardown).
+    fileprivate var callbackToken: UInt64 = 0
     
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -571,6 +574,13 @@ final class MPVLayerView: NSView {
         guard !isCleaningUp else { return }
         isCleaningUp = true
         
+        // Invalidate the callback token first so any in-flight or future mpv
+        // callback resolves to nil and no-ops instead of touching a dying view.
+        if callbackToken != 0 {
+            MPVCallbackRegistry.unregister(callbackToken)
+            callbackToken = 0
+        }
+        
         if let link = displayLink {
             CVDisplayLinkStop(link)
             displayLink = nil
@@ -582,6 +592,7 @@ final class MPVLayerView: NSView {
             self.mpvGL = nil
         }
         if let handle = self.mpv {
+            mpv_set_wakeup_callback(handle, nil, nil)
             mpv_terminate_destroy(handle)
             self.mpv = nil
         }
@@ -692,7 +703,8 @@ final class MPVLayerView: NSView {
         // Only capture warnings and errors to minimize CPU and string allocations
         mpv_request_log_messages(mpv, "warn")
         
-        mpv_set_wakeup_callback(self.mpv, mpvWakeUp, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
+        callbackToken = MPVCallbackRegistry.register(self)
+        mpv_set_wakeup_callback(self.mpv, mpvWakeUp, UnsafeMutableRawPointer(bitPattern: UInt(callbackToken)))
         startEventLoop()
     }
     
@@ -726,7 +738,7 @@ final class MPVLayerView: NSView {
             }
         }
         
-        mpv_render_context_set_update_callback(mpvGL, mpvGLUpdate, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
+        mpv_render_context_set_update_callback(mpvGL, mpvGLUpdate, UnsafeMutableRawPointer(bitPattern: UInt(callbackToken)))
         setupDisplayLink()
         
         if let pending = pendingURL {
@@ -941,14 +953,55 @@ final class MPVLayerView: NSView {
     }
 }
 
+// MARK: - Safe mpv callback registry
+
+/// mpv invokes its wakeup / render-update callbacks from internal C threads,
+/// passing back the context pointer we registered. Handing it an unretained
+/// raw pointer to the view is a use-after-free if the view tears down while a
+/// callback is in flight (the exact crash in the 2026-08-28 reports). Instead
+/// we register each view under a unique token and resolve that token against a
+/// lock-guarded table of weak references: a callback for a dead view no-ops.
+private final class MPVLayerViewBox {
+    weak var view: MPVLayerView?
+    init(_ view: MPVLayerView) { self.view = view }
+}
+
+enum MPVCallbackRegistry {
+    private static let lock = NSLock()
+    private static var boxes: [UInt64: MPVLayerViewBox] = [:]
+    private static var nextToken: UInt64 = 1
+
+    static func register(_ view: MPVLayerView) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        let token = nextToken
+        nextToken &+= 1
+        boxes[token] = MPVLayerViewBox(view)
+        return token
+    }
+
+    static func unregister(_ token: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        boxes.removeValue(forKey: token)
+    }
+
+    /// Promotes the weak reference to a strong one while holding the lock, so
+    /// the view cannot be deallocated mid-callback. Returns nil if it is gone.
+    static func view(for token: UInt64) -> MPVLayerView? {
+        lock.lock(); defer { lock.unlock() }
+        return boxes[token]?.view
+    }
+}
+
 func mpvGLUpdate(_ ctx: UnsafeMutableRawPointer?) {
     guard let ctx = ctx else { return }
-    let layerView = Unmanaged<MPVLayerView>.fromOpaque(ctx).takeUnretainedValue()
+    let token = UInt64(UInt(bitPattern: ctx))
+    guard let layerView = MPVCallbackRegistry.view(for: token) else { return }
     layerView.mpvRenderUpdate()
 }
 
 func mpvWakeUp(_ ctx: UnsafeMutableRawPointer?) {
     guard let ctx = ctx else { return }
-    let layerView = Unmanaged<MPVLayerView>.fromOpaque(ctx).takeUnretainedValue()
+    let token = UInt64(UInt(bitPattern: ctx))
+    guard let layerView = MPVCallbackRegistry.view(for: token) else { return }
     layerView.startEventLoop()
 }
