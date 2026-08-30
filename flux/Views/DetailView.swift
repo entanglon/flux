@@ -393,7 +393,6 @@ struct DetailView: View {
                                 GhostRail()
                                 GhostGrid()
                             }
-                            .transition(.opacity)
                         } else if isReleased && displayItem.category == "TV Show" {
                             VStack(alignment: .leading, spacing: 16) {
                                 if let seasons = displayItem.seasons, !seasons.isEmpty {
@@ -827,16 +826,12 @@ struct DetailView: View {
             }
 
             await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    self.isLoadingDetails = false
-                }
+                self.isLoadingDetails = false
             }
         } catch {
             print("Error loading detailed metadata: \(error)")
             await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    self.isLoadingDetails = false
-                }
+                self.isLoadingDetails = false
             }
         }
     }

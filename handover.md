@@ -1,6 +1,13 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — POPULAR TV SHOWS NEWS/TALK FILTERING + BONUS CONTENT TITLE ART FALLBACK & UNIFIED DETAIL TRANSITION + SYMMETRIC CARD MENU INSETS
+## LATEST: Aug 30, 2026 — ELIMINATED SLIDING CARD ANIMATION + IN-PLACE CARD RENDERING + POPULAR TV NEWS FILTERING + SYMMETRIC CARD MENU INSETS
+
+### Eliminated Upward Sliding Card Animations (`DetailView.swift`)
+- **Root Cause:** When `loadDetails()` completed, it called `withAnimation(.easeOut(duration: 0.25)) { self.isLoadingDetails = false }`. This animated the layout swap in SwiftUI's `VStack`, which applied default insertion move transitions (sliding cards upwards from below) to all newly populated rails (Bonus Content, Related, Cast).
+- **Fix:** 
+  1. Removed `withAnimation` from `isLoadingDetails = false` so state updates occur immediately on `MainActor`.
+  2. Removed `.transition(.opacity)` from the ghost rail container.
+  3. All cards and rails across the page now swap in-place instantly and smoothly without any sliding or movement, matching native episode cards behavior.
 
 ### Popular TV Shows News & Broadcast Filtering (`TMDBEnricher.swift`)
 - **Root Cause for *Tagesschau*:** TMDB's raw `/tv/popular` endpoint calculates popularity using raw web page view metrics, causing German daily news broadcast *Tagesschau* (and other non-scripted daily programs) to rank in the top 3.
@@ -8,9 +15,8 @@
   1. Updated `fetchPopularTV()` and `fetchStreamingTV()` to use TMDB discover with `without_genres=10763,10767` (News `10763`, Talk `10767`) and `vote_count.gte=10`.
   2. In `fetchCatalog(from:type:allowUnreleased:)` and `fetchTrendingAll()`, added strict programmatic filters excluding genre IDs `10763` (News) and `10767` (Talk) as well as daily news programs like *Tagesschau*. All TV rails across Home and TV Shows pages now strictly display premium scripted television shows.
 
-### Bonus Content Title Art Fallback & Unified Page Transition (`DetailView.swift`, `BonusContentCard.swift`, `TMDBEnricher.swift`)
+### Bonus Content Title Art Fallback (`DetailView.swift`, `BonusContentCard.swift`, `TMDBEnricher.swift`)
 - **Title Art Fallback:** If a bonus item or Season 0 special lacks a dedicated episode still thumbnail, it automatically falls back to the show's backdrop artwork (`displayItem.backdropURL ?? displayItem.heroURL`) so no card is ever rendered as a blank box.
-- **Eliminated Expanding Rail Animation:** Coordinated `fetchBonusContent()` and `fetchSimilar()` using `async let` inside `loadDetails()`. When `isLoadingDetails` becomes `false`, all sections (episodes, bonus content, related, and cast) transition in together in one unified opacity fade without expanding downwards from the episodes rail.
 
 ### Symmetric Card Menu Button Insets (`GlassCard.swift`)
 - **Exact Corner Symmetry:** Replaced non-square padding on `Image(systemName: "ellipsis")` with a fixed `28×28pt` circular frame and `.padding(10)`. The distance from the menu button to the right border of the card is now exactly identical to the distance from the bottom border down to the single pixel.
