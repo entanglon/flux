@@ -12,4 +12,11 @@ struct BonusContentItem: Identifiable, Hashable {
     var isStreamableEpisode: Bool {
         episode != nil
     }
+    
+    var youtubeURL: URL? {
+        if let key = videoKey {
+            return URL(string: "https://www.youtube.com/watch?v=\(key)")
+        }
+        return nil
+    }
 }

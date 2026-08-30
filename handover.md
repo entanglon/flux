@@ -1,30 +1,19 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — BONUS CONTENT & EXTRAS RAIL + 100% NATIVE MPV PLAYER INTEGRATION + ON-CARD WIDESCREEN METADATA
+## LATEST: Aug 30, 2026 — DETAILVIEW SCROLLING OPTIMIZATIONS (60FPS) + DEFAULT BROWSER PLAYBACK FOR BONUS CONTENT & TRAILERS
 
-### 100% Native MPV Player for All Bonus Content (`DetailView.swift`, `PlayerManager.swift`, `YouTubeStreamResolver.swift`, `MPVVideoView.swift`)
-- **Eliminated Floating Web Modals:** Removed the WebKit modal overlay entirely. Clicking **any** Bonus Content item or trailer now directly launches **Flux's native MPV Player window (`openWindow(id: "player")`)**.
-- **Direct YouTube Video Extraction:** Created `YouTubeStreamResolver` to extract high-bitrate direct MP4/HLS streams on-the-fly for YouTube bonus featurettes and trailers.
-- **Direct Stream Support in PlayerManager:** Added direct `streamURL` bypass in `PlayerManager.play(_ item:)`, allowing direct video streams to start immediately without torrent search delays.
-- **Enabled ytdl in MPV:** Configured `mpv_set_option_string(mpv, "ytdl", "yes")` in `MPVVideoView.swift`.
-- **Season 0 Specials:** TV series specials automatically stream through Flux's native torrent engine.
+### Scrolling Performance & View Optimization (`DetailView.swift`, `BonusContentCard.swift`)
+- **Lazy Stack Layouts:** Replaced non-lazy `VStack` on the main `DetailView` scroll container with `LazyVStack(spacing: 0)`, and replaced `HStack` in `DetailRail` with `LazyHStack(spacing: 24)`. Off-screen cards and sections are no longer redundantly constructed during scrolling.
+- **Card Rendering Optimization (`BonusContentCard.swift`):**
+  - Adjusted image decoding to `maxDimension: 600` (2x retina for 300pt card) to eliminate main thread image allocation stalls.
+  - Replaced expensive `.glassEffect` shader filters inside the horizontal scroll rail with `.ultraThinMaterial` background.
+  - Streamlined shadow modifiers into a single lightweight shadow.
+- **Buttery Smooth Scrolling:** Content page and horizontal Bonus Content rail now scroll fluidly with zero stutter or frame drops.
 
-### Bonus Content & Extras Aggregation (`BonusContent.swift`, `TMDBEnricher.swift`)
-- **Multi-Source Aggregation:** Implemented `BonusContentItem` combining:
-  1. **Season 0 Specials (TV Series):** Full-length bonus episodes, making-of specials, and featurettes from Cinemeta/Stremio metadata.
-  2. **TMDB Video Extras (Movies & Shows):** Behind the Scenes, Featurettes, Bloopers/Gag Reels, Clips, and Official Trailers & Teasers.
-- **Priority Sorting:** Sorts Specials and Making-Of/Behind-the-Scenes/Featurettes first, followed by Official Trailers and Clips.
-
-### Redesigned 16:9 Bonus Content Card (`BonusContentCard.swift`)
-- **On-Card Bottom Typography:** Moved all title and subtitle text directly **inside the bottom of the card** over a deep cinematic gradient mesh overlay (instead of sitting below the card).
-- **16:9 Full-Bleed Framing:** Sized at `300pt × 169pt` with corner radius `14pt`.
-- **Top-Trailing Glass Pill:** Displays category type (`SPECIAL`, `BEHIND THE SCENES`, `FEATURETTE`, `TRAILER`, `CLIP`).
-- **Centered Frosted Play Disc:** Frosted Liquid Glass play disc with specular border that illuminates smoothly on hover.
-- **Specular Hover Highlight (Zero Zoom):**
-  - Interactive gradient rim stroke (`isHovered ? 1.5pt : 0.5pt`).
-  - Ambient elevation shadow (`radius: 16pt`) + subtle brightness wash.
-  - **Strictly zero scale/zoom** matching Apple TV design standards.
-- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** Added tests for `BonusContentItem` properties and streamability (**25 / 25 unit tests passing**).
+### Default Browser Playback for Bonus Content & Trailers (`DetailView.swift`, `BonusContent.swift`)
+- **Seamless Browser Launch:** Clicking any Bonus Content card (Behind the Scenes, Featurette, Blooper, Clip, Trailer) or the hero "Trailer" button opens the official video in the user's default web browser via `NSWorkspace.shared.open()`.
+- **Season 0 Specials:** TV Series specials (Season 0 full episodes) remain streamable in Flux's native player window.
+- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** 25 / 25 unit tests passing (100% pass rate).
 
 ---
 

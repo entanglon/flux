@@ -11,7 +11,7 @@ struct BonusContentCard: View {
             // 1. Full-Bleed 16:9 Artwork Thumbnail
             Group {
                 if let url = item.thumbnailURL {
-                    CachedImage(url: url, maxDimension: 960) { phase in
+                    CachedImage(url: url, maxDimension: 600) { phase in
                         switch phase {
                         case .success(let image):
                             image
@@ -57,19 +57,19 @@ struct BonusContentCard: View {
                 Spacer()
             }
             
-            // 4. Centered Frosted Liquid Glass Play Disc
+            // 4. Centered Frosted Play Disc
             HStack {
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Color.black.opacity(isHovered ? 0.45 : 0.35))
+                        .fill(Color.black.opacity(isHovered ? 0.55 : 0.40))
                         .frame(width: 44, height: 44)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .background(.ultraThinMaterial, in: Circle())
                     
                     Circle()
                         .stroke(
                             LinearGradient(
-                                colors: isHovered ? [.white.opacity(0.8), .white.opacity(0.2)] : [.white.opacity(0.35), .white.opacity(0.08)],
+                                colors: isHovered ? [.white.opacity(0.85), .white.opacity(0.3)] : [.white.opacity(0.4), .white.opacity(0.1)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
@@ -135,8 +135,8 @@ struct BonusContentCard: View {
                     lineWidth: isHovered ? 1.5 : 0.5
                 )
         )
-        .shadow(color: isHovered ? Color.white.opacity(0.10) : Color.clear, radius: 14, x: 0, y: 0)
-        .shadow(color: isHovered ? Color.black.opacity(0.60) : Color.black.opacity(0.35), radius: isHovered ? 16 : 6, x: 0, y: isHovered ? 8 : 3)
+        .shadow(color: Color.black.opacity(isHovered ? 0.50 : 0.25), radius: isHovered ? 12 : 5, x: 0, y: isHovered ? 6 : 2)
+        .shadow(color: isHovered ? Color.white.opacity(0.12) : Color.clear, radius: 8, x: 0, y: 0)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isHovered)
         .contentShape(Rectangle())
         .onHover { hovering in

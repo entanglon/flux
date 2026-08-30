@@ -45,7 +45,7 @@ struct DetailView: View {
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                    VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     GeometryReader { innerGeo in
                         Color.clear.preference(
                             key: DetailScrollOffsetKey.self,
@@ -726,28 +726,8 @@ struct DetailView: View {
         if let episode = item.episode {
             PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
             openWindow(id: "player", value: displayItem.id)
-        } else if let key = item.videoKey {
-            Task {
-                let resolvedURL = await YouTubeStreamResolver.resolveStreamURL(videoKey: key)
-                await MainActor.run {
-                    let bonusMediaItem = MediaItem(
-                        id: "bonus-\(item.id)",
-                        title: "\(displayItem.title): \(item.title)",
-                        description: item.subtitle ?? item.categoryType,
-                        imageURL: item.thumbnailURL,
-                        posterURL: displayItem.posterURL,
-                        backdropURL: item.thumbnailURL ?? displayItem.backdropURL,
-                        heroURL: item.thumbnailURL ?? displayItem.heroURL,
-                        streamURL: resolvedURL ?? URL(string: "https://www.youtube.com/watch?v=\(key)"),
-                        category: item.categoryType,
-                        progress: nil,
-                        trailerURL: nil,
-                        cast: nil
-                    )
-                    PlayerManager.shared.play(bonusMediaItem)
-                    openWindow(id: "player", value: bonusMediaItem.id)
-                }
-            }
+        } else if let url = item.youtubeURL {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -1054,7 +1034,7 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 24) { // Switched to HStack for accurate contentSize
+                LazyHStack(spacing: 24) {
                     ForEach(Array(items.enumerated()), id: \.offset) { enumeration in
                         content(enumeration.element)
                             .id(enumeration.offset)
