@@ -113,7 +113,7 @@ struct DetailView: View {
                                     .foregroundStyle(.white.opacity(0.8))
                                     .tracking(0.5)
                             } else {
-                                Text(displayItem.category == "TV Show" ? "NEW EPISODE EVERY FRIDAY" : displayItem.genres?.first?.uppercased() ?? "MOVIE")
+                                Text(displayItem.category == "TV Show" ? "NEW EPISODE EVERY FRIDAY" : displayItem.genres?.first?.uppercased() ?? displayItem.category.uppercased())
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
@@ -131,10 +131,12 @@ struct DetailView: View {
                             // Metadata Row
                             HStack(spacing: 6) {
                                 Text(displayItem.category)
-                                Text("•")
-                                Text(displayItem.genres?.prefix(2).joined(separator: ", ") ?? "Genre")
-                                Text("•")
+                                if let genres = displayItem.genres, !genres.isEmpty {
+                                    Text("•")
+                                    Text(genres.prefix(2).joined(separator: ", "))
+                                }
                                 if let voteAvg = displayItem.voteAverage, voteAvg > 0 {
+                                    Text("•")
                                     HStack(spacing: 2) {
                                         Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
                                         Text(String(format: "%.1f", voteAvg))
@@ -786,14 +788,34 @@ struct DetailView: View {
             
             // 2. Fetch Enriched Metadata (Internally handles TMDB if available)
             let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
-            fullItem = detailedItem
+            
+            var merged = detailedItem
+            if merged.description.isEmpty && !item.description.isEmpty {
+                merged.description = item.description
+            }
+            if (merged.genres == nil || merged.genres?.isEmpty == true) && item.genres != nil {
+                merged.genres = item.genres
+            }
+            if (merged.voteAverage == nil || merged.voteAverage == 0) && item.voteAverage != nil {
+                merged.voteAverage = item.voteAverage
+            }
+            if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && item.releaseDate != nil {
+                merged.releaseDate = item.releaseDate
+            }
+            if merged.heroURL == nil { merged.heroURL = item.heroURL }
+            if merged.backdropURL == nil { merged.backdropURL = item.backdropURL }
+            if merged.posterURL == nil { merged.posterURL = item.posterURL }
+            
+            await MainActor.run {
+                self.fullItem = merged
+            }
             
             if type == "series" {
-                if let seasons = detailedItem.seasons, let first = seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first {
+                if let seasons = merged.seasons, let first = seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first {
                     selectedSeason = first
                     
                     // Track TMDB ID for sub-enrichment (episodes)
-                    if let imdbID = detailedItem.id.starts(with: "tt") ? detailedItem.id : nil {
+                    if let imdbID = merged.id.starts(with: "tt") ? merged.id : nil {
                         if let tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: imdbID, type: "tv") {
                              UserDefaults.standard.set(tmdbID, forKey: "activeTMDBID")
                         }
@@ -803,18 +825,22 @@ struct DetailView: View {
                 }
             }
             
-            let tmdbSimilar = await TMDBEnricher.shared.fetchSimilar(item: detailedItem)
+            let tmdbSimilar = await TMDBEnricher.shared.fetchSimilar(item: merged)
             if !tmdbSimilar.isEmpty {
-                relatedItems = Array(tmdbSimilar.filter { $0.id != detailedItem.id }.prefix(12))
+                relatedItems = Array(tmdbSimilar.filter { $0.id != merged.id }.prefix(12))
             } else {
-                let related = try? await StremioService.shared.fetchRelated(type: type, genres: detailedItem.genres)
-                relatedItems = Array(related?.filter { $0.id != detailedItem.id }.shuffled().prefix(10) ?? [])
+                let related = try? await StremioService.shared.fetchRelated(type: type, genres: merged.genres)
+                relatedItems = Array(related?.filter { $0.id != merged.id }.shuffled().prefix(10) ?? [])
             }
 
             // Fetch trailer in the background (non-blocking)
             Task {
-                if let url = await TMDBEnricher.shared.fetchTrailerURL(item: detailedItem) {
-                    await MainActor.run { self.trailerURL = url }
+                if let url = await TMDBEnricher.shared.fetchTrailerURL(item: merged) {
+                    await MainActor.run {
+                        withAnimation(.spring(duration: 0.3)) {
+                            self.trailerURL = url
+                        }
+                    }
                 }
             }
 

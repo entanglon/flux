@@ -1,6 +1,29 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — LIQUID GLASS TOGGLE + UPCOMING TITLES + WATCH HISTORY REORDER + TMDB DYNAMIC CATALOG CACHING + CAROUSEL DIFFING
+## LATEST: Aug 30, 2026 — DETAILVIEW METADATA FLICKER FIX + TMDB GENRE MAPPING + CANONICAL METADATA RECONCILIATION
+
+### DetailView Metadata Flash & Text Shift Fix (`DetailView.swift`, `TMDBModels.swift`, `TMDBEnricher.swift`)
+- **Root Cause:**
+  1. Discovery items from TMDB were decoded into `TMDBMovie` / `TMDBTVShow` / `TMDBTrendingItem` without decoding `genre_ids`. Their `toMediaItem()` conversions passed `genres: nil`, causing `DetailView` to initially display fallback `"MOVIE"` in the eyebrow kicker and `"Genre"` in the metadata row.
+  2. When `DetailView.loadDetails()` completed, it unconditionally replaced `fullItem` with Cinemeta's raw metadata. Cinemeta's IMDb description, missing genres, and alternative ratings abruptly replaced TMDB's rich discover data on screen, causing visible text jumping and layout shift.
+- **TMDB Genre Mapping (`TMDBModels.swift`):**
+  - Added `TMDBGenreMapper` containing all official TMDB integer-to-string genre classifications.
+  - Added `genreIds: [Int]?` (mapped from `genre_ids`) to `TMDBTrendingItem`, `TMDBMovie`, and `TMDBTVShow`.
+  - Updated `toMediaItem()` to populate `genres` immediately from `genreIds`, ensuring carousel and discovery cards immediately carry full genre lists without any initial fallback text.
+- **Canonical TMDB Metadata Enrichment (`TMDBEnricher.swift`):**
+  - Updated `quickEnrich` and `fullEnrich` to decode the full `TMDBMovieDetail` and `TMDBTVShowDetail` models.
+  - Prioritizes TMDB's high-fidelity official overview, genres, vote averages, release dates, runtimes, and high-resolution posters/backdrops, eliminating metadata downgrades by raw Cinemeta payloads.
+- **Seamless DetailView Reconciliation (`DetailView.swift`):**
+  - Updated `loadDetails()` to preserve existing non-empty caller metadata (`description`, `genres`, `voteAverage`, `releaseDate`, `heroURL`, `backdropURL`, `posterURL`) when `detailedItem` arrives.
+  - Updated the dynamic eyebrow kicker and metadata row to only display genre bullets and ratings when present, never showing placeholder `"Genre"` or fallback words.
+  - Added spring transition for the YouTube trailer button when loaded asynchronously in the background.
+- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):**
+  - Added unit test coverage for `TMDBGenreMapper` and metadata preservation on `TMDBMovie` and `TMDBTVShow`.
+  - **All 23 / 23 unit tests passing (100% success rate)**.
+
+---
+
+## Aug 30, 2026 — LIQUID GLASS TOGGLE + UPCOMING TITLES + WATCH HISTORY REORDER + TMDB DYNAMIC CATALOG CACHING + CAROUSEL DIFFING
 
 ### Liquid Glass Segmented Toggle (`SectionHeader.swift`, `HomeView.swift`, `MoviesView.swift`, `TVShowsView.swift`)
 - **Combined Trending Rails:** Replaced separate "Trending Today" and "Trending This Week" horizontal rails with a single "Trending" section header featuring an Apple native Liquid Glass `[ Today | This Week ]` segmented toggle before the navigation chevron.

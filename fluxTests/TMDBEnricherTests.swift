@@ -47,8 +47,22 @@ struct TMDBEnricherTests {
         #expect(cleared == nil)
     }
 
+    @Test func tmdbGenreMapperResolvesCorrectNames() {
+        let genreNames = TMDBGenreMapper.names(for: [80, 18])
+        #expect(genreNames == ["Crime", "Drama"])
+
+        let singleName = TMDBGenreMapper.names(for: [28])
+        #expect(singleName == ["Action"])
+
+        let nilNames = TMDBGenreMapper.names(for: nil)
+        #expect(nilNames == nil)
+
+        let emptyNames = TMDBGenreMapper.names(for: [])
+        #expect(emptyNames == nil)
+    }
+
     @Test func mediaItemConversionPreservesMetadata() {
-        let movie = TMDBMovie(id: 456, title: "Spider-Man", overview: "Friendly neighbor", posterPath: "/spider.jpg", backdropPath: "/spider_bg.jpg", releaseDate: "2026-07-24", voteAverage: 8.9, popularity: 1500.0)
+        let movie = TMDBMovie(id: 456, title: "Spider-Man", overview: "Friendly neighbor", posterPath: "/spider.jpg", backdropPath: "/spider_bg.jpg", releaseDate: "2026-07-24", voteAverage: 8.9, popularity: 1500.0, genreIds: [28, 12, 878])
         let mediaItem = movie.toMediaItem()
         
         #expect(mediaItem.id == "456")
@@ -57,8 +71,9 @@ struct TMDBEnricherTests {
         #expect(mediaItem.voteAverage == 8.9)
         #expect(mediaItem.popularity == 1500.0)
         #expect(mediaItem.releaseDate == "2026-07-24")
+        #expect(mediaItem.genres == ["Action", "Adventure", "Sci-Fi"])
 
-        let show = TMDBTVShow(id: 789, name: "Reacher", overview: "Jack Reacher", posterPath: "/reacher.jpg", backdropPath: "/reacher_bg.jpg", firstAirDate: "2022-02-04", voteAverage: 8.2, popularity: 800.0)
+        let show = TMDBTVShow(id: 789, name: "Reacher", overview: "Jack Reacher", posterPath: "/reacher.jpg", backdropPath: "/reacher_bg.jpg", firstAirDate: "2022-02-04", voteAverage: 8.2, popularity: 800.0, genreIds: [80, 18])
         let showItem = show.toMediaItem()
         
         #expect(showItem.id == "789")
@@ -66,6 +81,7 @@ struct TMDBEnricherTests {
         #expect(showItem.category == "TV Show")
         #expect(showItem.voteAverage == 8.2)
         #expect(showItem.popularity == 800.0)
+        #expect(showItem.genres == ["Crime", "Drama"])
     }
 
     @Test func mediaListTypeTitlesAreAccurate() {

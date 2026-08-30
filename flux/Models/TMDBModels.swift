@@ -14,6 +14,45 @@ struct TMDBResponse<T: Codable>: Codable {
     }
 }
 
+// MARK: - Genre Mapper
+enum TMDBGenreMapper {
+    static let idToName: [Int: String] = [
+        28: "Action",
+        12: "Adventure",
+        16: "Animation",
+        35: "Comedy",
+        80: "Crime",
+        99: "Documentary",
+        18: "Drama",
+        10751: "Family",
+        14: "Fantasy",
+        36: "History",
+        27: "Horror",
+        10402: "Music",
+        9648: "Mystery",
+        10749: "Romance",
+        878: "Sci-Fi",
+        10770: "TV Movie",
+        53: "Thriller",
+        10752: "War",
+        37: "Western",
+        10759: "Action & Adventure",
+        10762: "Kids",
+        10763: "News",
+        10764: "Reality",
+        10765: "Sci-Fi & Fantasy",
+        10766: "Soap",
+        10767: "Talk",
+        10768: "War & Politics"
+    ]
+    
+    static func names(for ids: [Int]?) -> [String]? {
+        guard let ids = ids, !ids.isEmpty else { return nil }
+        let mapped = ids.compactMap { idToName[$0] }
+        return mapped.isEmpty ? nil : mapped
+    }
+}
+
 // MARK: - Trending Combined
 struct TMDBTrendingResponse: Codable {
     let results: [TMDBTrendingItem]
@@ -31,6 +70,7 @@ struct TMDBTrendingItem: Codable {
     let firstAirDate: String?
     let popularity: Double?
     let voteAverage: Double?
+    let genreIds: [Int]?
     
     enum CodingKeys: String, CodingKey {
         case id, overview, popularity
@@ -41,6 +81,7 @@ struct TMDBTrendingItem: Codable {
         case releaseDate = "release_date"
         case firstAirDate = "first_air_date"
         case voteAverage = "vote_average"
+        case genreIds = "genre_ids"
     }
     
     func toMediaItem() -> MediaItem {
@@ -55,8 +96,17 @@ struct TMDBTrendingItem: Codable {
             heroURL: TMDBEnricher.shared.adaptiveURL(path: backdropPath, quality: .automatic),
             streamURL: nil,
             category: isMovie ? "Movie" : "TV Show",
+            progress: nil,
+            trailerURL: nil,
+            cast: nil,
+            seasons: nil,
+            runtime: nil,
+            certification: nil,
+            genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: isMovie ? releaseDate : firstAirDate,
+            spokenLanguages: nil,
+            originCountry: nil,
             voteAverage: voteAverage
         )
     }
@@ -72,6 +122,29 @@ struct TMDBMovie: Codable, Identifiable {
     let releaseDate: String?
     let voteAverage: Double?
     let popularity: Double?
+    let genreIds: [Int]?
+    
+    init(
+        id: Int,
+        title: String,
+        overview: String? = nil,
+        posterPath: String? = nil,
+        backdropPath: String? = nil,
+        releaseDate: String? = nil,
+        voteAverage: Double? = nil,
+        popularity: Double? = nil,
+        genreIds: [Int]? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.overview = overview
+        self.posterPath = posterPath
+        self.backdropPath = backdropPath
+        self.releaseDate = releaseDate
+        self.voteAverage = voteAverage
+        self.popularity = popularity
+        self.genreIds = genreIds
+    }
     
     enum CodingKeys: String, CodingKey {
         case id, title, overview, popularity
@@ -79,6 +152,7 @@ struct TMDBMovie: Codable, Identifiable {
         case backdropPath = "backdrop_path"
         case releaseDate = "release_date"
         case voteAverage = "vote_average"
+        case genreIds = "genre_ids"
     }
     
     nonisolated var posterURL: URL? {
@@ -104,6 +178,29 @@ struct TMDBTVShow: Codable, Identifiable {
     let firstAirDate: String?
     let voteAverage: Double?
     let popularity: Double?
+    let genreIds: [Int]?
+    
+    init(
+        id: Int,
+        name: String,
+        overview: String? = nil,
+        posterPath: String? = nil,
+        backdropPath: String? = nil,
+        firstAirDate: String? = nil,
+        voteAverage: Double? = nil,
+        popularity: Double? = nil,
+        genreIds: [Int]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.overview = overview
+        self.posterPath = posterPath
+        self.backdropPath = backdropPath
+        self.firstAirDate = firstAirDate
+        self.voteAverage = voteAverage
+        self.popularity = popularity
+        self.genreIds = genreIds
+    }
     
     enum CodingKeys: String, CodingKey {
         case id, name, overview, popularity
@@ -111,6 +208,7 @@ struct TMDBTVShow: Codable, Identifiable {
         case backdropPath = "backdrop_path"
         case firstAirDate = "first_air_date"
         case voteAverage = "vote_average"
+        case genreIds = "genre_ids"
     }
     
     nonisolated var posterURL: URL? {
@@ -535,7 +633,7 @@ extension TMDBMovie {
             seasons: nil,
             runtime: nil,
             certification: nil,
-            genres: nil,
+            genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: releaseDate,
             voteAverage: voteAverage
@@ -561,7 +659,7 @@ extension TMDBTVShow {
             seasons: nil,
             runtime: nil,
             certification: nil,
-            genres: nil,
+            genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: firstAirDate,
             voteAverage: voteAverage

@@ -144,8 +144,25 @@ class TMDBEnricher {
             if let popularity = json["popularity"] as? Double {
                 enriched.popularity = popularity
             }
-            if let overview = json["overview"] as? String, enriched.description.isEmpty {
+            if let overview = json["overview"] as? String, !overview.isEmpty {
                 enriched.description = overview
+            }
+            if let voteAvg = json["vote_average"] as? Double, voteAvg > 0 {
+                enriched.voteAverage = voteAvg
+            }
+            if let genresArray = json["genres"] as? [[String: Any]] {
+                let names = genresArray.compactMap { $0["name"] as? String }
+                if !names.isEmpty {
+                    enriched.genres = names
+                }
+            }
+            if let genreIds = json["genre_ids"] as? [Int] {
+                if let names = TMDBGenreMapper.names(for: genreIds) {
+                    enriched.genres = names
+                }
+            }
+            if let releaseDate = (json["release_date"] as? String) ?? (json["first_air_date"] as? String), !releaseDate.isEmpty {
+                enriched.releaseDate = releaseDate
             }
         }
         
@@ -183,12 +200,54 @@ class TMDBEnricher {
             group.addTask {
                 let urlString = "\(currentBaseURL)/\(type)/\(id)?api_key=\(currentAPIKey)"
                 if let url = URL(string: urlString),
-                   let (data, _) = try? await URLSession.shared.data(from: url),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let backdropPath = json["backdrop_path"] as? String {
-                    await MainActor.run {
-                        enriched.backdropURL = self.adaptiveURL(path: backdropPath, quality: .automatic)
-                        enriched.heroURL = enriched.backdropURL
+                   let (data, _) = try? await URLSession.shared.data(from: url) {
+                    if type == "movie", let detail = try? JSONDecoder().decode(TMDBMovieDetail.self, from: data) {
+                        await MainActor.run {
+                            if let backdrop = detail.backdropURL {
+                                enriched.backdropURL = backdrop
+                                enriched.heroURL = detail.heroURL ?? backdrop
+                            }
+                            if let poster = detail.posterURL {
+                                enriched.posterURL = poster
+                            }
+                            if let overview = detail.overview, !overview.isEmpty {
+                                enriched.description = overview
+                            }
+                            if let genres = detail.genres, !genres.isEmpty {
+                                enriched.genres = genres.map { $0.name }
+                            }
+                            if let voteAverage = detail.voteAverage, voteAverage > 0 {
+                                enriched.voteAverage = voteAverage
+                            }
+                            if let releaseDate = detail.releaseDate, !releaseDate.isEmpty {
+                                enriched.releaseDate = releaseDate
+                            }
+                            if let runtime = detail.runtime {
+                                enriched.runtime = "\(runtime / 60)h \(runtime % 60)m"
+                            }
+                        }
+                    } else if type == "tv", let detail = try? JSONDecoder().decode(TMDBTVShowDetail.self, from: data) {
+                        await MainActor.run {
+                            if let backdrop = detail.backdropURL {
+                                enriched.backdropURL = backdrop
+                                enriched.heroURL = detail.heroURL ?? backdrop
+                            }
+                            if let poster = detail.posterURL {
+                                enriched.posterURL = poster
+                            }
+                            if let overview = detail.overview, !overview.isEmpty {
+                                enriched.description = overview
+                            }
+                            if let genres = detail.genres, !genres.isEmpty {
+                                enriched.genres = genres.map { $0.name }
+                            }
+                            if let voteAverage = detail.voteAverage, voteAverage > 0 {
+                                enriched.voteAverage = voteAverage
+                            }
+                            if let releaseDate = detail.firstAirDate, !releaseDate.isEmpty {
+                                enriched.releaseDate = releaseDate
+                            }
+                        }
                     }
                 }
             }
