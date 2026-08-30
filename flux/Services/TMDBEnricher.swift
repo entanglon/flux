@@ -54,7 +54,7 @@ class TMDBEnricher {
     }
     
     private var apiKey: String {
-        let key = UserDefaults.standard.string(forKey: "tmdbApiKey") ?? ""
+        let key = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
         return key.isEmpty ? Secrets.tmdbAPIKey : key
     }
 

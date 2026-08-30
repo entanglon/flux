@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import OSLog
 
 /// Account identity via Cloudflare Worker native auth; library data via Worker D1.
 /// Worker owns credentials (PBKDF2 hashing, HMAC-signed JWTs, throttling).
@@ -194,10 +195,10 @@ class AuthManager: ObservableObject {
         guard let token = authToken else { return }
         do {
             if pullFirst, let remote = try await client.fetchData(token: token) {
-                let lastSync = UserDefaults.standard.double(forKey: "cloudLastSyncAt")
+                let lastSync = UserDefaults.standard.double(forKey: UserDefaults.Key.cloudLastSyncAt)
                 if remote.updatedAt > lastSync {
                     await UserDataService.shared.applyCloudPayload(remote.payload)
-                    print("[Auth] Cloud library pulled (\(remote.updatedAt))")
+                    Logger.auth.info("Cloud library pulled (\(remote.updatedAt))")
                 }
             }
 
@@ -208,11 +209,11 @@ class AuthManager: ObservableObject {
                 payload: payload,
                 updatedAt: now
             )
-            UserDefaults.standard.set(now, forKey: "cloudLastSyncAt")
+            UserDefaults.standard.set(now, forKey: UserDefaults.Key.cloudLastSyncAt)
             await MainActor.run { self.lastSyncDate = Date() }
-            print("[Auth] Cloud library pushed successfully (\(now))")
+            Logger.auth.info("Cloud library pushed successfully (\(now))")
         } catch {
-            print("[Auth] Sync failed:", error.localizedDescription)
+            Logger.auth.error("Sync failed: \(error.localizedDescription)")
         }
     }
 }

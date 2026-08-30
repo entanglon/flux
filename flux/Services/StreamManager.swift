@@ -143,7 +143,7 @@ class StreamManager {
             for await streams in group {
                 guard !streams.isEmpty else { continue }
                 allStreams.append(contentsOf: streams)
-                let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+                let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
                 let filtered = allStreams.filter { s in
                     guard self.isWithinMaxResolution(s) else { return false }
                     let isTorrent = s.url.absoluteString.starts(with: "magnet:") || (s.seeders != nil && s.seeders! > 0)
@@ -161,7 +161,7 @@ class StreamManager {
             }
         }
         
-        let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
         let finalFiltered = deduped(allStreams).filter { s in
             guard self.isWithinMaxResolution(s) else { return false }
             let isTorrent = s.isTorrent || (s.seeders != nil && s.seeders! > 0)
@@ -234,7 +234,7 @@ class StreamManager {
     }
     
     func maxAllowedQualityScore() -> Int {
-        let pref = UserDefaults.standard.string(forKey: "preferredQuality") ?? "4K"
+        let pref = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
         return qualityScore(pref)
     }
     

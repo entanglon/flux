@@ -131,7 +131,7 @@ class PlayerManager: ObservableObject {
         let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { _ in }
         guard !Task.isCancelled else { return }
 
-        let fluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+        let fluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
         defer {
             if Task.isCancelled {
                 DispatchQueue.main.async { self.isPrefetching = false }
@@ -583,7 +583,7 @@ class PlayerManager: ObservableObject {
         // ⚡ ADVANCED LOADING fast-path (Flux Mode): the detail page already
         // resolved + primed + warm-buffered this exact title — start instantly.
         let key = prefetchKey(for: item, season: season, episode: episode)
-        let isFluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
         if isFluxEnabled,
            prefetchedKey == key,
            let pf = prefetchedStream,
@@ -627,7 +627,7 @@ class PlayerManager: ObservableObject {
             }
             
             // Flux Mode Debugging
-            let isFluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+            let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
             print("[DEBUG] Flux Mode Enabled: \(isFluxEnabled)")
             print("[DEBUG] Stream Count: \(streams.count)")
 
@@ -662,7 +662,7 @@ class PlayerManager: ObservableObject {
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
 
-        let sourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode") ?? "both"
+        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
 
         if sourceMode != "http", let topTorrent = healthy.first(where: { $0.isTorrent }) {
             print("[PlayerManager] Flux Mode: top-ranked torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
@@ -814,7 +814,7 @@ class PlayerManager: ObservableObject {
     /// Two-phase playback (Stremio-style): torrents are resolved by the Stremio server,
     /// then the URL is handed to mpv. Dead sources fail and fall through to next candidate.
     private func attemptStream(_ stream: Stream) {
-        let isFluxEnabled = UserDefaults.standard.object(forKey: "enableFluxMode") as? Bool ?? true
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
 
         // Skip recently-dead hashes for AUTO selection only — an explicit user
         // click must always be attempted (the dead mark may be stale).
@@ -886,7 +886,7 @@ class PlayerManager: ObservableObject {
             UserDataService.shared.addToHistory(item, season: self.currentSeason, episode: self.currentEpisode, episodeImage: self.currentEpisodeImage)
         }
 
-        UserDefaults.standard.set(stream.source, forKey: "lastUsedSource")
+        UserDefaults.standard.set(stream.source, forKey: UserDefaults.Key.lastUsedSource)
     }
 
     /// After a failed attempt, move on to the next candidate in the ranked list.
