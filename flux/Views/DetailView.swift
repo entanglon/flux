@@ -209,17 +209,17 @@ struct DetailView: View {
                                         userData.toggleWatched(displayItem)
                                     }
                                 }) {
-                                    Image(systemName: userData.isInHistory(displayItem) ? "eye.fill" : "eye")
+                                    Image(systemName: userData.isWatched(displayItem) ? "eye.fill" : "eye")
                                         .font(.title3)
-                                        .foregroundStyle(userData.isInHistory(displayItem) ? Color.cyan : .white)
+                                        .foregroundStyle(userData.isWatched(displayItem) ? Color.cyan : .white)
                                         .padding(14)
                                         .glassEffect(.regular.interactive(), in: .circle)
-                                        .symbolEffect(.bounce, value: userData.isInHistory(displayItem))
+                                        .symbolEffect(.bounce, value: userData.isWatched(displayItem))
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .help(userData.isInHistory(displayItem) ? "Mark as unwatched" : "Mark as watched")
-                                .accessibilityLabel(userData.isInHistory(displayItem) ? "Mark as unwatched" : "Mark as watched")
+                                .help(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
+                                .accessibilityLabel(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
 
                                 // Love — strongest taste signal for the For You rail
                                 Button(action: {

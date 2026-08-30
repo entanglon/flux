@@ -29,6 +29,7 @@ protocol UserDataProtocol {
     
     func isInWatchlist(_ item: MediaItem) -> Bool
     func toggleWatchlist(_ item: MediaItem)
+    func isWatched(_ item: MediaItem) -> Bool
     func isInHistory(_ item: MediaItem) -> Bool
     func toggleWatched(_ item: MediaItem, season: Int?, episode: Int?, episodeTitle: String?, episodeImage: URL?)
     func addToHistory(_ item: MediaItem, progress: Double?, season: Int?, episode: Int?, episodeTitle: String?, episodeImage: URL?)

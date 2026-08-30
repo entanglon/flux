@@ -55,3 +55,15 @@ session's counterpart agent should read those first. Key pieces to reuse:
 5. Risk posture: keep the streaming channel single-user/self-hosted. Shared
    distribution channels are the ban magnet; account bans would take the
    whole vault with them. Content-provenance caveat stands.
+
+---
+
+## Secret Player Control Panel — PLANNED (planned 2026-08-30)
+
+**Goal:** Add an advanced secret HUD / control panel inside the player for power-user playback tuning.
+
+**Capabilities to include:**
+1. **Subtitle Precision Controls:** Real-time subtitle delay calibration (+/- 100ms), subtitle font sizing, custom subtitle color / outline opacity, subtitle position offset.
+2. **Audio Sync & Boost:** Audio delay calibration (+/- 50ms), custom audio equalizer presets, night mode (dialogue boost / dynamic range compression via libmpv `af` filters).
+3. **Video Stream Diagnostics & Shaders:** Real-time stream bitrate, dropped frames, cache buffer fill %, video hardware decoder backend (VideoToolbox / software), mpv video shader filters (contrast, brightness, saturation, deinterlace, deband).
+4. **Trigger:** Secret key combination (e.g. `Option + D` or `Ctrl + Shift + P`) or hidden icon in player controls.

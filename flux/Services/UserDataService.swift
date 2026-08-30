@@ -221,12 +221,19 @@ class UserDataService: ObservableObject {
         AuthManager.shared.scheduleAutoSync()
     }
     
+    /// Returns true only when the media is genuinely completed (progress >= 90% or marked 100%).
+    /// Titles with <90% progress are "In Progress / Continue Watching" and not treated as finished.
+    func isWatched(_ item: MediaItem) -> Bool {
+        guard let existing = history.first(where: { $0.id == item.id }) else { return false }
+        return (existing.progress ?? 0) >= 0.90
+    }
+
     func isInHistory(_ item: MediaItem) -> Bool {
         return history.contains { $0.id == item.id }
     }
 
     func toggleWatched(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
-        if isInHistory(item) {
+        if isWatched(item) {
             removeFromHistory(item)
         } else {
             addToHistory(item, progress: 1.0, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage)

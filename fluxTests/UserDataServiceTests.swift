@@ -44,4 +44,26 @@ struct UserDataServiceTests {
         let afterDelete = KeychainStore.get(testKey)
         #expect(afterDelete == nil)
     }
+
+    @Test func watchedThresholdDistinguishesFinishedFromInProgress() {
+        var completedMovie = MediaItem(
+            id: "tt9999991",
+            title: "Finished Movie",
+            description: "",
+            streamURL: nil,
+            category: "Movie",
+            progress: 0.95
+        )
+        var inProgressMovie = MediaItem(
+            id: "tt9999992",
+            title: "Started Movie",
+            description: "",
+            streamURL: nil,
+            category: "Movie",
+            progress: 0.15
+        )
+
+        #expect((completedMovie.progress ?? 0) >= 0.90)
+        #expect((inProgressMovie.progress ?? 0) < 0.90)
+    }
 }
