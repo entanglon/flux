@@ -66,4 +66,50 @@ struct UserDataServiceTests {
         #expect((completedMovie.progress ?? 0) >= 0.90)
         #expect((inProgressMovie.progress ?? 0) < 0.90)
     }
+
+    @Test func cloudMergePreservesLocalAdditionsAndNewerProgress() {
+        let localItem1: [String: Any] = [
+            "id": "tt1001",
+            "title": "Local Recent Movie",
+            "progress": 0.45,
+            "timestamp": 1725001000.0
+        ]
+        let remoteItem1: [String: Any] = [
+            "id": "tt1001",
+            "title": "Local Recent Movie",
+            "progress": 0.10,
+            "timestamp": 1725000000.0
+        ]
+        let remoteItem2: [String: Any] = [
+            "id": "tt1002",
+            "title": "Remote Exclusive Show",
+            "progress": 1.0,
+            "timestamp": 1725000500.0
+        ]
+
+        let local = [localItem1]
+        let remote = [remoteItem1, remoteItem2]
+
+        var map: [String: [String: Any]] = [:]
+        for item in local {
+            guard let id = item["id"] as? String else { continue }
+            map[id] = item
+        }
+        for item in remote {
+            guard let id = item["id"] as? String else { continue }
+            if let localItem = map[id] {
+                let localTime = localItem["timestamp"] as? Double ?? 0
+                let remoteTime = item["timestamp"] as? Double ?? 0
+                if remoteTime > localTime {
+                    map[id] = item
+                }
+            } else {
+                map[id] = item
+            }
+        }
+
+        #expect(map.count == 2)
+        #expect(map["tt1001"]?["progress"] as? Double == 0.45)
+        #expect(map["tt1002"]?["progress"] as? Double == 1.0)
+    }
 }

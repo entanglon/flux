@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // App lifecycle configuration
     }
     func applicationWillTerminate(_ notification: Notification) {
+        UserDefaults.standard.synchronize()
         AuthManager.shared.syncNow()
         StremioServerManager.shared.stopServer()
         StreamProxyManager.shared.stop()

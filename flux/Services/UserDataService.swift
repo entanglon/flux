@@ -26,7 +26,7 @@ class UserDataService: ObservableObject {
             collectionsKey = "profile.\(profile.id.uuidString).collections"
 
             if migrateLegacyData,
-               UserDefaults.standard.data(forKey: historyKey) == nil,
+               (UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]]) == nil,
                let legacy = UserDefaults.standard.array(forKey: "localHistoryDataStremio") {
                 UserDefaults.standard.set(legacy, forKey: historyKey)
             }
@@ -402,10 +402,66 @@ class UserDataService: ObservableObject {
         !watchlist.isEmpty || !history.isEmpty || !collections.isEmpty
     }
 
-    /// Applies a cloud payload to the CURRENT profile (replaces local state).
+    // MARK: - Smart Cloud Merge Helpers
+    
+    private func mergeHistoryData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
+        var map: [String: [String: Any]] = [:]
+        for item in local {
+            guard let id = item["id"] as? String else { continue }
+            map[id] = item
+        }
+        for item in remote {
+            guard let id = item["id"] as? String else { continue }
+            if let localItem = map[id] {
+                let localTime = localItem["timestamp"] as? Double ?? 0
+                let remoteTime = item["timestamp"] as? Double ?? 0
+                if remoteTime > localTime {
+                    map[id] = item
+                } else if remoteTime == localTime {
+                    let localProg = localItem["progress"] as? Double ?? 0
+                    let remoteProg = item["progress"] as? Double ?? 0
+                    if remoteProg > localProg {
+                        map[id] = item
+                    }
+                }
+            } else {
+                map[id] = item
+            }
+        }
+        return Array(map.values).sorted {
+            ($0["timestamp"] as? Double ?? 0) > ($1["timestamp"] as? Double ?? 0)
+        }
+    }
+
+    private func mergeWatchlistData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
+        var map: [String: [String: Any]] = [:]
+        var order: [String] = []
+        for item in local {
+            guard let id = item["id"] as? String else { continue }
+            map[id] = item
+            order.append(id)
+        }
+        for item in remote {
+            guard let id = item["id"] as? String else { continue }
+            if map[id] == nil {
+                map[id] = item
+                order.append(id)
+            }
+        }
+        return order.compactMap { map[$0] }
+    }
+
+    /// Applies a cloud payload to the CURRENT profile with two-way smart merging
+    /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
     func applyCloudPayload(_ payload: [String: Any]) {
-        let watchlistData = payload["watchlist"] as? [[String: Any]]
-        let historyData = payload["history"] as? [[String: Any]]
+        let remoteWatchlist = payload["watchlist"] as? [[String: Any]] ?? []
+        let remoteHistory = payload["history"] as? [[String: Any]] ?? []
+
+        let localWatchlist = (UserDefaults.standard.array(forKey: self.watchlistKey) as? [[String: Any]]) ?? []
+        let localHistory = (UserDefaults.standard.array(forKey: self.historyKey) as? [[String: Any]]) ?? []
+
+        let mergedWatchlist = mergeWatchlistData(local: localWatchlist, remote: remoteWatchlist)
+        let mergedHistory = mergeHistoryData(local: localHistory, remote: remoteHistory)
 
         var imported: [UserCollection] = []
         if let raw = payload["collections"] as? [[String: Any]] {
@@ -431,17 +487,16 @@ class UserDataService: ObservableObject {
             // Persist first so disk matches memory.
             self.collections = imported.sorted { $0.createdAt < $1.createdAt }
             self.saveCollections()
-            if let w = watchlistData {
-                UserDefaults.standard.set(w, forKey: self.watchlistKey)
-                self.watchlist = self.parseItems(w)
-            }
-            if let h = historyData {
-                UserDefaults.standard.set(h, forKey: self.historyKey)
-                self.history = self.parseItems(h)
-            }
+            
+            UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
+            self.watchlist = self.parseItems(mergedWatchlist)
+            
+            UserDefaults.standard.set(mergedHistory, forKey: self.historyKey)
+            self.history = self.parseItems(mergedHistory)
+            
             TasteProfileManager.shared.applyCloudData(loved: tasteLoved, snapshots: tasteSnapshots)
             ProfileManager.shared.applyCloudProfilesData(profilesData)
-            print("[UserDataService] Cloud payload applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
+            print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
         }
     }
 }
