@@ -31,7 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 #endif
-// import FirebaseCore
 
 @main
 struct fluxApp: App {

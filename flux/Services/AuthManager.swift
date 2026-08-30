@@ -37,7 +37,20 @@ class AuthManager: ObservableObject {
     }
 
     private init() {
-        if Self.isConfigured, let token = UserDefaults.standard.string(forKey: Self.tokenKey),
+        let token: String? = {
+            if let secureToken = KeychainStore.get(Self.tokenKey), !secureToken.isEmpty {
+                return secureToken
+            }
+            // Seamless backward-compatible migration from legacy UserDefaults
+            if let legacyToken = UserDefaults.standard.string(forKey: Self.tokenKey), !legacyToken.isEmpty {
+                KeychainStore.set(legacyToken, forKey: Self.tokenKey)
+                UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+                return legacyToken
+            }
+            return nil
+        }()
+
+        if Self.isConfigured, token != nil,
            let uid = UserDefaults.standard.string(forKey: Self.userUIDKey),
            let email = UserDefaults.standard.string(forKey: Self.userEmailKey) {
             // Set synchronously — init() runs on the main thread before any
@@ -58,16 +71,26 @@ class AuthManager: ObservableObject {
     // MARK: - Token
 
     var authToken: String? {
-        UserDefaults.standard.string(forKey: Self.tokenKey)
+        if let token = KeychainStore.get(Self.tokenKey), !token.isEmpty {
+            return token
+        }
+        if let legacy = UserDefaults.standard.string(forKey: Self.tokenKey), !legacy.isEmpty {
+            KeychainStore.set(legacy, forKey: Self.tokenKey)
+            UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+            return legacy
+        }
+        return nil
     }
 
     private func saveSession(_ resp: FluxAuthResponse) {
-        UserDefaults.standard.set(resp.token, forKey: Self.tokenKey)
+        KeychainStore.set(resp.token, forKey: Self.tokenKey)
+        UserDefaults.standard.removeObject(forKey: Self.tokenKey) // Ensure plaintext copy is purged
         UserDefaults.standard.set(resp.uid, forKey: Self.userUIDKey)
         UserDefaults.standard.set(resp.email, forKey: Self.userEmailKey)
     }
 
     private func clearSession() {
+        KeychainStore.delete(Self.tokenKey)
         UserDefaults.standard.removeObject(forKey: Self.tokenKey)
         UserDefaults.standard.removeObject(forKey: Self.userUIDKey)
         UserDefaults.standard.removeObject(forKey: Self.userEmailKey)

@@ -217,7 +217,6 @@
 			mainGroup = F7D6210D2EE1E52000C25560;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F73008512EE439BD00E56A23 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -603,14 +602,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		F73008512EE439BD00E56A23 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 12.6.0;
-			};
-		};
 		F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
