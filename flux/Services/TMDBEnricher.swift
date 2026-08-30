@@ -644,7 +644,7 @@ class TMDBEnricher {
             for ep in seasonZeroEpisodes {
                 let tmdbData = tmdbStills[ep.episodeNumber]
                 let epName = (!ep.name.isEmpty && ep.name != "Episode \(ep.episodeNumber)") ? ep.name : (tmdbData?.name ?? "Special \(ep.episodeNumber)")
-                let epStill = ep.stillURL ?? tmdbData?.stillURL ?? item.backdropURL ?? item.heroURL
+                let epStill = ep.stillURL ?? tmdbData?.stillURL
                 
                 let subtitle: String
                 if let runtime = ep.runtime {

@@ -389,6 +389,7 @@ struct DetailView: View {
                                 if item.category == "TV Show" {
                                     GhostRail(posterWidth: 380, ratio: 16/9)
                                 }
+                                GhostRail(posterWidth: 300, ratio: 16/9)
                                 GhostRail()
                                 GhostGrid()
                             }
@@ -477,7 +478,7 @@ struct DetailView: View {
                                     Button {
                                         playBonusContent(item)
                                     } label: {
-                                        BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
+                                        BonusContentCard(item: item)
                                     }
                                     .buttonStyle(.plain)
                                 }

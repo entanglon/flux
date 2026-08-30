@@ -1,18 +1,19 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — CURATED BONUS CONTENT RAIL (TMDB-ENRICHED SEASON 0 SPECIALS + STRICTLY OFFICIAL TRAILERS) + CLEAN SEASON DROPDOWN
+## LATEST: Aug 30, 2026 — BONUS CONTENT CARD POLISH (UNDIMMED VIBRANT ARTWORK, NO PLAY BUTTON, STABLE HOVER TYPOGRAPHY) + GHOST LOADING + CLEAN PLACEHOLDERS
 
-### Clean Season Dropdown (`DetailView.swift`)
-- **Filtered Specials Out of Dropdown:** Filtered out `seasonNumber == 0` (and any season named "Special") from `SeasonDropdownController.shared.seasons`.
-- **Streamlined Season Picker:** The season dropdown list now cleanly displays only actual numbered seasons (`Season 1`, `Season 2`, `Season 3`, etc.), eliminating the awkward "Special" entry.
-- **Default Selection:** TV series automatically initialize to the first regular season (`Season 1`).
+### Bonus Content Card Visual Refinements (`BonusContentCard.swift`)
+- **Removed Center Play Button:** Deleted the centered frosted play disc / circle button for a cleaner, modern editorial poster presentation.
+- **Zero Artificial Dimming:** Artwork is rendered 100% vibrant with full brightness across the top and center; only a subtle, soft gradient is placed strictly behind the text at the bottom.
+- **Eliminated Duplicate Thumbnail Flash:** Replaced the global backdrop fallback with a clean dark placeholder (`Rectangle().fill(Color(white: 0.12))`). Cards no longer flash the show's main hero backdrop before their individual stills finish loading.
+- **Removed "Play Special" Badge:** Dropped the cyan badge text for a clean, uniform metadata appearance.
+- **Stable Typography (Zero Hover Text Shift):** Fixed title font weight to constant `.semibold`, preventing any font reflow or text jitter when hovering.
+- **Hover Highlights (Zero Zoom):** Specular gradient border stroke and elevation shadow with strictly zero scale zoom.
 
-### Curated Bonus Content Rail (`TMDBEnricher.swift`, `BonusContentCard.swift`, `DetailView.swift`)
-- **Elevated Season 0 Specials:** All TV series specials (making-of documentaries, bonus featurettes, deleted scenes, shorts) from Cinemeta/Stremio are now elevated directly into the dedicated **Bonus Content** rail.
-- **TMDB Season 0 High-Res Enrichment:** Sub-enriches Season 0 episodes with TMDB's `/tv/{id}/season/0` metadata, fetching high-resolution 16:9 episode stills (`w780`), canonical titles, and full plot summaries.
-- **Native Player Streaming for Specials:** Clicking any Season 0 special immediately streams in **Flux's native MPV player (`openWindow(id: "player")`)** with native torrent streaming, hardware decoding, and subtitle/audio track switching.
-- **Strictly Official Trailers Only:** Completely eliminated third-party clips, random low-res featurettes, and YouTube noise. The rail now strictly includes **Official Trailers & Teasers** (`official == true` or named "Official Trailer").
-- **Browser Playback for Official Trailers:** Official trailers open in the user's default browser with clean 16:9 MaxRes thumbnails.
+### Bonus Content Ghost Loading & Visibility (`DetailView.swift`)
+- **Dedicated Ghost Rail:** Added a 16:9 widescreen `GhostRail(posterWidth: 300, ratio: 16/9)` during detail loading so bonus content cards load in seamlessly.
+- **Conditional Visibility:** If a title has no bonus content or specials, the Bonus Content section remains completely hidden.
+- **Clean Season Dropdown:** Filtered out Season 0 / Specials from the season dropdown, keeping only regular seasons (`Season 1`, `Season 2`, etc.).
 - **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** 25 / 25 unit tests passing (100% pass rate).
 
 ---

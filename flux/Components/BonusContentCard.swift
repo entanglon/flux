@@ -2,13 +2,12 @@ import SwiftUI
 
 struct BonusContentCard: View {
     let item: BonusContentItem
-    var fallbackBackdropURL: URL? = nil
     
     @State private var isHovered = false
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // 1. Full-Bleed 16:9 Artwork Thumbnail
+            // 1. Full-Bleed 16:9 Vibrant Artwork Thumbnail (Zero Artificial Dimming)
             Group {
                 if let url = item.thumbnailURL {
                     CachedImage(url: url, maxDimension: 600) { phase in
@@ -18,22 +17,21 @@ struct BonusContentCard: View {
                                 .resizable()
                                 .aspectRatio(16/9, contentMode: .fill)
                         default:
-                            fallbackView
+                            Rectangle().fill(Color(white: 0.12))
                         }
                     }
                 } else {
-                    fallbackView
+                    Rectangle().fill(Color(white: 0.12))
                 }
             }
             .frame(width: 300, height: 169)
             .clipped()
             
-            // 2. Cinematic Bottom-Up Shadow Gradient
+            // 2. Subtle Bottom Text Shadow Gradient (Rest of image is 100% undimmed)
             LinearGradient(
                 stops: [
-                    .init(color: .clear, location: 0.20),
-                    .init(color: .black.opacity(0.40), location: 0.55),
-                    .init(color: .black.opacity(0.92), location: 1.0)
+                    .init(color: .clear, location: 0.45),
+                    .init(color: .black.opacity(0.80), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -57,65 +55,23 @@ struct BonusContentCard: View {
                 Spacer()
             }
             
-            // 4. Centered Frosted Play Disc
-            HStack {
-                Spacer()
-                ZStack {
-                    Circle()
-                        .fill(Color.black.opacity(isHovered ? 0.55 : 0.40))
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                    
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: isHovered ? [.white.opacity(0.85), .white.opacity(0.3)] : [.white.opacity(0.4), .white.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: isHovered ? 1.5 : 1.0
-                        )
-                        .frame(width: 44, height: 44)
-                    
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Color.white)
-                        .offset(x: 1.5)
-                        .shadow(color: .white.opacity(isHovered ? 0.6 : 0.0), radius: 6)
-                }
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .allowsHitTesting(false)
-            
-            // 5. Hover Brightness Wash (Zero Zoom)
-            Color.white.opacity(isHovered ? 0.05 : 0.0)
-                .animation(.easeInOut(duration: 0.2), value: isHovered)
+            // 4. Hover Subtle Brightness Wash (Zero Zoom)
+            Color.white.opacity(isHovered ? 0.04 : 0.0)
                 .allowsHitTesting(false)
             
-            // 6. Title and Metadata on the Card (Bottom Part)
+            // 5. Title and Metadata on the Card (Bottom Part - Fixed typography, no hover shifts)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 14, weight: isHovered ? .bold : .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .shadow(color: .black.opacity(0.8), radius: 3, x: 0, y: 1)
+                    .shadow(color: .black.opacity(0.85), radius: 3, x: 0, y: 1)
                 
-                HStack(spacing: 6) {
-                    Text(item.subtitle ?? item.categoryType)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
-                    
-                    if item.isStreamableEpisode {
-                        Text("•")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.4))
-                        Text("Play Special")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.cyan)
-                    }
-                }
+                Text(item.subtitle ?? item.categoryType)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.85), radius: 2, x: 0, y: 1)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
@@ -141,23 +97,6 @@ struct BonusContentCard: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovered = hovering
-        }
-    }
-    
-    @ViewBuilder
-    private var fallbackView: some View {
-        if let fallback = fallbackBackdropURL {
-            CachedImage(url: fallback, maxDimension: 960) { phase in
-                if let image = phase.image {
-                    image
-                        .resizable()
-                        .aspectRatio(16/9, contentMode: .fill)
-                } else {
-                    Rectangle().fill(Color.white.opacity(0.08))
-                }
-            }
-        } else {
-            Rectangle().fill(Color.white.opacity(0.08))
         }
     }
 }
