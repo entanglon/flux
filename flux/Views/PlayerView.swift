@@ -161,6 +161,10 @@ struct PlayerView: View {
             }
             return .handled
         }
+        .onKeyPress(.space) {
+            mpv.togglePlayPause()
+            return .handled
+        }
         .onKeyPress(.leftArrow) {
             mpv.seek(relative: -10)
             return .handled
@@ -175,6 +179,14 @@ struct PlayerView: View {
         }
         .onKeyPress(.downArrow) {
             mpv.setVolume(max(mpv.volume - 0.1, 0.0))
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("m")) {
+            mpv.toggleMute()
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("c")) {
+            isControlsVisible = true
             return .handled
         }
         .onAppear {

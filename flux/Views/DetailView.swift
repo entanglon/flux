@@ -200,6 +200,26 @@ struct DetailView: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .help(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
+                                .accessibilityLabel(userData.isInWatchlist(displayItem) ? "Remove from Watchlist" : "Add to Watchlist")
+
+                                // Mark as Watched / Unwatched toggle
+                                Button(action: {
+                                    withAnimation(.spring(duration: 0.25)) {
+                                        userData.toggleWatched(displayItem)
+                                    }
+                                }) {
+                                    Image(systemName: userData.isInHistory(displayItem) ? "eye.fill" : "eye")
+                                        .font(.title3)
+                                        .foregroundStyle(userData.isInHistory(displayItem) ? Color.cyan : .white)
+                                        .padding(14)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                        .symbolEffect(.bounce, value: userData.isInHistory(displayItem))
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(userData.isInHistory(displayItem) ? "Mark as unwatched" : "Mark as watched")
+                                .accessibilityLabel(userData.isInHistory(displayItem) ? "Mark as unwatched" : "Mark as watched")
 
                                 // Love — strongest taste signal for the For You rail
                                 Button(action: {
@@ -352,7 +372,7 @@ struct DetailView: View {
                                         PlayerManager.shared.play(displayItem, season: selectedSeason?.seasonNumber, episode: episode.episodeNumber, episodeImage: episode.stillURL)
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
-                                        LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode))
+                                        LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode), item: displayItem)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -751,7 +771,9 @@ struct InfoDetailBlock: View {
 struct LiquidEpisodeCard: View {
     let episode: Episode
     let progress: Double // 0.0 to 1.0
+    var item: MediaItem? = nil
     @State private var isHovering = false
+    @ObservedObject private var userData = UserDataService.shared
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -820,8 +842,12 @@ struct LiquidEpisodeCard: View {
                         Button {} label: { Label("Share Episode", systemImage: "square.and.arrow.up") }
                         Button {} label: { Label("Share Show", systemImage: "square.and.arrow.up.on.square") }
                         Button {
-                            // TODO: Implement Mark Watched
-                        } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
+                            if let item = item {
+                                userData.toggleWatched(item, season: episode.seasonNumber, episode: episode.episodeNumber, episodeTitle: episode.name, episodeImage: episode.stillURL)
+                            }
+                        } label: {
+                            Label("Mark as Watched", systemImage: "checkmark.circle")
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 20)) // Slightly larger touch target

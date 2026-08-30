@@ -221,6 +221,18 @@ class UserDataService: ObservableObject {
         AuthManager.shared.scheduleAutoSync()
     }
     
+    func isInHistory(_ item: MediaItem) -> Bool {
+        return history.contains { $0.id == item.id }
+    }
+
+    func toggleWatched(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
+        if isInHistory(item) {
+            removeFromHistory(item)
+        } else {
+            addToHistory(item, progress: 1.0, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage)
+        }
+    }
+
     func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
         addToList(key: historyKey, item: item, progress: progress, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage, target: \.history)
     }

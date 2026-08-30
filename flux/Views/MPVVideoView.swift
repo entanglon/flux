@@ -192,9 +192,23 @@ class MPVController: ObservableObject {
         playerView?.seek(relative: seconds)
     }
     
+    private var savedVolume: Double = 1.0
+
     func setVolume(_ value: Double) {
         playerView?.setVolume(value)
         volume = value
+        if value > 0 {
+            savedVolume = value
+        }
+    }
+
+    func toggleMute() {
+        if volume > 0 {
+            savedVolume = volume
+            setVolume(0)
+        } else {
+            setVolume(savedVolume > 0 ? savedVolume : 1.0)
+        }
     }
     
     func handlePropertyChange(name: String, value: Any) {

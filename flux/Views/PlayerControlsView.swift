@@ -65,6 +65,7 @@ struct PlayerControlsView: View {
                             }
                             .buttonStyle(.plain)
                             .help("Picture in Picture")
+                            .accessibilityLabel("Picture in Picture")
                             
                             Divider()
                                 .frame(height: 16)
@@ -78,6 +79,7 @@ struct PlayerControlsView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Share")
                         }
                         .glassEffect(.regular.interactive(), in: .capsule)
                         
@@ -92,6 +94,8 @@ struct PlayerControlsView: View {
                             Slider(value: $volume, in: 0...1)
                                 .frame(width: 80)
                                 .tint(.white)
+                                .accessibilityLabel("Volume slider")
+                                .accessibilityValue("\(Int(volume * 100)) percent")
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -113,6 +117,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Skip backward 10 seconds")
                         
                         Button(action: onPlayPause) {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -123,6 +128,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(isPlaying ? "Pause" : "Play")
                         
                         Button(action: onSkipForward) {
                             Image(systemName: "goforward.10")
@@ -133,6 +139,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Skip forward 10 seconds")
                     }
                     
                     Spacer()
@@ -170,6 +177,7 @@ struct PlayerControlsView: View {
                                 .frame(width: 44, height: 36)
                                 .contentShape(Rectangle())
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Subtitles menu")
                                 .popover(isPresented: $showSubtitlePopover, arrowEdge: .bottom) {
                                     VStack(alignment: .leading, spacing: 0) {
                                         // Online subtitle search (OpenSubtitles addon etc.)
@@ -276,6 +284,7 @@ struct PlayerControlsView: View {
                                 .frame(width: 44, height: 36)
                                 .contentShape(Rectangle())
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Audio tracks menu")
                                 .popover(isPresented: $showAudioPopover, arrowEdge: .bottom) {
                                     TrackSelectionList(
                                         title: "Audio", 
@@ -322,6 +331,9 @@ struct PlayerControlsView: View {
                                         .shadow(radius: 4)
                                 }
                                 .contentShape(Rectangle())
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Playback progress")
+                                .accessibilityValue("\(Int(progress * 100)) percent, \(formatTime(currentTime)) of \(formatTime(duration))")
                                 .onHover { hovering in
                                     if hovering {
                                         NSCursor.pointingHand.push()
