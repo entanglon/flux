@@ -112,4 +112,78 @@ struct UserDataServiceTests {
         #expect(map["tt1001"]?["progress"] as? Double == 0.45)
         #expect(map["tt1002"]?["progress"] as? Double == 1.0)
     }
+
+    @Test func collectionMergePreservesLocalAndRemoteItems() {
+        let movie1 = MediaItem(id: "tt001", title: "SciFi A", description: "", streamURL: nil, category: "Movie")
+        let movie2 = MediaItem(id: "tt002", title: "SciFi B", description: "", streamURL: nil, category: "Movie")
+        let movie3 = MediaItem(id: "tt003", title: "SciFi C", description: "", streamURL: nil, category: "Movie")
+
+        let localCollection = UserCollection(
+            id: "col-1",
+            name: "Sci-Fi Favorites",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            items: [movie1, movie2]
+        )
+        let remoteCollection = UserCollection(
+            id: "col-1",
+            name: "Sci-Fi Favorites",
+            createdAt: Date(timeIntervalSince1970: 1000),
+            items: [movie2, movie3]
+        )
+        let remoteExclusiveCollection = UserCollection(
+            id: "col-2",
+            name: "Anime",
+            createdAt: Date(timeIntervalSince1970: 2000),
+            items: [movie1]
+        )
+
+        let local = [localCollection]
+        let remote = [remoteCollection, remoteExclusiveCollection]
+
+        var map: [String: UserCollection] = [:]
+        var order: [String] = []
+
+        for col in local {
+            map[col.id] = col
+            order.append(col.id)
+        }
+
+        for rCol in remote {
+            if let lCol = map[rCol.id] {
+                var itemMap: [String: MediaItem] = [:]
+                var itemOrder: [String] = []
+                for item in lCol.items {
+                    itemMap[item.id] = item
+                    itemOrder.append(item.id)
+                }
+                for item in rCol.items {
+                    if itemMap[item.id] == nil {
+                        itemMap[item.id] = item
+                        itemOrder.append(item.id)
+                    }
+                }
+                let mergedItems = itemOrder.compactMap { itemMap[$0] }
+                map[rCol.id] = UserCollection(id: rCol.id, name: lCol.name, createdAt: lCol.createdAt, items: mergedItems)
+            } else {
+                map[rCol.id] = rCol
+                order.append(rCol.id)
+            }
+        }
+
+        let merged = order.compactMap { map[$0] }
+        #expect(merged.count == 2)
+        #expect(merged.first(where: { $0.id == "col-1" })?.items.count == 3)
+        #expect(merged.first(where: { $0.id == "col-2" })?.items.count == 1)
+    }
+
+    @Test func cloudPayloadExportContainsEssentialSubsystems() {
+        let payload = UserDataService.shared.exportCloudPayload()
+        #expect(payload["version"] as? Int == 2)
+        #expect(payload["watchlist"] != nil)
+        #expect(payload["history"] != nil)
+        #expect(payload["collections"] != nil)
+        #expect(payload["tasteLoved"] != nil)
+        #expect(payload["tasteSnapshots"] != nil)
+        #expect(payload["profiles"] != nil)
+    }
 }

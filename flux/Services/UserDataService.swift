@@ -497,6 +497,43 @@ class UserDataService: ObservableObject {
         return order.compactMap { map[$0] }
     }
 
+    private func mergeCollections(local: [UserCollection], remote: [UserCollection]) -> [UserCollection] {
+        var map: [String: UserCollection] = [:]
+        var order: [String] = []
+        
+        for col in local {
+            map[col.id] = col
+            order.append(col.id)
+        }
+        
+        for rCol in remote {
+            if let lCol = map[rCol.id] {
+                // Merge items between local and remote versions of this collection
+                var itemMap: [String: MediaItem] = [:]
+                var itemOrder: [String] = []
+                for item in lCol.items {
+                    itemMap[item.id] = item
+                    itemOrder.append(item.id)
+                }
+                for item in rCol.items {
+                    if itemMap[item.id] == nil {
+                        itemMap[item.id] = item
+                        itemOrder.append(item.id)
+                    }
+                }
+                let mergedItems = itemOrder.compactMap { itemMap[$0] }
+                let name = lCol.name.isEmpty ? rCol.name : lCol.name
+                let created = min(lCol.createdAt, rCol.createdAt)
+                map[rCol.id] = UserCollection(id: rCol.id, name: name, createdAt: created, items: mergedItems)
+            } else {
+                map[rCol.id] = rCol
+                order.append(rCol.id)
+            }
+        }
+        
+        return order.compactMap { map[$0] }
+    }
+
     /// Applies a cloud payload to the CURRENT profile with two-way smart merging
     /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
     func applyCloudPayload(_ payload: [String: Any]) {
@@ -525,13 +562,15 @@ class UserDataService: ObservableObject {
             }
         }
 
+        let mergedCollections = mergeCollections(local: self.collections, remote: imported)
+
         let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
         let profilesData = payload["profiles"] as? [[String: Any]]
 
         DispatchQueue.main.async {
             // Persist first so disk matches memory.
-            self.collections = imported.sorted { $0.createdAt < $1.createdAt }
+            self.collections = mergedCollections.sorted { $0.createdAt < $1.createdAt }
             self.saveCollections()
             
             UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
