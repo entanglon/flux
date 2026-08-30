@@ -580,25 +580,45 @@ class TMDBEnricher {
         return []
     }
 
-    /// Returns the best YouTube trailer URL for a title, or nil if none.
-    func fetchTrailerURL(item: MediaItem) async -> URL? {
-        guard hasKey else { return nil }
+    /// Returns all valid YouTube trailers, teasers, and clips for a title, prioritized by relevance.
+    func fetchTrailers(item: MediaItem) async -> [TMDBVideo] {
+        guard hasKey else { return [] }
         let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
         let tmdbID = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
-        guard let id = tmdbID else { return nil }
+        guard let id = tmdbID else { return [] }
 
         let videosURL = "\(baseURL)/\(type)/\(id)/videos?api_key=\(apiKey)"
         guard let url = URL(string: videosURL),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(TMDBVideoResponse.self, from: data) else {
-            return nil
+            return []
         }
 
         let youtube = response.results.filter { $0.site == "YouTube" }
-        let best = youtube.first { $0.type == "Trailer" }
-            ?? youtube.first { $0.type == "Teaser" }
-            ?? youtube.first
-        return best?.youtubeURL
+        return youtube.sorted { v1, v2 in
+            let rank1 = trailerRank(for: v1)
+            let rank2 = trailerRank(for: v2)
+            if rank1 != rank2 { return rank1 < rank2 }
+            return (v1.publishedAt ?? "") > (v2.publishedAt ?? "")
+        }
+    }
+
+    private func trailerRank(for video: TMDBVideo) -> Int {
+        let name = video.name.lowercased()
+        let isOfficial = video.official == true
+        if video.type == "Trailer" && (name.contains("official") || isOfficial) { return 0 }
+        if video.type == "Trailer" { return 1 }
+        if video.type == "Teaser" && (name.contains("official") || isOfficial) { return 2 }
+        if video.type == "Teaser" { return 3 }
+        if video.type == "Clip" { return 4 }
+        if video.type == "Featurette" || video.type == "Behind the Scenes" { return 5 }
+        return 6
+    }
+
+    /// Returns the best YouTube trailer URL for a title, or nil if none.
+    func fetchTrailerURL(item: MediaItem) async -> URL? {
+        let trailers = await fetchTrailers(item: item)
+        return trailers.first?.youtubeURL
     }
     
     // MARK: - Helper API Calls

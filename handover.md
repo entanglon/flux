@@ -1,6 +1,30 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — HOMEVIEW TOP GAP REMOVAL + DETAILVIEW DESCRIPTION LOCK & HERO STABILIZATION
+## LATEST: Aug 30, 2026 — IN-APP MULTI-TRAILER CINEMA THEATER + REDESIGNED TRAILER CARDS + SPECULAR HOVER HIGHLIGHT
+
+### Multi-Trailer Ingestion & Ranking (`TMDBModels.swift`, `TMDBEnricher.swift`)
+- **Comprehensive Video Ingestion:** Updated `TMDBEnricher` to fetch all available YouTube videos (`Trailer`, `Teaser`, `Clip`, `Featurette`, `Behind the Scenes`) via `GET /{type}/{id}/videos`.
+- **Relevance Prioritization:** Implemented `trailerRank` prioritizing Official Main Trailers > Trailers > Teasers > Featurettes, with newer releases prioritized.
+- **Rich Model Fields:** Enhanced `TMDBVideo` with `official: Bool?`, `publishedAt: String?`, `thumbnailURL` (HQ), `maxResThumbnailURL`, and `embedURL`.
+
+### Redesigned 16:9 Trailer Cards (`TrailerCard.swift`)
+- **16:9 Widescreen Framing:** Sized at `300pt × 169pt` using YouTube MaxRes thumbnails with backdrop fallback.
+- **Frosted Liquid Glass Play Disc:** Replaced bulky center play button with a refined, centered frosted Liquid Glass play disc with specular ring border that glints on hover.
+- **Specular Hover Highlight (Zero Zoom):**
+  - Interactive gradient rim stroke (`isHovered ? 1.5pt : 0.5pt`).
+  - Ambient elevation shadow and subtle brightness wash.
+  - **Strictly zero scale/zoom** matching Apple TV design guidelines.
+- **Metadata Display:** Shows the exact trailer name (`video.name`), type pill badge (`TRAILER`, `TEASER`, `FEATURETTE`), and "Watch in Flux" indicator.
+
+### Native In-App Trailer Player Modal (`YouTubeTrailerPlayer.swift`, `DetailView.swift`)
+- **In-App Cinema Theater:** Built a native `WKWebView` embed inside SwiftUI that plays full HD YouTube trailers directly inside Flux without launching an external browser.
+- **Controls & Gestures:** Includes a dimmed cinema backdrop (`Color.black.opacity(0.85)`), title header with video type badge, frosted Liquid Glass close button (`xmark`), and keyboard shortcut support (`Esc` key to close).
+- **Multi-Trailer Rail:** DetailView now renders all fetched trailers in a horizontal `DetailRail` under "Trailers & Extras", allowing users to browse and watch all teasers and official trailers for the title.
+- **Unit Tests:** Added unit tests in `fluxTests/TMDBEnricherTests.swift` covering `TMDBVideo` properties and embed URLs (**24/24 tests passing**).
+
+---
+
+## Aug 30, 2026 — HOMEVIEW TOP GAP REMOVAL + DETAILVIEW DESCRIPTION LOCK & HERO STABILIZATION
 
 ### HomeView Top Gap & Layout Shift Fix (`HomeView.swift`)
 - **Root Cause:** `HomeView` used `LazyVStack(alignment: .leading, spacing: 32)` with an unused `GeometryReader` preference observer at index 0. This forced a 32pt blank spacing gap between the top boundary and `FeaturedCarousel`, exposing the black window background above the hero banner.

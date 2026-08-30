@@ -337,15 +337,24 @@ struct TMDBVideoResponse: Codable {
     let results: [TMDBVideo]
 }
 
-struct TMDBVideo: Codable, Identifiable {
+struct TMDBVideo: Codable, Identifiable, Hashable {
     let id: String
     let key: String
     let name: String
     let site: String
     let type: String
+    let official: Bool?
+    let publishedAt: String?
     
-    var thumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/maxresdefault.jpg") }
+    enum CodingKeys: String, CodingKey {
+        case id, key, name, site, type, official
+        case publishedAt = "published_at"
+    }
+    
+    var thumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/hqdefault.jpg") }
+    var maxResThumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/maxresdefault.jpg") }
     var youtubeURL: URL? { URL(string: "https://www.youtube.com/watch?v=\(key)") }
+    var embedURL: URL? { URL(string: "https://www.youtube-nocookie.com/embed/\(key)?autoplay=1&rel=0&modestbranding=1&playsinline=1") }
 }
 
 // MARK: - Watch Providers

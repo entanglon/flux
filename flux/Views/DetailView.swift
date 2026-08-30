@@ -19,6 +19,8 @@ struct DetailView: View {
     @State private var isDownloading = false
     @State private var showCollectionsPopover = false
     @State private var trailerURL: URL? = nil
+    @State private var trailers: [TMDBVideo] = []
+    @State private var activeTrailer: TMDBVideo? = nil
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -280,10 +282,16 @@ struct DetailView: View {
                                     .disabled(isDownloading)
                                     .help("Download best stream for offline")
 
-                                    // Play Trailer (opens YouTube in browser)
-                                    if let trailer = trailerURL {
+                                    // Play Trailer in Flux
+                                    if !trailers.isEmpty || trailerURL != nil {
                                         Button {
-                                            NSWorkspace.shared.open(trailer)
+                                            if let video = trailers.first {
+                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                    activeTrailer = video
+                                                }
+                                            } else if let trailer = trailerURL {
+                                                NSWorkspace.shared.open(trailer)
+                                            }
                                         } label: {
                                             Image(systemName: "play.rectangle.fill")
                                                 .font(.title3)
@@ -293,7 +301,7 @@ struct DetailView: View {
                                                 .contentShape(Rectangle())
                                         }
                                         .buttonStyle(.plain)
-                                        .help("Play trailer")
+                                        .help("Play trailer in Flux")
                                     }
                                 } else {
                                     // UPCOMING CONTENT MASTER LAYOUT (Apple TV style)
@@ -346,9 +354,15 @@ struct DetailView: View {
                                     .help("Add to list")
 
                                     // Play Trailer Button
-                                    if let trailer = trailerURL {
+                                    if !trailers.isEmpty || trailerURL != nil {
                                         Button {
-                                            NSWorkspace.shared.open(trailer)
+                                            if let video = trailers.first {
+                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                    activeTrailer = video
+                                                }
+                                            } else if let trailer = trailerURL {
+                                                NSWorkspace.shared.open(trailer)
+                                            }
                                         } label: {
                                             HStack(spacing: 8) {
                                                 Image(systemName: "play.rectangle.fill")
@@ -362,7 +376,7 @@ struct DetailView: View {
                                             .glassEffect(.regular.interactive(), in: .capsule)
                                         }
                                         .buttonStyle(.plain)
-                                        .help("Play trailer")
+                                        .help("Play trailer in Flux")
                                     }
                                 }
                             }
@@ -452,57 +466,25 @@ struct DetailView: View {
                             }
                         }
                         
-                        if let trailer = trailerURL {
+                        if !trailers.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Trailers")
+                                Text("Trailers & Extras")
                                     .font(.title2)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.white)
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
 
-                                Button {
-                                    NSWorkspace.shared.open(trailer)
-                                } label: {
-                                    ZStack(alignment: .bottomLeading) {
-                                        CachedImage(url: displayItem.backdropURL ?? displayItem.heroURL ?? displayItem.posterURL, maxDimension: 720) { phase in
-                                            if let image = phase.image {
-                                                image
-                                                    .resizable()
-                                                    .aspectRatio(16/9, contentMode: .fill)
-                                            } else {
-                                                Rectangle().fill(Color.white.opacity(0.08))
-                                            }
+                                DetailRail(items: trailers, idPath: \.id, itemWidth: 300, itemHeight: 220) { video in
+                                    Button {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            activeTrailer = video
                                         }
-                                        .frame(width: 320, height: 180)
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                                        LinearGradient(colors: [.black.opacity(0.85), .black.opacity(0.2), .clear], startPoint: .bottom, endPoint: .center)
-                                            .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                                        // Center play button
-                                        Circle()
-                                            .fill(Color.black.opacity(0.5))
-                                            .frame(width: 48, height: 48)
-                                            .overlay(Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white).offset(x: 2))
-                                            .glassEffect(.regular.interactive(), in: .circle)
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("\(displayItem.title) Official Trailer")
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundStyle(.white)
-                                                .lineLimit(1)
-                                            Text("Watch on YouTube")
-                                                .font(.system(size: 11, weight: .medium))
-                                                .foregroundStyle(.white.opacity(0.6))
-                                        }
-                                        .padding(14)
+                                    } label: {
+                                        TrailerCard(video: video, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
                                     }
-                                    .frame(width: 320, height: 180)
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
-                                .padding(.leading, 268)
                             }
                         }
                         
@@ -736,6 +718,17 @@ struct DetailView: View {
             .padding(.leading, 268)
             .padding(.top, 14)
         }
+        .overlay {
+            if let video = activeTrailer {
+                TrailerPlayerModal(video: video, title: displayItem.title) {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        activeTrailer = nil
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(100)
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
@@ -827,12 +820,14 @@ struct DetailView: View {
                 relatedItems = Array(related?.filter { $0.id != merged.id }.shuffled().prefix(10) ?? [])
             }
 
-            // Fetch trailer in the background (non-blocking)
+            // Fetch trailers in the background (non-blocking)
             Task {
-                if let url = await TMDBEnricher.shared.fetchTrailerURL(item: merged) {
-                    await MainActor.run {
-                        withAnimation(.spring(duration: 0.3)) {
-                            self.trailerURL = url
+                let fetchedTrailers = await TMDBEnricher.shared.fetchTrailers(item: merged)
+                await MainActor.run {
+                    withAnimation(.spring(duration: 0.3)) {
+                        self.trailers = fetchedTrailers
+                        if let best = fetchedTrailers.first {
+                            self.trailerURL = best.youtubeURL
                         }
                     }
                 }

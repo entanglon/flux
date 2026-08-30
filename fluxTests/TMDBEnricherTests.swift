@@ -92,5 +92,22 @@ struct TMDBEnricherTests {
         #expect(MediaListView.ListType.airingTodayTV.title == "Airing Today on TV")
         #expect(MediaListView.ListType.topRatedTV.title == "Top Rated TV Shows")
     }
+
+    @Test func tmdbVideoModelPropertiesAndEmbed() {
+        let video = TMDBVideo(
+            id: "vid-1",
+            key: "dQw4w9WgXcQ",
+            name: "Official Trailer",
+            site: "YouTube",
+            type: "Trailer",
+            official: true,
+            publishedAt: "2026-01-01T12:00:00.000Z"
+        )
+        
+        #expect(video.youtubeURL?.absoluteString == "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        #expect(video.embedURL?.absoluteString.contains("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ") == true)
+        #expect(video.thumbnailURL?.absoluteString.contains("hqdefault.jpg") == true)
+        #expect(video.maxResThumbnailURL?.absoluteString.contains("maxresdefault.jpg") == true)
+    }
 }
 
