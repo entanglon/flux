@@ -11,24 +11,12 @@ struct CollectionsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text("Collections")
-                        .font(.system(size: 44, weight: .heavy))
-                        .foregroundStyle(.white)
-
-                    if !userData.collections.isEmpty {
-                        Text("\(userData.collections.count) LISTS")
-                            .font(.system(size: 11, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .glassEffect(.clear, in: .capsule)
-                    }
-
-                    Spacer()
-
+            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                LibraryPageHeader(
+                    title: "Collections",
+                    itemCount: userData.collections.isEmpty ? nil : userData.collections.count,
+                    itemLabel: "LISTS"
+                ) {
                     Button(action: { showCreateAlert = true }) {
                         HStack(spacing: 8) {
                             Image(systemName: "plus")
@@ -43,7 +31,6 @@ struct CollectionsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.top, 48)
 
                 if userData.collections.isEmpty {
                     emptyState
@@ -69,10 +56,10 @@ struct CollectionsView: View {
                     }
                 }
             }
-            .padding(.leading, 268)
-            .padding(.trailing, 40)
-            .padding(.top, 40)
-            .padding(.bottom, 60)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
@@ -286,49 +273,38 @@ struct CollectionDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
                 if let collection {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        Text(collection.name)
-                            .font(.system(size: 44, weight: .heavy))
-                            .foregroundStyle(.white)
+                    LibraryPageHeader(
+                        title: collection.name,
+                        itemCount: collection.items.isEmpty ? nil : collection.items.count,
+                        itemLabel: "TITLES"
+                    ) {
+                        HStack(spacing: 10) {
+                            Button(action: {
+                                renameText = collection.name
+                                showRenameAlert = true
+                            }) {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 34, height: 34)
+                                    .glassEffect(.regular.interactive(), in: .circle)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Rename")
 
-                        if !collection.items.isEmpty {
-                            Text("\(collection.items.count) TITLES")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundStyle(.white.opacity(0.8))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .glassEffect(.clear, in: .capsule)
+                            Button(action: { showDeleteConfirm = true }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.red.opacity(0.9))
+                                    .frame(width: 34, height: 34)
+                                    .glassEffect(.regular.interactive(), in: .circle)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Delete list")
                         }
-
-                        Spacer()
-
-                        Button(action: {
-                            renameText = collection.name
-                            showRenameAlert = true
-                        }) {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .glassEffect(.regular.interactive(), in: .circle)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Rename")
-
-                        Button(action: { showDeleteConfirm = true }) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.red.opacity(0.9))
-                                .frame(width: 34, height: 34)
-                                .glassEffect(.regular.interactive(), in: .circle)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Delete list")
                     }
-                    .padding(.top, 48)
 
                     if collection.items.isEmpty {
                         memberEmptyState(name: collection.name)
@@ -356,10 +332,10 @@ struct CollectionDetailView: View {
                     }
                 }
             }
-            .padding(.leading, 268)
-            .padding(.trailing, 40)
-            .padding(.top, 40)
-            .padding(.bottom, 60)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .overlay(alignment: .topLeading) {
             Button(action: { dismiss() }) {

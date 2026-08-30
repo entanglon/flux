@@ -25,27 +25,14 @@ struct WatchlistView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                // Header with Badge & Filters
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        Text("Watchlist")
-                            .font(.system(size: 44, weight: .heavy))
-                            .foregroundStyle(.white)
-                        
-                        if !userData.watchlist.isEmpty {
-                            Text("\(userData.watchlist.count) ITEMS")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundStyle(.white.opacity(0.8))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .glassEffect(.clear, in: .capsule)
-                        }
-                        
-                        Spacer()
-                    }
-                    
+            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                LibraryPageHeader(
+                    title: "Watchlist",
+                    itemCount: userData.watchlist.isEmpty ? nil : userData.watchlist.count,
+                    itemLabel: "ITEMS"
+                ) {
+                    EmptyView()
+                } filterChips: {
                     if !userData.watchlist.isEmpty {
                         HStack(spacing: 8) {
                             ForEach(Filter.allCases, id: \.self) { filter in
@@ -88,7 +75,6 @@ struct WatchlistView: View {
                         }
                     }
                 }
-                .padding(.top, 48)
                 
                 if userData.watchlist.isEmpty {
                     LibraryEmptyState(
@@ -128,10 +114,10 @@ struct WatchlistView: View {
                     }
                 }
             }
-            .padding(.leading, 268)
-            .padding(.trailing, 40)
-            .padding(.top, 40)
-            .padding(.bottom, 60)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)

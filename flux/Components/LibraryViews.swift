@@ -1,19 +1,74 @@
 import SwiftUI
 
-/// Shared building blocks for the four Library pages (Watchlist, Collections,
-/// Recently Added, Downloads) so they stay visually identical: same header
-/// treatment, paddings and a single monochrome empty-state design.
+/// Shared geometry, typography, and building blocks for all Library pages
+/// (Watchlist, Collections, Recently Watched / History, Downloads).
+/// Guarantees pixel-identical header alignment, empty-state icon placement,
+/// and responsive typography across sidebar navigation.
 enum LibraryScheme {
-    /// Page scaffold — every library page wraps content in these.
-    static let headerTopPadding: CGFloat = 48
-    static let topPadding: CGFloat = 40
     static let leadingPadding: CGFloat = 268
     static let trailingPadding: CGFloat = 40
+    static let topPadding: CGFloat = 40
+    static let headerTopPadding: CGFloat = 48
+    static let headerBottomSpacing: CGFloat = 32
     static let bottomPadding: CGFloat = 60
+    static let emptyStateTopPadding: CGFloat = 60
+}
+
+/// Unified Header component for all Library pages.
+/// Ensures title baseline, badge pill, action buttons, and filter chips
+/// sit at the exact same screen coordinates across all tabs.
+struct LibraryPageHeader<RightContent: View, BottomContent: View>: View {
+    let title: String
+    var itemCount: Int? = nil
+    var itemLabel: String = "ITEMS"
+    @ViewBuilder var rightAction: () -> RightContent
+    @ViewBuilder var filterChips: () -> BottomContent
+
+    init(
+        title: String,
+        itemCount: Int? = nil,
+        itemLabel: String = "ITEMS",
+        @ViewBuilder rightAction: @escaping () -> RightContent = { EmptyView() },
+        @ViewBuilder filterChips: @escaping () -> BottomContent = { EmptyView() }
+    ) {
+        self.title = title
+        self.itemCount = itemCount
+        self.itemLabel = itemLabel
+        self.rightAction = rightAction
+        self.filterChips = filterChips
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(title)
+                    .font(.system(size: 44, weight: .heavy))
+                    .foregroundStyle(.white)
+                
+                if let count = itemCount, count > 0 {
+                    Text("\(count) \(itemLabel)")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.5)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .glassEffect(.clear, in: .capsule)
+                }
+                
+                Spacer()
+                
+                rightAction()
+            }
+            .padding(.top, LibraryScheme.headerTopPadding)
+
+            filterChips()
+        }
+    }
 }
 
 /// The empty-state used across all library pages.
 /// Clean, frameless layout floating naturally on the dark background.
+/// Sits at the exact same vertical offset across all tabs.
 struct LibraryEmptyState: View {
     let icon: String
     let title: String
@@ -84,7 +139,8 @@ struct LibraryEmptyState: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 80)
+        .padding(.top, LibraryScheme.emptyStateTopPadding)
+        .padding(.bottom, 80)
         .padding(.horizontal, 40)
     }
 }

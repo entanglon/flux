@@ -5,27 +5,15 @@ struct DownloadsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                // Header
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text("Downloads")
-                        .font(.system(size: 44, weight: .heavy))
-                        .foregroundStyle(.white)
+        let total = downloadManager.activeDownloads.count + downloadManager.completedDownloads.count
 
-                    let total = downloadManager.activeDownloads.count + downloadManager.completedDownloads.count
-                    if total > 0 {
-                        Text("\(total) ITEMS")
-                            .font(.system(size: 11, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .glassEffect(.clear, in: .capsule)
-                    }
-                    Spacer()
-                }
-                .padding(.top, LibraryScheme.headerTopPadding)
+        ScrollView {
+            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                LibraryPageHeader(
+                    title: "Downloads",
+                    itemCount: total > 0 ? total : nil,
+                    itemLabel: "ITEMS"
+                )
 
                 if downloadManager.activeDownloads.isEmpty && downloadManager.completedDownloads.isEmpty {
                     emptyState

@@ -32,46 +32,31 @@ struct HistoryView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                // Header with Badge, Filters & Clear Action
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        Text(showAsContinueWatching ? "Continue Watching" : "Recently Watched")
-                            .font(.system(size: 44, weight: .heavy))
-                            .foregroundStyle(.white)
-                        
-                        if !userData.history.isEmpty {
-                            Text("\(userData.history.count) ITEMS")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundStyle(.white.opacity(0.8))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .glassEffect(.clear, in: .capsule)
-                        }
-                        
-                        Spacer()
-                        
-                        if !userData.history.isEmpty {
-                            Button(role: .destructive) {
-                                showClearConfirm = true
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 12, weight: .bold))
-                                    Text("Clear")
-                                        .font(.system(size: 13, weight: .bold))
-                                }
-                                .foregroundStyle(.white.opacity(0.75))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(Color.white.opacity(0.06)))
-                                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                LibraryPageHeader(
+                    title: showAsContinueWatching ? "Continue Watching" : "Recently Watched",
+                    itemCount: userData.history.isEmpty ? nil : userData.history.count,
+                    itemLabel: "ITEMS"
+                ) {
+                    if !userData.history.isEmpty {
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text("Clear")
+                                    .font(.system(size: 13, weight: .bold))
                             }
-                            .buttonStyle(.plain)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
                         }
+                        .buttonStyle(.plain)
                     }
-                    
+                } filterChips: {
                     if !userData.history.isEmpty {
                         HStack(spacing: 8) {
                             ForEach(Filter.allCases, id: \.self) { filter in
@@ -112,7 +97,6 @@ struct HistoryView: View {
                         }
                     }
                 }
-                .padding(.top, 48)
                 
                 if userData.history.isEmpty {
                     LibraryEmptyState(
@@ -149,10 +133,10 @@ struct HistoryView: View {
                     }
                 }
             }
-            .padding(.leading, 268)
-            .padding(.trailing, 40)
-            .padding(.top, 40)
-            .padding(.bottom, 60)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
