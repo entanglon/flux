@@ -71,14 +71,24 @@
 - [x] **Accessibility (VoiceOver):** Added `.accessibilityElement`, `.accessibilityLabel`, and `.accessibilityHint` annotations to `GlassCard`, `ContinueWatchingCard`, and `GenreCard`.
 - [x] **Search Card Art & Fallback Polish:** Added dynamic glassmorphic fallback placeholder with category icon and title preview in `GlassCard` when external poster art is missing.
 
-### 🌟 Phase 4: Advanced Polish & Architecture (Active)
+### 🌟 Phase 4: Advanced Polish & Architecture (Completed)
 - [x] **"Mark as Watched" Toggle on Detail Pages:** Added "Mark as Watched" / "Mark as Unwatched" button on `DetailView.swift` and `LiquidEpisodeCard` to easily manage history without playing.
 - [x] **Player Controls Keyboard Navigation & a11y:** Added keyboard shortcuts (`Space` = Play/Pause, `←/→` = 10s Seek, `M` = Mute, `C` = Show Controls) and VoiceOver labels on `PlayerControlsView.swift`.
 - [x] **Service Protocol Abstractions:** Defined core protocol contracts (`TMDBServiceProtocol`, `StreamServiceProtocol`, `UserDataProtocol`, `AuthServiceProtocol`) in `Protocols.swift` for clean architecture and testing doubles.
+- [x] **Smart Two-Way Cloud Merge:** Fixed watch history persistence across restarts by implementing intelligent two-way cloud merging instead of destructive overwrite.
+
+### 🏗️ Phase 5: Evaluation Completion & Modernization (Active)
+- [ ] **Task 1: Production Guard on ImageDebugLog** (`#if DEBUG`)
+- [ ] **Task 2: Domain-Specific Error Types** (`FluxError.swift` with `StreamingError`, `TMDBError`, `PlaybackError`, `AuthError`)
+- [ ] **Task 3: Concurrency Modernization** (Migrate `NSLock` caches to Swift `actor`s)
+- [ ] **Task 4: Decompose `PlayerManager.swift`** (Extract `WarmCoreController.swift` and `StreamRacingController.swift`)
+- [ ] **Task 5: Localization Readiness** (Adopt `String(localized:)` for user-facing UI labels)
+- [ ] **Task 6: Unit Test Suite Expansion** (Unit tests for error types, cache actors, and controllers)
 
 ---
 
 ## Done (cumulative)
+- ✅ Smart two-way cloud merge preventing history loss on app restart
 - ✅ "Mark as Watched" toggle on Detail pages & episode cards
 - ✅ Player keyboard navigation (`Space`, `M`, `C`, arrows) and VoiceOver
 - ✅ Service protocol abstractions (Protocols.swift)

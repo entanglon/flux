@@ -7,22 +7,8 @@ class TMDBEnricher {
     
     private let baseURL = "https://api.themoviedb.org/3"
     
-    // MARK: - Caching Layer
-    // These methods are called from task groups, so cache access must be
-    // synchronized as well as bounded. Metadata is cheap to re-fetch compared
-    // with retaining every catalogue item for the full app lifetime.
-    private struct CacheEntry<Value> {
-        let value: Value
-        var lastAccessed: Date
-    }
-    private let cacheLock = NSLock()
-    private var itemCache: [String: CacheEntry<MediaItem>] = [:]
-    private var imdbIDCache: [String: CacheEntry<String>] = [:]
-    private var newEpisodeCache: [String: CacheEntry<Bool>] = [:]
-    private let itemCacheLimit = 150
-    private let idCacheLimit = 500
-    private let itemCacheTTL: TimeInterval = 2 * 60 * 60
-    private let idCacheTTL: TimeInterval = 24 * 60 * 60
+    // MARK: - Caching Layer (Actor-isolated)
+    private let memoryCache = TMDBMemoryCacheActor()
     
     // MARK: - Adaptive Resolution
     enum ImageQuality {
@@ -99,7 +85,7 @@ class TMDBEnricher {
     func getImdbID(tmdbID: String, type: String) async -> String? {
         let mediaType = type.contains("movie") ? "movie" : "tv"
         let cacheKey = "\(mediaType):\(tmdbID)"
-        if let cached = cachedIMDbID(for: cacheKey) { return cached }
+        if let cached = await memoryCache.getIMDbID(for: cacheKey) { return cached }
 
         let urlString = "\(baseURL)/\(mediaType)/\(tmdbID)/external_ids?api_key=\(apiKey)"
 
@@ -109,7 +95,7 @@ class TMDBEnricher {
             let (data, _) = try await URLSession.shared.data(from: url)
             let response = try JSONDecoder().decode(ExternalIDsResponse.self, from: data)
             if let imdbID = response.imdb_id {
-                storeIMDbID(imdbID, for: cacheKey)
+                await memoryCache.storeIMDbID(imdbID, for: cacheKey)
             }
             return response.imdb_id
         } catch {
@@ -122,7 +108,7 @@ class TMDBEnricher {
     /// Quick enrichment for catalog carousels
     func quickEnrich(_ item: MediaItem) async -> MediaItem {
         guard hasKey else { return item }
-        if let cached = cachedItem(for: item.id) { return cached }
+        if let cached = await memoryCache.getItem(for: item.id) { return cached }
         
         var enriched = item
         let type = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") ? "tv" : "movie"
@@ -153,7 +139,7 @@ class TMDBEnricher {
             }
         }
         
-        storeItem(enriched, for: item.id)
+        await memoryCache.storeItem(enriched, for: item.id)
         return enriched
     }
 
@@ -204,72 +190,23 @@ class TMDBEnricher {
                     let items = (region?.flatrate ?? []) + (region?.buy ?? []) + (region?.rent ?? [])
                     if !items.isEmpty {
                         await MainActor.run {
-                            enriched.watchProviders = items.map { WatchProvider(name: $0.provider_name, logoURL: self.adaptiveURL(path: $0.logo_path, quality: .poster), displayPriority: 0) }
+                            enriched.watchProviders = items.map {
+                                WatchProvider(
+                                    name: $0.provider_name,
+                                    logoURL: self.adaptiveURL(path: $0.logo_path, quality: .poster),
+                                    displayPriority: 0
+                                )
+                            }
                         }
                     }
                 }
             }
         }
         
-        storeItem(enriched, for: item.id)
+        await memoryCache.storeItem(enriched, for: item.id)
         return enriched
     }
 
-    private func cachedItem(for key: String) -> MediaItem? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        guard var entry = itemCache[key] else { return nil }
-        guard Date().timeIntervalSince(entry.lastAccessed) < itemCacheTTL else {
-            itemCache.removeValue(forKey: key)
-            return nil
-        }
-        entry.lastAccessed = Date()
-        itemCache[key] = entry
-        return entry.value
-    }
-
-    private func storeItem(_ item: MediaItem, for key: String) {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        let now = Date()
-        itemCache = itemCache.filter { now.timeIntervalSince($0.value.lastAccessed) < itemCacheTTL }
-        if itemCache[key] == nil {
-            trim(&itemCache, limit: itemCacheLimit)
-        }
-        itemCache[key] = CacheEntry(value: item, lastAccessed: now)
-    }
-
-    private func cachedIMDbID(for key: String) -> String? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        guard var entry = imdbIDCache[key] else { return nil }
-        guard Date().timeIntervalSince(entry.lastAccessed) < idCacheTTL else {
-            imdbIDCache.removeValue(forKey: key)
-            return nil
-        }
-        entry.lastAccessed = Date()
-        imdbIDCache[key] = entry
-        return entry.value
-    }
-
-    private func storeIMDbID(_ imdbID: String, for key: String) {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        let now = Date()
-        imdbIDCache = imdbIDCache.filter { now.timeIntervalSince($0.value.lastAccessed) < idCacheTTL }
-        if imdbIDCache[key] == nil {
-            trim(&imdbIDCache, limit: idCacheLimit)
-        }
-        imdbIDCache[key] = CacheEntry(value: imdbID, lastAccessed: now)
-    }
-
-    private func trim<Value>(_ cache: inout [String: CacheEntry<Value>], limit: Int) {
-        while cache.count >= limit,
-              let leastRecentKey = cache.min(by: { $0.value.lastAccessed < $1.value.lastAccessed })?.key {
-            cache.removeValue(forKey: leastRecentKey)
-        }
-    }
-    
     // MARK: - Specific Asset Fetching
     func fetchEpisodeStill(tmdbID: String, season: Int, episode: Int) async -> URL? {
         let (still, _) = await fetchEpisodeInfo(tmdbID: tmdbID, season: season, episode: episode)
@@ -498,16 +435,10 @@ class TMDBEnricher {
     /// True when the show's most recent episode aired within the last 7 days.
     /// Cached 6h — watchlist cards call this per render.
     func hasAiredNewEpisode(tmdbID: String) async -> Bool {
-        cacheLock.lock()
-        if var cached = newEpisodeCache[tmdbID],
-           Date().timeIntervalSince(cached.lastAccessed) < 6 * 3600 {
-            cached.lastAccessed = Date()
-            newEpisodeCache[tmdbID] = cached
-            cacheLock.unlock()
-            return cached.value
+        if let cached = await memoryCache.getNewEpisodeStatus(for: tmdbID) {
+            return cached
         }
-        newEpisodeCache.removeValue(forKey: tmdbID)
-        cacheLock.unlock()
+
         let urlString = "\(baseURL)/tv/\(tmdbID)?api_key=\(apiKey)"
         var fresh = false
         if let url = URL(string: urlString),
@@ -521,12 +452,8 @@ class TMDBEnricher {
                 fresh = days >= 0 && days <= 7
             }
         }
-        cacheLock.lock()
-        if newEpisodeCache[tmdbID] == nil {
-            trim(&newEpisodeCache, limit: idCacheLimit)
-        }
-        newEpisodeCache[tmdbID] = CacheEntry(value: fresh, lastAccessed: Date())
-        cacheLock.unlock()
+        
+        await memoryCache.storeNewEpisodeStatus(fresh, for: tmdbID)
         return fresh
     }
 

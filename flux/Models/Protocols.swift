@@ -10,7 +10,7 @@ protocol StreamServiceProtocol {
         onStreamsUpdated: @escaping ([Stream]) -> Void
     ) async -> [Stream]
     
-    func getCachedStreams(for item: MediaItem, season: Int?, episode: Int?) -> [Stream]?
+    func getCachedStreams(for item: MediaItem, season: Int?, episode: Int?) async -> [Stream]?
 }
 
 /// Protocol abstraction for metadata enrichment services (TMDB / Cinemeta).

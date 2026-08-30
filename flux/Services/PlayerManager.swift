@@ -579,35 +579,38 @@ class PlayerManager: ObservableObject {
 
     private func fetchAndRace(item: MediaItem, season: Int?, episode: Int?) {
         self.isFetchingStreams = true
+        self.isLoading = true
 
-        // ⚡ ADVANCED LOADING fast-path (Flux Mode): the detail page already
-        // resolved + primed + warm-buffered this exact title — start instantly.
-        let key = prefetchKey(for: item, season: season, episode: episode)
-        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-        if isFluxEnabled,
-           prefetchedKey == key,
-           let pf = prefetchedStream,
-           let at = prefetchedAt,
-           Date().timeIntervalSince(at) < 600 {
-            print("[PlayerManager] ⚡ Prefetch HIT — instant start: \(pf.cleanTitle)")
-            availableStreams = StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
-            verifyStreamHealth(availableStreams)
-            externalSubtitles = prefetchedSubtitles ?? []
-            isLoading = false
-            isFetchingStreams = false
-            finishSelect(pf)
-            return
-        }
-
-        if let cachedStreams = StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode), !cachedStreams.isEmpty {
-             print("[PlayerManager] Cache Hit! Ready to Race.")
-             self.availableStreams = cachedStreams
-             self.isLoading = true
-        } else {
-             self.isLoading = true
-        }
-        
         AsyncTask {
+            // ⚡ ADVANCED LOADING fast-path (Flux Mode): the detail page already
+            // resolved + primed + warm-buffered this exact title — start instantly.
+            let key = self.prefetchKey(for: item, season: season, episode: episode)
+            let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+            if isFluxEnabled,
+               self.prefetchedKey == key,
+               let pf = self.prefetchedStream,
+               let at = self.prefetchedAt,
+               Date().timeIntervalSince(at) < 600 {
+                print("[PlayerManager] ⚡ Prefetch HIT — instant start: \(pf.cleanTitle)")
+                let cached = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
+                await MainActor.run {
+                    self.availableStreams = cached
+                    self.verifyStreamHealth(cached)
+                    self.externalSubtitles = self.prefetchedSubtitles ?? []
+                    self.isLoading = false
+                    self.isFetchingStreams = false
+                    self.finishSelect(pf)
+                }
+                return
+            }
+
+            if let cachedStreams = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode), !cachedStreams.isEmpty {
+                print("[PlayerManager] Cache Hit! Ready to Race.")
+                await MainActor.run {
+                    self.availableStreams = cachedStreams
+                }
+            }
+
             async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
             
             let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { updatedStreams in
@@ -627,7 +630,6 @@ class PlayerManager: ObservableObject {
             }
             
             // Flux Mode Debugging
-            let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
             print("[DEBUG] Flux Mode Enabled: \(isFluxEnabled)")
             print("[DEBUG] Stream Count: \(streams.count)")
 

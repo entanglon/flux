@@ -68,30 +68,21 @@ class StreamManager {
         return URLSession(configuration: config)
     }()
     
-    // In-memory cache: "tmdbID:season:episode" -> [Stream]. Stream lists can
-    // contain long addon-provided titles and URLs, so keep this strictly bounded
-    // for long browsing sessions.
-    private struct StreamCacheEntry {
-        let streams: [Stream]
-        var lastAccessed: Date
-    }
-    private let streamCacheLock = NSLock()
-    private var streamCache: [String: StreamCacheEntry] = [:]
-    private let streamCacheLimit = 40
-    private let streamCacheTTL: TimeInterval = 15 * 60
+    // In-memory cache (Actor-isolated)
+    private let cacheActor = StreamCacheActor()
     
     func preloadStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async {
         _ = await fetchStreams(for: item, season: season, episode: episode)
     }
     
-    // Synchronous Cache Access
-    func getCachedStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) -> [Stream]? {
+    // Cache Access
+    func getCachedStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream]? {
         let s = season ?? 1
         let e = episode ?? 1
         let isSeries = item.category == "TV Show"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        return cachedStreams(forKey: cacheKey)
+        return await cacheActor.get(key: cacheKey)
     }
     
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
@@ -105,7 +96,7 @@ class StreamManager {
         let type = isSeries ? "series" : "movie"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        if let cached = cachedStreams(forKey: cacheKey) {
+        if let cached = await cacheActor.get(key: cacheKey) {
             onStreamsUpdated(cached)
             return cached
         }
@@ -123,7 +114,7 @@ class StreamManager {
         await withTaskGroup(of: [Stream].self) { group in
             // Only addons that actually provide streams — Cinemeta (catalog/meta)
             // would just waste a request in the fan-out. Addons with unknown
-            // resources are still queried (manifests may use complex shapes).
+            // resource flags are included conservatively.
             let enabledAddons = AddonManager.shared.addons.filter {
                 guard $0.isEnabled else { return false }
                 guard let resources = $0.resources, !resources.isEmpty else { return true }
@@ -139,24 +130,13 @@ class StreamManager {
                     return await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: addon.name)
                 }
             }
-            
-            for await streams in group {
-                guard !streams.isEmpty else { continue }
-                allStreams.append(contentsOf: streams)
-                let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
-                let filtered = allStreams.filter { s in
-                    guard self.isWithinMaxResolution(s) else { return false }
-                    let isTorrent = s.url.absoluteString.starts(with: "magnet:") || (s.seeders != nil && s.seeders! > 0)
-                    if sourceMode == "http" { return !isTorrent }
-                    if sourceMode == "torrent" { return isTorrent }
-                    return true
-                }
-                let snapshot = filtered.sorted { s1, s2 in
-                    self.streamSortComparator(s1, s2)
-                }
-                
-                await MainActor.run {
-                    onStreamsUpdated(snapshot)
+
+            for await result in group {
+                if !result.isEmpty {
+                    allStreams.append(contentsOf: result)
+                    let currentDeduped = self.deduped(allStreams)
+                    let currentSorted = currentDeduped.sorted { self.streamSortComparator($0, $1) }
+                    onStreamsUpdated(currentSorted)
                 }
             }
         }
@@ -174,33 +154,8 @@ class StreamManager {
             streamSortComparator(s1, s2)
         }
 
-        storeCachedStreams(sortedStreams, forKey: cacheKey)
+        await cacheActor.set(key: cacheKey, streams: sortedStreams)
         return sortedStreams
-    }
-
-    private func cachedStreams(forKey key: String) -> [Stream]? {
-        streamCacheLock.lock()
-        defer { streamCacheLock.unlock() }
-        guard var entry = streamCache[key] else { return nil }
-        guard Date().timeIntervalSince(entry.lastAccessed) < streamCacheTTL else {
-            streamCache.removeValue(forKey: key)
-            return nil
-        }
-        entry.lastAccessed = Date()
-        streamCache[key] = entry
-        return entry.streams.isEmpty ? nil : entry.streams
-    }
-
-    private func storeCachedStreams(_ streams: [Stream], forKey key: String) {
-        streamCacheLock.lock()
-        defer { streamCacheLock.unlock() }
-        let now = Date()
-        streamCache = streamCache.filter { now.timeIntervalSince($0.value.lastAccessed) < streamCacheTTL }
-        if streamCache[key] == nil, streamCache.count >= streamCacheLimit,
-           let leastRecentKey = streamCache.min(by: { $0.value.lastAccessed < $1.value.lastAccessed })?.key {
-            streamCache.removeValue(forKey: leastRecentKey)
-        }
-        streamCache[key] = StreamCacheEntry(streams: streams, lastAccessed: now)
     }
 
     /// Collapses duplicate entries for the same underlying source (same torrent from

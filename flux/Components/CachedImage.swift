@@ -156,9 +156,10 @@ final class ImageInMemoryCache {
     }
 }
 
-/// Debug logger for image loading — writes to /tmp/flux_image_debug.log
+/// Debug logger for image loading — writes to /tmp/flux_image_debug.log in DEBUG builds only
 enum ImageDebugLog {
     static func log(_ message: String) {
+        #if DEBUG
         let ts = ISO8601DateFormatter().string(from: Date())
         let line = "[\(ts)] \(message)\n"
         if let data = line.data(using: .utf8) {
@@ -171,5 +172,6 @@ enum ImageDebugLog {
                 try? data.write(to: URL(fileURLWithPath: path))
             }
         }
+        #endif
     }
 }
