@@ -615,53 +615,84 @@ class TMDBEnricher {
         return 6
     }
 
-    /// Returns all unified bonus content items: Behind the Scenes, Featurettes, Bloopers,
-    /// Season 0 Specials (streamable in native player), and Official Trailers.
+    /// Returns curated bonus content items: High-res TMDB-enriched Season 0 Specials
+    /// (streamable directly in Flux's native player) and strictly Official Trailers/Teasers.
     func fetchBonusContent(item: MediaItem, fullItem: MediaItem? = nil) async -> [BonusContentItem] {
         var items: [BonusContentItem] = []
+        let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
         
-        // 1. Season 0 Specials (from Series metadata - playable in Flux's native torrent stream player)
-        if let episodes = fullItem?.episodes ?? item.episodes {
-            let seasonZeroEpisodes = episodes.filter { $0.seasonNumber == 0 }
+        // 1. Season 0 Specials (from Series metadata - streamable in Flux's native player)
+        if type == "tv" {
+            let allEpisodes = fullItem?.episodes ?? item.episodes ?? []
+            let seasonZeroEpisodes = allEpisodes.filter { $0.seasonNumber == 0 }.sorted { $0.episodeNumber < $1.episodeNumber }
+            
+            // Enrich with TMDB Season 0 data (for high-res stills & descriptions)
+            var tmdbStills: [Int: (name: String, overview: String, stillURL: URL?)] = [:]
+            let tmdbID = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: "tv") : item.id
+            if let id = tmdbID {
+                let seasonURL = "\(baseURL)/tv/\(id)/season/0?api_key=\(apiKey)"
+                if let url = URL(string: seasonURL),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let response = try? JSONDecoder().decode(TMDBSeasonResponse.self, from: data) {
+                    for ep in response.episodes {
+                        let stillURL = ep.still_path != nil ? URL(string: "https://image.tmdb.org/t/p/w780\(ep.still_path!)") : nil
+                        tmdbStills[ep.episode_number] = (name: ep.name, overview: ep.overview, stillURL: stillURL)
+                    }
+                }
+            }
+            
             for ep in seasonZeroEpisodes {
+                let tmdbData = tmdbStills[ep.episodeNumber]
+                let epName = (!ep.name.isEmpty && ep.name != "Episode \(ep.episodeNumber)") ? ep.name : (tmdbData?.name ?? "Special \(ep.episodeNumber)")
+                let epStill = ep.stillURL ?? tmdbData?.stillURL ?? item.backdropURL ?? item.heroURL
+                
                 let subtitle: String
                 if let runtime = ep.runtime {
                     subtitle = "Special • \(runtime)m"
-                } else if !ep.overview.isEmpty {
+                } else if let overview = tmdbData?.overview, !overview.isEmpty {
                     subtitle = "Special Episode"
                 } else {
                     subtitle = "Special Feature"
                 }
                 
+                let enrichedEp = Episode(
+                    id: ep.id,
+                    name: epName,
+                    overview: tmdbData?.overview ?? ep.overview,
+                    stillURL: epStill,
+                    heroURL: ep.heroURL,
+                    episodeNumber: ep.episodeNumber,
+                    seasonNumber: ep.seasonNumber,
+                    airDate: ep.airDate,
+                    runtime: ep.runtime
+                )
+                
                 items.append(BonusContentItem(
                     id: "s0-e\(ep.episodeNumber)-\(ep.id)",
-                    title: ep.name.isEmpty ? "Special \(ep.episodeNumber)" : ep.name,
+                    title: epName,
                     subtitle: subtitle,
                     categoryType: "Special",
-                    thumbnailURL: ep.stillURL ?? item.backdropURL ?? item.heroURL,
+                    thumbnailURL: epStill,
                     videoKey: nil,
-                    episode: ep
+                    episode: enrichedEp
                 ))
             }
         }
         
-        // 2. TMDB Video Extras (Behind the Scenes, Featurettes, Bloopers, Clips, Trailers)
+        // 2. Official Trailers Only (filtered strictly to official trailers and teasers)
         let videos = await fetchTrailers(item: item)
-        for vid in videos {
-            let catType: String
-            switch vid.type {
-            case "Behind the Scenes": catType = "Behind the Scenes"
-            case "Featurette": catType = "Featurette"
-            case "Bloopers": catType = "Bloopers"
-            case "Clip": catType = "Clip"
-            case "Teaser": catType = "Teaser"
-            default: catType = "Trailer"
-            }
-            
+        let officialTrailers = videos.filter { vid in
+            let isOfficial = vid.official == true || vid.name.lowercased().contains("official")
+            let isTrailerType = vid.type == "Trailer" || vid.type == "Teaser"
+            return isOfficial && isTrailerType
+        }
+        
+        for vid in officialTrailers {
+            let catType = vid.type == "Teaser" ? "Teaser" : "Trailer"
             items.append(BonusContentItem(
-                id: "tmdb-vid-\(vid.id)",
+                id: "tmdb-trailer-\(vid.id)",
                 title: vid.name,
-                subtitle: catType,
+                subtitle: "Official \(catType)",
                 categoryType: catType,
                 thumbnailURL: vid.maxResThumbnailURL ?? vid.thumbnailURL ?? item.backdropURL,
                 videoKey: vid.key,
@@ -669,7 +700,7 @@ class TMDBEnricher {
             ))
         }
         
-        // Sort items: Specials & Featurettes first, then Trailers
+        // Sort: Specials first, then Trailers
         return items.sorted { item1, item2 in
             let r1 = bonusRank(category: item1.categoryType)
             let r2 = bonusRank(category: item2.categoryType)
@@ -680,13 +711,9 @@ class TMDBEnricher {
     private func bonusRank(category: String) -> Int {
         switch category {
         case "Special": return 0
-        case "Behind the Scenes": return 1
-        case "Featurette": return 2
-        case "Bloopers": return 3
-        case "Trailer": return 4
-        case "Teaser": return 5
-        case "Clip": return 6
-        default: return 7
+        case "Trailer": return 1
+        case "Teaser": return 2
+        default: return 3
         }
     }
 

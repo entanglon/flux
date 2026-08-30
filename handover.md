@@ -1,18 +1,18 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — DETAILVIEW SCROLLING OPTIMIZATIONS (60FPS) + DEFAULT BROWSER PLAYBACK FOR BONUS CONTENT & TRAILERS
+## LATEST: Aug 30, 2026 — CURATED BONUS CONTENT RAIL (TMDB-ENRICHED SEASON 0 SPECIALS + STRICTLY OFFICIAL TRAILERS) + CLEAN SEASON DROPDOWN
 
-### Scrolling Performance & View Optimization (`DetailView.swift`, `BonusContentCard.swift`)
-- **Lazy Stack Layouts:** Replaced non-lazy `VStack` on the main `DetailView` scroll container with `LazyVStack(spacing: 0)`, and replaced `HStack` in `DetailRail` with `LazyHStack(spacing: 24)`. Off-screen cards and sections are no longer redundantly constructed during scrolling.
-- **Card Rendering Optimization (`BonusContentCard.swift`):**
-  - Adjusted image decoding to `maxDimension: 600` (2x retina for 300pt card) to eliminate main thread image allocation stalls.
-  - Replaced expensive `.glassEffect` shader filters inside the horizontal scroll rail with `.ultraThinMaterial` background.
-  - Streamlined shadow modifiers into a single lightweight shadow.
-- **Buttery Smooth Scrolling:** Content page and horizontal Bonus Content rail now scroll fluidly with zero stutter or frame drops.
+### Clean Season Dropdown (`DetailView.swift`)
+- **Filtered Specials Out of Dropdown:** Filtered out `seasonNumber == 0` (and any season named "Special") from `SeasonDropdownController.shared.seasons`.
+- **Streamlined Season Picker:** The season dropdown list now cleanly displays only actual numbered seasons (`Season 1`, `Season 2`, `Season 3`, etc.), eliminating the awkward "Special" entry.
+- **Default Selection:** TV series automatically initialize to the first regular season (`Season 1`).
 
-### Default Browser Playback for Bonus Content & Trailers (`DetailView.swift`, `BonusContent.swift`)
-- **Seamless Browser Launch:** Clicking any Bonus Content card (Behind the Scenes, Featurette, Blooper, Clip, Trailer) or the hero "Trailer" button opens the official video in the user's default web browser via `NSWorkspace.shared.open()`.
-- **Season 0 Specials:** TV Series specials (Season 0 full episodes) remain streamable in Flux's native player window.
+### Curated Bonus Content Rail (`TMDBEnricher.swift`, `BonusContentCard.swift`, `DetailView.swift`)
+- **Elevated Season 0 Specials:** All TV series specials (making-of documentaries, bonus featurettes, deleted scenes, shorts) from Cinemeta/Stremio are now elevated directly into the dedicated **Bonus Content** rail.
+- **TMDB Season 0 High-Res Enrichment:** Sub-enriches Season 0 episodes with TMDB's `/tv/{id}/season/0` metadata, fetching high-resolution 16:9 episode stills (`w780`), canonical titles, and full plot summaries.
+- **Native Player Streaming for Specials:** Clicking any Season 0 special immediately streams in **Flux's native MPV player (`openWindow(id: "player")`)** with native torrent streaming, hardware decoding, and subtitle/audio track switching.
+- **Strictly Official Trailers Only:** Completely eliminated third-party clips, random low-res featurettes, and YouTube noise. The rail now strictly includes **Official Trailers & Teasers** (`official == true` or named "Official Trailer").
+- **Browser Playback for Official Trailers:** Official trailers open in the user's default browser with clean 16:9 MaxRes thumbnails.
 - **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** 25 / 25 unit tests passing (100% pass rate).
 
 ---

@@ -396,57 +396,60 @@ struct DetailView: View {
                         } else if isReleased && displayItem.category == "TV Show" {
                             VStack(alignment: .leading, spacing: 16) {
                                 if let seasons = displayItem.seasons, !seasons.isEmpty {
-                                    // Floating dropdown trigger — the panel itself
-                                    // renders at ContentView's root overlay (above
-                                    // rail + sidebar), positioned via this frame.
-                                    Button {
-                                        SeasonDropdownController.shared.seasons = seasons
-                                        SeasonDropdownController.shared.selectedName = selectedSeason?.name ?? "Season 1"
-                                        SeasonDropdownController.shared.onSelect = { season in
-                                            selectedSeason = season
-                                            Task { await loadEpisodes(for: season) }
-                                            // Re-prime the pipeline for the newly selected season (S{n}E1)
-                                            PlayerManager.shared.startDetailPrefetch(
-                                                item: displayItem,
-                                                season: season.seasonNumber,
-                                                episode: 1
-                                            )
+                                    let regularSeasons = seasons.filter { $0.seasonNumber > 0 && !$0.name.lowercased().contains("special") }
+                                    if !regularSeasons.isEmpty {
+                                        // Floating dropdown trigger — the panel itself
+                                        // renders at ContentView's root overlay (above
+                                        // rail + sidebar), positioned via this frame.
+                                        Button {
+                                            SeasonDropdownController.shared.seasons = regularSeasons
+                                            SeasonDropdownController.shared.selectedName = selectedSeason?.name ?? regularSeasons.first?.name ?? "Season 1"
+                                            SeasonDropdownController.shared.onSelect = { season in
+                                                selectedSeason = season
+                                                Task { await loadEpisodes(for: season) }
+                                                // Re-prime the pipeline for the newly selected season (S{n}E1)
+                                                PlayerManager.shared.startDetailPrefetch(
+                                                    item: displayItem,
+                                                    season: season.seasonNumber,
+                                                    episode: 1
+                                                )
+                                            }
+                                            withAnimation(.easeInOut(duration: 0.18)) {
+                                                SeasonDropdownController.shared.toggle()
+                                            }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Text(selectedSeason?.name ?? regularSeasons.first?.name ?? "Season 1")
+                                                    .font(.headline)
+                                                    .fontWeight(.bold)
+                                                    .foregroundStyle(.white)
+                                                Image(systemName: "chevron.down")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .rotationEffect(.degrees(SeasonDropdownController.shared.isOpen ? 180 : 0))
+                                            }
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .glassEffect(.regular.interactive(), in: .capsule)
+                                            .contentShape(Rectangle())
                                         }
-                                        withAnimation(.easeInOut(duration: 0.18)) {
-                                            SeasonDropdownController.shared.toggle()
-                                        }
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Text(selectedSeason?.name ?? "Season 1")
-                                                .font(.headline)
-                                                .fontWeight(.bold)
-                                                .foregroundStyle(.white)
-                                            Image(systemName: "chevron.down")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .rotationEffect(.degrees(SeasonDropdownController.shared.isOpen ? 180 : 0))
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .glassEffect(.regular.interactive(), in: .capsule)
-                                        .contentShape(Rectangle())
+                                        .buttonStyle(.plain)
+                                        .background(
+                                            GeometryReader { geo in
+                                                // Direct write to the controller — PreferenceKey
+                                                // values don't propagate out of pushed NavigationStack
+                                                // views reliably on macOS
+                                                Color.clear
+                                                    .onAppear {
+                                                        SeasonDropdownController.shared.anchor = geo.frame(in: .named("rootSpace"))
+                                                    }
+                                                    .onChange(of: geo.frame(in: .named("rootSpace"))) { _, frame in
+                                                        SeasonDropdownController.shared.anchor = frame
+                                                    }
+                                            }
+                                        )
+                                        .padding(.leading, 268)
                                     }
-                                    .buttonStyle(.plain)
-                                    .background(
-                                        GeometryReader { geo in
-                                            // Direct write to the controller — PreferenceKey
-                                            // values don't propagate out of pushed NavigationStack
-                                            // views reliably on macOS
-                                            Color.clear
-                                                .onAppear {
-                                                    SeasonDropdownController.shared.anchor = geo.frame(in: .named("rootSpace"))
-                                                }
-                                                .onChange(of: geo.frame(in: .named("rootSpace"))) { _, frame in
-                                                    SeasonDropdownController.shared.anchor = frame
-                                                }
-                                        }
-                                    )
-                                    .padding(.leading, 268)
                                 }
                                 
                                 DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
@@ -789,7 +792,8 @@ struct DetailView: View {
             }
             
             if type == "series" {
-                if let seasons = merged.seasons, let first = seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first {
+                let regularSeasons = merged.seasons?.filter { $0.seasonNumber > 0 && !$0.name.lowercased().contains("special") } ?? []
+                if let first = regularSeasons.first ?? merged.seasons?.first {
                     selectedSeason = first
                     
                     // Track TMDB ID for sub-enrichment (episodes)

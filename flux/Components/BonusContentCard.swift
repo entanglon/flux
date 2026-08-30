@@ -111,7 +111,7 @@ struct BonusContentCard: View {
                         Text("•")
                             .font(.system(size: 9))
                             .foregroundStyle(.white.opacity(0.4))
-                        Text("Play Episode")
+                        Text("Play Special")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Color.cyan)
                     }

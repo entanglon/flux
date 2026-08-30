@@ -135,6 +135,7 @@ struct TMDBEnricherTests {
         )
         #expect(bonusFeaturette.isStreamableEpisode == false)
         #expect(bonusFeaturette.videoKey == "abcd1234")
+        #expect(bonusFeaturette.youtubeURL?.absoluteString == "https://www.youtube.com/watch?v=abcd1234")
     }
 }
 
