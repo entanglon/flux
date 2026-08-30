@@ -10,56 +10,89 @@ struct CollectionsView: View {
     @State private var newCollectionName = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
-                LibraryPageHeader(
-                    title: "Collections",
-                    itemCount: userData.collections.isEmpty ? nil : userData.collections.count,
-                    itemLabel: "LISTS"
-                ) {
-                    Button(action: { showCreateAlert = true }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("New List")
-                                .font(.system(size: 14, weight: .bold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 11)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if userData.collections.isEmpty {
-                    emptyState
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
-                        Button(action: { showCreateAlert = true }) {
-                            newCollectionCard
-                        }
-                        .buttonStyle(.plain)
-
-                        ForEach(userData.collections) { collection in
-                            NavigationLink(value: CollectionNavigation(id: collection.id)) {
-                                CollectionCard(collection: collection,
-                                               onRename: { renameTarget = collection },
-                                               onDelete: { deleteCandidate = collection })
+        Group {
+            if userData.collections.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    LibraryPageHeader(
+                        title: "Collections",
+                        rightAction: {
+                            Button(action: { showCreateAlert = true }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 13, weight: .bold))
+                                    Text("New List")
+                                        .font(.system(size: 14, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 11)
+                                .glassEffect(.regular.interactive(), in: .capsule)
                             }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Rename…") { renameTarget = collection }
-                                Button("Delete", role: .destructive) { deleteCandidate = collection }
+                        }
+                    )
+
+                    Spacer()
+
+                    emptyState
+
+                    Spacer()
+                }
+                .padding(.leading, LibraryScheme.leadingPadding)
+                .padding(.trailing, LibraryScheme.trailingPadding)
+                .padding(.top, LibraryScheme.topPadding)
+                .padding(.bottom, LibraryScheme.bottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                        LibraryPageHeader(
+                            title: "Collections",
+                            itemCount: userData.collections.count,
+                            itemLabel: "LISTS",
+                            rightAction: {
+                                Button(action: { showCreateAlert = true }) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 13, weight: .bold))
+                                        Text("New List")
+                                            .font(.system(size: 14, weight: .bold))
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 11)
+                                    .glassEffect(.regular.interactive(), in: .capsule)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        )
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
+                            Button(action: { showCreateAlert = true }) {
+                                newCollectionCard
+                            }
+                            .buttonStyle(.plain)
+
+                            ForEach(userData.collections) { collection in
+                                NavigationLink(value: CollectionNavigation(id: collection.id)) {
+                                    CollectionCard(collection: collection,
+                                                   onRename: { renameTarget = collection },
+                                                   onDelete: { deleteCandidate = collection })
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Rename…") { renameTarget = collection }
+                                    Button("Delete", role: .destructive) { deleteCandidate = collection }
+                                }
                             }
                         }
                     }
+                    .padding(.leading, LibraryScheme.leadingPadding)
+                    .padding(.trailing, LibraryScheme.trailingPadding)
+                    .padding(.top, LibraryScheme.topPadding)
+                    .padding(.bottom, LibraryScheme.bottomPadding)
                 }
             }
-            .padding(.leading, LibraryScheme.leadingPadding)
-            .padding(.trailing, LibraryScheme.trailingPadding)
-            .padding(.top, LibraryScheme.topPadding)
-            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
@@ -272,43 +305,85 @@ struct CollectionDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
-                if let collection {
+        Group {
+            if let collection, collection.items.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
                     LibraryPageHeader(
                         title: collection.name,
-                        itemCount: collection.items.isEmpty ? nil : collection.items.count,
-                        itemLabel: "TITLES"
-                    ) {
-                        HStack(spacing: 10) {
-                            Button(action: {
-                                renameText = collection.name
-                                showRenameAlert = true
-                            }) {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 34, height: 34)
-                                    .glassEffect(.regular.interactive(), in: .circle)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Rename")
+                        rightAction: {
+                            HStack(spacing: 10) {
+                                Button(action: {
+                                    renameText = collection.name
+                                    showRenameAlert = true
+                                }) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 34, height: 34)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Rename")
 
-                            Button(action: { showDeleteConfirm = true }) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(.red.opacity(0.9))
-                                    .frame(width: 34, height: 34)
-                                    .glassEffect(.regular.interactive(), in: .circle)
+                                Button(action: { showDeleteConfirm = true }) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.red.opacity(0.9))
+                                        .frame(width: 34, height: 34)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Delete list")
                             }
-                            .buttonStyle(.plain)
-                            .help("Delete list")
                         }
-                    }
+                    )
 
-                    if collection.items.isEmpty {
-                        memberEmptyState(name: collection.name)
-                    } else {
+                    Spacer()
+
+                    memberEmptyState(name: collection.name)
+
+                    Spacer()
+                }
+                .padding(.leading, LibraryScheme.leadingPadding)
+                .padding(.trailing, LibraryScheme.trailingPadding)
+                .padding(.top, LibraryScheme.topPadding)
+                .padding(.bottom, LibraryScheme.bottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if let collection {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                        LibraryPageHeader(
+                            title: collection.name,
+                            itemCount: collection.items.count,
+                            itemLabel: "TITLES",
+                            rightAction: {
+                                HStack(spacing: 10) {
+                                    Button(action: {
+                                        renameText = collection.name
+                                        showRenameAlert = true
+                                    }) {
+                                        Image(systemName: "pencil")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .frame(width: 34, height: 34)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Rename")
+
+                                    Button(action: { showDeleteConfirm = true }) {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(.red.opacity(0.9))
+                                            .frame(width: 34, height: 34)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Delete list")
+                                }
+                            }
+                        )
+
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                             ForEach(collection.items) { item in
                                 GlassCard(item: item, aspectRatio: .portrait)
@@ -330,12 +405,12 @@ struct CollectionDetailView: View {
                             }
                         }
                     }
+                    .padding(.leading, LibraryScheme.leadingPadding)
+                    .padding(.trailing, LibraryScheme.trailingPadding)
+                    .padding(.top, LibraryScheme.topPadding)
+                    .padding(.bottom, LibraryScheme.bottomPadding)
                 }
             }
-            .padding(.leading, LibraryScheme.leadingPadding)
-            .padding(.trailing, LibraryScheme.trailingPadding)
-            .padding(.top, LibraryScheme.topPadding)
-            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .overlay(alignment: .topLeading) {
             Button(action: { dismiss() }) {

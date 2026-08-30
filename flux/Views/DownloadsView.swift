@@ -7,46 +7,63 @@ struct DownloadsView: View {
     var body: some View {
         let total = downloadManager.activeDownloads.count + downloadManager.completedDownloads.count
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
-                LibraryPageHeader(
-                    title: "Downloads",
-                    itemCount: total > 0 ? total : nil,
-                    itemLabel: "ITEMS"
-                )
+        Group {
+            if downloadManager.activeDownloads.isEmpty && downloadManager.completedDownloads.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    LibraryPageHeader(
+                        title: "Downloads"
+                    )
 
-                if downloadManager.activeDownloads.isEmpty && downloadManager.completedDownloads.isEmpty {
+                    Spacer()
+
                     emptyState
-                } else {
-                    if !downloadManager.activeDownloads.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Downloading")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(.white)
 
-                            ForEach(downloadManager.activeDownloads) { item in
-                                activeRow(item)
+                    Spacer()
+                }
+                .padding(.leading, LibraryScheme.leadingPadding)
+                .padding(.trailing, LibraryScheme.trailingPadding)
+                .padding(.top, LibraryScheme.topPadding)
+                .padding(.bottom, LibraryScheme.bottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
+                        LibraryPageHeader(
+                            title: "Downloads",
+                            itemCount: total > 0 ? total : nil,
+                            itemLabel: "ITEMS"
+                        )
+
+                        if !downloadManager.activeDownloads.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Downloading")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(.white)
+
+                                ForEach(downloadManager.activeDownloads) { item in
+                                    activeRow(item)
+                                }
+                            }
+                        }
+
+                        if !downloadManager.completedDownloads.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Completed")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(.white)
+
+                                ForEach(downloadManager.completedDownloads) { item in
+                                    completedRow(item)
+                                }
                             }
                         }
                     }
-
-                    if !downloadManager.completedDownloads.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Completed")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(.white)
-
-                            ForEach(downloadManager.completedDownloads) { item in
-                                completedRow(item)
-                            }
-                        }
-                    }
+                    .padding(.leading, LibraryScheme.leadingPadding)
+                    .padding(.trailing, LibraryScheme.trailingPadding)
+                    .padding(.top, LibraryScheme.topPadding)
+                    .padding(.bottom, LibraryScheme.bottomPadding)
                 }
             }
-            .padding(.leading, LibraryScheme.leadingPadding)
-            .padding(.trailing, LibraryScheme.trailingPadding)
-            .padding(.top, LibraryScheme.topPadding)
-            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)

@@ -21,26 +21,26 @@ struct LibraryPageHeader<RightContent: View, BottomContent: View>: View {
     let title: String
     var itemCount: Int? = nil
     var itemLabel: String = "ITEMS"
-    @ViewBuilder var rightAction: () -> RightContent
-    @ViewBuilder var filterChips: () -> BottomContent
+    let rightAction: RightContent
+    let filterChips: BottomContent
 
     init(
         title: String,
         itemCount: Int? = nil,
         itemLabel: String = "ITEMS",
-        @ViewBuilder rightAction: @escaping () -> RightContent = { EmptyView() },
-        @ViewBuilder filterChips: @escaping () -> BottomContent = { EmptyView() }
+        @ViewBuilder rightAction: () -> RightContent = { EmptyView() },
+        @ViewBuilder filterChips: () -> BottomContent = { EmptyView() }
     ) {
         self.title = title
         self.itemCount = itemCount
         self.itemLabel = itemLabel
-        self.rightAction = rightAction
-        self.filterChips = filterChips
+        self.rightAction = rightAction()
+        self.filterChips = filterChips()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 16) {
                 Text(title)
                     .font(.system(size: 44, weight: .heavy))
                     .foregroundStyle(.white)
@@ -57,18 +57,18 @@ struct LibraryPageHeader<RightContent: View, BottomContent: View>: View {
                 
                 Spacer()
                 
-                rightAction()
+                rightAction
             }
             .padding(.top, LibraryScheme.headerTopPadding)
 
-            filterChips()
+            filterChips
         }
     }
 }
 
 /// The empty-state used across all library pages.
-/// Clean, frameless layout floating naturally on the dark background.
-/// Sits at the exact same vertical offset across all tabs.
+/// Clean, frameless layout perfectly centered in the body area.
+/// Fixed geometric height guarantees 100% pixel-identical icon placement.
 struct LibraryEmptyState: View {
     let icon: String
     let title: String
@@ -80,7 +80,7 @@ struct LibraryEmptyState: View {
     @State private var isHoveringAction = false
 
     var body: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 20) {
             ZStack {
                 Circle()
                     .fill(Color.white.opacity(0.06))
@@ -109,38 +109,40 @@ struct LibraryEmptyState: View {
                     .lineSpacing(3)
             }
 
-            if let actionTitle, let action {
-                Button(action: action) {
-                    HStack(spacing: 8) {
-                        if let actionIcon {
-                            Image(systemName: actionIcon)
-                                .font(.system(size: 13, weight: .bold))
+            Group {
+                if let actionTitle, let action {
+                    Button(action: action) {
+                        HStack(spacing: 8) {
+                            if let actionIcon {
+                                Image(systemName: actionIcon)
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            Text(actionTitle)
+                                .font(.system(size: 14, weight: .bold))
                         }
-                        Text(actionTitle)
-                            .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(isHoveringAction ? 0.16 : 0.08))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(isHoveringAction ? 0.35 : 0.16), lineWidth: 1)
+                        )
+                        .scaleEffect(isHoveringAction ? 1.03 : 1.0)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(
-                        Capsule()
-                            .fill(Color.white.opacity(isHoveringAction ? 0.16 : 0.08))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.white.opacity(isHoveringAction ? 0.35 : 0.16), lineWidth: 1)
-                    )
-                    .scaleEffect(isHoveringAction ? 1.03 : 1.0)
+                    .buttonStyle(.plain)
+                    .onHover { isHoveringAction = $0 }
+                    .animation(.spring(response: 0.25, dampingFraction: 0.75), value: isHoveringAction)
+                } else {
+                    Color.clear.frame(height: 44)
                 }
-                .buttonStyle(.plain)
-                .onHover { isHoveringAction = $0 }
-                .animation(.spring(response: 0.25, dampingFraction: 0.75), value: isHoveringAction)
-                .padding(.top, 6)
             }
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, LibraryScheme.emptyStateTopPadding)
-        .padding(.bottom, 80)
         .padding(.horizontal, 40)
     }
 }
