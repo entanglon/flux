@@ -631,8 +631,7 @@ final class MPVLayerView: NSView {
         mpv_set_option_string(mpv, "load-scripts", "no")
         mpv_set_option_string(mpv, "load-osd-console", "no")
         mpv_set_option_string(mpv, "load-stats-overlay", "no")
-        mpv_set_option_string(mpv, "load-auto-profiles", "no")
-        mpv_set_option_string(mpv, "ytdl", "no")
+        mpv_set_option_string(mpv, "ytdl", "yes")
         mpv_set_option_string(mpv, "osc", "no")
         // Fail over reasonably fast when a torrent swarm is dead: the Stremio
         // server holds the file response silent until pieces flow, so without a

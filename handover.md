@@ -1,6 +1,13 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — BONUS CONTENT & EXTRAS RAIL + ON-CARD WIDESCREEN METADATA + NATIVE PLAYER & CINEMA THEATER
+## LATEST: Aug 30, 2026 — BONUS CONTENT & EXTRAS RAIL + 100% NATIVE MPV PLAYER INTEGRATION + ON-CARD WIDESCREEN METADATA
+
+### 100% Native MPV Player for All Bonus Content (`DetailView.swift`, `PlayerManager.swift`, `YouTubeStreamResolver.swift`, `MPVVideoView.swift`)
+- **Eliminated Floating Web Modals:** Removed the WebKit modal overlay entirely. Clicking **any** Bonus Content item or trailer now directly launches **Flux's native MPV Player window (`openWindow(id: "player")`)**.
+- **Direct YouTube Video Extraction:** Created `YouTubeStreamResolver` to extract high-bitrate direct MP4/HLS streams on-the-fly for YouTube bonus featurettes and trailers.
+- **Direct Stream Support in PlayerManager:** Added direct `streamURL` bypass in `PlayerManager.play(_ item:)`, allowing direct video streams to start immediately without torrent search delays.
+- **Enabled ytdl in MPV:** Configured `mpv_set_option_string(mpv, "ytdl", "yes")` in `MPVVideoView.swift`.
+- **Season 0 Specials:** TV series specials automatically stream through Flux's native torrent engine.
 
 ### Bonus Content & Extras Aggregation (`BonusContent.swift`, `TMDBEnricher.swift`)
 - **Multi-Source Aggregation:** Implemented `BonusContentItem` combining:
@@ -17,10 +24,6 @@
   - Interactive gradient rim stroke (`isHovered ? 1.5pt : 0.5pt`).
   - Ambient elevation shadow (`radius: 16pt`) + subtle brightness wash.
   - **Strictly zero scale/zoom** matching Apple TV design standards.
-
-### Native Flux Playback & Cinema Theater (`DetailView.swift`, `YouTubeTrailerPlayer.swift`)
-- **Direct App Playback for Season 0 Specials:** Clicking a streamable special launches **Flux's native MPV player window (`openWindow(id: "player")`)** via `PlayerManager.shared.play()`.
-- **Distraction-Free Cinema Theater for Video Extras:** TMDB video extras and trailers open in an upgraded fullscreen `BonusContentPlayerModal` with stripped web clutter, glass header, and `Esc` key dismissal.
 - **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** Added tests for `BonusContentItem` properties and streamability (**25 / 25 unit tests passing**).
 
 ---

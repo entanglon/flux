@@ -20,7 +20,6 @@ struct DetailView: View {
     @State private var showCollectionsPopover = false
     @State private var trailerURL: URL? = nil
     @State private var bonusContent: [BonusContentItem] = []
-    @State private var activeBonusItem: BonusContentItem? = nil
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -282,18 +281,11 @@ struct DetailView: View {
                                     .disabled(isDownloading)
                                     .help("Download best stream for offline")
 
-                                    // Play Trailer in Flux
+                                    // Play Trailer in Flux Native Player
                                     if !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
                                             if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
-                                                if let episode = firstTrailer.episode {
-                                                    PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
-                                                    openWindow(id: "player", value: displayItem.id)
-                                                } else {
-                                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                        activeBonusItem = firstTrailer
-                                                    }
-                                                }
+                                                playBonusContent(firstTrailer)
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
                                             }
@@ -362,14 +354,7 @@ struct DetailView: View {
                                     if !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
                                             if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
-                                                if let episode = firstTrailer.episode {
-                                                    PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
-                                                    openWindow(id: "player", value: displayItem.id)
-                                                } else {
-                                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                        activeBonusItem = firstTrailer
-                                                    }
-                                                }
+                                                playBonusContent(firstTrailer)
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
                                             }
@@ -487,14 +472,7 @@ struct DetailView: View {
 
                                 DetailRail(items: bonusContent, idPath: \.id, itemWidth: 300, itemHeight: 169) { item in
                                     Button {
-                                        if let episode = item.episode {
-                                            PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
-                                            openWindow(id: "player", value: displayItem.id)
-                                        } else {
-                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                activeBonusItem = item
-                                            }
-                                        }
+                                        playBonusContent(item)
                                     } label: {
                                         BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
                                     }
@@ -733,17 +711,6 @@ struct DetailView: View {
             .padding(.leading, 268)
             .padding(.top, 14)
         }
-        .overlay {
-            if let bonus = activeBonusItem {
-                BonusContentPlayerModal(item: bonus, mainTitle: displayItem.title) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        activeBonusItem = nil
-                    }
-                }
-                .transition(.opacity)
-                .zIndex(100)
-            }
-        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
@@ -752,6 +719,35 @@ struct DetailView: View {
         }
         .onDisappear {
             PlayerManager.shared.cancelDetailPrefetch()
+        }
+    }
+
+    private func playBonusContent(_ item: BonusContentItem) {
+        if let episode = item.episode {
+            PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
+            openWindow(id: "player", value: displayItem.id)
+        } else if let key = item.videoKey {
+            Task {
+                let resolvedURL = await YouTubeStreamResolver.resolveStreamURL(videoKey: key)
+                await MainActor.run {
+                    let bonusMediaItem = MediaItem(
+                        id: "bonus-\(item.id)",
+                        title: "\(displayItem.title): \(item.title)",
+                        description: item.subtitle ?? item.categoryType,
+                        imageURL: item.thumbnailURL,
+                        posterURL: displayItem.posterURL,
+                        backdropURL: item.thumbnailURL ?? displayItem.backdropURL,
+                        heroURL: item.thumbnailURL ?? displayItem.heroURL,
+                        streamURL: resolvedURL ?? URL(string: "https://www.youtube.com/watch?v=\(key)"),
+                        category: item.categoryType,
+                        progress: nil,
+                        trailerURL: nil,
+                        cast: nil
+                    )
+                    PlayerManager.shared.play(bonusMediaItem)
+                    openWindow(id: "player", value: bonusMediaItem.id)
+                }
+            }
         }
     }
 

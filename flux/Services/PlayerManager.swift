@@ -537,6 +537,14 @@ class PlayerManager: ObservableObject {
             return
         }
         
+        // Direct Stream Check (e.g. Bonus Content, Trailers, Direct URLs)
+        if let directUrl = item.streamURL {
+            print("[PlayerManager] Playing direct stream: \(directUrl)")
+            self.currentStreamURL = directUrl
+            self.isLoading = false
+            return
+        }
+        
         // 1. Instant Replay Check
         let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
         
