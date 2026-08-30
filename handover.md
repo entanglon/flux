@@ -1,26 +1,27 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — IN-APP MULTI-TRAILER CINEMA THEATER + REDESIGNED TRAILER CARDS + SPECULAR HOVER HIGHLIGHT
+## LATEST: Aug 30, 2026 — BONUS CONTENT & EXTRAS RAIL + ON-CARD WIDESCREEN METADATA + NATIVE PLAYER & CINEMA THEATER
 
-### Multi-Trailer Ingestion & Ranking (`TMDBModels.swift`, `TMDBEnricher.swift`)
-- **Comprehensive Video Ingestion:** Updated `TMDBEnricher` to fetch all available YouTube videos (`Trailer`, `Teaser`, `Clip`, `Featurette`, `Behind the Scenes`) via `GET /{type}/{id}/videos`.
-- **Relevance Prioritization:** Implemented `trailerRank` prioritizing Official Main Trailers > Trailers > Teasers > Featurettes, with newer releases prioritized.
-- **Rich Model Fields:** Enhanced `TMDBVideo` with `official: Bool?`, `publishedAt: String?`, `thumbnailURL` (HQ), `maxResThumbnailURL`, and `embedURL`.
+### Bonus Content & Extras Aggregation (`BonusContent.swift`, `TMDBEnricher.swift`)
+- **Multi-Source Aggregation:** Implemented `BonusContentItem` combining:
+  1. **Season 0 Specials (TV Series):** Full-length bonus episodes, making-of specials, and featurettes from Cinemeta/Stremio metadata.
+  2. **TMDB Video Extras (Movies & Shows):** Behind the Scenes, Featurettes, Bloopers/Gag Reels, Clips, and Official Trailers & Teasers.
+- **Priority Sorting:** Sorts Specials and Making-Of/Behind-the-Scenes/Featurettes first, followed by Official Trailers and Clips.
 
-### Redesigned 16:9 Trailer Cards (`TrailerCard.swift`)
-- **16:9 Widescreen Framing:** Sized at `300pt × 169pt` using YouTube MaxRes thumbnails with backdrop fallback.
-- **Frosted Liquid Glass Play Disc:** Replaced bulky center play button with a refined, centered frosted Liquid Glass play disc with specular ring border that glints on hover.
+### Redesigned 16:9 Bonus Content Card (`BonusContentCard.swift`)
+- **On-Card Bottom Typography:** Moved all title and subtitle text directly **inside the bottom of the card** over a deep cinematic gradient mesh overlay (instead of sitting below the card).
+- **16:9 Full-Bleed Framing:** Sized at `300pt × 169pt` with corner radius `14pt`.
+- **Top-Trailing Glass Pill:** Displays category type (`SPECIAL`, `BEHIND THE SCENES`, `FEATURETTE`, `TRAILER`, `CLIP`).
+- **Centered Frosted Play Disc:** Frosted Liquid Glass play disc with specular border that illuminates smoothly on hover.
 - **Specular Hover Highlight (Zero Zoom):**
   - Interactive gradient rim stroke (`isHovered ? 1.5pt : 0.5pt`).
-  - Ambient elevation shadow and subtle brightness wash.
-  - **Strictly zero scale/zoom** matching Apple TV design guidelines.
-- **Metadata Display:** Shows the exact trailer name (`video.name`), type pill badge (`TRAILER`, `TEASER`, `FEATURETTE`), and "Watch in Flux" indicator.
+  - Ambient elevation shadow (`radius: 16pt`) + subtle brightness wash.
+  - **Strictly zero scale/zoom** matching Apple TV design standards.
 
-### Native In-App Trailer Player Modal (`YouTubeTrailerPlayer.swift`, `DetailView.swift`)
-- **In-App Cinema Theater:** Built a native `WKWebView` embed inside SwiftUI that plays full HD YouTube trailers directly inside Flux without launching an external browser.
-- **Controls & Gestures:** Includes a dimmed cinema backdrop (`Color.black.opacity(0.85)`), title header with video type badge, frosted Liquid Glass close button (`xmark`), and keyboard shortcut support (`Esc` key to close).
-- **Multi-Trailer Rail:** DetailView now renders all fetched trailers in a horizontal `DetailRail` under "Trailers & Extras", allowing users to browse and watch all teasers and official trailers for the title.
-- **Unit Tests:** Added unit tests in `fluxTests/TMDBEnricherTests.swift` covering `TMDBVideo` properties and embed URLs (**24/24 tests passing**).
+### Native Flux Playback & Cinema Theater (`DetailView.swift`, `YouTubeTrailerPlayer.swift`)
+- **Direct App Playback for Season 0 Specials:** Clicking a streamable special launches **Flux's native MPV player window (`openWindow(id: "player")`)** via `PlayerManager.shared.play()`.
+- **Distraction-Free Cinema Theater for Video Extras:** TMDB video extras and trailers open in an upgraded fullscreen `BonusContentPlayerModal` with stripped web clutter, glass header, and `Esc` key dismissal.
+- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** Added tests for `BonusContentItem` properties and streamability (**25 / 25 unit tests passing**).
 
 ---
 

@@ -11,13 +11,12 @@ struct YouTubeWebView: NSViewRepresentable {
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground") // Transparent background
+        webView.setValue(false, forKey: "drawsBackground")
         loadYouTubeVideo(in: webView)
         return webView
     }
     
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        // Only reload if the video key has changed
         if context.coordinator.currentKey != videoKey {
             context.coordinator.currentKey = videoKey
             loadYouTubeVideo(in: nsView)
@@ -66,7 +65,7 @@ struct YouTubeWebView: NSViewRepresentable {
         </head>
         <body>
             <iframe 
-                src="https://www.youtube-nocookie.com/embed/\(videoKey)?autoplay=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&fs=1" 
+                src="https://www.youtube-nocookie.com/embed/\(videoKey)?autoplay=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&fs=1&color=white" 
                 allow="autoplay; encrypted-media; picture-in-picture; fullscreen" 
                 allowfullscreen>
             </iframe>
@@ -77,10 +76,10 @@ struct YouTubeWebView: NSViewRepresentable {
     }
 }
 
-// MARK: - In-App Cinema Trailer Theater Modal
-struct TrailerPlayerModal: View {
-    let video: TMDBVideo
-    let title: String
+// MARK: - In-App Cinema Bonus Content & Trailer Theater Modal
+struct BonusContentPlayerModal: View {
+    let item: BonusContentItem
+    let mainTitle: String
     let onDismiss: () -> Void
     
     @State private var isVisible = false
@@ -88,7 +87,7 @@ struct TrailerPlayerModal: View {
     var body: some View {
         ZStack {
             // 1. Cinema Dimmed Backdrop
-            Color.black.opacity(0.85)
+            Color.black.opacity(0.88)
                 .ignoresSafeArea()
                 .onTapGesture {
                     closeModal()
@@ -100,7 +99,7 @@ struct TrailerPlayerModal: View {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            Text("TRAILER THEATER")
+                            Text("BONUS CONTENT")
                                 .font(.system(size: 10, weight: .bold))
                                 .tracking(1.5)
                                 .foregroundStyle(Color.cyan)
@@ -109,12 +108,12 @@ struct TrailerPlayerModal: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(Color.white.opacity(0.4))
                             
-                            Text(video.type)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.white.opacity(0.7))
+                            Text(item.categoryType)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.75))
                         }
                         
-                        Text("\(title) — \(video.name)")
+                        Text("\(mainTitle) — \(item.title)")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -134,30 +133,32 @@ struct TrailerPlayerModal: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .help("Close Trailer (Esc)")
+                    .help("Close (Esc)")
                     .keyboardShortcut(.escape, modifiers: [])
                 }
                 .padding(.horizontal, 6)
                 
                 // 16:9 HD Video Player Frame
-                ZStack {
-                    YouTubeWebView(videoKey: video.key)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [.white.opacity(0.3), .white.opacity(0.08)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                        .shadow(color: .black.opacity(0.75), radius: 30, x: 0, y: 15)
+                if let key = item.videoKey {
+                    ZStack {
+                        YouTubeWebView(videoKey: key)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.35), .white.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1
+                                    )
+                            )
+                            .shadow(color: .black.opacity(0.85), radius: 30, x: 0, y: 15)
+                    }
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .frame(maxWidth: 960, maxHeight: 540)
                 }
-                .aspectRatio(16/9, contentMode: .fit)
-                .frame(maxWidth: 960, maxHeight: 540)
             }
             .padding(24)
             .frame(maxWidth: 1040)

@@ -19,8 +19,8 @@ struct DetailView: View {
     @State private var isDownloading = false
     @State private var showCollectionsPopover = false
     @State private var trailerURL: URL? = nil
-    @State private var trailers: [TMDBVideo] = []
-    @State private var activeTrailer: TMDBVideo? = nil
+    @State private var bonusContent: [BonusContentItem] = []
+    @State private var activeBonusItem: BonusContentItem? = nil
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -283,11 +283,16 @@ struct DetailView: View {
                                     .help("Download best stream for offline")
 
                                     // Play Trailer in Flux
-                                    if !trailers.isEmpty || trailerURL != nil {
+                                    if !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
-                                            if let video = trailers.first {
-                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                    activeTrailer = video
+                                            if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
+                                                if let episode = firstTrailer.episode {
+                                                    PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
+                                                    openWindow(id: "player", value: displayItem.id)
+                                                } else {
+                                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                        activeBonusItem = firstTrailer
+                                                    }
                                                 }
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
@@ -354,11 +359,16 @@ struct DetailView: View {
                                     .help("Add to list")
 
                                     // Play Trailer Button
-                                    if !trailers.isEmpty || trailerURL != nil {
+                                    if !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
-                                            if let video = trailers.first {
-                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                    activeTrailer = video
+                                            if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
+                                                if let episode = firstTrailer.episode {
+                                                    PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
+                                                    openWindow(id: "player", value: displayItem.id)
+                                                } else {
+                                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                        activeBonusItem = firstTrailer
+                                                    }
                                                 }
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
@@ -466,22 +476,27 @@ struct DetailView: View {
                             }
                         }
                         
-                        if !trailers.isEmpty {
+                        if !bonusContent.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Trailers & Extras")
+                                Text("Bonus Content")
                                     .font(.title2)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.white)
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
 
-                                DetailRail(items: trailers, idPath: \.id, itemWidth: 300, itemHeight: 220) { video in
+                                DetailRail(items: bonusContent, idPath: \.id, itemWidth: 300, itemHeight: 169) { item in
                                     Button {
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                            activeTrailer = video
+                                        if let episode = item.episode {
+                                            PlayerManager.shared.play(displayItem, season: 0, episode: episode.episodeNumber, episodeImage: episode.stillURL)
+                                            openWindow(id: "player", value: displayItem.id)
+                                        } else {
+                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                                activeBonusItem = item
+                                            }
                                         }
                                     } label: {
-                                        TrailerCard(video: video, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
+                                        BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -719,10 +734,10 @@ struct DetailView: View {
             .padding(.top, 14)
         }
         .overlay {
-            if let video = activeTrailer {
-                TrailerPlayerModal(video: video, title: displayItem.title) {
+            if let bonus = activeBonusItem {
+                BonusContentPlayerModal(item: bonus, mainTitle: displayItem.title) {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        activeTrailer = nil
+                        activeBonusItem = nil
                     }
                 }
                 .transition(.opacity)
@@ -820,14 +835,15 @@ struct DetailView: View {
                 relatedItems = Array(related?.filter { $0.id != merged.id }.shuffled().prefix(10) ?? [])
             }
 
-            // Fetch trailers in the background (non-blocking)
+            // Fetch bonus content & extras in the background (non-blocking)
             Task {
-                let fetchedTrailers = await TMDBEnricher.shared.fetchTrailers(item: merged)
+                let fetchedBonus = await TMDBEnricher.shared.fetchBonusContent(item: merged, fullItem: merged)
                 await MainActor.run {
                     withAnimation(.spring(duration: 0.3)) {
-                        self.trailers = fetchedTrailers
-                        if let best = fetchedTrailers.first {
-                            self.trailerURL = best.youtubeURL
+                        self.bonusContent = fetchedBonus
+                        if let bestTrailer = fetchedBonus.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }),
+                           let key = bestTrailer.videoKey {
+                            self.trailerURL = URL(string: "https://www.youtube.com/watch?v=\(key)")
                         }
                     }
                 }

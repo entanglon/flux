@@ -109,5 +109,32 @@ struct TMDBEnricherTests {
         #expect(video.thumbnailURL?.absoluteString.contains("hqdefault.jpg") == true)
         #expect(video.maxResThumbnailURL?.absoluteString.contains("maxresdefault.jpg") == true)
     }
+
+    @Test func bonusContentItemPropertiesAndStreamability() {
+        let specialEp = Episode(id: 101, name: "The Making of Season 1", overview: "Behind the scenes look", stillURL: nil, heroURL: nil, episodeNumber: 1, seasonNumber: 0, airDate: "2026-01-01", runtime: 45)
+        let bonusSpecial = BonusContentItem(
+            id: "special-1",
+            title: "The Making of Season 1",
+            subtitle: "Special • 45m",
+            categoryType: "Special",
+            thumbnailURL: nil,
+            videoKey: nil,
+            episode: specialEp
+        )
+        #expect(bonusSpecial.isStreamableEpisode == true)
+        #expect(bonusSpecial.categoryType == "Special")
+
+        let bonusFeaturette = BonusContentItem(
+            id: "feat-1",
+            title: "Creating the Soundscape",
+            subtitle: "Featurette",
+            categoryType: "Featurette",
+            thumbnailURL: URL(string: "https://example.com/thumb.jpg"),
+            videoKey: "abcd1234",
+            episode: nil
+        )
+        #expect(bonusFeaturette.isStreamableEpisode == false)
+        #expect(bonusFeaturette.videoKey == "abcd1234")
+    }
 }
 

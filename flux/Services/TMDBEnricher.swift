@@ -615,6 +615,81 @@ class TMDBEnricher {
         return 6
     }
 
+    /// Returns all unified bonus content items: Behind the Scenes, Featurettes, Bloopers,
+    /// Season 0 Specials (streamable in native player), and Official Trailers.
+    func fetchBonusContent(item: MediaItem, fullItem: MediaItem? = nil) async -> [BonusContentItem] {
+        var items: [BonusContentItem] = []
+        
+        // 1. Season 0 Specials (from Series metadata - playable in Flux's native torrent stream player)
+        if let episodes = fullItem?.episodes ?? item.episodes {
+            let seasonZeroEpisodes = episodes.filter { $0.seasonNumber == 0 }
+            for ep in seasonZeroEpisodes {
+                let subtitle: String
+                if let runtime = ep.runtime {
+                    subtitle = "Special • \(runtime)m"
+                } else if !ep.overview.isEmpty {
+                    subtitle = "Special Episode"
+                } else {
+                    subtitle = "Special Feature"
+                }
+                
+                items.append(BonusContentItem(
+                    id: "s0-e\(ep.episodeNumber)-\(ep.id)",
+                    title: ep.name.isEmpty ? "Special \(ep.episodeNumber)" : ep.name,
+                    subtitle: subtitle,
+                    categoryType: "Special",
+                    thumbnailURL: ep.stillURL ?? item.backdropURL ?? item.heroURL,
+                    videoKey: nil,
+                    episode: ep
+                ))
+            }
+        }
+        
+        // 2. TMDB Video Extras (Behind the Scenes, Featurettes, Bloopers, Clips, Trailers)
+        let videos = await fetchTrailers(item: item)
+        for vid in videos {
+            let catType: String
+            switch vid.type {
+            case "Behind the Scenes": catType = "Behind the Scenes"
+            case "Featurette": catType = "Featurette"
+            case "Bloopers": catType = "Bloopers"
+            case "Clip": catType = "Clip"
+            case "Teaser": catType = "Teaser"
+            default: catType = "Trailer"
+            }
+            
+            items.append(BonusContentItem(
+                id: "tmdb-vid-\(vid.id)",
+                title: vid.name,
+                subtitle: catType,
+                categoryType: catType,
+                thumbnailURL: vid.maxResThumbnailURL ?? vid.thumbnailURL ?? item.backdropURL,
+                videoKey: vid.key,
+                episode: nil
+            ))
+        }
+        
+        // Sort items: Specials & Featurettes first, then Trailers
+        return items.sorted { item1, item2 in
+            let r1 = bonusRank(category: item1.categoryType)
+            let r2 = bonusRank(category: item2.categoryType)
+            return r1 < r2
+        }
+    }
+
+    private func bonusRank(category: String) -> Int {
+        switch category {
+        case "Special": return 0
+        case "Behind the Scenes": return 1
+        case "Featurette": return 2
+        case "Bloopers": return 3
+        case "Trailer": return 4
+        case "Teaser": return 5
+        case "Clip": return 6
+        default: return 7
+        }
+    }
+
     /// Returns the best YouTube trailer URL for a title, or nil if none.
     func fetchTrailerURL(item: MediaItem) async -> URL? {
         let trailers = await fetchTrailers(item: item)
