@@ -41,18 +41,28 @@ struct fluxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
 
+    private static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        ProcessInfo.processInfo.environment["XCInjectBundleInto"] != nil
+    }
+
     init() {
         #if os(macOS)
-        guard acquireSingleInstanceLock() else {
-            print("[flux] Another instance is already running — exiting")
-            exit(0)
+        if !Self.isRunningTests {
+            guard acquireSingleInstanceLock() else {
+                print("[flux] Another instance is already running — exiting")
+                exit(0)
+            }
         }
         NSWindow.allowsAutomaticWindowTabbing = false
         #endif
 
-        StremioServerManager.shared.startServerIfNeeded()
-        StreamProxyManager.shared.start()
-        AuthManager.shared.syncOnLaunch()
+        if !Self.isRunningTests {
+            StremioServerManager.shared.startServerIfNeeded()
+            StreamProxyManager.shared.start()
+            AuthManager.shared.syncOnLaunch()
+        }
     }
     
     var body: some Scene {

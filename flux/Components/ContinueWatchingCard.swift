@@ -234,6 +234,9 @@ struct ContinueWatchingCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.title), \(mode == .continueWatching ? "Continue watching" : "Recently watched"), \(subtitleText)")
+        .accessibilityHint("Resumes playback")
         .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
             fetchedImage = nil

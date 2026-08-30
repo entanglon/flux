@@ -74,6 +74,9 @@ struct GenreCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: .black.opacity(isHovering ? 0.45 : 0.25), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 6 : 3)
             .animation(.easeOut(duration: 0.2), value: isHovering)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(genre.name) genre")
+            .accessibilityHint("Browse all \(genre.name) titles")
             .onHover { hovering in
                 isHovering = hovering
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }

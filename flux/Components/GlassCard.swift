@@ -69,22 +69,15 @@ struct GlassCard: View {
                             CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 1200) { phase in
                                 switch phase {
                                 case .empty:
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.15))
+                                    placeholderView
                                 case .success(let image):
                                     image
                                         .resizable()
                                         .aspectRatio(contentMode: .fill)
                                 case .failure:
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.15))
-                                        .overlay(
-                                            Image(systemName: "photo")
-                                                .font(.system(size: 20))
-                                                .foregroundColor(.white.opacity(0.3))
-                                        )
+                                    placeholderView
                                 @unknown default:
-                                    EmptyView()
+                                    placeholderView
                                 }
                             }
                         }
@@ -219,6 +212,32 @@ struct GlassCard: View {
             if displayItem.category == "TV Show", !displayItem.id.hasPrefix("tt"),
                userData.watchlist.contains(where: { $0.id == displayItem.id }) {
                 hasNewEpisode = await TMDBEnricher.shared.hasAiredNewEpisode(tmdbID: displayItem.id)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(displayItem.title), \(displayItem.category)\(displayItem.releaseDateYear.map { ", \($0)" } ?? "")")
+        .accessibilityHint("Opens title details")
+    }
+
+    private var placeholderView: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.16, green: 0.18, blue: 0.28).opacity(0.6), Color(red: 0.08, green: 0.09, blue: 0.15)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            VStack(spacing: 8) {
+                Image(systemName: displayItem.category.lowercased().contains("movie") ? "film" : "tv")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                
+                Text(displayItem.title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
             }
         }
     }
