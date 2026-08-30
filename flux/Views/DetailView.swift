@@ -478,7 +478,7 @@ struct DetailView: View {
                                     Button {
                                         playBonusContent(item)
                                     } label: {
-                                        BonusContentCard(item: item)
+                                        BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -808,26 +808,22 @@ struct DetailView: View {
                 }
             }
             
-            let tmdbSimilar = await TMDBEnricher.shared.fetchSimilar(item: merged)
+            async let fetchedBonusTask = TMDBEnricher.shared.fetchBonusContent(item: merged, fullItem: merged)
+            async let tmdbSimilarTask = TMDBEnricher.shared.fetchSimilar(item: merged)
+            
+            let (fetchedBonus, tmdbSimilar) = await (fetchedBonusTask, tmdbSimilarTask)
+            
+            self.bonusContent = fetchedBonus
+            if let bestTrailer = fetchedBonus.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }),
+               let key = bestTrailer.videoKey {
+                self.trailerURL = URL(string: "https://www.youtube.com/watch?v=\(key)")
+            }
+            
             if !tmdbSimilar.isEmpty {
                 relatedItems = Array(tmdbSimilar.filter { $0.id != merged.id }.prefix(12))
             } else {
                 let related = try? await StremioService.shared.fetchRelated(type: type, genres: merged.genres)
                 relatedItems = Array(related?.filter { $0.id != merged.id }.shuffled().prefix(10) ?? [])
-            }
-
-            // Fetch bonus content & extras in the background (non-blocking)
-            Task {
-                let fetchedBonus = await TMDBEnricher.shared.fetchBonusContent(item: merged, fullItem: merged)
-                await MainActor.run {
-                    withAnimation(.spring(duration: 0.3)) {
-                        self.bonusContent = fetchedBonus
-                        if let bestTrailer = fetchedBonus.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }),
-                           let key = bestTrailer.videoKey {
-                            self.trailerURL = URL(string: "https://www.youtube.com/watch?v=\(key)")
-                        }
-                    }
-                }
             }
 
             await MainActor.run {

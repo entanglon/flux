@@ -132,15 +132,15 @@ struct GlassCard: View {
                              
                          } label: {
                              Image(systemName: "ellipsis")
-                                 .font(.system(size: 16, weight: .bold))
+                                 .font(.system(size: 13, weight: .bold))
                                  .foregroundColor(.white)
-                                 .padding(8)
+                                 .frame(width: 28, height: 28)
                                  .glassEffect(.regular.interactive(), in: .circle)
-                                 .contentShape(Rectangle())
+                                 .contentShape(Circle())
                          }
                          .menuStyle(.button)
                          .buttonStyle(.plain)
-                         .padding(8)
+                         .padding(10)
                     }
                 }
                 .overlay(alignment: .bottom) {

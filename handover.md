@@ -1,19 +1,19 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — BONUS CONTENT CARD POLISH (UNDIMMED VIBRANT ARTWORK, NO PLAY BUTTON, STABLE HOVER TYPOGRAPHY) + GHOST LOADING + CLEAN PLACEHOLDERS
+## LATEST: Aug 30, 2026 — POPULAR TV SHOWS NEWS/TALK FILTERING + BONUS CONTENT TITLE ART FALLBACK & UNIFIED DETAIL TRANSITION + SYMMETRIC CARD MENU INSETS
 
-### Bonus Content Card Visual Refinements (`BonusContentCard.swift`)
-- **Removed Center Play Button:** Deleted the centered frosted play disc / circle button for a cleaner, modern editorial poster presentation.
-- **Zero Artificial Dimming:** Artwork is rendered 100% vibrant with full brightness across the top and center; only a subtle, soft gradient is placed strictly behind the text at the bottom.
-- **Eliminated Duplicate Thumbnail Flash:** Replaced the global backdrop fallback with a clean dark placeholder (`Rectangle().fill(Color(white: 0.12))`). Cards no longer flash the show's main hero backdrop before their individual stills finish loading.
-- **Removed "Play Special" Badge:** Dropped the cyan badge text for a clean, uniform metadata appearance.
-- **Stable Typography (Zero Hover Text Shift):** Fixed title font weight to constant `.semibold`, preventing any font reflow or text jitter when hovering.
-- **Hover Highlights (Zero Zoom):** Specular gradient border stroke and elevation shadow with strictly zero scale zoom.
+### Popular TV Shows News & Broadcast Filtering (`TMDBEnricher.swift`)
+- **Root Cause for *Tagesschau*:** TMDB's raw `/tv/popular` endpoint calculates popularity using raw web page view metrics, causing German daily news broadcast *Tagesschau* (and other non-scripted daily programs) to rank in the top 3.
+- **Fix:** 
+  1. Updated `fetchPopularTV()` and `fetchStreamingTV()` to use TMDB discover with `without_genres=10763,10767` (News `10763`, Talk `10767`) and `vote_count.gte=10`.
+  2. In `fetchCatalog(from:type:allowUnreleased:)` and `fetchTrendingAll()`, added strict programmatic filters excluding genre IDs `10763` (News) and `10767` (Talk) as well as daily news programs like *Tagesschau*. All TV rails across Home and TV Shows pages now strictly display premium scripted television shows.
 
-### Bonus Content Ghost Loading & Visibility (`DetailView.swift`)
-- **Dedicated Ghost Rail:** Added a 16:9 widescreen `GhostRail(posterWidth: 300, ratio: 16/9)` during detail loading so bonus content cards load in seamlessly.
-- **Conditional Visibility:** If a title has no bonus content or specials, the Bonus Content section remains completely hidden.
-- **Clean Season Dropdown:** Filtered out Season 0 / Specials from the season dropdown, keeping only regular seasons (`Season 1`, `Season 2`, etc.).
+### Bonus Content Title Art Fallback & Unified Page Transition (`DetailView.swift`, `BonusContentCard.swift`, `TMDBEnricher.swift`)
+- **Title Art Fallback:** If a bonus item or Season 0 special lacks a dedicated episode still thumbnail, it automatically falls back to the show's backdrop artwork (`displayItem.backdropURL ?? displayItem.heroURL`) so no card is ever rendered as a blank box.
+- **Eliminated Expanding Rail Animation:** Coordinated `fetchBonusContent()` and `fetchSimilar()` using `async let` inside `loadDetails()`. When `isLoadingDetails` becomes `false`, all sections (episodes, bonus content, related, and cast) transition in together in one unified opacity fade without expanding downwards from the episodes rail.
+
+### Symmetric Card Menu Button Insets (`GlassCard.swift`)
+- **Exact Corner Symmetry:** Replaced non-square padding on `Image(systemName: "ellipsis")` with a fixed `28×28pt` circular frame and `.padding(10)`. The distance from the menu button to the right border of the card is now exactly identical to the distance from the bottom border down to the single pixel.
 - **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** 25 / 25 unit tests passing (100% pass rate).
 
 ---

@@ -368,7 +368,15 @@ class TMDBEnricher {
         let (data, _) = try await URLSession.shared.data(from: url)
         
         let response = try JSONDecoder().decode(TMDBTrendingResponse.self, from: data)
-        let results = response.results.compactMap { $0.toMediaItem() }
+        let filtered = response.results.filter { item in
+            if let genres = item.genreIds {
+                if genres.contains(10763) || genres.contains(10767) { return false }
+            }
+            let name = (item.name ?? item.title ?? "").lowercased()
+            if name.contains("tagesschau") || name.contains("tagesthemen") { return false }
+            return true
+        }
+        let results = filtered.compactMap { $0.toMediaItem() }
         
         await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: results, ttl: window == "day" ? .trendingDay : .trendingWeek)
         return results
@@ -458,7 +466,7 @@ class TMDBEnricher {
         let cacheKey = "tv:popular:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
-        let urlString = "\(baseURL)/tv/popular?api_key=\(apiKey)&page=\(page)"
+        let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&sort_by=popularity.desc&without_genres=10763,10767&include_adult=false&vote_count.gte=10&page=\(page)"
         let items = try await fetchCatalog(from: urlString, type: "tv")
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .popular) }
         return items
@@ -498,7 +506,7 @@ class TMDBEnricher {
         let cacheKey = "tv:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
-        let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+        let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&without_genres=10763,10767&include_adult=false&vote_count.gte=30&page=\(page)"
         let items = try await fetchCatalog(from: urlString, type: "tv")
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
         return items
@@ -515,7 +523,15 @@ class TMDBEnricher {
             return allowUnreleased ? items : items.filter { $0.isReleased }
         } else {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
-            let items = response.results.map { $0.toMediaItem() }
+            let filtered = response.results.filter { show in
+                if let genres = show.genreIds {
+                    if genres.contains(10763) || genres.contains(10767) { return false }
+                }
+                let lower = show.name.lowercased()
+                if lower.contains("tagesschau") || lower.contains("tagesthemen") { return false }
+                return true
+            }
+            let items = filtered.map { $0.toMediaItem() }
             return allowUnreleased ? items : items.filter { $0.isReleased }
         }
     }
@@ -644,7 +660,7 @@ class TMDBEnricher {
             for ep in seasonZeroEpisodes {
                 let tmdbData = tmdbStills[ep.episodeNumber]
                 let epName = (!ep.name.isEmpty && ep.name != "Episode \(ep.episodeNumber)") ? ep.name : (tmdbData?.name ?? "Special \(ep.episodeNumber)")
-                let epStill = ep.stillURL ?? tmdbData?.stillURL
+                let epStill = ep.stillURL ?? tmdbData?.stillURL ?? item.backdropURL ?? item.heroURL
                 
                 let subtitle: String
                 if let runtime = ep.runtime {

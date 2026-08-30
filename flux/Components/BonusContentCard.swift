@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BonusContentCard: View {
     let item: BonusContentItem
+    var fallbackBackdropURL: URL? = nil
     
     @State private var isHovered = false
     
@@ -17,11 +18,11 @@ struct BonusContentCard: View {
                                 .resizable()
                                 .aspectRatio(16/9, contentMode: .fill)
                         default:
-                            Rectangle().fill(Color(white: 0.12))
+                            fallbackView
                         }
                     }
                 } else {
-                    Rectangle().fill(Color(white: 0.12))
+                    fallbackView
                 }
             }
             .frame(width: 300, height: 169)
@@ -97,6 +98,23 @@ struct BonusContentCard: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovered = hovering
+        }
+    }
+    
+    @ViewBuilder
+    private var fallbackView: some View {
+        if let fallback = fallbackBackdropURL {
+            CachedImage(url: fallback, maxDimension: 600) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .aspectRatio(16/9, contentMode: .fill)
+                } else {
+                    Rectangle().fill(Color(white: 0.12))
+                }
+            }
+        } else {
+            Rectangle().fill(Color(white: 0.12))
         }
     }
 }
