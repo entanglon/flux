@@ -1,95 +1,193 @@
 import SwiftUI
 
 struct TVShowsView: View {
+    @State private var heroShows: [MediaItem] = []
+    @State private var forYouShows: [MediaItem] = []
+    @State private var trendingTodayShows: [MediaItem] = []
+    @State private var trendingWeekShows: [MediaItem] = []
     @State private var popularShows: [MediaItem] = []
-    @State private var trendingShows: [MediaItem] = []
+    @State private var airingTodayShows: [MediaItem] = []
+    @State private var onTheAirShows: [MediaItem] = []
+    @State private var streamingShows: [MediaItem] = []
+    @State private var topRatedShows: [MediaItem] = []
+    @State private var trendingWindow: String = "day"
     @State private var isLoading = true
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 48) {
-                if isLoading {
-                    VStack(spacing: 48) {
+            LazyVStack(spacing: 0) {
+                if isLoading && heroShows.isEmpty && popularShows.isEmpty {
+                    VStack(alignment: .leading, spacing: 44) {
                         GhostHero()
-                        GhostGrid()
+                        GhostRail()
+                        GhostRail()
                     }
+                    .padding(.bottom, 40)
                     .transition(.opacity)
                 } else {
-                    // Featured Carousel
-                    if !popularShows.isEmpty {
-                        FeaturedCarousel(items: Array(popularShows.prefix(5)))
+                    // Featured TV Carousel
+                    if !heroShows.isEmpty {
+                        FeaturedCarousel(items: Array(heroShows.prefix(5)))
+                            .padding(.bottom, 10)
                     }
-                    
-                    // Popular Shows Grid
-                    if !popularShows.isEmpty {
+
+                    // For You TV Shows
+                    if !forYouShows.isEmpty {
+                        renderRail(title: "For You", listType: .fixed(title: "For You TV Shows", items: forYouShows), items: forYouShows)
+                    }
+
+                    // 1. Combined Trending TV Shows with Liquid Glass Toggle
+                    let activeTrending = trendingWindow == "day" ? trendingTodayShows : trendingWeekShows
+                    if !activeTrending.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(title: "Popular Shows", value: MediaListView.ListType.popularTV)
-                                .padding(.leading, 268)
-                                .padding(.trailing, 40)
-                            
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
-                                ForEach(popularShows) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .landscape, showTitle: false)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
+                            TrendingToggleSectionHeader(
+                                title: "Trending",
+                                window: $trendingWindow,
+                                value: MediaListView.ListType.trendingTV(window: trendingWindow)
+                            )
                             .padding(.leading, 268)
                             .padding(.trailing, 40)
-                        }
-                    }
-                    
-                    // Trending Shows Grid
-                    if !trendingShows.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(title: "Trending Now", value: MediaListView.ListType.trendingTV)
-                                .padding(.leading, 268)
-                                .padding(.trailing, 40)
-                            
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 40) {
-                                ForEach(trendingShows) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .landscape, showTitle: false)
-                                    }
-                                    .buttonStyle(.plain)
+
+                            CarouselView(items: activeTrending) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                        .frame(width: 180)
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
+                            .id("trending-tv-\(trendingWindow)")
                         }
+                        .padding(.bottom, 16)
+                    }
+
+                    // 2. Popular TV Shows
+                    if !popularShows.isEmpty {
+                        renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
+                    }
+
+                    // 4. Airing Today on TV
+                    if !airingTodayShows.isEmpty {
+                        renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayShows)
+                    }
+
+                    // 5. On The Air / This Week on TV
+                    if !onTheAirShows.isEmpty {
+                        renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirShows)
+                    }
+
+                    // 6. Popular on Streaming
+                    if !streamingShows.isEmpty {
+                        renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
+                    }
+
+                    // 7. Top Rated TV Shows
+                    if !topRatedShows.isEmpty {
+                        renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
                     }
                 }
             }
             .padding(.bottom, 80)
         }
-
-        .ignoresSafeArea(edges: .top)
+        .ignoresSafeArea(.all, edges: .top)
+        .refreshable {
+            await TMDBCatalogCacheActor.shared.clear()
+            await loadData()
+        }
         .task {
             await loadData()
         }
     }
     
+    @ViewBuilder
+    private func renderRail(title: String, listType: MediaListView.ListType, items: [MediaItem]) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ListSectionHeader(title: title, value: listType)
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+            
+            CarouselView(items: items) { item in
+                NavigationLink(value: item) {
+                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                        .frame(width: 180)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 16)
+    }
+    
     private func loadData() async {
-        do {
-            async let popular = StremioService.shared.fetchPopularTVShows()
-            async let trending = StremioService.shared.fetchTrendingTVShows()
-            
-            let (p, t) = try await (popular, trending)
-            
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.popularShows = p.filter { $0.isReleased }
-                    self.trendingShows = t.filter { $0.isReleased }
-                    self.isLoading = false
+        await withTaskGroup(of: Void.self) { group in
+            // 1. Trending Today & Hero
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingTV(window: "day"), !items.isEmpty {
+                    await MainActor.run {
+                        self.trendingTodayShows = items
+                        self.heroShows = Array(items.prefix(10))
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
                 }
             }
-        } catch {
-            print("Error fetching TV shows: \(error)")
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    isLoading = false
+            
+            // 2. Trending This Week
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingTV(window: "week"), !items.isEmpty {
+                    await MainActor.run { self.trendingWeekShows = items }
                 }
+            }
+            
+            // 3. Popular TV Shows
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchPopularTV(), !items.isEmpty {
+                    await MainActor.run {
+                        self.popularShows = items
+                        if self.heroShows.isEmpty { self.heroShows = Array(items.prefix(10)) }
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
+                }
+            }
+
+            // 4. Airing Today on TV
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchAiringTodayTV(), !items.isEmpty {
+                    await MainActor.run { self.airingTodayShows = items }
+                }
+            }
+
+            // 5. On The Air / This Week on TV
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchOnTheAirTV(), !items.isEmpty {
+                    await MainActor.run { self.onTheAirShows = items }
+                }
+            }
+
+            // 6. Popular on Streaming
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchStreamingTV(), !items.isEmpty {
+                    await MainActor.run { self.streamingShows = items }
+                }
+            }
+
+            // 7. Top Rated TV Shows
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTopRatedTV(), !items.isEmpty {
+                    await MainActor.run { self.topRatedShows = items }
+                }
+            }
+
+            // 8. For You TV Shows
+            group.addTask {
+                if TasteProfileManager.shared.hasEnoughSignal {
+                    let (recs, _) = await TasteProfileManager.shared.forYouRecommendations()
+                    let tvRecs = recs.filter { $0.category.lowercased().contains("tv") || $0.category.lowercased().contains("series") }
+                    await MainActor.run { self.forYouShows = tvRecs }
+                }
+            }
+        }
+
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
             }
         }
     }

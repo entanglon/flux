@@ -63,12 +63,37 @@ struct MediaItem: Identifiable, Hashable, Codable {
         }
         return true
     }
+
+    var upcomingBadgeText: String {
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: dateStr) else { return "Coming Soon" }
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            return "Releasing Today"
+        } else if cal.isDateInTomorrow(date) {
+            return "Coming Tomorrow"
+        } else {
+            let days = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day ?? 0
+            if days > 0 && days <= 7 {
+                let dayFormatter = DateFormatter()
+                dayFormatter.dateFormat = "EEEE"
+                return "Coming \(dayFormatter.string(from: date))"
+            } else {
+                let displayFormatter = DateFormatter()
+                displayFormatter.dateFormat = "MMMM d"
+                return "Coming \(displayFormatter.string(from: date))"
+            }
+        }
+    }
     
     // History Specific
     var lastSeason: Int?
     var lastEpisode: Int?
     var lastEpisodeTitle: String?
     var lastEpisodeImage: URL?
+    var timestamp: TimeInterval?
 }
 
 /// Minimal init for recommendation seeds — extension keeps the memberwise init.
@@ -81,7 +106,8 @@ extension MediaItem {
             director: nil, seasons: nil, runtime: nil, certification: nil,
             genres: genres, popularity: nil, releaseDate: nil, spokenLanguages: nil,
             originCountry: nil, voteAverage: nil, episodes: nil, watchProviders: nil,
-            lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil
+            lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil,
+            timestamp: nil
         )
     }
 }

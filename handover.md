@@ -1,6 +1,38 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 28, 2026 — CRASH FIX + CACHE EVICTION + AUTH FLASH + UI/UX POLISH + DATABASE CLOUD SYNC
+## LATEST: Aug 30, 2026 — LIQUID GLASS TOGGLE + UPCOMING TITLES + WATCH HISTORY REORDER + TMDB DYNAMIC CATALOG CACHING + CAROUSEL DIFFING
+
+### Liquid Glass Segmented Toggle (`SectionHeader.swift`, `HomeView.swift`, `MoviesView.swift`, `TVShowsView.swift`)
+- **Combined Trending Rails:** Replaced separate "Trending Today" and "Trending This Week" horizontal rails with a single "Trending" section header featuring an Apple native Liquid Glass `[ Today | This Week ]` segmented toggle before the navigation chevron.
+- **Permanent Socket Typography:** Positioned labels permanently inside the track capsule base (`.glassEffect(.regular, in: .capsule)`). Active label stays crisp white (`Color.white`) while inactive label sits softly in the background (`Color.white.opacity(0.50)`).
+- **Empty Zero-Distortion Glass Lens:** Sliding pill is an empty, crystal-clear optical glass lens with zero optical lens warping/distortion, gliding smoothly over the stationary socket typography with crisp specular gradient edge glints.
+- **Physical Pop-Out & Motion Dynamics:**
+  - **1.32x Vertical Height Expansion:** Pill expands vertically upon press/hold (`scaleEffect(y: isDragging ? 1.32 : 1.0)`), visibly popping above and below the track borders.
+  - **1:1 Realtime Cursor Tracking:** Pointer interpolation with zero tap/drag gesture conflicts via `DragGesture(minimumDistance: 0)`.
+  - **Velocity Squish & Rubber-Banding:** Preserves optical volume using horizontal stretch/squash compensation (`GlassMotion.squish`) and boundary rubber-banding.
+  - **Spring Physics:** Tuned `GlassMotion` physics (`popOut`, `drag`, `settle`, `squish`, and `reduced` for accessibility).
+
+### Upcoming Content Detail Actions (`DetailView.swift`, `MediaItem.swift`)
+- **Release-Date Detection:** Added `isUpcoming` computed property to `MediaItem` comparing release/first-air dates against current day.
+- **Sanitized Action Buttons:** For unreleased / upcoming titles, removed invalid playback/download/mark-watched controls and substituted a prominent primary **"Add to Watchlist" / "In Watchlist"** action button matching Apple TV.
+
+### Watch History Sorting Fix (`UserDataService.swift`)
+- **Chronological Order:** Sorted `recentlyWatched` items strictly descending by `updatedAt` / `lastWatched` timestamp, ensuring the most recently watched items always appear first instead of last.
+
+### Continue Watching Navigation Polish (`HomeView.swift`, `MediaListView.swift`)
+- **Heading Destination Parity:** Fixed header button on Home screen so clicking "Continue Watching >" opens the designated Continue Watching landscape page rather than Recently Watched.
+
+### Dynamic TMDB Catalog Caching & Background Refresh (`TMDBCatalogCacheActor.swift`, `TMDBEnricher.swift`)
+- **Thread-Safe Actor Caching:** Introduced `TMDBCatalogCacheActor` with TTL expiration for TMDB catalog and discover queries, preventing stale content lock while minimizing unnecessary network roundtrips.
+- **Unit Tests:** Added full test coverage in `fluxTests/TMDBEnricherTests.swift`.
+
+### Carousel Item Diffing & Re-rendering (`CarouselView.swift`)
+- **Identity-Based Iteration:** Switched `CarouselView` `ForEach` from index offsets to item IDs (`\.element.id` / `.id(item.id)`).
+- **Dynamic View Identity:** Bound `.id("trending-...-\(trendingWindow)")` so switching between daily and weekly trending instantly updates the visible cards and resets scroll position without layout stutter.
+
+---
+
+## Aug 28, 2026 — CRASH FIX + CACHE EVICTION + AUTH FLASH + UI/UX POLISH + DATABASE CLOUD SYNC
 
 ### Warm-Core NSWindow Double-Release Crash Fix
 - **Root cause:** `cancelDetailPrefetch()` called `hostWindow?.close()` which auto-releases the window (`isReleasedWhenClosed = true`), then `warmCore = nil` released it again via ARC → crash

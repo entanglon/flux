@@ -287,37 +287,178 @@ class TMDBEnricher {
         return overviews
     }
     
-    // MARK: - Catalog Fetching (Flux Discovery Layer)
-    func fetchTrendingAll() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/trending/all/week?api_key=\(apiKey)"
+    // MARK: - Regional & Locale Helpers
+    var currentRegion: String {
+        Locale.current.region?.identifier ?? "US"
+    }
+    
+    var currentTimeZone: String {
+        TimeZone.current.identifier
+    }
+
+    // MARK: - Catalog Fetching (Flux Discovery Layer with TTL-Aware Caching)
+    
+    func fetchTrendingAll(window: String = "day") async throws -> [MediaItem] {
+        let cacheKey = "trending:all:\(window)"
+        if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) {
+            return cached
+        }
+        
+        let urlString = "\(baseURL)/trending/all/\(window)?api_key=\(apiKey)"
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(from: url)
         
         let response = try JSONDecoder().decode(TMDBTrendingResponse.self, from: data)
         let results = response.results.compactMap { $0.toMediaItem() }
         
-        // Apply Freshness Filter: Only 2024+ content for the main Hero
-        return results.filter { item in
-            guard let date = item.releaseDate, !date.isEmpty else { return true }
-            return date >= "2024-01-01"
+        await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: results, ttl: window == "day" ? .trendingDay : .trendingWeek)
+        return results
+    }
+
+    func fetchTrendingMovies(window: String = "day") async throws -> [MediaItem] {
+        let cacheKey = "trending:movie:\(window)"
+        if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/trending/movie/\(window)?api_key=\(apiKey)"
+        let items = try await fetchCatalog(from: urlString, type: "movie")
+        await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: window == "day" ? .trendingDay : .trendingWeek)
+        return items
+    }
+
+    func fetchTrendingTV(window: String = "day") async throws -> [MediaItem] {
+        let cacheKey = "trending:tv:\(window)"
+        if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/trending/tv/\(window)?api_key=\(apiKey)"
+        let items = try await fetchCatalog(from: urlString, type: "tv")
+        await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: window == "day" ? .trendingDay : .trendingWeek)
+        return items
+    }
+
+    func fetchPopularMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:popular:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/movie/popular?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .popular) }
+        return items
+    }
+
+    func fetchNowPlayingMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:now_playing:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .nowPlaying) }
+        return items
+    }
+
+    func fetchUpcomingMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:upcoming:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/movie/upcoming?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .upcoming) }
+        return items
+    }
+
+    func fetchTopRatedMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:top_rated:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/movie/top_rated?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .topRated) }
+        return items
+    }
+
+    func fetchStreamingMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:streaming:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
+        return items
+    }
+
+    func fetchQuickWatchMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "movie:quick:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_runtime.lte=95&sort_by=popularity.desc&include_adult=false&vote_count.gte=50&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
+        return items
+    }
+
+    func fetchPopularTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "tv:popular:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/tv/popular?api_key=\(apiKey)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .popular) }
+        return items
+    }
+
+    func fetchAiringTodayTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "tv:airing_today:\(currentTimeZone):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/tv/airing_today?api_key=\(apiKey)&timezone=\(currentTimeZone)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .airingToday) }
+        return items
+    }
+
+    func fetchOnTheAirTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "tv:on_the_air:\(currentTimeZone):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)&timezone=\(currentTimeZone)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .nowPlaying) }
+        return items
+    }
+
+    func fetchTopRatedTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "tv:top_rated:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/tv/top_rated?api_key=\(apiKey)&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .topRated) }
+        return items
+    }
+
+    func fetchStreamingTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "tv:streaming:\(currentRegion):\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+        
+        let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+        let items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
+        return items
+    }
+
+    // Generic Internal Fetcher with allowUnreleased switch
+    private func fetchCatalog(from urlString: String, type mediaType: String, allowUnreleased: Bool = false) async throws -> [MediaItem] {
+        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        if mediaType == "movie" {
+            let response = try JSONDecoder().decode(TMDBResponse<TMDBMovie>.self, from: data)
+            let items = response.results.map { $0.toMediaItem() }
+            return allowUnreleased ? items : items.filter { $0.isReleased }
+        } else {
+            let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
+            let items = response.results.map { $0.toMediaItem() }
+            return allowUnreleased ? items : items.filter { $0.isReleased }
         }
-    }
-    func fetchTrending(type: String) async throws -> [MediaItem] {
-        let mediaType = type.contains("movie") ? "movie" : "tv"
-        let urlString = "\(baseURL)/trending/\(mediaType)/week?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: mediaType)
-    }
-
-    func fetchPopular(type: String) async throws -> [MediaItem] {
-        let mediaType = type.contains("movie") ? "movie" : "tv"
-        let urlString = "\(baseURL)/\(mediaType)/popular?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: mediaType)
-    }
-
-    func fetchTopRated(type: String) async throws -> [MediaItem] {
-        let mediaType = type.contains("movie") ? "movie" : "tv"
-        let urlString = "\(baseURL)/\(mediaType)/top_rated?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: mediaType)
     }
 
     /// TMDB discover by genre — real genre-accurate titles, page-based pagination
@@ -342,10 +483,7 @@ class TMDBEnricher {
         return (try? await fetchCatalog(from: urlString, type: type)) ?? []
     }
 
-    /// OTT platform catalogs via TMDB watch providers — always fresh, unlike the
-    /// stale third-party Streaming Catalogs addon. Maps our platform codes to
-    /// TMDB provider IDs (US region) and queries /discover with
-    /// `with_watch_providers`. Returns popularity-sorted results.
+    /// OTT platform catalogs via TMDB watch providers
     static let tmdbProviderIDs: [String: Int] = [
         "nfx": 8,      // Netflix
         "dnp": 337,    // Disney+
@@ -361,31 +499,8 @@ class TMDBEnricher {
     func fetchWatchProviderCatalog(platformID: String, type: String, page: Int = 1) async -> [MediaItem] {
         guard hasKey, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
         let mediaType = type == "series" ? "tv" : "movie"
-        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=US&sort_by=popularity.desc&include_adult=false&vote_count.gte=50&page=\(page)"
+        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
         return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
-    }
-
-    func fetchUpcomingMovies() async throws -> [MediaItem] {        // /movie/upcoming mixes in titles whose PRIMARY date already passed
-        // (earlier foreign release), which breaks unreleased-only filtering.
-        // discover with primary_release_date.gte=today guarantees genuinely
-        // unreleased, popularity-sorted results.
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let today = fmt.string(from: Date())
-        let discoverURL = "\(baseURL)/discover/movie?api_key=\(apiKey)&primary_release_date.gte=\(today)&sort_by=popularity.desc&include_adult=false"
-        let items = try await fetchCatalog(from: discoverURL, type: "movie")
-        if !items.isEmpty { return items }
-        return try await fetchCatalog(from: "\(baseURL)/movie/upcoming?api_key=\(apiKey)", type: "movie")
-    }
-
-    func fetchLatestMovies() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: "movie")
-    }
-    
-    func fetchLatestTV() async throws -> [MediaItem] {
-        let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)"
-        return try await fetchCatalog(from: urlString, type: "tv")
     }
 
     func fetchSimilar(item: MediaItem) async -> [MediaItem] {
@@ -407,7 +522,6 @@ class TMDBEnricher {
     }
 
     /// Returns the best YouTube trailer URL for a title, or nil if none.
-    /// Prefers an official "Trailer"; falls back to any YouTube trailer/teaser.
     func fetchTrailerURL(item: MediaItem) async -> URL? {
         guard hasKey else { return nil }
         let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
@@ -426,20 +540,6 @@ class TMDBEnricher {
             ?? youtube.first { $0.type == "Teaser" }
             ?? youtube.first
         return best?.youtubeURL
-    }
-
-    // Generic Internal Fetcher
-    private func fetchCatalog(from urlString: String, type mediaType: String) async throws -> [MediaItem] {
-        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-        let (data, _) = try await URLSession.shared.data(from: url)
-        
-        if mediaType == "movie" {
-            let response = try JSONDecoder().decode(TMDBResponse<TMDBMovie>.self, from: data)
-            return response.results.map { $0.toMediaItem() }.filter { $0.isReleased }
-        } else {
-            let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
-            return response.results.map { $0.toMediaItem() }.filter { $0.isReleased }
-        }
     }
     
     // MARK: - Helper API Calls

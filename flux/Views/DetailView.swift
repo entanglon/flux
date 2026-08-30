@@ -98,7 +98,15 @@ struct DetailView: View {
                         // Hero Content Overlay
                         VStack(alignment: .leading, spacing: 16) {
                             // 1. Dynamic Eyebrow
-                            if let episode = heroEpisode {
+                            if !isReleased {
+                                Text(displayItem.upcomingBadgeText)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.white.opacity(0.18)))
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                            } else if let episode = heroEpisode {
                                 Text("S\(episode.seasonNumber), E\(episode.episodeNumber) • \(episode.name)")
                                     .font(.headline)
                                     .fontWeight(.bold)
@@ -187,102 +195,11 @@ struct DetailView: View {
                                         }
                                     }
                                     .buttonStyle(.plain)
-                                }
-                                
-                                Button(action: {
-                                    userData.toggleWatchlist(displayItem)
-                                }) {
-                                    Image(systemName: userData.isInWatchlist(displayItem) ? "checkmark" : "plus")
-                                        .font(.title3)
-                                        .foregroundStyle(.white)
-                                        .padding(14)
-                                        .glassEffect(.regular.interactive(), in: .circle)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
-                                .accessibilityLabel(userData.isInWatchlist(displayItem) ? "Remove from Watchlist" : "Add to Watchlist")
-
-                                // Mark as Watched / Unwatched toggle
-                                Button(action: {
-                                    withAnimation(.spring(duration: 0.25)) {
-                                        userData.toggleWatched(displayItem)
-                                    }
-                                }) {
-                                    Image(systemName: userData.isWatched(displayItem) ? "eye.fill" : "eye")
-                                        .font(.title3)
-                                        .foregroundStyle(userData.isWatched(displayItem) ? Color.cyan : .white)
-                                        .padding(14)
-                                        .glassEffect(.regular.interactive(), in: .circle)
-                                        .symbolEffect(.bounce, value: userData.isWatched(displayItem))
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
-                                .accessibilityLabel(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
-
-                                // Love — strongest taste signal for the For You rail
-                                Button(action: {
-                                    tasteProfile.toggleLove(displayItem)
-                                }) {
-                                    Image(systemName: tasteProfile.isLoved(displayItem) ? "heart.fill" : "heart")
-                                        .font(.title3)
-                                        .foregroundStyle(tasteProfile.isLoved(displayItem) ? Color.pink : .white)
-                                        .padding(14)
-                                        .glassEffect(.regular.interactive(), in: .circle)
-                                        .symbolEffect(.bounce, value: tasteProfile.isLoved(displayItem))
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
-
-                                // Custom user lists (Collections)
-                                Button(action: { showCollectionsPopover = true }) {
-                                    Image(systemName: "rectangle.stack.badge.plus")
-                                        .font(.title3)
-                                        .foregroundStyle(.white)
-                                        .padding(14)
-                                        .glassEffect(.regular.interactive(), in: .circle)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
-                                    AddToCollectionView(item: displayItem)
-                                }
-                                .help("Add to list")
-
-                                // Download best stream for offline viewing
-                                Button {
-                                    isDownloading = true
-                                    Task {
-                                        await downloadBestStream()
-                                        isDownloading = false
-                                    }
-                                } label: {
-                                    Group {
-                                        if isDownloading {
-                                            ProgressView().controlSize(.small)
-                                                .frame(width: 18, height: 18)
-                                        } else {
-                                            Image(systemName: "arrow.down.circle")
-                                                .font(.title3)
-                                                .foregroundStyle(.white)
-                                        }
-                                    }
-                                    .padding(14)
-                                    .glassEffect(.regular.interactive(), in: .circle)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(isDownloading)
-                                .help("Download best stream for offline")
-
-                                // Play Trailer (opens YouTube in browser)
-                                if let trailer = trailerURL {
-                                    Button {
-                                        NSWorkspace.shared.open(trailer)
-                                    } label: {
-                                        Image(systemName: "play.rectangle.fill")
+                                    
+                                    Button(action: {
+                                        userData.toggleWatchlist(displayItem)
+                                    }) {
+                                        Image(systemName: userData.isInWatchlist(displayItem) ? "checkmark" : "plus")
                                             .font(.title3)
                                             .foregroundStyle(.white)
                                             .padding(14)
@@ -290,7 +207,167 @@ struct DetailView: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Play trailer")
+                                    .help(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
+                                    .accessibilityLabel(userData.isInWatchlist(displayItem) ? "Remove from Watchlist" : "Add to Watchlist")
+
+                                    // Mark as Watched / Unwatched toggle
+                                    Button(action: {
+                                        withAnimation(.spring(duration: 0.25)) {
+                                            userData.toggleWatched(displayItem)
+                                        }
+                                    }) {
+                                        Image(systemName: userData.isWatched(displayItem) ? "eye.fill" : "eye")
+                                            .font(.title3)
+                                            .foregroundStyle(userData.isWatched(displayItem) ? Color.cyan : .white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .symbolEffect(.bounce, value: userData.isWatched(displayItem))
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
+                                    .accessibilityLabel(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
+
+                                    // Love — strongest taste signal for the For You rail
+                                    Button(action: {
+                                        tasteProfile.toggleLove(displayItem)
+                                    }) {
+                                        Image(systemName: tasteProfile.isLoved(displayItem) ? "heart.fill" : "heart")
+                                            .font(.title3)
+                                            .foregroundStyle(tasteProfile.isLoved(displayItem) ? Color.pink : .white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .symbolEffect(.bounce, value: tasteProfile.isLoved(displayItem))
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
+
+                                    // Custom user lists (Collections)
+                                    Button(action: { showCollectionsPopover = true }) {
+                                        Image(systemName: "rectangle.stack.badge.plus")
+                                            .font(.title3)
+                                            .foregroundStyle(.white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
+                                        AddToCollectionView(item: displayItem)
+                                    }
+                                    .help("Add to list")
+
+                                    // Download best stream for offline viewing
+                                    Button {
+                                        isDownloading = true
+                                        Task {
+                                            await downloadBestStream()
+                                            isDownloading = false
+                                        }
+                                    } label: {
+                                        Group {
+                                            if isDownloading {
+                                                ProgressView().controlSize(.small)
+                                                    .frame(width: 18, height: 18)
+                                            } else {
+                                                Image(systemName: "arrow.down.circle")
+                                                    .font(.title3)
+                                                    .foregroundStyle(.white)
+                                            }
+                                        }
+                                        .padding(14)
+                                        .glassEffect(.regular.interactive(), in: .circle)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isDownloading)
+                                    .help("Download best stream for offline")
+
+                                    // Play Trailer (opens YouTube in browser)
+                                    if let trailer = trailerURL {
+                                        Button {
+                                            NSWorkspace.shared.open(trailer)
+                                        } label: {
+                                            Image(systemName: "play.rectangle.fill")
+                                                .font(.title3)
+                                                .foregroundStyle(.white)
+                                                .padding(14)
+                                                .glassEffect(.regular.interactive(), in: .circle)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Play trailer")
+                                    }
+                                } else {
+                                    // UPCOMING CONTENT MASTER LAYOUT (Apple TV style)
+                                    Button(action: {
+                                        userData.toggleWatchlist(displayItem)
+                                    }) {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: userData.isInWatchlist(displayItem) ? "checkmark" : "plus")
+                                                .font(.system(size: 15, weight: .bold))
+                                            Text(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
+                                                .font(.system(size: 15, weight: .bold))
+                                        }
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, 32)
+                                        .padding(.vertical, 14)
+                                        .background(Color.white)
+                                        .clipShape(Capsule())
+                                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    // Love button
+                                    Button(action: {
+                                        tasteProfile.toggleLove(displayItem)
+                                    }) {
+                                        Image(systemName: tasteProfile.isLoved(displayItem) ? "heart.fill" : "heart")
+                                            .font(.title3)
+                                            .foregroundStyle(tasteProfile.isLoved(displayItem) ? Color.pink : .white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .symbolEffect(.bounce, value: tasteProfile.isLoved(displayItem))
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
+
+                                    // Custom user lists (Collections)
+                                    Button(action: { showCollectionsPopover = true }) {
+                                        Image(systemName: "rectangle.stack.badge.plus")
+                                            .font(.title3)
+                                            .foregroundStyle(.white)
+                                            .padding(14)
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
+                                        AddToCollectionView(item: displayItem)
+                                    }
+                                    .help("Add to list")
+
+                                    // Play Trailer Button
+                                    if let trailer = trailerURL {
+                                        Button {
+                                            NSWorkspace.shared.open(trailer)
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "play.rectangle.fill")
+                                                    .font(.title3)
+                                                Text("Trailer")
+                                                    .font(.system(size: 14, weight: .bold))
+                                            }
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 20)
+                                            .padding(.vertical, 12)
+                                            .glassEffect(.regular.interactive(), in: .capsule)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Play trailer")
+                                    }
                                 }
                             }
                             .padding(.top, 10)
@@ -311,7 +388,7 @@ struct DetailView: View {
                                 GhostGrid()
                             }
                             .transition(.opacity)
-                        } else if displayItem.category == "TV Show" {
+                        } else if isReleased && displayItem.category == "TV Show" {
                             VStack(alignment: .leading, spacing: 16) {
                                 if let seasons = displayItem.seasons, !seasons.isEmpty {
                                     // Floating dropdown trigger — the panel itself
@@ -376,6 +453,60 @@ struct DetailView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
+                            }
+                        }
+                        
+                        if let trailer = trailerURL {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Trailers")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.white)
+                                    .padding(.leading, 268)
+                                    .padding(.trailing, 60)
+
+                                Button {
+                                    NSWorkspace.shared.open(trailer)
+                                } label: {
+                                    ZStack(alignment: .bottomLeading) {
+                                        CachedImage(url: displayItem.backdropURL ?? displayItem.heroURL ?? displayItem.posterURL, maxDimension: 720) { phase in
+                                            if let image = phase.image {
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(16/9, contentMode: .fill)
+                                            } else {
+                                                Rectangle().fill(Color.white.opacity(0.08))
+                                            }
+                                        }
+                                        .frame(width: 320, height: 180)
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                                        LinearGradient(colors: [.black.opacity(0.85), .black.opacity(0.2), .clear], startPoint: .bottom, endPoint: .center)
+                                            .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                                        // Center play button
+                                        Circle()
+                                            .fill(Color.black.opacity(0.5))
+                                            .frame(width: 48, height: 48)
+                                            .overlay(Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white).offset(x: 2))
+                                            .glassEffect(.regular.interactive(), in: .circle)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("\(displayItem.title) Official Trailer")
+                                                .font(.system(size: 14, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .lineLimit(1)
+                                            Text("Watch on YouTube")
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(.white.opacity(0.6))
+                                        }
+                                        .padding(14)
+                                    }
+                                    .frame(width: 320, height: 180)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.leading, 268)
                             }
                         }
                         

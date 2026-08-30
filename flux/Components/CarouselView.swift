@@ -37,9 +37,9 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: spacing) {
-                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             content(item, index)
-                                .id(index)
+                                .id(item.id)
                         }
                     }
                     .padding(.leading, 268)

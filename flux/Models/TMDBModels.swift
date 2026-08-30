@@ -537,7 +537,8 @@ extension TMDBMovie {
             certification: nil,
             genres: nil,
             popularity: popularity,
-            releaseDate: releaseDate
+            releaseDate: releaseDate,
+            voteAverage: voteAverage
         )
     }
 }
@@ -562,7 +563,8 @@ extension TMDBTVShow {
             certification: nil,
             genres: nil,
             popularity: popularity,
-            releaseDate: firstAirDate
+            releaseDate: firstAirDate,
+            voteAverage: voteAverage
         )
     }
 }

@@ -26,4 +26,55 @@ struct TMDBEnricherTests {
         #expect(names.contains("Short Films"))
         #expect(names.contains("Western"))
     }
+
+    @Test func tmdbCatalogCacheActorStoresAndExpiresEntries() async {
+        let cache = TMDBCatalogCacheActor()
+        let testItem = MediaItem(id: "test-123", title: "Test Movie", description: "Overview", imageURL: nil, posterURL: nil, backdropURL: nil, heroURL: nil, streamURL: nil, category: "Movie", progress: nil, trailerURL: nil, cast: nil, seasons: nil, runtime: nil, certification: nil, genres: nil, popularity: 99.5, releaseDate: "2026-08-30", voteAverage: 8.5)
+        
+        await cache.set(key: "test:key", items: [testItem], ttl: .trendingDay)
+        let cached = await cache.get(key: "test:key")
+        #expect(cached?.count == 1)
+        #expect(cached?.first?.id == "test-123")
+        #expect(cached?.first?.voteAverage == 8.5)
+        
+        // Test custom 0-second expired TTL
+        await cache.set(key: "test:expired", items: [testItem], ttl: .custom(-1))
+        let expired = await cache.get(key: "test:expired")
+        #expect(expired == nil)
+        
+        await cache.clear()
+        let cleared = await cache.get(key: "test:key")
+        #expect(cleared == nil)
+    }
+
+    @Test func mediaItemConversionPreservesMetadata() {
+        let movie = TMDBMovie(id: 456, title: "Spider-Man", overview: "Friendly neighbor", posterPath: "/spider.jpg", backdropPath: "/spider_bg.jpg", releaseDate: "2026-07-24", voteAverage: 8.9, popularity: 1500.0)
+        let mediaItem = movie.toMediaItem()
+        
+        #expect(mediaItem.id == "456")
+        #expect(mediaItem.title == "Spider-Man")
+        #expect(mediaItem.category == "Movie")
+        #expect(mediaItem.voteAverage == 8.9)
+        #expect(mediaItem.popularity == 1500.0)
+        #expect(mediaItem.releaseDate == "2026-07-24")
+
+        let show = TMDBTVShow(id: 789, name: "Reacher", overview: "Jack Reacher", posterPath: "/reacher.jpg", backdropPath: "/reacher_bg.jpg", firstAirDate: "2022-02-04", voteAverage: 8.2, popularity: 800.0)
+        let showItem = show.toMediaItem()
+        
+        #expect(showItem.id == "789")
+        #expect(showItem.title == "Reacher")
+        #expect(showItem.category == "TV Show")
+        #expect(showItem.voteAverage == 8.2)
+        #expect(showItem.popularity == 800.0)
+    }
+
+    @Test func mediaListTypeTitlesAreAccurate() {
+        #expect(MediaListView.ListType.trendingAllDay.title == "Trending Today")
+        #expect(MediaListView.ListType.trendingAllWeek.title == "Trending This Week")
+        #expect(MediaListView.ListType.popularMovies.title == "Popular Movies")
+        #expect(MediaListView.ListType.nowPlayingMovies.title == "Now Playing in Theatres")
+        #expect(MediaListView.ListType.airingTodayTV.title == "Airing Today on TV")
+        #expect(MediaListView.ListType.topRatedTV.title == "Top Rated TV Shows")
+    }
 }
+

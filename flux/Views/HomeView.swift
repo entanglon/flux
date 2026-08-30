@@ -18,12 +18,24 @@ struct HomeView: View {
     @ObservedObject private var userData = UserDataService.shared
     @Environment(\.openWindow) private var openWindow
     
+    // Core discovery rails
     @State private var heroContent: [MediaItem] = []
-    @State private var nativeSections: [CatalogSection] = []
+    @State private var trendingTodayItems: [MediaItem] = []
+    @State private var trendingWeekItems: [MediaItem] = []
+    @State private var popularMovies: [MediaItem] = []
+    @State private var popularTV: [MediaItem] = []
+    @State private var nowPlayingMovies: [MediaItem] = []
+    @State private var airingTodayTV: [MediaItem] = []
+    @State private var onTheAirTV: [MediaItem] = []
+    @State private var topRatedMovies: [MediaItem] = []
+    @State private var topRatedTV: [MediaItem] = []
+    @State private var upcomingMovies: [MediaItem] = []
+    @State private var quickWatches: [MediaItem] = []
     @State private var addonSections: [CatalogSection] = []
     @State private var genres: [Genre] = Genre.allGenres
     @State private var forYouItems: [MediaItem] = []
     @State private var becauseTitle: String? = nil
+    @State private var trendingWindow: String = "day"
     
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
 
@@ -32,7 +44,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 32) {
                 GeometryReader { geo in
                     Color.clear.preference(
                         key: HomeScrollOffsetKey.self,
@@ -41,7 +53,7 @@ struct HomeView: View {
                 }
                 .frame(height: 0)
 
-                if isLoading {
+                if isLoading && heroContent.isEmpty && trendingTodayItems.isEmpty {
                     // Ghost loading layout — hero + skeleton rails
                     VStack(alignment: .leading, spacing: 44) {
                         GhostHero()
@@ -51,16 +63,16 @@ struct HomeView: View {
                     .padding(.bottom, 40)
                     .transition(.opacity)
                 } else {
-                    // Featured Carousel (Trending / Hero Content)
+                    // Featured Carousel (Trending Today & Hero Content)
                     if !heroContent.isEmpty {
                         FeaturedCarousel(items: Array(heroContent.prefix(5)))
                             .padding(.bottom, 10)
                     }
                     
-                    // Continue Watching (Real Data)
+                    // Continue Watching (Real Data with Episode Stills)
                     if !userData.history.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(title: "Continue Watching", value: HistoryNavigation(showAsContinueWatching: true))
+                            ListSectionHeader(title: "Continue Watching", value: MediaListView.ListType.continueWatching)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
@@ -99,9 +111,79 @@ struct HomeView: View {
                         .padding(.bottom, 16)
                     }
 
-                    // ... rest of content rows ...
-                    fluxNativeRows
+                    // 1. Combined Trending Rail with Liquid Glass Toggle
+                    let activeTrending = trendingWindow == "day" ? trendingTodayItems : trendingWeekItems
+                    if !activeTrending.isEmpty {
+                        VStack(alignment: .leading, spacing: 16) {
+                            TrendingToggleSectionHeader(
+                                title: "Trending",
+                                window: $trendingWindow,
+                                value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
+                            )
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
+
+                            CarouselView(items: activeTrending) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                        .frame(width: 180)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .id("trending-home-\(trendingWindow)")
+                        }
+                        .padding(.bottom, 16)
+                    }
+
+                    // 2. Popular Movies
+                    if !popularMovies.isEmpty {
+                        renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+                    }
+
+                    // 4. Popular TV Shows
+                    if !popularTV.isEmpty {
+                        renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
+                    }
+
+                    // 5. Now Playing in Theatres
+                    if !nowPlayingMovies.isEmpty {
+                        renderRail(title: "Now Playing in Theatres", listType: .nowPlayingMovies, items: nowPlayingMovies)
+                    }
+
+                    // 6. Airing Today on TV
+                    if !airingTodayTV.isEmpty {
+                        renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayTV)
+                    }
+
+                    // Explore OTT Platforms
                     exploreOTTRow
+
+                    // 7. On The Air / This Week on TV
+                    if !onTheAirTV.isEmpty {
+                        renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirTV)
+                    }
+
+                    // 8. Top Rated Movies
+                    if !topRatedMovies.isEmpty {
+                        renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
+                    }
+
+                    // 9. Top Rated TV Shows
+                    if !topRatedTV.isEmpty {
+                        renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedTV)
+                    }
+
+                    // 10. Upcoming Movies
+                    if !upcomingMovies.isEmpty {
+                        renderRail(title: "Upcoming in Theatres", listType: .upcomingMovies, items: upcomingMovies)
+                    }
+
+                    // 11. Quick Watches (< 95 mins)
+                    if !quickWatches.isEmpty {
+                        renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+                    }
+
+                    // Addon Sections & Other Rows
                     addonRows
                     watchlistRow
                     genreRow
@@ -115,6 +197,10 @@ struct HomeView: View {
             scrollOffset = max(0, -value)
         }
         .ignoresSafeArea(.all, edges: .top)
+        .refreshable {
+            await TMDBCatalogCacheActor.shared.clear()
+            await loadData()
+        }
         .task {
             await loadData()
         }
@@ -122,7 +208,6 @@ struct HomeView: View {
         .onReceive(TasteProfileManager.shared.$lovedItems) { _ in
             refreshForYouTask?.cancel()
             refreshForYouTask = Task {
-                // Debounce rapid ♥ toggles so we don't spam TMDB.
                 try? await Task.sleep(nanoseconds: 600_000_000)
                 if Task.isCancelled { return }
                 await refreshForYou()
@@ -145,26 +230,22 @@ struct HomeView: View {
         }
     }
     
-    // Extracted subviews for readability
-    @ViewBuilder private var fluxNativeRows: some View {
-        if enableFluxCatalogue {
-            ForEach(nativeSections) { section in
-                VStack(alignment: .leading, spacing: 16) {
-                    ListSectionHeader(title: section.title, value: MediaListView.ListType.fixed(title: section.title, items: section.items))
-                        .padding(.leading, 268)
-                        .padding(.trailing, 40)
-                    
-                    CarouselView(items: section.items) { item in
-                        NavigationLink(value: item) {
-                            GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                .frame(width: 180)
-                        }
-                        .buttonStyle(.plain)
-                    }
+    @ViewBuilder
+    private func renderRail(title: String, listType: MediaListView.ListType, items: [MediaItem]) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ListSectionHeader(title: title, value: listType)
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+            
+            CarouselView(items: items) { item in
+                NavigationLink(value: item) {
+                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                        .frame(width: 180)
                 }
-                .padding(.bottom, 16)
+                .buttonStyle(.plain)
             }
         }
+        .padding(.bottom, 16)
     }
     
     @ViewBuilder private var exploreOTTRow: some View {
@@ -269,83 +350,123 @@ struct HomeView: View {
 
 extension HomeView {
     private func loadData() async {
-        do {
-            // 1. Featured Hero - Cinemeta's Popular movies (keyless)
-            if let popular = try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", preserveOrder: true) {
-                self.heroContent = Array(popular.filter { $0.isReleased }.prefix(20))
-            }
-            
-            // 2. Load Sections
-            await fetchNativeCinemetaSections()
-            await fetchAddonSections() // Restore Addon support
-            
-            // 3. Background: Enrich History Items (fills missing thumbnails, writes back)
-            Task.detached(priority: .background) {
-                await self.userData.enrichHistory()
-            }
-
-            // 4. For You — taste-based recommendations (hidden until enough signal)
-            if TasteProfileManager.shared.hasEnoughSignal {
-                let (recs, because) = await TasteProfileManager.shared.forYouRecommendations()
-                self.forYouItems = recs
-                self.becauseTitle = because?.title
-            }
-            
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.isLoading = false
-                }
-            }
-        } catch {
-            print("Error fetching data: \(error)")
-            await fetchNativeCinemetaSections()
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.isLoading = false
-                }
-            }
-        }
-    }
-    
-    private func fetchNativeCinemetaSections() async {
-        // Cinemeta discovery rails — free, keyless (Stremio's own metadata source).
-        // (title, type, catalog id)
-        let defs: [(String, String, String)] = [
-            ("Popular Movies", "movie", "top"),
-            ("Popular Series", "series", "top"),
-            ("New Releases", "movie", "year"),
-            ("Top Rated Shows", "series", "imdbRating"),
-        ]
-
-        var fetchedSections: [CatalogSection] = []
-        await withTaskGroup(of: CatalogSection?.self) { group in
-            for (title, type, id) in defs {
-                group.addTask {
-                    if let items = try? await StremioService.shared.fetchCatalog(type: type, id: id, preserveOrder: true), !items.isEmpty {
-                        return CatalogSection(addonName: "Cinemeta", title: title, type: type, items: items)
+        // Parallel non-blocking streaming load for all discovery rails
+        await withTaskGroup(of: Void.self) { group in
+            // 1. Hero Content & Trending Today
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingAll(window: "day"), !items.isEmpty {
+                    await MainActor.run {
+                        self.trendingTodayItems = items
+                        self.heroContent = Array(items.prefix(10))
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
                     }
-                    return nil
+                } else if let items = try? await StremioService.shared.fetchTrendingMovies(), !items.isEmpty {
+                    await MainActor.run {
+                        self.heroContent = Array(items.prefix(10))
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
                 }
             }
-            for await section in group {
-                if let s = section { fetchedSections.append(s) }
+            
+            // 2. Trending This Week
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingAll(window: "week"), !items.isEmpty {
+                    await MainActor.run { self.trendingWeekItems = items }
+                }
+            }
+            
+            // 3. Popular Movies
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchPopularMovies(), !items.isEmpty {
+                    await MainActor.run { self.popularMovies = items }
+                }
+            }
+
+            // 4. Popular TV Shows
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchPopularTV(), !items.isEmpty {
+                    await MainActor.run { self.popularTV = items }
+                }
+            }
+
+            // 5. Now Playing in Theatres
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchNowPlayingMovies(), !items.isEmpty {
+                    await MainActor.run { self.nowPlayingMovies = items }
+                }
+            }
+
+            // 6. Airing Today on TV
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchAiringTodayTV(), !items.isEmpty {
+                    await MainActor.run { self.airingTodayTV = items }
+                }
+            }
+
+            // 7. On The Air / This Week on TV
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchOnTheAirTV(), !items.isEmpty {
+                    await MainActor.run { self.onTheAirTV = items }
+                }
+            }
+
+            // 8. Top Rated Movies
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTopRatedMovies(), !items.isEmpty {
+                    await MainActor.run { self.topRatedMovies = items }
+                }
+            }
+
+            // 9. Top Rated TV Shows
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTopRatedTV(), !items.isEmpty {
+                    await MainActor.run { self.topRatedTV = items }
+                }
+            }
+
+            // 10. Upcoming Movies
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchUpcomingMovies(), !items.isEmpty {
+                    await MainActor.run { self.upcomingMovies = items }
+                }
+            }
+
+            // 11. Quick Watches
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchQuickWatchMovies(), !items.isEmpty {
+                    await MainActor.run { self.quickWatches = items }
+                }
+            }
+
+            // 12. Addon sections
+            group.addTask {
+                await self.fetchAddonSections()
+            }
+
+            // 13. For You Recommendations
+            group.addTask {
+                if TasteProfileManager.shared.hasEnoughSignal {
+                    let (recs, because) = await TasteProfileManager.shared.forYouRecommendations()
+                    await MainActor.run {
+                        self.forYouItems = recs
+                        self.becauseTitle = because?.title
+                    }
+                }
+            }
+
+            // 14. Background history enrichment
+            group.addTask {
+                await self.userData.enrichHistory()
             }
         }
 
         await MainActor.run {
-            let order = defs.map { $0.0 }
-            // Nothing to play until it's released — drop unreleased, then hollow rails.
-            let released = fetchedSections.map { section -> CatalogSection in
-                CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
-            }
-            .filter { !$0.items.isEmpty }
-            self.nativeSections = released.sorted { s1, s2 in
-                let i1 = order.firstIndex(of: s1.title) ?? 99
-                let i2 = order.firstIndex(of: s2.title) ?? 99
-                return i1 < i2
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
             }
         }
     }
+
     
     private func fetchAddonSections() async {
         let addons = AddonManager.shared.enabledAddons

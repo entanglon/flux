@@ -113,6 +113,7 @@ class UserDataService: ObservableObject {
                 }
             }
 
+            enriched.timestamp = item.timestamp
             if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL || enriched.lastEpisodeImage != item.lastEpisodeImage || enriched.lastSeason != item.lastSeason {
                 didChange = true
             }
@@ -179,6 +180,7 @@ class UserDataService: ObservableObject {
             item.lastSeason = lastSeason
             item.lastEpisode = lastEpisode
             item.lastEpisodeTitle = lastEpisodeTitle
+            item.timestamp = timestamp
             
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
                 item.lastEpisodeImage = url
@@ -193,7 +195,16 @@ class UserDataService: ObservableObject {
             return (item, timestamp)
         }
         
-        let sorted = rawItems.sorted { $0.timestamp > $1.timestamp }
+        // Sort by timestamp descending. If timestamps differ by <= 1.0 second
+        // (written in a batch loop), preserve original array order (earlier index = more recent).
+        let sorted = rawItems.enumerated().sorted { a, b in
+            let diff = a.element.timestamp - b.element.timestamp
+            if abs(diff) > 1.0 {
+                return a.element.timestamp > b.element.timestamp
+            } else {
+                return a.offset < b.offset
+            }
+        }.map { $0.element }
         
         var uniqueItems: [MediaItem] = []
         var seenIDs: Set<String> = []
@@ -334,7 +345,7 @@ class UserDataService: ObservableObject {
             "title": item.title,
             "image": imageVal,
             "backdrop": backdropVal,
-            "timestamp": Date().timeIntervalSince1970
+            "timestamp": item.timestamp ?? Date().timeIntervalSince1970
         ]
         if let p = item.progress { dict["progress"] = p }
         if let s = item.lastSeason { dict["lastSeason"] = s }

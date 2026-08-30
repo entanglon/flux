@@ -2,22 +2,44 @@ import SwiftUI
 
 struct MediaListView: View {
     enum ListType: Hashable {
-        case trendingMovies
+        case continueWatching
+        case trendingAllDay
+        case trendingAllWeek
+        case trendingMovies(window: String)
         case popularMovies
+        case nowPlayingMovies
+        case upcomingMovies
         case topRatedMovies
-        case trendingTV
+        case streamingMovies
+        case quickWatches
+        case trendingTV(window: String)
         case popularTV
+        case airingTodayTV
+        case onTheAirTV
+        case topRatedTV
+        case streamingTV
         case genre(id: Int, name: String) // TMDB genre — real ID + display name
         case ott(id: String, name: String) // OTT platform — catalog code + display name
         case fixed(title: String, items: [MediaItem])
 
         var title: String {
             switch self {
-            case .trendingMovies: return "Trending Movies"
+            case .continueWatching: return "Continue Watching"
+            case .trendingAllDay: return "Trending Today"
+            case .trendingAllWeek: return "Trending This Week"
+            case .trendingMovies(let window): return window == "day" ? "Trending Movies Today" : "Trending Movies This Week"
             case .popularMovies: return "Popular Movies"
+            case .nowPlayingMovies: return "Now Playing in Theatres"
+            case .upcomingMovies: return "Upcoming Movies"
             case .topRatedMovies: return "Top Rated Movies"
-            case .trendingTV: return "Trending TV Shows"
+            case .streamingMovies: return "Popular on Streaming"
+            case .quickWatches: return "Quick Watches (< 95m)"
+            case .trendingTV(let window): return window == "day" ? "Trending Shows Today" : "Trending Shows This Week"
             case .popularTV: return "Popular TV Shows"
+            case .airingTodayTV: return "Airing Today on TV"
+            case .onTheAirTV: return "On The Air / This Week"
+            case .topRatedTV: return "Top Rated TV Shows"
+            case .streamingTV: return "Popular on Streaming"
             case .genre(_, let name): return name
             case .ott(_, let name): return name
             case .fixed(let title, _): return title
@@ -27,10 +49,12 @@ struct MediaListView: View {
     
     let title: String
     let type: ListType
+    @ObservedObject private var userData = UserDataService.shared
+    @Environment(\.openWindow) private var openWindow
     @State private var genreMediaType = "movie" // genre pages: Movies/TV toggle
     @State private var items: [MediaItem] = []
     @State private var isLoading = false
-    @State private var skipCount = 0
+    @State private var currentPage = 1
     @State private var canLoadMore = true
     
     init(title: String? = nil, type: ListType) {
@@ -91,9 +115,13 @@ struct MediaListView: View {
         .task {
             await loadData()
         }
+        .refreshable {
+            await TMDBCatalogCacheActor.shared.clear()
+            await loadData(reset: true)
+        }
         .onChange(of: genreMediaType) { _, _ in
             items = []
-            skipCount = 0
+            currentPage = 1
             canLoadMore = true
             Task { await loadData() }
         }
@@ -108,7 +136,7 @@ struct MediaListView: View {
                         if genreMediaType != mt {
                             genreMediaType = mt
                             items = []
-                            skipCount = 0
+                            currentPage = 1
                             canLoadMore = true
                             Task { await loadData() }
                         }
@@ -130,48 +158,71 @@ struct MediaListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && items.isEmpty {
+        if type == .continueWatching {
+            if userData.history.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text("No In-Progress Titles")
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
+                    Text("Movies and TV shows you start watching will automatically appear here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .frame(maxWidth: .infinity, minHeight: 300)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 24)], spacing: 32) {
+                    ForEach(userData.history) { item in
+                        Button(action: {
+                            PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                            openWindow(id: "player", value: item.id)
+                        }) {
+                            ContinueWatchingCard(item: item, mode: .continueWatching)
+                        }
+                        .buttonStyle(.plain)
+                        .focusEffectDisabled()
+                    }
+                }
+            }
+        } else if isLoading && items.isEmpty {
             LazyVGrid(columns: columns, spacing: 40) {
                 ForEach(0..<12, id: \.self) { _ in
                     GhostCard()
                 }
             }
         } else {
-        LazyVGrid(columns: columns, spacing: 40) {
-            ForEach(items) { item in
-                NavigationLink(value: item) {
-                    GlassCard(item: item, aspectRatio: aspectRatio, showTitle: false)
-                }
-                .buttonStyle(.plain)
-                .onAppear {
-                    if item == items.last {
-                        Task { await loadData() }
+            LazyVGrid(columns: columns, spacing: 40) {
+                ForEach(items) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: aspectRatio, showTitle: false)
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear {
+                        if item == items.last {
+                            Task { await loadData() }
+                        }
                     }
                 }
-            }
 
-            if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding()
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
             }
-        }
         }
     }
     
     private var aspectRatio: CardAspectRatio {
-        switch type {
-        case .trendingTV, .popularTV:
-            return .landscape
-        default:
-            return .portrait
-        }
+        .portrait
     }
     
     private func loadData(reset: Bool = false) async {
         if reset {
             items = []
-            skipCount = 0
+            currentPage = 1
             canLoadMore = true
         }
         
@@ -180,29 +231,51 @@ struct MediaListView: View {
         
         do {
             var newItems: [MediaItem] = []
+            let page = currentPage
             
             switch type {
-            case .trendingMovies:
-                newItems = try await StremioService.shared.fetchTrendingMovies()
+            case .continueWatching:
+                newItems = userData.history
+                canLoadMore = false
+            case .trendingAllDay:
+                newItems = (try? await TMDBEnricher.shared.fetchTrendingAll(window: "day")) ?? []
+                canLoadMore = false
+            case .trendingAllWeek:
+                newItems = (try? await TMDBEnricher.shared.fetchTrendingAll(window: "week")) ?? []
+                canLoadMore = false
+            case .trendingMovies(let window):
+                newItems = (try? await TMDBEnricher.shared.fetchTrendingMovies(window: window)) ?? []
+                canLoadMore = false
             case .popularMovies:
-                newItems = try await StremioService.shared.fetchPopularMovies()
+                newItems = (try? await TMDBEnricher.shared.fetchPopularMovies(page: page)) ?? []
+            case .nowPlayingMovies:
+                newItems = (try? await TMDBEnricher.shared.fetchNowPlayingMovies(page: page)) ?? []
+            case .upcomingMovies:
+                newItems = (try? await TMDBEnricher.shared.fetchUpcomingMovies(page: page)) ?? []
             case .topRatedMovies:
-                newItems = try await StremioService.shared.fetchTrendingMovies() // Placeholder
-            case .trendingTV:
-                newItems = try await StremioService.shared.fetchTrendingTVShows()
+                newItems = (try? await TMDBEnricher.shared.fetchTopRatedMovies(page: page)) ?? []
+            case .streamingMovies:
+                newItems = (try? await TMDBEnricher.shared.fetchStreamingMovies(page: page)) ?? []
+            case .quickWatches:
+                newItems = (try? await TMDBEnricher.shared.fetchQuickWatchMovies(page: page)) ?? []
+            case .trendingTV(let window):
+                newItems = (try? await TMDBEnricher.shared.fetchTrendingTV(window: window)) ?? []
+                canLoadMore = false
             case .popularTV:
-                newItems = try await StremioService.shared.fetchPopularTVShows()
+                newItems = (try? await TMDBEnricher.shared.fetchPopularTV(page: page)) ?? []
+            case .airingTodayTV:
+                newItems = (try? await TMDBEnricher.shared.fetchAiringTodayTV(page: page)) ?? []
+            case .onTheAirTV:
+                newItems = (try? await TMDBEnricher.shared.fetchOnTheAirTV(page: page)) ?? []
+            case .topRatedTV:
+                newItems = (try? await TMDBEnricher.shared.fetchTopRatedTV(page: page)) ?? []
+            case .streamingTV:
+                newItems = (try? await TMDBEnricher.shared.fetchStreamingTV(page: page)) ?? []
             case .genre(let id, _):
-                // TMDB discover: real genre-accurate titles, page-based endless scroll
-                let page = (skipCount / 20) + 1
                 newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType)
-                if newItems.isEmpty { canLoadMore = false }
             case .ott(let platformID, _):
-                // OTT platform catalog — TMDB watch providers, page-based endless scroll
                 let ottType = genreMediaType == "tv" ? "series" : "movie"
-                let page = (skipCount / 20) + 1
                 newItems = (try? await StremioService.shared.fetchOTTCatalog(platformID: platformID, type: ottType, page: page)) ?? []
-                if newItems.isEmpty { canLoadMore = false }
             case .fixed(_, let fixedItems):
                 newItems = fixedItems
                 canLoadMore = false
@@ -212,11 +285,11 @@ struct MediaListView: View {
                 if newItems.isEmpty {
                     canLoadMore = false
                 } else {
-                    // Deduplicate + hide unreleased titles (nothing to play yet)
                     let existingIDs = Set(items.map { $0.id })
-                    let uniqueItems = newItems.filter { !existingIDs.contains($0.id) && $0.isReleased }
+                    let uniqueItems = newItems.filter { !existingIDs.contains($0.id) }
                     items.append(contentsOf: uniqueItems)
-                    skipCount += 20 // one TMDB page per load
+                    currentPage += 1
+                    if currentPage > 500 { canLoadMore = false }
                 }
                 isLoading = false
             }
