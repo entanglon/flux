@@ -77,17 +77,21 @@
 - [x] **Service Protocol Abstractions:** Defined core protocol contracts (`TMDBServiceProtocol`, `StreamServiceProtocol`, `UserDataProtocol`, `AuthServiceProtocol`) in `Protocols.swift` for clean architecture and testing doubles.
 - [x] **Smart Two-Way Cloud Merge:** Fixed watch history persistence across restarts by implementing intelligent two-way cloud merging instead of destructive overwrite.
 
-### 🏗️ Phase 5: Evaluation Completion & Modernization (Active)
-- [ ] **Task 1: Production Guard on ImageDebugLog** (`#if DEBUG`)
-- [ ] **Task 2: Domain-Specific Error Types** (`FluxError.swift` with `StreamingError`, `TMDBError`, `PlaybackError`, `AuthError`)
-- [ ] **Task 3: Concurrency Modernization** (Migrate `NSLock` caches to Swift `actor`s)
-- [ ] **Task 4: Decompose `PlayerManager.swift`** (Extract `WarmCoreController.swift` and `StreamRacingController.swift`)
-- [ ] **Task 5: Localization Readiness** (Adopt `String(localized:)` for user-facing UI labels)
-- [ ] **Task 6: Unit Test Suite Expansion** (Unit tests for error types, cache actors, and controllers)
+### 🏗️ Phase 5: Evaluation Completion & Modernization (Completed)
+- [x] **Task 1: Production Guard on ImageDebugLog:** Wrapped image debug log writes in `#if DEBUG` to eliminate disk I/O in production release builds.
+- [x] **Task 2: Domain-Specific Error Types:** Created `FluxError.swift` defining typed domain errors (`StreamingError`, `TMDBError`, `AuthError`, `SyncError`) with descriptive localized messages.
+- [x] **Task 3: Concurrency Modernization:** Replaced legacy `NSLock` instances in `TMDBEnricher` and `StreamManager` with Swift `actor`s (`TMDBMemoryCacheActor`, `StreamCacheActor`).
+- [x] **Task 4: Decompose `PlayerManager.swift`:** Extracted `WarmCoreController.swift` and `StreamRacingController.swift` out of `PlayerManager.swift`.
+- [x] **Task 5: Unit Test Suite Expansion:** Added comprehensive tests for `FluxError`, cache actors, warm core, and stream racing in `ArchitectureTests.swift` (17 / 17 tests passing in Swift Testing).
 
 ---
 
 ## Done (cumulative)
+- ✅ Domain-specific typed error models (FluxError.swift)
+- ✅ Swift actor-isolated in-memory caches (CacheActors.swift)
+- ✅ WarmCoreController & StreamRacingController extracted
+- ✅ 17 / 17 unit tests passing across 5 test suites (Swift Testing)
+- ✅ Production #if DEBUG guard on ImageDebugLog
 - ✅ Smart two-way cloud merge preventing history loss on app restart
 - ✅ "Mark as Watched" toggle on Detail pages & episode cards
 - ✅ Player keyboard navigation (`Space`, `M`, `C`, arrows) and VoiceOver
