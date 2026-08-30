@@ -106,14 +106,8 @@ struct DetailView: View {
                                     .padding(.vertical, 6)
                                     .background(Capsule().fill(Color.white.opacity(0.18)))
                                     .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                            } else if let episode = heroEpisode {
-                                Text("S\(episode.seasonNumber), E\(episode.episodeNumber) • \(episode.name)")
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white.opacity(0.8))
-                                    .tracking(0.5)
                             } else {
-                                Text(displayItem.category == "TV Show" ? "NEW EPISODE EVERY FRIDAY" : displayItem.genres?.first?.uppercased() ?? displayItem.category.uppercased())
+                                Text(displayItem.genres?.first?.uppercased() ?? displayItem.category.uppercased())
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
@@ -151,8 +145,8 @@ struct DetailView: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.white.opacity(0.9))
                             
-                            // Hero Description (Episode or Show)
-                            Text(heroEpisode?.overview ?? displayItem.description)
+                            // Hero Description
+                            Text(displayItem.description)
                                 .font(.body)
                                 .lineLimit(3)
                                 .lineSpacing(4)
@@ -790,21 +784,21 @@ struct DetailView: View {
             let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
             
             var merged = detailedItem
-            if merged.description.isEmpty && !item.description.isEmpty {
+            if !item.description.isEmpty {
                 merged.description = item.description
             }
-            if (merged.genres == nil || merged.genres?.isEmpty == true) && item.genres != nil {
-                merged.genres = item.genres
+            if let genres = item.genres, !genres.isEmpty {
+                merged.genres = genres
             }
-            if (merged.voteAverage == nil || merged.voteAverage == 0) && item.voteAverage != nil {
-                merged.voteAverage = item.voteAverage
+            if let voteAverage = item.voteAverage, voteAverage > 0 {
+                merged.voteAverage = voteAverage
             }
-            if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && item.releaseDate != nil {
-                merged.releaseDate = item.releaseDate
+            if let releaseDate = item.releaseDate, !releaseDate.isEmpty {
+                merged.releaseDate = releaseDate
             }
-            if merged.heroURL == nil { merged.heroURL = item.heroURL }
-            if merged.backdropURL == nil { merged.backdropURL = item.backdropURL }
-            if merged.posterURL == nil { merged.posterURL = item.posterURL }
+            if item.heroURL != nil { merged.heroURL = item.heroURL }
+            if item.backdropURL != nil { merged.backdropURL = item.backdropURL }
+            if item.posterURL != nil { merged.posterURL = item.posterURL }
             
             await MainActor.run {
                 self.fullItem = merged

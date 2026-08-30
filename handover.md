@@ -1,25 +1,22 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — DETAILVIEW METADATA FLICKER FIX + TMDB GENRE MAPPING + CANONICAL METADATA RECONCILIATION
+## LATEST: Aug 30, 2026 — HOMEVIEW TOP GAP REMOVAL + DETAILVIEW DESCRIPTION LOCK & HERO STABILIZATION
 
-### DetailView Metadata Flash & Text Shift Fix (`DetailView.swift`, `TMDBModels.swift`, `TMDBEnricher.swift`)
+### HomeView Top Gap & Layout Shift Fix (`HomeView.swift`)
+- **Root Cause:** `HomeView` used `LazyVStack(alignment: .leading, spacing: 32)` with an unused `GeometryReader` preference observer at index 0. This forced a 32pt blank spacing gap between the top boundary and `FeaturedCarousel`, exposing the black window background above the hero banner.
+- **Fix:** Switched `HomeView`'s container to `LazyVStack(spacing: 0)` matching `MoviesView` and `TVShowsView`, and removed the unused `HomeScrollOffsetKey` and `scrollOffset` state. `FeaturedCarousel` now renders flush at `y: 0` beneath the top navigation bar without any gap or vertical offset.
+
+### DetailView Description Flash & Eyebrow Flip Fix (`DetailView.swift`)
 - **Root Cause:**
-  1. Discovery items from TMDB were decoded into `TMDBMovie` / `TMDBTVShow` / `TMDBTrendingItem` without decoding `genre_ids`. Their `toMediaItem()` conversions passed `genres: nil`, causing `DetailView` to initially display fallback `"MOVIE"` in the eyebrow kicker and `"Genre"` in the metadata row.
-  2. When `DetailView.loadDetails()` completed, it unconditionally replaced `fullItem` with Cinemeta's raw metadata. Cinemeta's IMDb description, missing genres, and alternative ratings abruptly replaced TMDB's rich discover data on screen, causing visible text jumping and layout shift.
-- **TMDB Genre Mapping (`TMDBModels.swift`):**
-  - Added `TMDBGenreMapper` containing all official TMDB integer-to-string genre classifications.
-  - Added `genreIds: [Int]?` (mapped from `genre_ids`) to `TMDBTrendingItem`, `TMDBMovie`, and `TMDBTVShow`.
-  - Updated `toMediaItem()` to populate `genres` immediately from `genreIds`, ensuring carousel and discovery cards immediately carry full genre lists without any initial fallback text.
-- **Canonical TMDB Metadata Enrichment (`TMDBEnricher.swift`):**
-  - Updated `quickEnrich` and `fullEnrich` to decode the full `TMDBMovieDetail` and `TMDBTVShowDetail` models.
-  - Prioritizes TMDB's high-fidelity official overview, genres, vote averages, release dates, runtimes, and high-resolution posters/backdrops, eliminating metadata downgrades by raw Cinemeta payloads.
-- **Seamless DetailView Reconciliation (`DetailView.swift`):**
-  - Updated `loadDetails()` to preserve existing non-empty caller metadata (`description`, `genres`, `voteAverage`, `releaseDate`, `heroURL`, `backdropURL`, `posterURL`) when `detailedItem` arrives.
-  - Updated the dynamic eyebrow kicker and metadata row to only display genre bullets and ratings when present, never showing placeholder `"Genre"` or fallback words.
-  - Added spring transition for the YouTube trailer button when loaded asynchronously in the background.
-- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):**
-  - Added unit test coverage for `TMDBGenreMapper` and metadata preservation on `TMDBMovie` and `TMDBTVShow`.
-  - **All 23 / 23 unit tests passing (100% success rate)**.
+  1. In `DetailView.swift`, the hero description previously evaluated `heroEpisode?.overview ?? displayItem.description`. For TV shows, when `loadEpisodes()` finished, `heroEpisode` was set to Episode 1, replacing the entire show's synopsis with Episode 1's plot summary after a split second.
+  2. In `loadDetails()`, incoming `detailedItem.description` from Cinemeta/enrichment was overwriting the initial `item.description` when `fullItem = merged` was assigned.
+  3. The eyebrow kicker previously flipped to `S1, E1` when `heroEpisode` loaded.
+- **Fix:**
+  - **Show Description Lock:** Anchored the hero description permanently to `displayItem.description` (the show or movie overview), ensuring individual episode synopses remain strictly on episode list cards.
+  - **Strict Field Preservation:** Configured `loadDetails()` to preserve `item.description`, `item.genres`, `item.voteAverage`, `item.releaseDate`, and artwork URLs on `merged`, eliminating 100% of text jumping.
+  - **Stable Eyebrow:** Standardized the eyebrow kicker to display the title's primary genre (`CRIME`, `DRAMA`, etc.) consistently.
+- **Testing:**
+  - Verified all 23 / 23 unit tests pass. App builds cleanly without warnings.
 
 ---
 

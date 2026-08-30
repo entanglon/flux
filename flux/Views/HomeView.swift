@@ -40,19 +40,10 @@ struct HomeView: View {
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
 
     @State private var isLoading = true
-    @State private var scrollOffset: CGFloat = 0.0
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 32) {
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: HomeScrollOffsetKey.self,
-                        value: geo.frame(in: .named("homeScrollSpace")).minY
-                    )
-                }
-                .frame(height: 0)
-
+            LazyVStack(spacing: 0) {
                 if isLoading && heroContent.isEmpty && trendingTodayItems.isEmpty {
                     // Ghost loading layout — hero + skeleton rails
                     VStack(alignment: .leading, spacing: 44) {
@@ -191,10 +182,6 @@ struct HomeView: View {
                 }
             }
             .padding(.bottom, 80)
-        }
-        .coordinateSpace(name: "homeScrollSpace")
-        .onPreferenceChange(HomeScrollOffsetKey.self) { value in
-            scrollOffset = max(0, -value)
         }
         .ignoresSafeArea(.all, edges: .top)
         .refreshable {
@@ -509,13 +496,6 @@ extension HomeView {
     }
     
 
-}
-
-struct HomeScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 #Preview {
