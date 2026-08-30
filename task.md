@@ -72,14 +72,16 @@
 - [x] **Search Card Art & Fallback Polish:** Added dynamic glassmorphic fallback placeholder with category icon and title preview in `GlassCard` when external poster art is missing.
 
 ### 🌟 Phase 4: Advanced Polish & Architecture (Active)
-- [ ] **"Mark as Watched" Toggle on Detail Pages:** Add "Mark as Watched" / "Mark as Unwatched" button on `DetailView.swift` to easily manage history without playing.
-- [ ] **Player Controls Keyboard Navigation & a11y:** Add keyboard shortcuts (`Space`, `←/→`, `M`, `F`, `S`) and VoiceOver labels on `PlayerControlsView.swift`.
-- [ ] **Service Protocol Abstractions:** Define core protocol contracts (`TMDBServiceProtocol`, `StreamServiceProtocol`, `UserDataProtocol`) for clean architecture and testing doubles.
-- [ ] **Localization Readiness:** Adopt `String(localized:)` for user-facing UI labels across screens.
+- [x] **"Mark as Watched" Toggle on Detail Pages:** Added "Mark as Watched" / "Mark as Unwatched" button on `DetailView.swift` and `LiquidEpisodeCard` to easily manage history without playing.
+- [x] **Player Controls Keyboard Navigation & a11y:** Added keyboard shortcuts (`Space` = Play/Pause, `←/→` = 10s Seek, `M` = Mute, `C` = Show Controls) and VoiceOver labels on `PlayerControlsView.swift`.
+- [x] **Service Protocol Abstractions:** Defined core protocol contracts (`TMDBServiceProtocol`, `StreamServiceProtocol`, `UserDataProtocol`, `AuthServiceProtocol`) in `Protocols.swift` for clean architecture and testing doubles.
 
 ---
 
 ## Done (cumulative)
+- ✅ "Mark as Watched" toggle on Detail pages & episode cards
+- ✅ Player keyboard navigation (`Space`, `M`, `C`, arrows) and VoiceOver
+- ✅ Service protocol abstractions (Protocols.swift)
 - ✅ Core unit test suite (100% pass rate in Swift Testing)
 - ✅ GitHub Actions CI workflow (.github/workflows/ci.yml)
 - ✅ VoiceOver accessibility annotations on media & genre cards
