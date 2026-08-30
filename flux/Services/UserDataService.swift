@@ -67,8 +67,8 @@ class UserDataService: ObservableObject {
     }
 
     /// Fills in missing artwork/IDs for history items via TMDB and publishes the
-    /// enriched items. Without the write-back, Continue Watching cards restored
-    /// from disk keep nil URLs and render as eternal spinners.
+    /// enriched items. Preserves all episode-specific thumbnails, titles, runtimes,
+    /// and watch progress so they are never overwritten.
     func enrichHistory() async {
         let items = history
         guard !items.isEmpty else { return }
@@ -76,8 +76,44 @@ class UserDataService: ObservableObject {
         updated.reserveCapacity(items.count)
         var didChange = false
         for item in items {
-            let enriched = await TMDBEnricher.shared.quickEnrich(item)
-            if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL {
+            var enriched = await TMDBEnricher.shared.quickEnrich(item)
+            
+            // STRICTLY PRESERVE all episode-specific user watch session metadata
+            enriched.lastSeason = item.lastSeason ?? enriched.lastSeason
+            enriched.lastEpisode = item.lastEpisode ?? enriched.lastEpisode
+            enriched.lastEpisodeTitle = item.lastEpisodeTitle ?? enriched.lastEpisodeTitle
+            enriched.lastEpisodeImage = item.lastEpisodeImage ?? enriched.lastEpisodeImage
+            enriched.progress = item.progress ?? enriched.progress
+            enriched.runtime = item.runtime ?? enriched.runtime
+            enriched.logoURL = item.logoURL ?? enriched.logoURL
+
+            // If TV show history item is missing season/episode, default to S1, E1 to repair
+            if (enriched.category == "TV Show" || enriched.category == "Series") && enriched.lastSeason == nil {
+                enriched.lastSeason = 1
+                enriched.lastEpisode = 1
+                didChange = true
+            }
+
+            // If the item has a specific episode, ensure episode still/runtime is populated
+            if let season = enriched.lastSeason, let episode = enriched.lastEpisode {
+                if enriched.lastEpisodeImage == nil || enriched.runtime == nil {
+                    let type = "tv"
+                    let tmdbID = enriched.id.starts(with: "tt") ? await TMDBEnricher.shared.resolveTmdbID(imdbID: enriched.id, type: type) : enriched.id
+                    if let id = tmdbID {
+                        let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: season, episode: episode)
+                        if enriched.lastEpisodeImage == nil, let still = info.stillURL {
+                            enriched.lastEpisodeImage = still
+                            didChange = true
+                        }
+                        if enriched.runtime == nil, let rt = info.runtime {
+                            enriched.runtime = rt
+                            didChange = true
+                        }
+                    }
+                }
+            }
+
+            if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL || enriched.lastEpisodeImage != item.lastEpisodeImage || enriched.lastSeason != item.lastSeason {
                 didChange = true
             }
             updated.append(enriched)
@@ -86,6 +122,8 @@ class UserDataService: ObservableObject {
             await MainActor.run {
                 self.history = updated
             }
+            let rawData = updated.map { itemDict($0) }
+            UserDefaults.standard.set(rawData, forKey: self.historyKey)
         }
     }
     
@@ -290,7 +328,7 @@ class UserDataService: ObservableObject {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
         let backdropVal = item.backdropURL?.absoluteString ?? item.heroURL?.absoluteString ?? imageVal
-        return [
+        var dict: [String: Any] = [
             "id": item.id,
             "type": typeString,
             "title": item.title,
@@ -298,6 +336,14 @@ class UserDataService: ObservableObject {
             "backdrop": backdropVal,
             "timestamp": Date().timeIntervalSince1970
         ]
+        if let p = item.progress { dict["progress"] = p }
+        if let s = item.lastSeason { dict["lastSeason"] = s }
+        if let e = item.lastEpisode { dict["lastEpisode"] = e }
+        if let et = item.lastEpisodeTitle { dict["lastEpisodeTitle"] = et }
+        if let ei = item.lastEpisodeImage?.absoluteString { dict["lastEpisodeImage"] = ei }
+        if let r = item.runtime { dict["runtime"] = r }
+        if let l = item.logoURL?.absoluteString { dict["logo"] = l }
+        return dict
     }
     
     private func decodeCollection(_ dict: [String: Any]) -> UserCollection? {

@@ -108,7 +108,17 @@ class TMDBEnricher {
     /// Quick enrichment for catalog carousels
     func quickEnrich(_ item: MediaItem) async -> MediaItem {
         guard hasKey else { return item }
-        if let cached = await memoryCache.getItem(for: item.id) { return cached }
+        if var cached = await memoryCache.getItem(for: item.id) {
+            // Strictly preserve the episode-specific watch session state from the incoming item
+            cached.lastSeason = item.lastSeason ?? cached.lastSeason
+            cached.lastEpisode = item.lastEpisode ?? cached.lastEpisode
+            cached.lastEpisodeTitle = item.lastEpisodeTitle ?? cached.lastEpisodeTitle
+            cached.lastEpisodeImage = item.lastEpisodeImage ?? cached.lastEpisodeImage
+            cached.progress = item.progress ?? cached.progress
+            cached.runtime = item.runtime ?? cached.runtime
+            cached.logoURL = item.logoURL ?? cached.logoURL
+            return cached
+        }
         
         var enriched = item
         let type = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") ? "tv" : "movie"
@@ -139,6 +149,15 @@ class TMDBEnricher {
             }
         }
         
+        // Retain caller's episode session properties
+        enriched.lastSeason = item.lastSeason
+        enriched.lastEpisode = item.lastEpisode
+        enriched.lastEpisodeTitle = item.lastEpisodeTitle
+        enriched.lastEpisodeImage = item.lastEpisodeImage
+        enriched.progress = item.progress
+        enriched.runtime = item.runtime
+        enriched.logoURL = item.logoURL
+
         await memoryCache.storeItem(enriched, for: item.id)
         return enriched
     }
