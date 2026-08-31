@@ -86,4 +86,36 @@ struct ArchitectureTests {
         #expect(winner?.cleanTitle == "4K Torrent")
         #expect(winner?.isTorrent == true)
     }
+
+    @Test func addonStoreCatalogContainsEssentialCategories() {
+        let catalog = AddonStoreCatalog.curatedAddons
+        #expect(!catalog.isEmpty)
+        
+        let categories = Set(catalog.map { $0.category })
+        #expect(categories.contains(.subtitles))
+        #expect(categories.contains(.streamingServices))
+        #expect(categories.contains(.publicDomain))
+        #expect(categories.contains(.community))
+
+        let opensubs = catalog.first(where: { $0.id == "opensubtitles3" })
+        #expect(opensubs?.isStock == true)
+
+        let watchhub = catalog.first(where: { $0.id == "official.watchhub" })
+        #expect(watchhub?.category == .streamingServices)
+    }
+
+    @Test func stockAddonProtectionPreventsDeletion() {
+        let manager = AddonManager.shared
+        #expect(manager.isAddonInstalled(id: "opensubtitles3"))
+        
+        if let stockAddon = manager.installedAddon(for: "opensubtitles3") {
+            #expect(stockAddon.isStock == true)
+            let initialCount = manager.addons.count
+            manager.removeAddon(stockAddon)
+            // Should not be deleted
+            #expect(manager.addons.count == initialCount)
+            #expect(manager.isAddonInstalled(id: "opensubtitles3"))
+        }
+    }
 }
+
