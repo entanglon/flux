@@ -1,13 +1,16 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — CONTINUE WATCHING LOGO STABILIZATION, STREAM BUTTON REMOVAL, CURSOR AUTO-HIDE & SMART CHAPTER SKIPS
+## LATEST: Aug 31, 2026 — CLEAN SEPARATION OF COLD STARTUP BUFFERING & IN-PLAYER MID-PLAYBACK BUFFERING, LOGO STABILITY & STREAM BUTTON REMOVAL
 
-### Continue Watching Card Logo Stabilization (`ContinueWatchingCard.swift`)
-- **Root Cause:** When the rail was slid, `.task` wiped `fetchedLogo = nil`, temporarily falling back to the item logo before TMDB's high-aspect logo reloaded and shrunk *Project Hail Mary*'s title.
-- **Fix:** Fixed logo container height to `.frame(height: 34, alignment: .leading)`, preserved existing fetched assets in `.task` on rail scroll, and prioritized stable `item.logoURL`. The logo no longer shifts, shrinks, or resets size during carousel sliding.
+### Pristine Startup Buffer Screen & In-Player Mid-Playback Buffering (`PlayerView.swift`)
+- **No Controls on Startup Buffer Screen:** Restored the initial cold-start buffering view to be 100% focused on the title artwork, vignette, and animated fill logo with a top-left close button (`X`) and Esc handler. Player controls (play/pause circle, seekbar, track pills) are strictly hidden until the video frames begin rendering (`hasStartedPlayback = true`).
+- **Clean In-Player Mid-Playback Buffering:** When buffering occurs mid-playback, `logoBufferingView` is NOT triggered. Instead, the paused video frame remains on screen with a floating, translucent center `ProgressView` glass badge directly on the video inside the player.
+
+### Continue Watching Card Logo Stability (`ContinueWatchingCard.swift`)
+- **Zero Mid-Flight URL Swapping:** Fixed logo container height to `.frame(height: 34, alignment: .leading)`, preserved existing fetched assets in `.task` on rail scroll, and eliminated asynchronous TMDB logo overwriting for IMDb items with deterministic Metahub artwork. *Project Hail Mary* renders at its true size from the first frame without shrinking or flashing.
 
 ### Mid-Playback Stream Button Removal (`PlayerControlsView.swift`)
-- **Removed Sources Button from Audio/Subtitles Pill:** Removed the source switch button from the audio/subtitle controls. Restored the clean Apple TV audio/subtitles pill (Subtitles + Audio only), eliminating pipeline detachment and crashes during playback.
+- **Removed Sources Button from Audio/Subtitles Pill:** Restored the clean Apple TV audio/subtitles pill (Subtitles + Audio only), eliminating pipeline detachment and crashes during playback.
 
 ### Cursor Auto-Hide & Scrubbing Key Polish (`PlayerControlsView.swift`, `PlayerView.swift`)
 - **Automatic Cursor Hiding After 2.5s:** Added continuous hover activity tracking (`.onContinuousHover`). When the user moves the mouse, the cursor appears; after 2.5s of no movement, `NSCursor.setHiddenUntilMouseMoves(true)` automatically hides the cursor.
