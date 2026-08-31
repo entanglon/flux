@@ -552,16 +552,32 @@ class StremioServerManager: ObservableObject {
         return total
     }
 
-    /// Current on-disk torrent cache usage, formatted ("2.1 GB").
-    func cacheUsage() async -> String {
+    /// Current on-disk torrent cache usage info (raw bytes and formatted string).
+    func cacheUsageInfo() async -> (usedBytes: Int64, formatted: String) {
         let cacheDir = torrentCacheDir
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: cacheDir) else { return "0 KB" }
+        guard let contents = try? fm.contentsOfDirectory(atPath: cacheDir) else { return (0, "0 KB") }
         var total: Int64 = 0
         for name in contents where isTorrentHashDir(name) {
             total += diskSize(of: cacheDir + "/" + name)
         }
-        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+        return (total, ByteCountFormatter.string(fromByteCount: total, countStyle: .file))
+    }
+
+    /// Current on-disk torrent cache usage, formatted ("2.1 GB").
+    func cacheUsage() async -> String {
+        let info = await cacheUsageInfo()
+        return info.formatted
+    }
+
+    /// Purges all inactive torrent caches from disk.
+    func purgeTorrentCache() async {
+        let cacheDir = torrentCacheDir
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: cacheDir) else { return }
+        for name in contents where isTorrentHashDir(name) {
+            try? fm.removeItem(atPath: cacheDir + "/" + name)
+        }
     }
 
     /// Evicts oldest torrent directories until total usage is within the limit.
