@@ -1,14 +1,20 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — BUFFER LOADING SCREEN LAYER REORDER, TRANSPARENT MID-PLAY BUFFERING, ZERO PAUSE-FLASH, APPLE TV CONTROLS & CONTINUE WATCHING NEXT-EPISODE
+## LATEST: Aug 31, 2026 — NATIVE MKV/MP4 CHAPTER PARSING, SMART SKIP ACTION ENGINE (NO FALSE RECAPS), REAL BUFFER TELEMETRY, APPLE TV CONTROLS & CONTINUE WATCHING NEXT-EPISODE
 
-### Buffer Loading Screen & Layer Reorder (`PlayerView.swift`)
-- **Controls Always Accessible During Buffering:** Reordered view layers so `logoBufferingView` resides directly above the video layer and *behind* `PlayerControlsView` with `.allowsHitTesting(false)`. Users can now see the title, exit anytime via the Close button `X`, or adjust PiP/audio while the buffer loads.
-- **Transparent Mid-Playback Buffering:**
-  - On **initial cold start** (`!hasStartedPlayback`), displays the full dark backdrop and vignette loading screen.
-  - On **mid-playback re-buffering** (`hasStartedPlayback && mpv.isBuffering`), the backdrop and gradients are completely transparent (`Color.clear`), rendering only the centered animated logo fill spinner directly over the frozen video frame without blanking the screen.
-- **Zero Black-Frame Flash on Play-After-Pause:** Eliminated the race condition where `!mpv.isPlaying` during the pause-to-play transition falsely triggered `isInitialLoading = true`. Tracked `hasStartedPlayback` ensures hitting play after pause never triggers the black initial loading overlay.
-- **Instant Audio/Video Sync Dismissal:** As soon as `mpv.timePos > 0.05` and frames render, `hasStartedPlayback` immediately flips to true, eliminating the delay where audio started playing behind the black screen.
+### Smart Skip Action Engine & Native Chapter Track Parsing (`MPVVideoView.swift`, `PlayerView.swift`)
+- **Native Embedded Chapter Track Extraction:** MPV now queries `chapter-list/count`, `chapter-list/{i}/title`, and `chapter-list/{i}/time` directly from the MKV/MP4 video stream upon loading.
+- **Accurate Chapter Timing:** Matches chapters titled `"Recap"`, `"Previously On"`, `"Intro"`, `"Opening"`, `"Theme"`, `"Credits"`, and `"Outro"` with millisecond-exact start and end timestamps.
+- **Zero False "Skip Recap" on Season 1 Episode 1:** Pilot / premiere episodes ($S1E1$) never have a recap. The smart skip engine strictly prohibits showing "Skip Recap" on Episode 1. Only on Episode 2+ ($S > 1$ or $E > 1$) does recap detection activate.
+- **Context-Aware Button Actions:**
+  - `Skip Recap` jumps directly past the recap to the start of the episode.
+  - `Skip Intro` jumps past the intro sequence.
+  - `Next: S{n} E{e+1}` button appears during the end credits to smoothly advance to the next episode.
+
+### Real Buffer Progress Telemetry & Seamless Start (`PlayerView.swift`, `MPVVideoView.swift`)
+- **Real Buffer Telemetry:** `logoBufferingView` now binds directly to `mpv.bufferProgress` (the true $0–100\%$ cache fill) alongside `mpv.demuxerCacheTime`, replacing static pulse states with real byte-fill progress.
+- **Mid-Play Re-Buffering Stability:** Mid-playback buffering checks require $timePos \ge 3.0\text{s}$, preventing micro-buffering oscillations during cold start that previously caused the HBO intro chime to play behind a lingering black screen.
+- **Controls Always Accessible During Buffering:** Layered `PlayerControlsView` over the buffering overlay with `.allowsHitTesting(false)` so users can exit or see metadata without obstruction.
 
 ### Apple TV-Style Player Controls Interaction (`PlayerControlsView.swift`, `PlayerView.swift`)
 - **Touch / Tap / Key-Triggered Appearance:** Replaced continuous mouse tracking with tap/click gesture (`onTapGesture`) and keyboard triggers (Space, Enter, `C`, arrow keys). Subtle cursor movements no longer pop up the controls while watching.
