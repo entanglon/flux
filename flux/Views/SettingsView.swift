@@ -525,10 +525,10 @@ struct AddonsSettingsTabView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "puzzlepiece.extension.fill")
                         .font(.title2)
-                        .foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.8), .cyan.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Addon Store")
+                        Text("Addon Store & Directory")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
                         
@@ -539,11 +539,48 @@ struct AddonsSettingsTabView: View {
                     
                     Spacer()
                     
-                    Button("Browse Store") {
-                        NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.addons)
+                    // Web Directory Button
+                    Button(action: {
+                        if let url = URL(string: "https://stremio-addons.netlify.app") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "safari")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Web Store")
+                                .font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5.5)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(.white.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .buttonStyle(.plain)
+                    .help("Open community addon directory in browser")
+                    
+                    // In-App Store Button
+                    Button(action: {
+                        NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.addons)
+                    }) {
+                        Text("Browse Store")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5.5)
+                            .background(Color.white.opacity(0.14))
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.vertical, 4)
             }
@@ -644,30 +681,69 @@ struct AddonsSettingsTabView: View {
                 }
             }
             
-            // Install from URL Section
-            Section(header: Text("Install Custom Addon")) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        TextField("Addon Manifest URL (e.g. https://domain.com/manifest.json)", text: $newAddonUrl)
-                            .textFieldStyle(.roundedBorder)
+            // Install from URL Section (Spacious Liquid Glass Input)
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Install Custom Addon")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text("Paste any manifest URL (e.g. https://domain.com/manifest.json) or stremio:// link")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                    
+                    HStack(spacing: 8) {
+                        TextField("https://addon-domain.com/manifest.json", text: $newAddonUrl)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                            )
+                            .labelsHidden()
                         
                         Button(action: addAddon) {
-                            if isAdding {
-                                ProgressView()
-                                    .scaleEffect(0.65)
-                            } else {
+                            HStack(spacing: 5) {
+                                if isAdding {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 11, weight: .bold))
+                                }
                                 Text("Install")
+                                    .font(.system(size: 11.5, weight: .semibold))
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.12))
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                            )
                         }
+                        .buttonStyle(.plain)
                         .disabled(newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAdding)
                     }
                     
                     if let error = addError {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.caption)
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                            Text(error)
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.red)
                     }
                 }
+                .padding(.vertical, 4)
             }
         }
         .formStyle(.grouped)

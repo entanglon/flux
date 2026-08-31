@@ -68,21 +68,22 @@ struct fluxApp: App {
     
     var body: some Scene {
         WindowGroup {
-            if authManager.needsGate {
-                AuthGateView()
-                    .environmentObject(authManager)
-                    .preferredColorScheme(.dark)
-                    .containerBackground(.clear, for: .window)
-            } else if profileManager.currentProfile != nil {
-                ContentView()
-                    .environmentObject(playerManager)
-                    .environmentObject(authManager)
-                    .preferredColorScheme(.dark)
-                    .containerBackground(.clear, for: .window)
-            } else {
-                ProfileGateView()
-                    .preferredColorScheme(.dark)
-                    .containerBackground(.clear, for: .window)
+            Group {
+                if authManager.needsGate {
+                    AuthGateView()
+                        .environmentObject(authManager)
+                } else if profileManager.currentProfile != nil {
+                    ContentView()
+                        .environmentObject(playerManager)
+                        .environmentObject(authManager)
+                } else {
+                    ProfileGateView()
+                }
+            }
+            .preferredColorScheme(.dark)
+            .containerBackground(.clear, for: .window)
+            .onOpenURL { url in
+                AddonManager.shared.handleIncomingURL(url)
             }
         }
         .commands {
@@ -124,7 +125,7 @@ struct fluxApp: App {
             }
         }
         .defaultSize(width: 1200, height: 800)
-        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        .windowToolbarStyle(.unified(showsTitle: false))
         
         // Player Window
         WindowGroup(id: "player", for: MediaItem.ID.self) { $itemId in

@@ -170,4 +170,90 @@ class AddonManager: ObservableObject {
             saveAddons()
         }
     }
+    
+    // MARK: - Deep Linking Protocol (stremio:// & flux://)
+    
+    @Published var pendingDeepLinkManifest: AddonManifest?
+    @Published var pendingDeepLinkURL: String?
+    @Published var showDeepLinkModal: Bool = false
+    @Published var isInstallingDeepLink: Bool = false
+    @Published var deepLinkError: String?
+    
+    func handleIncomingURL(_ url: URL) {
+        var targetManifestURL = url.absoluteString
+        
+        if url.scheme == "stremio" {
+            targetManifestURL = targetManifestURL.replacingOccurrences(of: "stremio://", with: "https://")
+        } else if url.scheme == "flux" {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let queryItems = components.queryItems,
+               let urlParam = queryItems.first(where: { $0.name == "url" || $0.name == "addon" })?.value {
+                targetManifestURL = urlParam
+            }
+        }
+        
+        targetManifestURL = targetManifestURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !targetManifestURL.hasSuffix("/manifest.json") {
+            if targetManifestURL.hasSuffix("/") {
+                targetManifestURL.removeLast()
+            }
+            targetManifestURL += "/manifest.json"
+        }
+        
+        guard let fetchURL = URL(string: targetManifestURL) else { return }
+        
+        Task { @MainActor in
+            do {
+                var request = URLRequest(url: fetchURL)
+                request.timeoutInterval = 10
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    return
+                }
+                let manifest = try JSONDecoder().decode(AddonManifest.self, from: data)
+                self.pendingDeepLinkManifest = manifest
+                self.pendingDeepLinkURL = targetManifestURL
+                self.deepLinkError = nil
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    self.showDeepLinkModal = true
+                }
+            } catch {
+                print("Failed to fetch incoming deep link manifest: \(error)")
+            }
+        }
+    }
+    
+    func confirmDeepLinkInstallation() async {
+        guard let manifest = pendingDeepLinkManifest, let urlStr = pendingDeepLinkURL else { return }
+        await MainActor.run {
+            self.isInstallingDeepLink = true
+            self.deepLinkError = nil
+        }
+        
+        do {
+            try await addAddon(url: urlStr, isStock: false, category: AddonCategory.community.rawValue, fallbackLogoURL: manifest.logo ?? manifest.icon)
+            await MainActor.run {
+                self.isInstallingDeepLink = false
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    self.showDeepLinkModal = false
+                    self.pendingDeepLinkManifest = nil
+                    self.pendingDeepLinkURL = nil
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.isInstallingDeepLink = false
+                self.deepLinkError = "Installation failed: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    func dismissDeepLinkModal() {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+            showDeepLinkModal = false
+            pendingDeepLinkManifest = nil
+            pendingDeepLinkURL = nil
+            deepLinkError = nil
+        }
+    }
 }

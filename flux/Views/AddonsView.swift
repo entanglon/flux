@@ -100,7 +100,7 @@ struct AddonsView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Addon Store")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -113,18 +113,18 @@ struct AddonsView: View {
                     .lineLimit(1)
             }
             
-            Spacer(minLength: 24)
+            Spacer(minLength: 20)
             
             // Search Input
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
                 
                 TextField("Search extensions…", text: $searchText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .frame(width: 180)
+                    .font(.system(size: 12.5))
+                    .frame(width: 160)
                 
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
@@ -135,28 +135,48 @@ struct AddonsView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Color.white.opacity(0.08))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.07))
             .clipShape(Capsule())
             .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
             
-            // Install from URL Button
-            Button(action: { showCustomURLModal = true }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "link.badge.plus")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("Install from URL")
-                        .font(.system(size: 13, weight: .semibold))
+            // Web Store Button (Liquid Glass)
+            Button(action: {
+                if let url = URL(string: "https://stremio-addons.netlify.app") {
+                    NSWorkspace.shared.open(url)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(
-                    LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                )
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "safari")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Web Store")
+                        .font(.system(size: 12.5, weight: .semibold))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.08))
+                .foregroundColor(.white.opacity(0.9))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("Open community addon directory in browser")
+            
+            // Install from URL Button (Liquid Glass)
+            Button(action: { showCustomURLModal = true }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "link.badge.plus")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Install from URL")
+                        .font(.system(size: 12.5, weight: .semibold))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.14))
                 .foregroundColor(.white)
                 .clipShape(Capsule())
-                .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 3)
+                .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain)
         }
@@ -176,31 +196,31 @@ struct AddonsView: View {
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: category.icon)
-                                .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                                .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
                             
                             Text(category.rawValue)
-                                .font(.system(size: 12.5, weight: isSelected ? .bold : .medium))
+                                .font(.system(size: 12, weight: isSelected ? .bold : .medium))
                             
                             if category == .installed {
                                 Text("\(addonManager.addons.count)")
-                                    .font(.system(size: 10.5, weight: .heavy))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
+                                    .font(.system(size: 10, weight: .heavy))
+                                    .padding(.horizontal, 5.5)
+                                    .padding(.vertical, 1.5)
                                     .background(isSelected ? Color.white.opacity(0.25) : Color.white.opacity(0.12))
                                     .clipShape(Capsule())
                             }
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7.5)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 7)
                         .background(
                             isSelected
-                            ? AnyShapeStyle(LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                            : AnyShapeStyle(Color.white.opacity(0.08))
+                            ? AnyShapeStyle(Color.white.opacity(0.18))
+                            : AnyShapeStyle(Color.white.opacity(0.06))
                         )
-                        .foregroundColor(isSelected ? .white : .white.opacity(0.75))
+                        .foregroundColor(isSelected ? .white : .white.opacity(0.72))
                         .clipShape(Capsule())
                         .overlay(
-                            Capsule().stroke(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
+                            Capsule().stroke(isSelected ? Color.white.opacity(0.28) : Color.white.opacity(0.08), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -266,7 +286,7 @@ struct AddonsView: View {
     }
 }
 
-// MARK: - Curated Store Addon Card (Real Official Logos)
+// MARK: - Curated Store Addon Card (Liquid Glass & Real Logos)
 
 struct StoreAddonCardView: View {
     let item: StoreAddonItem
@@ -370,10 +390,10 @@ struct StoreAddonCardView: View {
             }
             
             Divider()
-                .background(Color.white.opacity(0.1))
+                .background(Color.white.opacity(0.08))
                 .padding(.vertical, 2)
             
-            // Bottom Action Row
+            // Bottom Action Row (Liquid Glass)
             HStack(spacing: 10) {
                 if let addon = installedAddon {
                     // Toggle Switch
@@ -394,11 +414,12 @@ struct StoreAddonCardView: View {
                     if item.configureURL != nil || !addon.url.isEmpty {
                         Button(action: { onConfigure(addon) }) {
                             Image(systemName: "gearshape.fill")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.8))
                                 .padding(7)
-                                .background(Color.white.opacity(0.1))
+                                .background(Color.white.opacity(0.08))
                                 .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .help("Configure addon in browser")
@@ -408,11 +429,12 @@ struct StoreAddonCardView: View {
                     if !addon.isStock {
                         Button(action: { onUninstall(addon) }) {
                             Image(systemName: "trash.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.red.opacity(0.9))
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.85))
                                 .padding(7)
-                                .background(Color.red.opacity(0.15))
+                                .background(Color.red.opacity(0.12))
                                 .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.red.opacity(0.2), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .help("Uninstall community addon")
@@ -420,28 +442,30 @@ struct StoreAddonCardView: View {
                 } else {
                     Spacer()
                     
-                    // Install Button
+                    // Liquid Glass Install Button
                     Button(action: onInstall) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             if isInstalling {
                                 ProgressView()
-                                    .scaleEffect(0.65)
+                                    .scaleEffect(0.6)
                                     .tint(.white)
                             } else {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 13, weight: .bold))
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 12, weight: .semibold))
                             }
                             
                             Text(isInstalling ? "Installing…" : "Install")
-                                .font(.system(size: 12.5, weight: .bold))
+                                .font(.system(size: 12, weight: .semibold))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 7)
-                        .background(
-                            LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                        )
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6.5)
+                        .background(Color.white.opacity(0.12))
                         .foregroundColor(.white)
                         .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
                     .disabled(isInstalling)
@@ -451,7 +475,7 @@ struct StoreAddonCardView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.09 : 0.04))
+                .fill(Color.white.opacity(isHovered ? 0.08 : 0.04))
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
@@ -459,16 +483,16 @@ struct StoreAddonCardView: View {
                 .stroke(
                     LinearGradient(
                         colors: isHovered
-                            ? [Color.blue.opacity(0.6), Color.cyan.opacity(0.3)]
-                            : [Color.white.opacity(0.1), Color.white.opacity(0.02)],
+                            ? [Color.white.opacity(0.25), Color.white.opacity(0.10)]
+                            : [Color.white.opacity(0.08), Color.white.opacity(0.02)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isHovered ? 1.5 : 1
+                    lineWidth: 1
                 )
         )
         .scaleEffect(isHovered ? 1.01 : 1.0)
-        .shadow(color: isHovered ? Color.blue.opacity(0.2) : Color.clear, radius: 10, x: 0, y: 4)
+        .shadow(color: isHovered ? Color.black.opacity(0.3) : Color.clear, radius: 10, x: 0, y: 4)
         .onHover { hovering in
             withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
                 isHovered = hovering
@@ -583,7 +607,7 @@ struct CustomAddonCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             Divider()
-                .background(Color.white.opacity(0.1))
+                .background(Color.white.opacity(0.08))
                 .padding(.vertical, 2)
             
             HStack(spacing: 10) {
@@ -603,11 +627,12 @@ struct CustomAddonCardView: View {
                 if !addon.url.isEmpty {
                     Button(action: onConfigure) {
                         Image(systemName: "gearshape.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12.5, weight: .semibold))
                             .foregroundColor(.white.opacity(0.8))
                             .padding(7)
-                            .background(Color.white.opacity(0.1))
+                            .background(Color.white.opacity(0.08))
                             .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .help("Configure addon")
@@ -616,11 +641,12 @@ struct CustomAddonCardView: View {
                 if !addon.isStock {
                     Button(action: onUninstall) {
                         Image(systemName: "trash.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.red.opacity(0.9))
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.85))
                             .padding(7)
-                            .background(Color.red.opacity(0.15))
+                            .background(Color.red.opacity(0.12))
                             .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.red.opacity(0.2), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .help("Uninstall custom addon")
@@ -630,7 +656,7 @@ struct CustomAddonCardView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.09 : 0.04))
+                .fill(Color.white.opacity(isHovered ? 0.08 : 0.04))
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
@@ -638,12 +664,12 @@ struct CustomAddonCardView: View {
                 .stroke(
                     LinearGradient(
                         colors: isHovered
-                            ? [Color.purple.opacity(0.6), Color.indigo.opacity(0.3)]
-                            : [Color.white.opacity(0.1), Color.white.opacity(0.02)],
+                            ? [Color.white.opacity(0.25), Color.white.opacity(0.10)]
+                            : [Color.white.opacity(0.08), Color.white.opacity(0.02)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isHovered ? 1.5 : 1
+                    lineWidth: 1
                 )
         )
         .scaleEffect(isHovered ? 1.01 : 1.0)
@@ -679,7 +705,7 @@ struct CustomManifestInstallerModal: View {
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                     
-                    Text("Paste any Stremio manifest URL (e.g. https://domain.com/manifest.json)")
+                    Text("Paste any Stremio manifest URL or stremio:// link")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.white.opacity(0.65))
                 }
@@ -700,11 +726,11 @@ struct CustomManifestInstallerModal: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .padding(12)
-                    .background(Color.white.opacity(0.08))
+                    .background(Color.white.opacity(0.07))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     )
                 
                 if let error = errorMessage {
@@ -737,20 +763,19 @@ struct CustomManifestInstallerModal: View {
                                 .scaleEffect(0.65)
                                 .tint(.white)
                         } else {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 13, weight: .bold))
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 12.5, weight: .bold))
                         }
                         
                         Text(isValidating ? "Validating…" : "Install Addon")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: 12.5, weight: .semibold))
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
-                    )
+                    .padding(.vertical, 7.5)
+                    .background(Color.white.opacity(0.16))
                     .foregroundColor(.white)
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.24), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .disabled(manifestUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidating)
@@ -797,6 +822,243 @@ struct CustomManifestInstallerModal: View {
                     errorMessage = "Failed to load manifest: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+}
+
+// MARK: - Deep Link Installation Modal (Floating Glass UI)
+
+struct DeepLinkAddonInstallModal: View {
+    @ObservedObject var addonManager = AddonManager.shared
+    
+    var body: some View {
+        if addonManager.showDeepLinkModal, let manifest = addonManager.pendingDeepLinkManifest {
+            ZStack {
+                // Dimmed Backdrop Blur
+                Color.black.opacity(0.65)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        addonManager.dismissDeepLinkModal()
+                    }
+                
+                // Floating Glass Card
+                VStack(alignment: .leading, spacing: 18) {
+                    // Header with Logo + Name + Dismiss
+                    HStack(alignment: .top, spacing: 14) {
+                        // Addon Logo
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                                .frame(width: 52, height: 52)
+                            
+                            if let logoStr = manifest.logo ?? manifest.icon, let url = URL(string: logoStr) {
+                                CachedImage(url: url, maxDimension: 120) { phase in
+                                    switch phase {
+                                    case .success(let img):
+                                        img
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 42, height: 42)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    default:
+                                        fallbackLogo(name: manifest.name)
+                                    }
+                                }
+                            } else {
+                                fallbackLogo(name: manifest.name)
+                            }
+                        }
+                        .frame(width: 52, height: 52)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(manifest.name)
+                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                
+                                if let ver = manifest.version {
+                                    Text("v\(ver)")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.white.opacity(0.1))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            
+                            Text("External Addon Installation Request")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: { addonManager.dismissDeepLinkModal() }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    // Description
+                    if let desc = manifest.description, !desc.isEmpty {
+                        Text(desc)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(3)
+                            .padding(.vertical, 2)
+                    }
+                    
+                    // Permissions & Requested Resources
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("REQUESTED CAPABILITIES")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .tracking(0.8)
+                        
+                        HStack(spacing: 8) {
+                            if let resources = manifest.resources, !resources.isEmpty {
+                                ForEach(resources, id: \.self) { res in
+                                    HStack(spacing: 4) {
+                                        Image(systemName: iconForResource(res))
+                                            .font(.system(size: 10))
+                                        Text(res.capitalized)
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.white.opacity(0.08))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                }
+                            } else {
+                                Text("Standard Media Provider")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            Spacer()
+                        }
+                    }
+                    
+                    // Manifest Source URL
+                    if let urlStr = addonManager.pendingDeepLinkURL {
+                        HStack(spacing: 6) {
+                            Image(systemName: "link")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.4))
+                            Text(urlStr)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    
+                    if let error = addonManager.deepLinkError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                            Text(error)
+                                .font(.system(size: 11.5))
+                        }
+                        .foregroundColor(.red)
+                    }
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.08))
+                    
+                    // Action Buttons (Liquid Glass)
+                    HStack(spacing: 12) {
+                        Button("Cancel") {
+                            addonManager.dismissDeepLinkModal()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7.5)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            Task {
+                                await addonManager.confirmDeepLinkInstallation()
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                if addonManager.isInstallingDeepLink {
+                                    ProgressView()
+                                        .scaleEffect(0.65)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 12.5, weight: .bold))
+                                }
+                                Text(addonManager.isInstallingDeepLink ? "Installing…" : "Install Addon")
+                                    .font(.system(size: 12.5, weight: .bold))
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 7.5)
+                            .background(Color.white.opacity(0.18))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(addonManager.isInstallingDeepLink)
+                    }
+                }
+                .padding(24)
+                .frame(width: 480)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.ultraThinMaterial.opacity(0.95))
+                        .shadow(color: .black.opacity(0.7), radius: 32, x: 0, y: 16)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [.white.opacity(0.25), .white.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.94).combined(with: .opacity),
+                    removal: .scale(scale: 0.96).combined(with: .opacity)
+                ))
+            }
+            .zIndex(100)
+        }
+    }
+    
+    private func fallbackLogo(name: String) -> some View {
+        Text(String(name.prefix(1)).uppercased())
+            .font(.system(size: 20, weight: .bold, design: .rounded))
+            .foregroundColor(.white.opacity(0.9))
+    }
+    
+    private func iconForResource(_ resource: String) -> String {
+        switch resource.lowercased() {
+        case "stream": return "play.circle.fill"
+        case "subtitles": return "captions.bubble.fill"
+        case "catalog": return "square.grid.2x2.fill"
+        case "meta": return "info.circle.fill"
+        default: return "puzzlepiece.extension.fill"
         }
     }
 }

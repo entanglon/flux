@@ -142,6 +142,10 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        // MARK: - Floating Glass Deep Link Addon Installer Modal
+        .overlay {
+            DeepLinkAddonInstallModal()
+        }
         .simultaneousGesture(
             SpatialTapGesture()
                 .onEnded { value in
