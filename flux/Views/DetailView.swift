@@ -20,6 +20,7 @@ struct DetailView: View {
     @State private var showCollectionsPopover = false
     @State private var trailerURL: URL? = nil
     @State private var bonusContent: [BonusContentItem] = []
+    @State private var trailers: [BonusContentItem] = []
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -289,9 +290,9 @@ struct DetailView: View {
                                     .help("Download best stream for offline")
 
                                     // Play Trailer in Flux Native Player
-                                    if !bonusContent.isEmpty || trailerURL != nil {
+                                    if !trailers.isEmpty || !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
-                                            if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
+                                            if let firstTrailer = trailers.first ?? bonusContent.first {
                                                 playBonusContent(firstTrailer)
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
@@ -358,9 +359,9 @@ struct DetailView: View {
                                     .help("Add to list")
 
                                     // Play Trailer Button
-                                    if !bonusContent.isEmpty || trailerURL != nil {
+                                    if !trailers.isEmpty || !bonusContent.isEmpty || trailerURL != nil {
                                         Button {
-                                            if let firstTrailer = bonusContent.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }) ?? bonusContent.first {
+                                            if let firstTrailer = trailers.first ?? bonusContent.first {
                                                 playBonusContent(firstTrailer)
                                             } else if let trailer = trailerURL {
                                                 NSWorkspace.shared.open(trailer)
@@ -488,6 +489,26 @@ struct DetailView: View {
                                     .padding(.trailing, 60)
 
                                 DetailRail(items: bonusContent, idPath: \.id, itemWidth: 300, itemHeight: 169) { item in
+                                    Button {
+                                        playBonusContent(item)
+                                    } label: {
+                                        BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if !trailers.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Trailers")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.white)
+                                    .padding(.leading, 268)
+                                    .padding(.trailing, 60)
+
+                                DetailRail(items: trailers, idPath: \.id, itemWidth: 300, itemHeight: 169) { item in
                                     Button {
                                         playBonusContent(item)
                                     } label: {
@@ -826,8 +847,10 @@ struct DetailView: View {
             
             let (fetchedBonus, tmdbSimilar) = await (fetchedBonusTask, tmdbSimilarTask)
             
-            self.bonusContent = fetchedBonus
-            if let bestTrailer = fetchedBonus.first(where: { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }),
+            self.bonusContent = fetchedBonus.filter { $0.categoryType != "Trailer" && $0.categoryType != "Teaser" }
+            self.trailers = fetchedBonus.filter { $0.categoryType == "Trailer" || $0.categoryType == "Teaser" }
+            
+            if let bestTrailer = self.trailers.first,
                let key = bestTrailer.videoKey {
                 self.trailerURL = URL(string: "https://www.youtube.com/watch?v=\(key)")
             }
