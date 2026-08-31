@@ -1,6 +1,13 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — MODERN SETTINGS UI REDESIGN: TMDB KEY VALIDATION CARD, VISUAL STORAGE GAUGE & ACCORDION STATE
+## LATEST: Aug 31, 2026 — PERSISTENT DISK STREAM CACHE (24H TTL), ZERO-SCRAPE INSTANT REPLAY & CACHE EVICTION
+
+### 24-Hour Disk-Persisted Stream Cache (`StreamCacheActor.swift`, `StreamManager.swift`)
+- **Zero-Latency Stream Loading for Visited Titles:** `StreamCacheActor` now persists scraped stream lists (including seeders, fast-start rankings, infohashes, and file indices) directly to disk (`flux_streams_cache.json`) with a 24-hour TTL. Replaying or opening ANY title previously scraped loads the complete ranked stream list in **0 milliseconds** without repeating HTTP requests to addons.
+
+### Multi-Title Instant Replay Fast-Path & Auto-Eviction (`PlayerManager.swift`, `StremioServerManager.swift`)
+- **Instant Replay for All Watched Titles:** `finishSelect` now immediately captures and persists `lastStreamURL`, `lastTorrentInfoHash`, and `lastFileIndex` to `UserDataService`. Re-clicking any title in Continue Watching or Library reuses the stream session immediately without re-scraping.
+- **Natural Download Pause & Automatic Cache Eviction on Player Close:** When exiting the player, MPV stops reading from the stream, naturally pausing piece downloads in `FluxEngine` while preserving verified chunks. In the background, `PlayerManager.close()` triggers `evictCacheIfNeeded()` to enforce the user's cache limit (e.g. 2 GB).
 
 ### Redesigned TMDB API Key Section (`SettingsView.swift`)
 - **Clean Two-Row Layout:** The input field now sits cleanly below the "TMDB API Key" header row.
