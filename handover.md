@@ -3,7 +3,8 @@
 ## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
 ### App Store-Style Addons Store & Settings Pane (`AddonsView.swift`, `SettingsView.swift`, `AddonModels.swift`, `AddonManager.swift`)
-- **Real Official Addon Logos:** Replaced generic SF Symbol tiles with official brand PNG logos directly from addon manifests and CDNs (e.g. OpenSubtitles, WatchHub, Torrentio, Comet, MediaFusion, Internet Archive, CyberFlix, YouTube).
+- **Verified Official Addon Logos:** All 12 curated addons now load real, official brand PNGs directly from tested, active 200 HTTP endpoints (OpenSubtitles, WatchHub, Torrentio, Comet, MediaFusion, Meteor, Internet Archive, YouTube, IPTV, CyberFlix, Stremify, WebStreamr).
+- **Sidebar Alignment & Clean Layout:** Added `LibraryScheme.leadingPadding` (268px) to `AddonsView.swift` so store content and headers are never covered or clipped by the floating sidebar, perfectly aligning with Watchlist, Collections, and Downloads pages.
 - **Clean macOS Settings Addons Pane (`AddonsSettingsTabView`):** Created a dedicated, compact preference pane for the `530x460` Settings window with installed addon toggles, quick URL install, and a "Browse Store" button that opens the full Addon Store in the main window.
 - **Spacious Full-Window Store View (`AddonsView`):** Polished the sidebar Addon Store page with fixed non-wrapping header typography (`lineLimit(1)`), responsive search bar, category filter pills, and adaptive card grid.
 
