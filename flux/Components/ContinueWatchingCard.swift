@@ -252,8 +252,8 @@ struct ContinueWatchingCard: View {
             }
 
             if let id = tmdbIDToUse {
-                // Fetch logo only if not already present on item or fetched
-                if item.logoURL == nil && fetchedLogo == nil {
+                // Fetch logo only if not already present on item or deterministic Metahub endpoint
+                if item.logoURL == nil && !item.id.starts(with: "tt") && fetchedLogo == nil {
                     if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
                         await MainActor.run { self.fetchedLogo = logo }
                     }

@@ -33,57 +33,73 @@ struct PlayerView: View {
             MPVVideoView(controller: mpv)
                 .ignoresSafeArea()
             
-            // 2. Buffering Layer (rendered behind controls so top bar / close stay accessible)
-            if isBufferingOverlayActive {
+            // 2. Initial Buffer Loading Screen (Cold start: full artwork + animated logo fill, only BEFORE playback starts)
+            if isInitialLoading {
                 logoBufferingView
-                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .zIndex(10)
             }
             
-            // 3. Controls Layer (always visible and interactive)
-            PlayerControlsView(
-                isPlaying: $mpv.isPlaying,
-                progress: Binding(
-                    get: { mpv.progress },
-                    set: { 
-                         // Seek to absolute time based on percentage
-                         let targetTime = $0 * mpv.duration
-                         mpv.seek(absolute: targetTime)
-                         
-                         // Smart Preload Trigger
-                         if $0 > 0.9 {
-                             playerManager.preloadNextEpisodeIfNeeded()
-                         }
+            // 3. Mid-Playback Buffering Spinner (Clean Apple TV spinner in center of video frame over the paused frame)
+            if isMidPlaybackBuffering {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(20)
+                    .glassEffect(.regular, in: .circle)
+                    .shadow(color: .black.opacity(0.5), radius: 12)
+                    .transition(.opacity)
+                    .zIndex(15)
+            }
+            
+            // 4. Controls Layer (Only active once playback has started)
+            if hasStartedPlayback {
+                PlayerControlsView(
+                    isPlaying: $mpv.isPlaying,
+                    progress: Binding(
+                        get: { mpv.progress },
+                        set: { 
+                             // Seek to absolute time based on percentage
+                             let targetTime = $0 * mpv.duration
+                             mpv.seek(absolute: targetTime)
+                             
+                             // Smart Preload Trigger
+                             if $0 > 0.9 {
+                                 playerManager.preloadNextEpisodeIfNeeded()
+                             }
+                        }
+                    ),
+                    currentTime: $mpv.timePos,
+                    duration: $mpv.duration,
+                    volume: Binding(
+                        get: { mpv.volume },
+                        set: { mpv.setVolume($0) }
+                    ),
+                    isControlsVisible: $isControlsVisible,
+                    title: item?.title ?? "Unknown Title",
+                    subtitle: getSubtitle(),
+                    onPlayPause: { mpv.togglePlayPause() },
+                    onSkipForward: { mpv.seek(relative: 15) }, 
+                    onSkipBackward: { mpv.seek(relative: -15) },
+                    onClose: {
+                        playerManager.close()
+                        dismiss() // Dismiss the window
+                    },
+                    onTogglePiP: {
+                        PiPManager.shared.toggle(mpv: mpv)
+                    },
+                    audioTracks: mpv.audioTracks,
+                    subtitleTracks: mpv.subtitleTracks,
+                    externalTracks: playerManager.externalSubtitles,
+                    onSelectTrack: { track in
+                        mpv.selectTrack(track)
+                    },
+                    onSelectExternalSub: { sub in
+                        mpv.addExternalSubtitle(sub)
                     }
-                ),
-                currentTime: $mpv.timePos,
-                duration: $mpv.duration,
-                volume: Binding(
-                    get: { mpv.volume },
-                    set: { mpv.setVolume($0) }
-                ),
-                isControlsVisible: $isControlsVisible,
-                title: item?.title ?? "Unknown Title",
-                subtitle: getSubtitle(),
-                onPlayPause: { mpv.togglePlayPause() },
-                onSkipForward: { mpv.seek(relative: 15) }, 
-                onSkipBackward: { mpv.seek(relative: -15) },
-                onClose: {
-                    playerManager.close()
-                    dismiss() // Dismiss the window
-                },
-                onTogglePiP: {
-                    PiPManager.shared.toggle(mpv: mpv)
-                },
-                audioTracks: mpv.audioTracks,
-                subtitleTracks: mpv.subtitleTracks,
-                externalTracks: playerManager.externalSubtitles,
-                onSelectTrack: { track in
-                    mpv.selectTrack(track)
-                },
-                onSelectExternalSub: { sub in
-                    mpv.addExternalSubtitle(sub)
-                }
-            )
+                )
+                .zIndex(20)
+            }
             // Exit Warning Overlay
             if showExitWarning {
                 Text("Press Esc again to exit")
@@ -445,32 +461,51 @@ struct PlayerView: View {
         }
     }
     
-    private var logoBufferingView: some View {
+     private var logoBufferingView: some View {
         ZStack {
-            // 1. Initial cold load only: Fullscreen backdrop picture & vignette
-            // Mid-playback buffering: 100% transparent background so the paused video frame remains visible
-            if isInitialLoading {
-                if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
-                    AsyncImage(url: bgURL) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } placeholder: {
-                        Color.black
-                    }
-                } else {
+            // Fullscreen backdrop picture & vignette
+            if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
+                AsyncImage(url: bgURL) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } placeholder: {
                     Color.black
                 }
-                
-                LinearGradient(
-                    colors: [.black.opacity(0.4), .black.opacity(0.2), .black.opacity(0.6)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+            } else {
+                Color.black
             }
             
-            // 2. Real Telemetry Progress Fill Loading
+            LinearGradient(
+                colors: [.black.opacity(0.4), .black.opacity(0.2), .black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            
+            // Top-left dismiss button
+            VStack {
+                HStack {
+                    Button {
+                        playerManager.close()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+                            .padding(10)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 28)
+                    .padding(.leading, 28)
+                    
+                    Spacer()
+                }
+                Spacer()
+            }
+            
+            // Real Telemetry Progress Fill Loading
             let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
             
             VStack(spacing: 20) {
@@ -483,8 +518,8 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: isInitialLoading ? 150 : 80)
-                                    .opacity(isInitialLoading ? 0.25 : 0.4)
+                                    .frame(maxHeight: 140)
+                                    .opacity(0.25)
                                     .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
                             } placeholder: {
                                 EmptyView()
@@ -494,7 +529,7 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: isInitialLoading ? 150 : 80)
+                                    .frame(maxHeight: 140)
                                     .opacity(1.0)
                                     .mask(
                                         GeometryReader { geo in
@@ -510,11 +545,11 @@ struct PlayerView: View {
                         } else {
                             // Text fallback for media with no logo image
                             Text(media.title.uppercased())
-                                .font(.system(size: isInitialLoading ? 48 : 28, weight: .black, design: .rounded))
+                                .font(.system(size: 48, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white.opacity(0.25))
                             
                             Text(media.title.uppercased())
-                                .font(.system(size: isInitialLoading ? 48 : 28, weight: .black, design: .rounded))
+                                .font(.system(size: 48, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white)
                                 .mask(
                                     GeometryReader { geo in
@@ -527,22 +562,6 @@ struct PlayerView: View {
                     }
                     .scaleEffect(pulseScale)
                     .padding(.horizontal, 40)
-                }
-                
-                // Status pill during mid-playback buffering
-                if isMidPlaybackBuffering {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                        Text(mpv.bufferProgress > 0 ? "Buffering \(Int(mpv.bufferProgress * 100))%" : "Buffering...")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .glassEffect(.regular, in: .capsule)
-                    .transition(.opacity)
                 }
             }
         }
@@ -568,18 +587,16 @@ struct PlayerView: View {
             let fill = min(0.99, cacheTime / 10.0)
 
             if fill > 0.005 {
-                withAnimation(.easeOut(duration: 0.3)) {
+                withAnimation(.linear(duration: 0.35)) {
                     self.animatedProgress = max(self.animatedProgress, fill)
                 }
             }
         }
         .onAppear {
-            animatedProgress = 0.0
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                pulseScale = 1.03
+                self.pulseScale = 1.03
             }
         }
-        .transition(.opacity)
     }
 
     private func errorView(error: String) -> some View {
