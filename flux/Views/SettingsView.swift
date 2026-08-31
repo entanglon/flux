@@ -541,49 +541,14 @@ struct AddonsSettingsTabView: View {
                     
                     Spacer()
                     
-                    // Refresh Cloud Addons Button
-                    Button(action: {
-                        Task {
-                            isSyncing = true
-                            await authManager.syncNowAsync(forcePull: true)
-                            try? await Task.sleep(nanoseconds: 300_000_000)
-                            await MainActor.run { isSyncing = false }
-                        }
-                    }) {
-                        HStack(spacing: 5) {
-                            if isSyncing {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            Text(isSyncing ? "Syncing…" : "Refresh")
-                                .font(.system(size: 11.5, weight: .semibold))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.08))
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isSyncing)
-                    .help("Fetch latest installed addons and settings from Flux Cloud")
-                    
                     // Web Directory Button (SSO Auto-Login)
                     Button(action: {
                         addonManager.openWebStore()
                     }) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Image(systemName: "safari")
                                 .font(.system(size: 11, weight: .bold))
-                            Text("Open Web Store ↗")
+                            Text("Web Store ↗")
                                 .font(.system(size: 12, weight: .semibold))
                         }
                         .padding(.horizontal, 12)
@@ -603,14 +568,32 @@ struct AddonsSettingsTabView: View {
             }
             
             // Installed Addons List
-            Section(header: HStack {
+            Section(header: HStack(spacing: 8) {
                 Text("Installed Addons (\(addonManager.addons.count))")
-                Spacer()
-                if isSyncing {
-                    Text("Syncing…")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
+                
+                Button(action: {
+                    Task {
+                        isSyncing = true
+                        await authManager.syncNowAsync(forcePull: true)
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        await MainActor.run { isSyncing = false }
+                    }
+                }) {
+                    if isSyncing {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(isSyncing)
+                .help("Refresh installed addons from Flux Cloud")
+                
+                Spacer()
             }) {
                 if addonManager.addons.isEmpty {
                     Text("No addons installed.")

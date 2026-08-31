@@ -43,10 +43,16 @@ class AddonManager: ObservableObject {
     }
     
     func isAddonInstalled(id: String) -> Bool {
+        if id == "opensubtitles3" || id == "org.stremio.opensubtitlesv3" {
+            return addons.contains(where: { $0.id == "opensubtitles3" || $0.id == "org.stremio.opensubtitlesv3" || $0.url.contains("opensubtitles") })
+        }
         return addons.contains(where: { $0.id == id })
     }
     
     func installedAddon(for id: String) -> StremioAddon? {
+        if id == "opensubtitles3" || id == "org.stremio.opensubtitlesv3" {
+            return addons.first(where: { $0.id == "opensubtitles3" || $0.id == "org.stremio.opensubtitlesv3" || $0.url.contains("opensubtitles") })
+        }
         return addons.first(where: { $0.id == id })
     }
     
@@ -129,6 +135,7 @@ class AddonManager: ObservableObject {
         // Ensure stock addons are never removed
         self.addons = Array(map.values)
         ensureDefaultAddons()
+        sortAddonsDeterministically()
     }
     
     // MARK: - Local Persistence
@@ -141,6 +148,7 @@ class AddonManager: ObservableObject {
         
         // Always ensure essential default/stock addons are present
         ensureDefaultAddons()
+        sortAddonsDeterministically()
     }
     
     private func ensureDefaultAddons() {
@@ -172,7 +180,17 @@ class AddonManager: ObservableObject {
             addons.append(openSubs)
         }
 
+        sortAddonsDeterministically()
         saveAddons()
+    }
+    
+    private func sortAddonsDeterministically() {
+        addons.sort { (a, b) -> Bool in
+            if a.isStock != b.isStock {
+                return a.isStock && !b.isStock
+            }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
     
     private func saveAddons() {
@@ -210,10 +228,11 @@ class AddonManager: ObservableObject {
         let manifest = try JSONDecoder().decode(AddonManifest.self, from: data)
         let baseURLStr = manifestUrlStr.replacingOccurrences(of: "/manifest.json", with: "")
         
-        let isProtected = isStock || manifest.id == "opensubtitles3"
+        let isProtected = isStock || manifest.id == "opensubtitles3" || manifest.id == "org.stremio.opensubtitlesv3" || baseURLStr.contains("opensubtitles")
+        let canonicalID = (manifest.id == "org.stremio.opensubtitlesv3") ? "opensubtitles3" : manifest.id
         let resolvedLogo = manifest.logo ?? manifest.icon ?? fallbackLogoURL
         let newAddon = StremioAddon(
-            id: manifest.id,
+            id: canonicalID,
             name: manifest.name,
             description: manifest.description,
             version: manifest.version,
@@ -231,6 +250,7 @@ class AddonManager: ObservableObject {
         await MainActor.run {
             self.addons.removeAll { $0.id == newAddon.id || $0.url == newAddon.url }
             self.addons.append(newAddon)
+            self.sortAddonsDeterministically()
             self.saveAddons()
         }
     }
@@ -238,6 +258,7 @@ class AddonManager: ObservableObject {
     func removeAddon(_ addon: StremioAddon) {
         guard !addon.isStock else { return } // Protected
         addons.removeAll { $0.id == addon.id }
+        sortAddonsDeterministically()
         saveAddons()
     }
     
