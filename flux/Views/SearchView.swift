@@ -1,11 +1,7 @@
 import SwiftUI
 
 struct SearchView: View {
-    @State private var searchText = ""
-    @State private var searchResults: [MediaItem] = []
-    @State private var suggestions: [MediaItem] = []
-    @State private var isSearching = false
-    @State private var isLoading = false
+    @StateObject private var viewModel = SearchViewModel()
     @FocusState private var isSearchFocused: Bool
     @ObservedObject private var recentManager = RecentSearchManager.shared
     
@@ -21,15 +17,15 @@ struct SearchView: View {
                     // Toolbar clearance height
                     Color.clear.frame(height: 44)
 
-                    if isSearching {
-                        if isLoading {
+                    if viewModel.isSearching {
+                        if viewModel.isLoading && viewModel.searchResults.isEmpty {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()
                                 }
                             }
                             .transition(.opacity)
-                        } else if searchResults.isEmpty {
+                        } else if viewModel.searchResults.isEmpty && !viewModel.isLoading {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -56,7 +52,7 @@ struct SearchView: View {
                 .padding(.bottom, 60)
             }
 
-            // Floating Apple TV Liquid Glass Search Bar Capsule (Positioned in Toolbar Row, Centered over content)
+            // Floating Apple TV Liquid Glass Search Bar Capsule
             VStack(spacing: 0) {
                 HStack {
                     Spacer()
@@ -66,22 +62,18 @@ struct SearchView: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(isSearchFocused ? .cyan : .white.opacity(0.75))
                         
-                        TextField("Search", text: $searchText)
+                        TextField("Search", text: $viewModel.query)
                             .font(.system(size: 15, weight: .medium))
                             .textFieldStyle(.plain)
                             .foregroundStyle(.white)
                             .focused($isSearchFocused)
                             .onSubmit {
-                                guard !searchText.isEmpty else { return }
-                                suggestions = []
-                                isSearching = true
-                                Task { await performSearch() }
+                                viewModel.commitSearch()
                             }
                         
-                        if !searchText.isEmpty {
+                        if !viewModel.query.isEmpty {
                             Button(action: {
-                                searchText = ""
-                                isSearching = false
+                                viewModel.clear()
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 16))
@@ -102,15 +94,16 @@ struct SearchView: View {
                     Spacer()
                 }
 
-                // Autocomplete suggestions — dropdown while typing, hidden after submit
-                if !suggestions.isEmpty && isSearchFocused && !isSearching {
+                // Instant Autocomplete Suggestions (0ms Local Trie)
+                if !viewModel.instantSuggestions.isEmpty && isSearchFocused && !viewModel.query.isEmpty {
                     HStack {
                         Spacer()
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(suggestions.prefix(6)) { suggestion in
-                                NavigationLink(value: suggestion) {
+                            ForEach(viewModel.instantSuggestions.prefix(6)) { entry in
+                                let mediaItem = entry.toMediaItem()
+                                NavigationLink(value: mediaItem) {
                                     HStack(spacing: 12) {
-                                        CachedImage(url: suggestion.posterURL ?? suggestion.imageURL, maxDimension: 100) { phase in
+                                        CachedImage(url: entry.posterURL, maxDimension: 100) { phase in
                                             if let img = phase.image {
                                                 img.resizable().aspectRatio(contentMode: .fill)
                                             } else {
@@ -122,19 +115,13 @@ struct SearchView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(suggestion.title)
+                                            Text(entry.title)
                                                 .font(.system(size: 13, weight: .semibold))
                                                 .foregroundStyle(.white)
                                                 .lineLimit(1)
-                                            HStack(spacing: 6) {
-                                                Text(suggestion.category)
-                                                if let year = suggestion.releaseDateYear, !year.isEmpty {
-                                                    Text("·")
-                                                    Text(year)
-                                                }
-                                            }
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(.white.opacity(0.5))
+                                            Text(entry.mediaType.displayName)
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.white.opacity(0.5))
                                         }
 
                                         Spacer()
@@ -148,6 +135,9 @@ struct SearchView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .simultaneousGesture(TapGesture().onEnded {
+                                    recentManager.add(mediaItem)
+                                })
                             }
                         }
                         .padding(8)
@@ -161,73 +151,21 @@ struct SearchView: View {
             }
             .padding(.leading, 244)
             .padding(.top, 14)
-            .animation(.easeInOut(duration: 0.15), value: suggestions)
+            .animation(.easeInOut(duration: 0.15), value: viewModel.instantSuggestions)
         }
         .navigationBarBackButtonHidden(true)
         .onAppear {
             // Apple TV behavior: arriving at Search focuses the field immediately
             isSearchFocused = true
-        }
-        .onChange(of: searchText) { _, newValue in
-            if newValue.isEmpty {
-                isSearching = false
-                isLoading = false
-                searchResults = []
-                suggestions = []
-            } else if isSearching {
-                // User typed after a search — go back to suggestion mode
-                isSearching = false
-                searchResults = []
-            }
-        }
-        .task(id: searchText) {
-            guard !searchText.isEmpty else { return }
-            // Only populate suggestions (dropdown) — full search triggered by onSubmit
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            if Task.isCancelled { return }
-            if let results = try? await StremioService.shared.searchMulti(query: searchText) {
-                let combined = (results.0 + results.1).filter { $0.isReleased }
-                if !Task.isCancelled {
-                    suggestions = Array(sortByRelevance(combined, query: searchText).prefix(6))
-                }
-            }
-        }
-    }
-    
-    private func performSearch() async {
-        guard !searchText.isEmpty else { return }
-        await MainActor.run {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isSearching = true
-                isLoading = true
-            }
-        }
-        
-        do {
-            let (movies, tvShows) = try await StremioService.shared.searchMulti(query: searchText)
-            
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    self.searchResults = sortByRelevance(
-                        (movies + tvShows).filter { $0.isReleased },
-                        query: searchText
-                    )
-                    self.isLoading = false
-                }
-            }
-        } catch {
-            print("Error searching: \(error)")
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    self.isLoading = false
-                }
+            Task {
+                await SearchEngine.shared.indexUserAndTrendingData()
             }
         }
     }
     
     private var searchResultsView: some View {
         LazyVGrid(columns: resultColumns, spacing: 24) {
-            ForEach(searchResults) { item in
+            ForEach(viewModel.searchResults) { item in
                 NavigationLink(value: item) {
                     GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                 }
@@ -344,59 +282,6 @@ struct RecentSearchCard: View {
             parts.append(year)
         }
         return parts.joined(separator: " · ")
-    }
-}
-
-// MARK: - Search Relevance Scoring
-
-extension SearchView {
-    /// Score how relevant a MediaItem is to the search query.
-    /// Higher score = more relevant. Used to sort results instead of raw popularity.
-    private func relevanceScore(_ item: MediaItem, query: String) -> Double {
-        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = item.title.lowercased()
-        guard !q.isEmpty else { return item.popularity ?? 0 }
-
-        var score: Double = 0
-
-        // Exact title match — highest priority
-        if title == q { return 10000 }
-
-        // Title starts with query
-        if title.hasPrefix(q) { score += 5000 }
-
-        // Title contains query as a whole word
-        if title.contains(q) { score += 3000 }
-
-        // Query words match title words (ordered)
-        let queryWords = q.split(separator: " ")
-        let titleWords = title.split(separator: " ")
-        var matchedWords = 0
-        for qw in queryWords {
-            if titleWords.contains(where: { $0.hasPrefix(qw) }) {
-                matchedWords += 1
-            }
-        }
-        score += Double(matchedWords) * 500
-
-        // Boost if all query words matched
-        if matchedWords == queryWords.count && queryWords.count > 1 {
-            score += 2000
-        }
-
-        // Tiebreaker: popularity (only if relevance is low)
-        if score > 0 {
-            score += (item.popularity ?? 0) * 0.1
-        } else {
-            score = item.popularity ?? 0
-        }
-
-        return score
-    }
-
-    /// Sort items by relevance to query, not just popularity.
-    private func sortByRelevance(_ items: [MediaItem], query: String) -> [MediaItem] {
-        items.sorted { relevanceScore($0, query: query) > relevanceScore($1, query: query) }
     }
 }
 

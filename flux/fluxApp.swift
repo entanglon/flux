@@ -63,6 +63,9 @@ struct fluxApp: App {
             StremioServerManager.shared.startServerIfNeeded()
             StreamProxyManager.shared.start()
             AuthManager.shared.syncOnLaunch()
+            Task(priority: .background) {
+                await SearchEngine.shared.indexUserAndTrendingData()
+            }
         }
     }
     
