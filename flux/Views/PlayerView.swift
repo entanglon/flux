@@ -12,6 +12,7 @@ struct PlayerView: View {
     @State private var pulseScale: CGFloat = 0.96
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
     @State private var autoPlayCancelled = false
+    @State private var hasStartedPlayback = false
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -28,11 +29,17 @@ struct PlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // Video Layer
+            // 1. Video Layer
             MPVVideoView(controller: mpv)
                 .ignoresSafeArea()
             
-            // Controls Layer
+            // 2. Buffering Layer (rendered behind controls so top bar / close stay accessible)
+            if isBufferingOverlayActive {
+                logoBufferingView
+                    .allowsHitTesting(false)
+            }
+            
+            // 3. Controls Layer (always visible and interactive)
             PlayerControlsView(
                 isPlaying: $mpv.isPlaying,
                 progress: Binding(
@@ -204,6 +211,7 @@ struct PlayerView: View {
                 print("PlayerView: adopting warm core, releasing hold...")
                 mpv.play()
                 animatedProgress = 1.0
+                hasStartedPlayback = true
             } else if let url = playerManager.currentStreamURL {
                 // If URL is already present (Instant Replay), start playing
                 print("PlayerView: onAppear found url, playing...")
@@ -226,12 +234,19 @@ struct PlayerView: View {
                 // Reset buffering progress + auto-play cancellation for the new stream
                 animatedProgress = 0.0
                 autoPlayCancelled = false
+                hasStartedPlayback = false
                 mpv.play(url: url)
             }
         }
         // Resume-after-PiP-expand: once the fresh stream is producing frames,
         // jump to the position the floating panel was at (once).
         .onChange(of: mpv.timePos) { _, t in
+            if t > 0.05 && !hasStartedPlayback {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    hasStartedPlayback = true
+                    animatedProgress = 1.0
+                }
+            }
             guard let resume = playerManager.pendingResumeTime else { return }
             guard t > 0.3, mpv.duration > 0 else { return }
             playerManager.pendingResumeTime = nil
@@ -258,11 +273,6 @@ struct PlayerView: View {
         
         if let error = playerManager.errorMessage {
             errorView(error: error)
-        }
-        
-        // Logo Buffering Overlay (Stremio-style real logo fill loading bar)
-        if isBufferingOverlayActive {
-            logoBufferingView
         }
         
         // Stream Selection UI
@@ -328,14 +338,16 @@ struct PlayerView: View {
         }
     }
     
+    private var isInitialLoading: Bool {
+        return !hasStartedPlayback && !playerManager.isLoading && playerManager.currentStreamURL != nil
+    }
+
+    private var isMidPlaybackBuffering: Bool {
+        return hasStartedPlayback && (mpv.isBuffering || mpv.isSeeking) && !mpv.isUserPaused
+    }
+
     private var isBufferingOverlayActive: Bool {
-        guard !playerManager.isLoading, playerManager.currentStreamURL != nil else { return false }
-        if mpv.isUserPaused { return false }
-        
-        let isInitialLoad = !mpv.isPlaying || mpv.timePos < 0.5
-        let isMidPlayBuffer = mpv.isBuffering || mpv.isSeeking
-        
-        return isInitialLoad || isMidPlayBuffer
+        return isInitialLoading || isMidPlaybackBuffering
     }
     
     private var loadingView: some View {
@@ -360,28 +372,30 @@ struct PlayerView: View {
     
     private var logoBufferingView: some View {
         ZStack {
-            // 1. Fullscreen backdrop picture
-            if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
-                AsyncImage(url: bgURL) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } placeholder: {
+            // 1. Initial cold load only: Fullscreen backdrop picture & vignette
+            // Mid-playback buffering: 100% transparent background so the paused video frame remains visible
+            if isInitialLoading {
+                if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
+                    AsyncImage(url: bgURL) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } placeholder: {
+                        Color.black
+                    }
+                } else {
                     Color.black
                 }
-            } else {
-                Color.black
+                
+                LinearGradient(
+                    colors: [.black.opacity(0.4), .black.opacity(0.2), .black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
             }
             
-            // 2. Subtle dark vignette gradient
-            LinearGradient(
-                colors: [.black.opacity(0.4), .black.opacity(0.2), .black.opacity(0.6)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            
-            // 3. Center Official Logo / Title vibrant fill loading bar
+            // 2. Center Official Logo / Title vibrant fill loading bar
             let realProgress = CGFloat(min(1.0, max(0.0, animatedProgress)))
             
             VStack(spacing: 24) {
@@ -394,8 +408,8 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 150)
-                                    .opacity(0.25)
+                                    .frame(maxHeight: isInitialLoading ? 150 : 100)
+                                    .opacity(isInitialLoading ? 0.25 : 0.35)
                                     .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
                             } placeholder: {
                                 EmptyView()
@@ -405,7 +419,7 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 150)
+                                    .frame(maxHeight: isInitialLoading ? 150 : 100)
                                     .opacity(1.0)
                                     .mask(
                                         GeometryReader { geo in
@@ -421,11 +435,11 @@ struct PlayerView: View {
                         } else {
                             // Text fallback for media with no logo image
                             Text(media.title.uppercased())
-                                .font(.system(size: 48, weight: .black, design: .rounded))
+                                .font(.system(size: isInitialLoading ? 48 : 32, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white.opacity(0.25))
                             
                             Text(media.title.uppercased())
-                                .font(.system(size: 48, weight: .black, design: .rounded))
+                                .font(.system(size: isInitialLoading ? 48 : 32, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white)
                                 .mask(
                                     GeometryReader { geo in
@@ -444,8 +458,9 @@ struct PlayerView: View {
         .onReceive(loadingTimer) { _ in
             guard playerManager.currentStreamURL != nil else { return }
 
-            if mpv.isPlaying && mpv.timePos >= 0.5 {
-                withAnimation(.easeOut(duration: 0.3)) {
+            if mpv.isPlaying && mpv.timePos >= 0.05 {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    self.hasStartedPlayback = true
                     self.animatedProgress = 1.0
                 }
 
@@ -458,12 +473,7 @@ struct PlayerView: View {
                 return
             }
 
-            // Buffer-readiness metric (real data): how full is mpv's pre-roll
-            // demuxer cache vs its target (cache-secs=10). Reaches 100% exactly
-            // when playback starts. NOTE: cacheTime/duration is WRONG here — a
-            // 10s cache on a 2h movie is <0.2% and the fill would never move.
             let cacheTime = mpv.demuxerCacheTime
-            print("[BUFFER] cacheTime=\(String(format: "%.1f", cacheTime))s playing=\(mpv.isPlaying) buffering=\(mpv.isBuffering)")
             let fill = min(0.99, cacheTime / 10.0)
 
             if fill > 0.005 {
