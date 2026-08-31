@@ -383,22 +383,23 @@ class StreamManager {
     /// Evaluates if a stream qualifies for the "Fast Start" tab (< 3.5s estimated startup)
     func isFastStartStream(_ stream: Stream) -> Bool {
         if !stream.isTorrent { return true }
-        guard let seeders = stream.seeders, seeders >= 20 else { return false }
+        guard let seeders = stream.seeders, seeders >= 35 else { return false }
         let sizeGB = stream.parsedSizeInGB ?? 2.5
-        // Exclude massive 40GB+ remuxes from Fast Start tab
-        if sizeGB > 12.0 { return false }
-        return computeStartupSpeedScore(stream) >= 8.0
+        // Exclude massive 8GB+ remuxes from Fast Start tab
+        if sizeGB > 8.0 { return false }
+        return computeStartupSpeedScore(stream) >= 18.0
     }
 
     /// Categorizes stream into speed tier
     func speedTier(for stream: Stream) -> StartupSpeedTier {
         if !stream.isTorrent { return .instant }
-        guard let seeders = stream.seeders, seeders >= 15 else { return .standard }
+        guard let seeders = stream.seeders, seeders >= 35 else { return .standard }
         
         let score = computeStartupSpeedScore(stream)
-        if score >= 35.0 && (stream.parsedSizeInGB ?? 2.5) <= 5.0 {
+        let sizeGB = stream.parsedSizeInGB ?? 2.5
+        if seeders >= 80 && sizeGB <= 4.0 && score >= 50.0 {
             return .instant
-        } else if score >= 10.0 {
+        } else if seeders >= 35 && sizeGB <= 8.0 && score >= 18.0 {
             return .fast
         } else {
             return .standard
