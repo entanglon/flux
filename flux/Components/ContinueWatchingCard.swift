@@ -49,8 +49,8 @@ struct ContinueWatchingCard: View {
     }
 
     private var activeLogoURL: URL? {
-        if let logo = fetchedLogo { return logo }
         if let logo = item.logoURL { return logo }
+        if let logo = fetchedLogo { return logo }
         if item.id.starts(with: "tt") {
             return URL(string: "https://images.metahub.space/logo/medium/\(item.id)/img")
         }
@@ -126,15 +126,17 @@ struct ContinueWatchingCard: View {
                             case .success(let img):
                                 img
                                     .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 160, maxHeight: 36, alignment: .leading)
+                                    .scaledToFit()
+                                    .frame(maxWidth: 170, maxHeight: 34, alignment: .leading)
                                     .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
                             default:
                                 fallbackTitleText
                             }
                         }
+                        .frame(height: 34, alignment: .leading)
                     } else {
                         fallbackTitleText
+                            .frame(height: 34, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -239,10 +241,6 @@ struct ContinueWatchingCard: View {
         .accessibilityHint("Resumes playback")
         .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
-            fetchedImage = nil
-            fetchedRuntime = nil
-            fetchedLogo = nil
-
             let isTV = item.category == "TV Show" || item.lastSeason != nil
             let type = isTV ? "tv" : "movie"
 
@@ -254,20 +252,24 @@ struct ContinueWatchingCard: View {
             }
 
             if let id = tmdbIDToUse {
-                // Fetch logo
-                if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
-                    await MainActor.run { self.fetchedLogo = logo }
+                // Fetch logo only if not already present on item or fetched
+                if item.logoURL == nil && fetchedLogo == nil {
+                    if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                        await MainActor.run { self.fetchedLogo = logo }
+                    }
                 }
 
                 if isTV, let season = item.lastSeason, let episode = item.lastEpisode {
-                    let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: season, episode: episode)
-                    await MainActor.run {
-                        if let still = info.stillURL { self.fetchedImage = still }
-                        if let rt = info.runtime { self.fetchedRuntime = rt }
+                    if fetchedImage == nil || fetchedRuntime == nil {
+                        let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: season, episode: episode)
+                        await MainActor.run {
+                            if let still = info.stillURL { self.fetchedImage = still }
+                            if let rt = info.runtime { self.fetchedRuntime = rt }
+                        }
                     }
                 } else if !isTV {
                     // Movie: fetch runtime if not already present
-                    if item.runtime == nil || item.runtime?.isEmpty == true {
+                    if (item.runtime == nil || item.runtime?.isEmpty == true) && fetchedRuntime == nil {
                         if let rt = await TMDBEnricher.shared.fetchMovieRuntime(tmdbID: id) {
                             await MainActor.run { self.fetchedRuntime = rt }
                         }
