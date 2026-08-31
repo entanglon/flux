@@ -1,29 +1,22 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — NATIVE MKV/MP4 CHAPTER PARSING, SMART SKIP ACTION ENGINE (NO FALSE RECAPS), REAL BUFFER TELEMETRY, APPLE TV CONTROLS & CONTINUE WATCHING NEXT-EPISODE
+## LATEST: Aug 31, 2026 — CURSOR AUTO-HIDE, CLEAN KEYBOARD SCRUBBING, ENLARGED SKIP PILL, CHAPTER-VERIFIED SKIPS & WEB-DL SWARM RECENCY RANKING
 
-### Smart Skip Action Engine & Native Chapter Track Parsing (`MPVVideoView.swift`, `PlayerView.swift`)
-- **Native Embedded Chapter Track Extraction:** MPV now queries `chapter-list/count`, `chapter-list/{i}/title`, and `chapter-list/{i}/time` directly from the MKV/MP4 video stream upon loading.
-- **Accurate Chapter Timing:** Matches chapters titled `"Recap"`, `"Previously On"`, `"Intro"`, `"Opening"`, `"Theme"`, `"Credits"`, and `"Outro"` with millisecond-exact start and end timestamps.
-- **Zero False "Skip Recap" on Season 1 Episode 1:** Pilot / premiere episodes ($S1E1$) never have a recap. The smart skip engine strictly prohibits showing "Skip Recap" on Episode 1. Only on Episode 2+ ($S > 1$ or $E > 1$) does recap detection activate.
-- **Context-Aware Button Actions:**
-  - `Skip Recap` jumps directly past the recap to the start of the episode.
-  - `Skip Intro` jumps past the intro sequence.
-  - `Next: S{n} E{e+1}` button appears during the end credits to smoothly advance to the next episode.
+### Cursor Auto-Hide & Scrubbing Key Polish (`PlayerControlsView.swift`, `PlayerView.swift`)
+- **Automatic Cursor Hiding After 2.5s:** Added continuous hover activity tracking (`.onContinuousHover`). When the user moves the mouse, the cursor appears; after 2.5s of no movement, `NSCursor.setHiddenUntilMouseMoves(true)` automatically hides the cursor.
+- **Clean Keyboard Seeking (`<`, `>`, `,`, `.`):** Seeking with keyboard keys now scrubs smoothly without forcing the entire player control bar to pop up over the movie. If controls are toggled via Space or `C`, the 2.5s auto-hide timer is consistently refreshed and dismissed.
+
+### Chapter-Verified Skips & Enlarged Liquid Glass Pill (`PlayerView.swift`, `MPVVideoView.swift`)
+- **100% Chapter-Verified Intro & Recap Skips:** Removed the arbitrary 25s–100s heuristic that previously showed "Skip Intro" over cold open scenes (like *Lanterns* S1E1). Intro and recap skips now trigger **only** when verified by native embedded container chapters (`mpv.chapters`).
+- **Enlarged Skip Button:** Increased padding (`22pt` horizontal, `12pt` vertical), font size (`14pt` bold), and icon sizing (`13pt` bold) with subtle shadow elevation (`radius: 8, y: 4`), matching the native Apple TV floating pill.
+
+### Active Seedbox & WEB-DL Recency Ranking Boost (`StreamManager.swift`)
+- **Recent Swarm Recency Multiplier:** Modern WEB-DL/WEBRip releases from top streaming providers (`AMZN`, `ATVP`, `MAX`, `DSNP`, `NF`, `HMAX`, `FLUX`, `NTB`, `PSA`, `GALAXYRG`, `QXR`, `SMURF`, `KOGI`) receive an unchoked seedbox bonus ($\times 1.30 \times 1.25$) in `computeStartupSpeedScore`, ranking the fastest starting, freshly uploaded streams higher in the stream picker and Fast Start tab.
 
 ### Real Buffer Progress Telemetry & Seamless Start (`PlayerView.swift`, `MPVVideoView.swift`)
-- **Real Buffer Telemetry:** `logoBufferingView` now binds directly to `mpv.bufferProgress` (the true $0–100\%$ cache fill) alongside `mpv.demuxerCacheTime`, replacing static pulse states with real byte-fill progress.
+- **Real Buffer Telemetry:** `logoBufferingView` binds directly to `mpv.bufferProgress` (the true $0–100\%$ cache fill) alongside `mpv.demuxerCacheTime`, replacing static pulse states with real byte-fill progress.
 - **Mid-Play Re-Buffering Stability:** Mid-playback buffering checks require $timePos \ge 3.0\text{s}$, preventing micro-buffering oscillations during cold start that previously caused the HBO intro chime to play behind a lingering black screen.
 - **Controls Always Accessible During Buffering:** Layered `PlayerControlsView` over the buffering overlay with `.allowsHitTesting(false)` so users can exit or see metadata without obstruction.
-
-### Apple TV-Style Player Controls Interaction (`PlayerControlsView.swift`, `PlayerView.swift`)
-- **Touch / Tap / Key-Triggered Appearance:** Replaced continuous mouse tracking with tap/click gesture (`onTapGesture`) and keyboard triggers (Space, Enter, `C`, arrow keys). Subtle cursor movements no longer pop up the controls while watching.
-- **Exact 2.5-Second Hide Timing:** Synchronized the control fade-out timer to 2.5s of inactivity matching macOS Apple TV / QuickTime players.
-- **Pure Liquid Glass (Zero Black Tint):** Removed the bottom `LinearGradient` black tint from `PlayerControlsView.swift`. The glass pills and progress scrubbers float cleanly with pure translucent glass over the video.
-
-### Liquid Glass Floating Skip Recap / Skip Intro Button (`PlayerView.swift`)
-- **Apple TV Placement & Appearance:** The floating button in the bottom right corner uses `.glassEffect(.regular.interactive(), in: .capsule)` with `.padding(.trailing, 40)` and `.padding(.bottom, 36)`.
-- **Contextual Labeling:** Dynamically displays **"Skip Recap"** (0–35s) or **"Skip Intro"** (35–95s).
 
 ### Background Download Teardown on Close (`PlayerManager.swift`, `PlayerView.swift`)
 - **Instant Torrent Stop:** When dismissing the player window or calling `close()`, `StremioServerManager.shared.removeAllTorrents()` and `.removeTorrent(infoHash:)` are invoked immediately, guaranteeing all background torrent download and seeding activity terminates the moment the player closes.
