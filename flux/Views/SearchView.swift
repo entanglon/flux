@@ -18,14 +18,18 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if viewModel.isSearching {
-                        if viewModel.isLoading && viewModel.searchResults.isEmpty {
+                        let displayedItems: [MediaItem] = !viewModel.searchResults.isEmpty 
+                            ? viewModel.searchResults 
+                            : viewModel.instantSuggestions.map { $0.toMediaItem() }
+
+                        if viewModel.isLoading && displayedItems.isEmpty {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()
                                 }
                             }
                             .transition(.opacity)
-                        } else if viewModel.searchResults.isEmpty && !viewModel.isLoading {
+                        } else if displayedItems.isEmpty && !viewModel.isLoading {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -39,8 +43,18 @@ struct SearchView: View {
                             .frame(maxWidth: .infinity, minHeight: 300)
                             .transition(.opacity)
                         } else {
-                            searchResultsView
-                                .transition(.opacity)
+                            LazyVGrid(columns: resultColumns, spacing: 24) {
+                                ForEach(displayedItems) { item in
+                                    NavigationLink(value: item) {
+                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .simultaneousGesture(TapGesture().onEnded {
+                                        recentManager.add(item)
+                                    })
+                                }
+                            }
+                            .transition(.opacity)
                         }
                     } else {
                         defaultBrowseView
@@ -93,86 +107,15 @@ struct SearchView: View {
                     
                     Spacer()
                 }
-
-                // Instant Autocomplete Suggestions (0ms Local Trie)
-                if !viewModel.instantSuggestions.isEmpty && isSearchFocused && !viewModel.query.isEmpty {
-                    HStack {
-                        Spacer()
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(viewModel.instantSuggestions.prefix(6)) { entry in
-                                let mediaItem = entry.toMediaItem()
-                                NavigationLink(value: mediaItem) {
-                                    HStack(spacing: 12) {
-                                        CachedImage(url: entry.posterURL, maxDimension: 100) { phase in
-                                            if let img = phase.image {
-                                                img.resizable().aspectRatio(contentMode: .fill)
-                                            } else {
-                                                Rectangle().fill(Color.white.opacity(0.08))
-                                                    .overlay { Image(systemName: "film").foregroundStyle(.white.opacity(0.3)) }
-                                            }
-                                        }
-                                        .frame(width: 34, height: 48)
-                                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(entry.title)
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundStyle(.white)
-                                                .lineLimit(1)
-                                            Text(entry.mediaType.displayName)
-                                                .font(.system(size: 11))
-                                                .foregroundStyle(.white.opacity(0.5))
-                                        }
-
-                                        Spacer()
-
-                                        Image(systemName: "arrow.up.left")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundStyle(.white.opacity(0.35))
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .simultaneousGesture(TapGesture().onEnded {
-                                    recentManager.add(mediaItem)
-                                })
-                            }
-                        }
-                        .padding(8)
-                        .frame(width: 520)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
-                        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        Spacer()
-                    }
-                }
             }
             .padding(.leading, 244)
             .padding(.top, 14)
-            .animation(.easeInOut(duration: 0.15), value: viewModel.instantSuggestions)
         }
         .navigationBarBackButtonHidden(true)
         .onAppear {
-            // Apple TV behavior: arriving at Search focuses the field immediately
             isSearchFocused = true
             Task {
                 await SearchEngine.shared.indexUserAndTrendingData()
-            }
-        }
-    }
-    
-    private var searchResultsView: some View {
-        LazyVGrid(columns: resultColumns, spacing: 24) {
-            ForEach(viewModel.searchResults) { item in
-                NavigationLink(value: item) {
-                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture().onEnded {
-                    recentManager.add(item)
-                })
             }
         }
     }

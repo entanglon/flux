@@ -479,6 +479,14 @@ struct TrackSelectionList: View {
     let onSelect: (Track) -> Void
     let onSelectExternal: (StremioSubtitleTrack) -> Void
     
+    private var isSubtitles: Bool {
+        title.lowercased().contains("sub")
+    }
+    
+    private var isNoneSelected: Bool {
+        !tracks.contains(where: { $0.isSelected })
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -489,6 +497,35 @@ struct TrackSelectionList: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
+                    if isSubtitles {
+                        Button {
+                            onSelect(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                        } label: {
+                            HStack {
+                                if isNoneSelected {
+                                    Image(systemName: "checkmark")
+                                        .frame(width: 16)
+                                } else {
+                                    Spacer().frame(width: 16)
+                                }
+                                
+                                Text("Off")
+                                    .fontWeight(isNoneSelected ? .semibold : .regular)
+                                Spacer()
+                            }
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .background(isNoneSelected ? Color.white.opacity(0.1) : Color.clear)
+                        .cornerRadius(6)
+                        
+                        Divider()
+                            .background(Color.white.opacity(0.1))
+                            .padding(.vertical, 2)
+                    }
+                    
                     ForEach(tracks) { track in
                         Button {
                             onSelect(track)

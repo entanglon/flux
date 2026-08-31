@@ -857,7 +857,11 @@ final class MPVLayerView: NSView {
     func selectTrack(_ track: Track) {
         guard mpv != nil else { return }
         let propertyName = track.type == "audio" ? "aid" : "sid"
-        mpv_set_property_string(mpv, propertyName, "\(track.id)")
+        if track.id <= 0 {
+            mpv_set_property_string(mpv, propertyName, "no")
+        } else {
+            mpv_set_property_string(mpv, propertyName, "\(track.id)")
+        }
     }
     
     func addExternalSubtitle(url: String, title: String) {
