@@ -1,6 +1,13 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — CURSOR AUTO-HIDE, CLEAN KEYBOARD SCRUBBING, ENLARGED SKIP PILL, CHAPTER-VERIFIED SKIPS & WEB-DL SWARM RECENCY RANKING
+## LATEST: Aug 31, 2026 — CONTINUE WATCHING LOGO STABILIZATION, STREAM BUTTON REMOVAL, CURSOR AUTO-HIDE & SMART CHAPTER SKIPS
+
+### Continue Watching Card Logo Stabilization (`ContinueWatchingCard.swift`)
+- **Root Cause:** When the rail was slid, `.task` wiped `fetchedLogo = nil`, temporarily falling back to the item logo before TMDB's high-aspect logo reloaded and shrunk *Project Hail Mary*'s title.
+- **Fix:** Fixed logo container height to `.frame(height: 34, alignment: .leading)`, preserved existing fetched assets in `.task` on rail scroll, and prioritized stable `item.logoURL`. The logo no longer shifts, shrinks, or resets size during carousel sliding.
+
+### Mid-Playback Stream Button Removal (`PlayerControlsView.swift`)
+- **Removed Sources Button from Audio/Subtitles Pill:** Removed the source switch button from the audio/subtitle controls. Restored the clean Apple TV audio/subtitles pill (Subtitles + Audio only), eliminating pipeline detachment and crashes during playback.
 
 ### Cursor Auto-Hide & Scrubbing Key Polish (`PlayerControlsView.swift`, `PlayerView.swift`)
 - **Automatic Cursor Hiding After 2.5s:** Added continuous hover activity tracking (`.onContinuousHover`). When the user moves the mouse, the cursor appears; after 2.5s of no movement, `NSCursor.setHiddenUntilMouseMoves(true)` automatically hides the cursor.
