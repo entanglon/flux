@@ -31,7 +31,6 @@ struct ContentView: View {
                             case .collections: CollectionsView(selectedTab: Binding(get: { selectedCategory ?? .home }, set: { selectedCategory = $0 }))
                             case .history: HistoryView()
                             case .downloads: DownloadsView()
-                            case .addons: AddonsView()
                             }
                         } else {
                             HomeView()
@@ -86,7 +85,6 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         browseSection
                         librarySection
-                        extensionsSection
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
@@ -222,19 +220,6 @@ struct ContentView: View {
             sidebarRow(.collections, title: "Collections", icon: "rectangle.stack", fillIcon: "rectangle.stack.fill")
             sidebarRow(.history, title: "Recently Watched", icon: "clock", fillIcon: "clock.fill")
             sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
-        }
-    }
-    
-    private var extensionsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Extensions")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white.opacity(0.45))
-                .padding(.leading, 10)
-                .padding(.bottom, 2)
-                .padding(.top, 4)
-            
-            sidebarRow(.addons, title: "Addon Store", icon: "puzzlepiece.extension", fillIcon: "puzzlepiece.extension.fill")
         }
     }
     

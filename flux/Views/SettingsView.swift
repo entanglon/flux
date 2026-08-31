@@ -543,42 +543,24 @@ struct AddonsSettingsTabView: View {
                     Button(action: {
                         addonManager.openWebStore()
                     }) {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Image(systemName: "safari")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("Web Store")
-                                .font(.system(size: 11.5, weight: .semibold))
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Open Web Store ↗")
+                                .font(.system(size: 12, weight: .semibold))
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5.5)
-                        .background(Color.white.opacity(0.08))
-                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.12))
+                        .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
-                    .help("Open community addon store in browser with auto-login")
-                    
-                    // In-App Store Button
-                    Button(action: {
-                        NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.addons)
-                    }) {
-                        Text("Browse Store")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 5.5)
-                            .background(Color.white.opacity(0.14))
-                            .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+                    .help("Open Flux Addon Web Store in browser with auto-login")
                 }
                 .padding(.vertical, 4)
             }

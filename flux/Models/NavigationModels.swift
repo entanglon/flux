@@ -42,7 +42,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case collections = "Collections"
     case history = "History"
     case downloads = "Downloads"
-    case addons = "Addons"
     
     var id: String { rawValue }
     
@@ -57,7 +56,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .collections: return "rectangle.stack"
         case .history: return "clock"
         case .downloads: return "arrow.down.circle"
-        case .addons: return "puzzlepiece.extension"
         }
     }
 }
