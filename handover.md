@@ -1,31 +1,22 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — STREAMING PIPELINE ACCELERATION (FAST START TAB, CONTAINER-AWARE SPEED SCORING, MPV INSTANT-START BUFFER TUNING, HUNG-STREAM WATCHDOG)
+## LATEST: Aug 31, 2026 — APPLE TV PLAYER POLISH, LIQUID GLASS SKIP RECAP/INTRO, TOUCH/KEY CONTROLS, 2.5S HIDE TIMER, TORRENT TEARDOWN, CONTINUE WATCHING AUTO-PROGRESSION
 
-### Container-Aware Startup Speed Scoring & Speed Tiers (`StreamManager.swift`)
-- **Startup Speed Score (SSS):** Calculates time-to-first-playable-byte using active seed count, file size, container type, and release encoder heuristics.
-- **Container Awareness (MKV vs. MP4):**
-  - Matroska (`.mkv`) places its `SeekHead` at byte 0 by specification, enabling instant sequential demuxing without trailing index fetches (+35% speed bonus).
-  - MP4 files check for known `faststart` release encoders (`PSA`, `GalaxyRG`, `YTS`, `QxR`, `NTb`, `FLUX`, `MeGusta`, `Pahe`, `TGx`).
-- **Defensive Missing-Seeder Handling:** Safely handles `seeders == nil` by evaluating score to 0 and excluding from the Fast Start tab.
-- **Speed Tiers:**
-  - `⚡ Instant (~1-2s)`: Direct streams or $\ge 35$ score compact MKV/WebRips ($\le 5\text{ GB}$).
-  - `⚡ Fast (~3-4s)`: High-seeder 1080p Web-DLs ($\text{score} \ge 10$).
-  - `Standard`: Large 4K remuxes or smaller swarms.
+### Apple TV-Style Player Controls Interaction (`PlayerControlsView.swift`, `PlayerView.swift`)
+- **Touch / Tap / Key-Triggered Appearance:** Replaced the sensitive mouse hover tracking (`continuousHover`) with a tap/click gesture (`onTapGesture`) and keyboard triggers (Space, Enter, `C`, arrow keys). Subtle cursor movements no longer pop up the controls while watching a movie.
+- **Exact 2.5-Second Hide Timing:** Synchronized the control fade-out timer to 2.5s of inactivity matching macOS Apple TV / QuickTime players.
+- **Pure Liquid Glass (Zero Black Tint):** Removed the bottom `LinearGradient` black tint from `PlayerControlsView.swift`. The glass pills and progress scrubbers now float cleanly with pure translucent glass over the video.
 
-### "Fast Start" Filter Tab & Badges (`PlayerView.swift`)
-- **Dedicated "Fast Start" Tab:** Automatically appears alongside "All" and "Best" when Fast Start qualifying streams are available, sorting sources by startup speed.
-- **Live Latency Speed Badges:** Displays `⚡ Instant` (cyan badge) and `⚡ Fast` (blue badge) on stream rows.
+### Liquid Glass Floating Skip Recap / Skip Intro Button (`PlayerView.swift`)
+- **Apple TV Placement & Appearance:** The floating button in the bottom right corner uses `.glassEffect(.regular.interactive(), in: .capsule)` with `.padding(.trailing, 40)` and `.padding(.bottom, 36)`.
+- **Contextual Labeling:** Dynamically displays **"Skip Recap"** (0–35s) or **"Skip Intro"** (35–95s).
 
-### MPV Instant-Start Buffer Tuning & Hung-Stream Watchdog (`MPVVideoView.swift`)
-- **Instant First Frame:** Configured `cache-pause-initial = no` so MPV renders the very first decoded keyframe immediately without waiting for an artificial multi-second buffer.
-- **Micro-Stall Cushion:** Configured `cache-pause-wait = 3.0` and `demuxer-readahead-secs = 12.0` with a 150 MiB RAM budget (`demuxer-max-bytes = 157286400`) and 30 MiB rewind buffer (`demuxer-max-back-bytes = 31457280`).
-- **Dead Swarm Fail-Fast:** Lowered `network-timeout` from 45s to 15s.
-- **12-Second Hung-Stream Watchdog:** If the engine registers a stream but receives 0 bytes/frames for 12 seconds, it automatically triggers fallback to the next best source rather than hanging indefinitely.
+### Background Download Teardown on Close (`PlayerManager.swift`, `PlayerView.swift`)
+- **Instant Torrent Stop:** When dismissing the player window or calling `close()`, `StremioServerManager.shared.removeAllTorrents()` and `.removeTorrent(infoHash:)` are invoked immediately, guaranteeing all background torrent download and seeding activity terminates the moment the player closes.
 
-### Verification & Unit Tests (`StreamManagerTests.swift`)
-- Added comprehensive unit tests covering MKV vs. Remux speed scoring, `nil` seeder defensive handling, and Direct stream instant classification.
-- **Test Suite:** 28 / 28 unit tests passing (100% pass rate).
+### Continue Watching Next-Episode Auto-Progression (`PlayerManager.swift`, `UserDataService.swift`)
+- **Auto-Advance on 90% Watch Progress:** When an episode in a TV series reaches $\ge 90\%$ completion, `updateWatchProgress` automatically records the entry in Continue Watching for the **next episode** (`lastSeason = next.season`, `lastEpisode = next.episode`, `progress = 0.0`), so the Home screen immediately displays the card for the next upcoming episode ready to play.
+- **Unit Tests:** 28 / 28 unit tests passing (100% pass rate).
 
 ---
 
