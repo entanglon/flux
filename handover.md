@@ -2,12 +2,13 @@
 
 ## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
-### Cloudflare Addon Web Store, Zero-Scraper Binary & SSO Integration (`/Users/zainulnazir/Projects/addons`, `AddonsView.swift`, `SettingsView.swift`, `AddonManager.swift`, `UserDataService.swift`)
-- **Cloudflare Pages Web Store (`https://flux-addons.pages.dev`):** Created and deployed a standalone, responsive, dark liquid glass Addon Store web app in `/Users/zainulnazir/Projects/addons`. Includes live search, category filtering, verified official logos, and two-way cloud sync.
-- **Zero Scraper Binary Liability:** Removed the hardcoded curated scraper directory (`AddonStoreCatalog`) from the macOS app binary. The app is now a 100% legal, neutral player/metadata client with zero embedded scraper names or torrent domains.
-- **Single Sign-On (SSO) Auto-Login:** Clicking "Browse Web Store" in Flux (Sidebar or Settings) generates the user's JWT auth token and opens `https://flux-addons.pages.dev/?token=...`. The web store automatically authenticates the user, loads their installed addons, and syncs changes.
-- **1-Click Deep-Link Install & Remote Uninstall:** Clicking "Install" on the web store triggers `flux://install-addon?url=...` which presents the floating glass confirmation modal in Flux. Clicking "Uninstall" on the web store updates the user's cloud payload via `PUT /v1/data` to the Cloudflare Worker backend.
-- **Two-Way Cloud Sync for Addons (`UserDataService.swift`):** `exportCloudPayload()` and `applyCloudPayload()` now include the user's installed addons list, seamlessly synchronizing between the macOS app, web store, and Cloudflare Worker D1 database.
+### Cloudflare Addon Web Store, Zero-Scraper Binary & In-App Store Complete Removal (`/Users/zainulnazir/Projects/addons`, `ContentView.swift`, `SettingsView.swift`, `NavigationModels.swift`, `AddonManager.swift`, `UserDataService.swift`)
+- **Completely Removed In-App Store from Sidebar:** Removed `Extensions` / `Addon Store` and `SidebarItem.addons` from the main sidebar. The sidebar is now 100% focused on entertainment and media browsing (`Search`, `Home`, `Movies`, `TV Shows`, `Trending`, `Watchlist`, `Collections`, `Recently Watched`, `Downloads`).
+- **Official Master Flux Logo on Web Store:** Deployed the glowing cursive ribbon master Flux logo (`AppIcon_master_1024.png`) to `https://flux-addons.pages.dev/` as the navbar brand icon and favicon.
+- **Cloudflare Pages Web Store (`https://flux-addons.pages.dev`):** Live, standalone, dark liquid glass Addon Store web app in `/Users/zainulnazir/Projects/addons` with search, category filtering, and two-way cloud sync.
+- **Zero Scraper Binary Liability:** Removed the hardcoded curated scraper directory from the macOS app binary. The app is now a 100% legal, neutral player/metadata client with zero embedded scraper names or torrent domains.
+- **Single Sign-On (SSO) Auto-Login:** Clicking "Open Web Store ↗" in `Settings → Addons` generates the user's JWT auth token and opens `https://flux-addons.pages.dev/?token=...`, automatically authenticating the user and loading installed extensions.
+- **1-Click Deep-Link Install & Remote Uninstall:** Clicking "Install" on the web store triggers `flux://install-addon?url=...` which presents the floating glass confirmation modal (`DeepLinkAddonInstallModal`). Clicking "Uninstall" on the web store updates the user's cloud payload via `PUT /v1/data` to the Cloudflare Worker backend.
 
 ### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
 - **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
