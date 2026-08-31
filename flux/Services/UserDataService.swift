@@ -152,6 +152,11 @@ class UserDataService: ObservableObject {
             let lastEpisode = dict["lastEpisode"] as? Int
             let lastEpisodeTitle = dict["lastEpisodeTitle"] as? String
             let progress = dict["progress"] as? Double
+            let lastPlaybackPosition = dict["lastPlaybackPosition"] as? Double
+            let lastPlaybackDuration = dict["lastPlaybackDuration"] as? Double
+            let lastStreamURLString = dict["lastStreamURL"] as? String
+            let lastTorrentInfoHash = dict["lastTorrentInfoHash"] as? String
+            let lastFileIndex = dict["lastFileIndex"] as? Int
             
             var item = MediaItem(
                 id: idString,
@@ -181,6 +186,13 @@ class UserDataService: ObservableObject {
             item.lastEpisode = lastEpisode
             item.lastEpisodeTitle = lastEpisodeTitle
             item.timestamp = timestamp
+            item.lastPlaybackPosition = lastPlaybackPosition
+            item.lastPlaybackDuration = lastPlaybackDuration
+            if let su = lastStreamURLString, let u = URL(string: su) {
+                item.lastStreamURL = u
+            }
+            item.lastTorrentInfoHash = lastTorrentInfoHash
+            item.lastFileIndex = lastFileIndex
             
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
                 item.lastEpisodeImage = url
@@ -234,7 +246,7 @@ class UserDataService: ObservableObject {
         }
     }
     
-    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
+    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
         let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
@@ -256,6 +268,11 @@ class UserDataService: ObservableObject {
         if let ei = episodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
         if let r = item.runtime { finalItem["runtime"] = r }
         if let l = item.logoURL?.absoluteString { finalItem["logo"] = l }
+        if let pos = playbackPosition ?? item.lastPlaybackPosition { finalItem["lastPlaybackPosition"] = pos }
+        if let dur = playbackDuration ?? item.lastPlaybackDuration { finalItem["lastPlaybackDuration"] = dur }
+        if let su = streamURL ?? item.lastStreamURL { finalItem["lastStreamURL"] = su.absoluteString }
+        if let hash = torrentInfoHash ?? item.lastTorrentInfoHash { finalItem["lastTorrentInfoHash"] = hash }
+        if let fi = fileIndex ?? item.lastFileIndex { finalItem["lastFileIndex"] = fi }
         
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
         // Remove existing item if present
@@ -281,6 +298,10 @@ class UserDataService: ObservableObject {
         return history.contains { $0.id == item.id }
     }
 
+    func getHistoryItem(id: String) -> MediaItem? {
+        return history.first { $0.id == id }
+    }
+
     func toggleWatched(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
         if isWatched(item) {
             removeFromHistory(item)
@@ -289,8 +310,22 @@ class UserDataService: ObservableObject {
         }
     }
 
-    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {
-        addToList(key: historyKey, item: item, progress: progress, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage, target: \.history)
+    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil) {
+        addToList(
+            key: historyKey,
+            item: item,
+            progress: progress,
+            season: season,
+            episode: episode,
+            episodeTitle: episodeTitle,
+            episodeImage: episodeImage,
+            playbackPosition: playbackPosition,
+            playbackDuration: playbackDuration,
+            streamURL: streamURL,
+            torrentInfoHash: torrentInfoHash,
+            fileIndex: fileIndex,
+            target: \.history
+        )
     }
     
     func removeFromHistory(_ item: MediaItem) {
@@ -354,6 +389,11 @@ class UserDataService: ObservableObject {
         if let ei = item.lastEpisodeImage?.absoluteString { dict["lastEpisodeImage"] = ei }
         if let r = item.runtime { dict["runtime"] = r }
         if let l = item.logoURL?.absoluteString { dict["logo"] = l }
+        if let pos = item.lastPlaybackPosition { dict["lastPlaybackPosition"] = pos }
+        if let dur = item.lastPlaybackDuration { dict["lastPlaybackDuration"] = dur }
+        if let su = item.lastStreamURL?.absoluteString { dict["lastStreamURL"] = su }
+        if let hash = item.lastTorrentInfoHash { dict["lastTorrentInfoHash"] = hash }
+        if let fi = item.lastFileIndex { dict["lastFileIndex"] = fi }
         return dict
     }
     

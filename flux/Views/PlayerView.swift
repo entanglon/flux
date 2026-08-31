@@ -283,8 +283,8 @@ struct PlayerView: View {
                 mpv.play(url: url)
             }
         }
-        // Resume-after-PiP-expand: once the fresh stream is producing frames,
-        // jump to the position the floating panel was at (once).
+        // Resume playback position: once the stream is producing frames or duration is known,
+        // jump directly to the saved position where the user left off.
         .onChange(of: mpv.timePos) { _, t in
             if t > 0.05 && !hasStartedPlayback {
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -293,10 +293,18 @@ struct PlayerView: View {
                 }
             }
             guard let resume = playerManager.pendingResumeTime else { return }
-            guard t > 0.3, mpv.duration > 0 else { return }
+            guard t > 0.1 || mpv.duration > 0 else { return }
             playerManager.pendingResumeTime = nil
             if abs(t - resume) > 1.5 {
-                print("PlayerView: resuming after PiP expand at \(Int(resume))s")
+                print("PlayerView: resuming playback at \(Int(resume))s")
+                mpv.seek(absolute: resume)
+            }
+        }
+        .onChange(of: mpv.duration) { _, dur in
+            guard dur > 0, let resume = playerManager.pendingResumeTime else { return }
+            playerManager.pendingResumeTime = nil
+            if abs(mpv.timePos - resume) > 1.5 {
+                print("PlayerView: duration received, seeking to resume position: \(Int(resume))s")
                 mpv.seek(absolute: resume)
             }
         }

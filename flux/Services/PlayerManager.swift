@@ -500,6 +500,26 @@ class PlayerManager: ObservableObject {
         if !isAutoAdvance {
             resumePos = PiPManager.shared.interceptPlaybackRequest(item: item, season: season, episode: episode)
         }
+        
+        // Automatic saved watch history resume position calculation (exact seconds)
+        if resumePos == nil {
+            let historyItem = UserDataService.shared.getHistoryItem(id: item.id) ?? item
+            let isMatchingEpisode: Bool
+            if item.category == "TV Show" || season != nil {
+                isMatchingEpisode = (historyItem.lastSeason == season || (season == nil && historyItem.lastSeason != nil)) &&
+                                    (historyItem.lastEpisode == episode || (episode == nil && historyItem.lastEpisode != nil))
+            } else {
+                isMatchingEpisode = true
+            }
+
+            if isMatchingEpisode {
+                if let pos = historyItem.lastPlaybackPosition, pos > 5.0, (historyItem.progress ?? 0) < 0.92 {
+                    resumePos = pos
+                } else if let p = historyItem.progress ?? item.progress, p > 0.01 && p < 0.92, let dur = historyItem.lastPlaybackDuration, dur > 10 {
+                    resumePos = p * dur
+                }
+            }
+        }
         self.pendingResumeTime = resumePos
 
         self.currentItem = item
@@ -522,12 +542,6 @@ class PlayerManager: ObservableObject {
         if warmCore?.key != playbackKey {
             cancelDetailPrefetch()
         }
-
-        // Remove the previously-playing torrent so only one downloads at a time.
-        if let oldHash = activeTorrentHash {
-            StremioServerManager.shared.removeTorrent(infoHash: oldHash)
-            activeTorrentHash = nil
-        }
         
         // 0. Offline Check
         if let localUrl = DownloadManager.shared.getLocalUrl(for: item) {
@@ -545,25 +559,33 @@ class PlayerManager: ObservableObject {
             return
         }
         
-        // 1. Instant Replay Check
+        // 1. Instant Replay / Active Session Reuse Check
         let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
         
         if let cached = lastPlayedStreams[key] {
             let elapsed = Date().timeIntervalSince(cached.timestamp)
             
-            // If Fresh (< 60 mins), Play Immediately
-            if elapsed < 3600 {
-                print("[PlayerManager] Cache Fresh (\(Int(elapsed/60))m): Playing immediately.")
+            // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session
+            if elapsed < 86400 {
+                print("[PlayerManager] Active Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
                 self.currentStreamURL = cached.url
                 self.isLoading = false
                 self.populateStreamsInBackground(item: item, season: season, episode: episode)
                 return
             } else {
-                // Cache Stale — don't bother validating a possibly-dead torrent URL;
-                // refetch fresh sources instead (HEAD checks can pass on dead swarms).
-                print("[PlayerManager] Cache Stale (\(Int(elapsed/60))m): Refetching.")
                 self.lastPlayedStreams.removeValue(forKey: key)
                 fetchAndRace(item: item, season: season, episode: episode)
+                return
+            }
+        } else if let savedURL = item.lastStreamURL ?? UserDataService.shared.getHistoryItem(id: item.id)?.lastStreamURL {
+            let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+            let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
+            if elapsed < 86400 {
+                print("[PlayerManager] Persisted History Stream Available: Playing \(savedURL)")
+                self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
+                self.currentStreamURL = savedURL
+                self.isLoading = false
+                self.populateStreamsInBackground(item: item, season: season, episode: episode)
                 return
             }
         }
@@ -973,9 +995,31 @@ class PlayerManager: ObservableObject {
         }
         // If an episode in a TV show is completed (progress >= 90%), advance Continue Watching to the next episode!
         if (item.category == "TV Show" || currentSeason != nil), progress >= 0.90, let next = nextEpisodeInfo {
-            UserDataService.shared.addToHistory(item, progress: 0.0, season: next.season, episode: next.episode, episodeImage: nil)
+            UserDataService.shared.addToHistory(
+                item,
+                progress: 0.0,
+                season: next.season,
+                episode: next.episode,
+                episodeImage: nil,
+                playbackPosition: 0.0,
+                playbackDuration: duration,
+                streamURL: nil,
+                torrentInfoHash: nil,
+                fileIndex: nil
+            )
         } else {
-            UserDataService.shared.addToHistory(item, progress: progress, season: currentSeason, episode: currentEpisode, episodeImage: currentEpisodeImage)
+            UserDataService.shared.addToHistory(
+                item,
+                progress: progress,
+                season: currentSeason,
+                episode: currentEpisode,
+                episodeImage: currentEpisodeImage,
+                playbackPosition: time,
+                playbackDuration: duration,
+                streamURL: currentStreamURL,
+                torrentInfoHash: activeTorrentHash,
+                fileIndex: nil
+            )
         }
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
@@ -983,12 +1027,9 @@ class PlayerManager: ObservableObject {
     func close() {
         DispatchQueue.main.async {
             self.cancelDetailPrefetch()
-            // Remove the active torrent so it stops downloading immediately.
-            if let hash = self.activeTorrentHash {
-                StremioServerManager.shared.removeTorrent(infoHash: hash)
-                self.activeTorrentHash = nil
-            }
-            StremioServerManager.shared.removeAllTorrents()
+            // Do NOT forcefully destroy the active torrent session on every brief window close.
+            // Keeping the session active in StremioServerManager allows instant replay/resume
+            // without re-running DHT handshakes, peer discovery, and piece re-indexing.
             self.currentItem = nil
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
@@ -1000,7 +1041,6 @@ class PlayerManager: ObservableObject {
             self.currentSeason = nil
             self.currentEpisode = nil
             self.currentEpisodeImage = nil
-            self.pendingResumeTime = nil
             // Session over — a held warm core is stale now.
             self.prefetchedKey = nil
             self.prefetchedStream = nil

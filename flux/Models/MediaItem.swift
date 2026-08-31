@@ -88,12 +88,17 @@ struct MediaItem: Identifiable, Hashable, Codable {
         }
     }
     
-    // History Specific
+    // History & Playback Persistence
     var lastSeason: Int?
     var lastEpisode: Int?
     var lastEpisodeTitle: String?
     var lastEpisodeImage: URL?
     var timestamp: TimeInterval?
+    var lastPlaybackPosition: Double? // in seconds (e.g. 1420.5)
+    var lastPlaybackDuration: Double? // in seconds (e.g. 7200.0)
+    var lastStreamURL: URL?
+    var lastTorrentInfoHash: String?
+    var lastFileIndex: Int?
 }
 
 /// Minimal init for recommendation seeds — extension keeps the memberwise init.
@@ -107,7 +112,8 @@ extension MediaItem {
             genres: genres, popularity: nil, releaseDate: nil, spokenLanguages: nil,
             originCountry: nil, voteAverage: nil, episodes: nil, watchProviders: nil,
             lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil,
-            timestamp: nil
+            timestamp: nil, lastPlaybackPosition: nil, lastPlaybackDuration: nil,
+            lastStreamURL: nil, lastTorrentInfoHash: nil, lastFileIndex: nil
         )
     }
 }
