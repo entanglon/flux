@@ -568,8 +568,10 @@ struct AddonsSettingsTabView: View {
             }
             
             // Installed Addons List
-            Section(header: HStack(spacing: 8) {
+            Section(header: HStack {
                 Text("Installed Addons (\(addonManager.addons.count))")
+                
+                Spacer()
                 
                 Button(action: {
                     Task {
@@ -579,21 +581,32 @@ struct AddonsSettingsTabView: View {
                         await MainActor.run { isSyncing = false }
                     }
                 }) {
-                    if isSyncing {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        if isSyncing {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 13, height: 13)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Text(isSyncing ? "Syncing…" : "Refresh")
+                            .font(.system(size: 11.5, weight: .semibold))
                     }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(Color.white.opacity(0.08))
+                    .foregroundColor(.white.opacity(0.9))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(isSyncing)
                 .help("Refresh installed addons from Flux Cloud")
-                
-                Spacer()
             }) {
                 if addonManager.addons.isEmpty {
                     Text("No addons installed.")
@@ -601,6 +614,25 @@ struct AddonsSettingsTabView: View {
                 } else {
                     ForEach(addonManager.addons) { addon in
                         HStack(spacing: 10) {
+                            // Delete / Uninstall Button (Left Side)
+                            if !addon.isStock {
+                                Button(action: {
+                                    addonManager.removeAddon(addon)
+                                }) {
+                                    Image(systemName: "trash.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.red.opacity(0.85))
+                                        .frame(width: 22, height: 22)
+                                        .background(Color.red.opacity(0.12))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Uninstall addon")
+                            } else {
+                                Color.clear
+                                    .frame(width: 22, height: 22)
+                            }
+                            
                             // Logo
                             if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
                                 CachedImage(url: url, maxDimension: 60) { phase in
@@ -644,13 +676,6 @@ struct AddonsSettingsTabView: View {
                             
                             Spacer()
                             
-                            Toggle("", isOn: Binding(
-                                get: { addon.isEnabled },
-                                set: { _ in addonManager.toggleAddon(addon) }
-                            ))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            
                             if !addon.url.isEmpty {
                                 Button(action: {
                                     var urlStr = addon.url
@@ -672,17 +697,12 @@ struct AddonsSettingsTabView: View {
                                 .help("Configure addon")
                             }
                             
-                            if !addon.isStock {
-                                Button(action: {
-                                    addonManager.removeAddon(addon)
-                                }) {
-                                    Image(systemName: "trash.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.red.opacity(0.85))
-                                }
-                                .buttonStyle(.borderless)
-                                .help("Uninstall addon")
-                            }
+                            Toggle("", isOn: Binding(
+                                get: { addon.isEnabled },
+                                set: { _ in addonManager.toggleAddon(addon) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
                         }
                         .padding(.vertical, 3)
                     }
