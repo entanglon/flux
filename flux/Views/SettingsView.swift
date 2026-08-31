@@ -613,26 +613,7 @@ struct AddonsSettingsTabView: View {
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(addonManager.addons) { addon in
-                        HStack(spacing: 10) {
-                            // Delete / Uninstall Button (Left Side)
-                            if !addon.isStock {
-                                Button(action: {
-                                    addonManager.removeAddon(addon)
-                                }) {
-                                    Image(systemName: "trash.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.red.opacity(0.85))
-                                        .frame(width: 22, height: 22)
-                                        .background(Color.red.opacity(0.12))
-                                        .clipShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .help("Uninstall addon")
-                            } else {
-                                Color.clear
-                                    .frame(width: 22, height: 22)
-                            }
-                            
+                        HStack(spacing: 12) {
                             // Logo
                             if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
                                 CachedImage(url: url, maxDimension: 60) { phase in
@@ -676,6 +657,20 @@ struct AddonsSettingsTabView: View {
                             
                             Spacer()
                             
+                            // Delete / Uninstall Button (Left of Settings Gear)
+                            if !addon.isStock {
+                                Button(action: {
+                                    addonManager.removeAddon(addon)
+                                }) {
+                                    Image(systemName: "trash.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.red.opacity(0.85))
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Uninstall addon")
+                            }
+                            
+                            // Configure Gear Button (Left of Toggle)
                             if !addon.url.isEmpty {
                                 Button(action: {
                                     var urlStr = addon.url
@@ -697,6 +692,7 @@ struct AddonsSettingsTabView: View {
                                 .help("Configure addon")
                             }
                             
+                            // Toggle Switch (Far Right Alignment)
                             Toggle("", isOn: Binding(
                                 get: { addon.isEnabled },
                                 set: { _ in addonManager.toggleAddon(addon) }
