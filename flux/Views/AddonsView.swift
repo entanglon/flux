@@ -87,9 +87,10 @@ struct AddonsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 44)
-            .padding(.bottom, 64)
+            .padding(.leading, LibraryScheme.leadingPadding)
+            .padding(.trailing, LibraryScheme.trailingPadding)
+            .padding(.top, LibraryScheme.topPadding)
+            .padding(.bottom, LibraryScheme.bottomPadding)
         }
         .sheet(isPresented: $showCustomURLModal) {
             CustomManifestInstallerModal(isPresented: $showCustomURLModal)
@@ -100,17 +101,11 @@ struct AddonsView: View {
     
     private var headerView: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                    Image(systemName: "puzzlepiece.extension.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    
-                    Text("Addon Store")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Addon Store")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
                 
                 Text("\(addonManager.addons.count) installed · Official streaming platforms, metadata, and community extensions")
                     .font(.system(size: 13, weight: .medium))
@@ -118,7 +113,7 @@ struct AddonsView: View {
                     .lineLimit(1)
             }
             
-            Spacer(minLength: 20)
+            Spacer(minLength: 24)
             
             // Search Input
             HStack(spacing: 8) {
@@ -129,7 +124,7 @@ struct AddonsView: View {
                 TextField("Search extensions…", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .frame(width: 170)
+                    .frame(width: 180)
                 
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
@@ -140,8 +135,8 @@ struct AddonsView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
             .background(Color.white.opacity(0.08))
             .clipShape(Capsule())
             .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
@@ -154,8 +149,8 @@ struct AddonsView: View {
                     Text("Install from URL")
                         .font(.system(size: 13, weight: .semibold))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
                 .background(
                     LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing)
                 )
@@ -271,7 +266,7 @@ struct AddonsView: View {
     }
 }
 
-// MARK: - Curated Store Addon Card (Real Logos)
+// MARK: - Curated Store Addon Card (Real Official Logos)
 
 struct StoreAddonCardView: View {
     let item: StoreAddonItem
@@ -482,7 +477,11 @@ struct StoreAddonCardView: View {
     }
     
     private var addonLogoView: some View {
-        Group {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 46, height: 46)
+            
             if let logoStr = item.logoURL ?? installedAddon?.logoURL ?? installedAddon?.iconURL,
                let url = URL(string: logoStr) {
                 CachedImage(url: url, maxDimension: 120) { phase in
@@ -491,30 +490,23 @@ struct StoreAddonCardView: View {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 44, height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    case .empty, .failure:
-                        fallbackLogo
-                    @unknown default:
-                        fallbackLogo
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    default:
+                        fallbackLogoText
                     }
                 }
             } else {
-                fallbackLogo
+                fallbackLogoText
             }
         }
+        .frame(width: 46, height: 46)
     }
     
-    private var fallbackLogo: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.1))
-                .frame(width: 44, height: 44)
-            
-            Text(String(item.name.prefix(1)).uppercased())
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-        }
+    private var fallbackLogoText: some View {
+        Text(String(item.name.prefix(1)).uppercased())
+            .font(.system(size: 18, weight: .bold, design: .rounded))
+            .foregroundColor(.white.opacity(0.85))
     }
 }
 
@@ -532,22 +524,29 @@ struct CustomAddonCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
                 // Logo
-                if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
-                    CachedImage(url: url, maxDimension: 120) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 44, height: 44)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        default:
-                            fallbackIcon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 46, height: 46)
+                    
+                    if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
+                        CachedImage(url: url, maxDimension: 120) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            default:
+                                fallbackIcon
+                            }
                         }
+                    } else {
+                        fallbackIcon
                     }
-                } else {
-                    fallbackIcon
                 }
+                .frame(width: 46, height: 46)
                 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(addon.name)
@@ -656,14 +655,9 @@ struct CustomAddonCardView: View {
     }
     
     private var fallbackIcon: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.1))
-                .frame(width: 44, height: 44)
-            Text(String(addon.name.prefix(1)).uppercased())
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-        }
+        Text(String(addon.name.prefix(1)).uppercased())
+            .font(.system(size: 18, weight: .bold, design: .rounded))
+            .foregroundColor(.white.opacity(0.85))
     }
 }
 

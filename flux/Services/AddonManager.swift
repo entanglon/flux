@@ -72,14 +72,14 @@ class AddonManager: ObservableObject {
             addons[existingIdx].isStock = true
             addons[existingIdx].url = openSubtitlesHost
             addons[existingIdx].transportUrl = openSubtitlesHost
-            addons[existingIdx].logoURL = "https://app.strem.io/images/addons/opensubtitles.png"
+            addons[existingIdx].logoURL = "https://www.strem.io/images/addons/opensubtitles-logo.png"
         } else {
             let openSubs = StremioAddon(
                 id: openSubtitlesID,
                 name: "OpenSubtitles v3",
                 description: "Official multi-language subtitle search",
                 version: "1.0.0",
-                logoURL: "https://app.strem.io/images/addons/opensubtitles.png",
+                logoURL: "https://www.strem.io/images/addons/opensubtitles-logo.png",
                 url: openSubtitlesHost,
                 transportUrl: openSubtitlesHost,
                 isEnabled: true,

@@ -166,7 +166,7 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Official",
             manifestURL: "https://opensubtitles-v3.strem.io/manifest.json",
-            logoURL: "https://app.strem.io/images/addons/opensubtitles.png",
+            logoURL: "https://www.strem.io/images/addons/opensubtitles-logo.png",
             category: .subtitles,
             tags: ["Official", "Subtitles", "Multi-Language"],
             isStock: true
@@ -180,7 +180,7 @@ public struct AddonStoreCatalog {
             version: "1.0.2",
             author: "Official",
             manifestURL: "https://watchhub.strem.io/manifest.json",
-            logoURL: "https://app.strem.io/images/addons/watchhub.png",
+            logoURL: "https://www.strem.io/images/watchhub-logo.png",
             category: .streamingServices,
             tags: ["Official", "Netflix", "Prime Video", "Apple TV+", "Disney+"]
         ),
@@ -193,7 +193,7 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Archive.org",
             manifestURL: "https://ia-stremio.elfhosted.com/manifest.json",
-            logoURL: "https://ia-stremio.elfhosted.com/logo.png",
+            logoURL: "https://archive.org/images/glogo.png",
             category: .publicDomain,
             tags: ["Free", "Public Domain", "Classic Movies", "HTTP"]
         ),
@@ -204,7 +204,7 @@ public struct AddonStoreCatalog {
             version: "1.1.0",
             author: "Community",
             manifestURL: "https://youtube.strem.fun/manifest.json",
-            logoURL: "https://app.strem.io/images/addons/youtube.png",
+            logoURL: "https://cdn-icons-png.flaticon.com/512/1384/1384060.png",
             category: .publicDomain,
             tags: ["Trailers", "Clips", "Live Video", "Free"]
         ),
@@ -215,7 +215,7 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "FreeIPTV",
             manifestURL: "https://free-iptv.strem.fun/manifest.json",
-            logoURL: "https://free-iptv.strem.fun/logo.png",
+            logoURL: "https://cdn-icons-png.flaticon.com/512/2798/2798007.png",
             category: .publicDomain,
             tags: ["Free-to-Air", "Live TV", "News", "M3U8"]
         ),
@@ -229,7 +229,7 @@ public struct AddonStoreCatalog {
             author: "TheCommunity",
             manifestURL: "https://torrentio.strem.fun/manifest.json",
             configureURL: "https://torrentio.strem.fun/configure",
-            logoURL: "https://torrentio.strem.fun/logo.png",
+            logoURL: "https://torrentio.strem.fun/images/logo_v1.png",
             category: .community,
             tags: ["Torrents", "Debrid-Ready", "Fast Start", "4K HDR"]
         ),
@@ -241,7 +241,7 @@ public struct AddonStoreCatalog {
             author: "ElfHosted",
             manifestURL: "https://comet.elfhosted.com/manifest.json",
             configureURL: "https://comet.elfhosted.com/configure",
-            logoURL: "https://comet.elfhosted.com/logo.png",
+            logoURL: "https://raw.githubusercontent.com/g0ldyy/comet/refs/heads/main/comet/assets/icon.png",
             category: .community,
             tags: ["Torrents", "Debrid", "High Speed"]
         ),
@@ -253,7 +253,7 @@ public struct AddonStoreCatalog {
             author: "MediaFusion",
             manifestURL: "https://mediafusion.elfhosted.com/manifest.json",
             configureURL: "https://mediafusion.elfhosted.com/configure",
-            logoURL: "https://mediafusion.elfhosted.com/logo.png",
+            logoURL: "https://raw.githubusercontent.com/mhdzumair/MediaFusion/main/resources/images/mediafusion_logo.png",
             category: .community,
             tags: ["Multi-Source", "Torrents", "Debrid"]
         ),
@@ -275,7 +275,7 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "ElfHosted",
             manifestURL: "https://stremify.elfhosted.com/manifest.json",
-            logoURL: "https://stremify.elfhosted.com/logo.png",
+            logoURL: "https://cdn-icons-png.flaticon.com/512/3074/3074767.png",
             category: .community,
             tags: ["HTTP Streams", "Web Direct", "No P2P"]
         ),
@@ -286,7 +286,7 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Community",
             manifestURL: "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/manifest.json",
-            logoURL: "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/logo.png",
+            logoURL: "https://emojiapi.dev/api/v1/spider_web/256.png",
             category: .community,
             tags: ["HTTP", "Direct Streams", "No P2P"]
         ),
@@ -298,7 +298,7 @@ public struct AddonStoreCatalog {
             author: "CyberFlix",
             manifestURL: "https://cyberflix.elfhosted.com/manifest.json",
             configureURL: "https://cyberflix.elfhosted.com/configure",
-            logoURL: "https://cyberflix.elfhosted.com/logo.png",
+            logoURL: "https://cdn-icons-png.flaticon.com/512/3845/3845868.png",
             category: .community,
             tags: ["Catalogs", "Trending", "Curated"]
         )
