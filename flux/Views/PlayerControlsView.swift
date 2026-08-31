@@ -38,15 +38,15 @@ struct PlayerControlsView: View {
     
     var body: some View {
         ZStack {
-            // Invisible background to track mouse movement
+            // Touch/click background to reveal or hide controls (Apple TV behavior)
             Color.black.opacity(0.001)
-                .onHover { hovering in
-                    if hovering {
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isControlsVisible {
+                        hideControls()
+                    } else {
                         showControls()
                     }
-                }
-                .continuousHover { _ in
-                    showControls()
                 }
             
             // Controls Overlay
@@ -385,20 +385,12 @@ struct PlayerControlsView: View {
                         .padding(.horizontal, 60)
                         .padding(.bottom, 40)
                     }
-                    .background(
-                        LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                            .allowsHitTesting(false)
-                    )
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
         }
         .onAppear {
             showControls()
-        }
-        // Force Arrow Cursor
-        .onHover { _ in
-            NSCursor.arrow.push()
         }
         .onChange(of: showSubtitlePopover) { _, newValue in
             if newValue { hoverTimer?.invalidate() }
@@ -411,7 +403,7 @@ struct PlayerControlsView: View {
     }
     
     private func showControls() {
-        withAnimation {
+        withAnimation(.easeInOut(duration: 0.2)) {
             isControlsVisible = true
         }
         NSCursor.unhide()
@@ -423,17 +415,26 @@ struct PlayerControlsView: View {
             return
         }
         
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-            // Double check before hiding
+        // Exactly 2.5s hide timer (Apple TV player standard)
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { _ in
             if !showSubtitlePopover && !showAudioPopover {
-                withAnimation {
+                withAnimation(.easeInOut(duration: 0.25)) {
                     isControlsVisible = false
                 }
-                // Only hide if we are the key window/active (simple check)
                 if NSApp.isActive {
                     NSCursor.setHiddenUntilMouseMoves(true)
                 }
             }
+        }
+    }
+
+    private func hideControls() {
+        hoverTimer?.invalidate()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isControlsVisible = false
+        }
+        if NSApp.isActive {
+            NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
     

@@ -97,18 +97,18 @@ struct PlayerView: View {
                     HStack {
                         Spacer()
                         if item?.category == "TV Show" && mpv.isPlaying && !mpv.isUserPaused
-                            && mpv.timePos > 4 && mpv.timePos < 90 && mpv.duration > 120 {
+                            && mpv.timePos > 3 && mpv.timePos < 95 && mpv.duration > 120 {
                             Button {
                                 mpv.seek(absolute: 95)
                             } label: {
-                                Text("Skip Intro")
-                                    .font(.system(size: 14, weight: .semibold))
+                                Text(mpv.timePos < 35 ? "Skip Recap" : "Skip Intro")
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 10)
-                                    .background(.ultraThinMaterial, in: Capsule())
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
                             }
                             .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .capsule)
                             .transition(.opacity)
                         }
 
@@ -120,25 +120,26 @@ struct PlayerView: View {
                                     Image(systemName: "forward.end.fill")
                                         .font(.system(size: 11))
                                     Text("Next: S\(next.season) E\(next.episode)")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.system(size: 13, weight: .semibold))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                                .background(.ultraThinMaterial, in: Capsule())
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
                             }
                             .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .capsule)
                             .transition(.opacity)
                         }
                     }
                     .padding(.trailing, 40)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 36)
                 }
             }
         }
         .focusable() // Make the view capable of receiving key presses
         .focusEffectDisabled() // Remove the blue focus ring
         .onKeyPress(.space) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             if mpv.timePos >= 0.5 {
                 mpv.togglePlayPause()
             }
@@ -161,32 +162,35 @@ struct PlayerView: View {
             }
             return .handled
         }
-        .onKeyPress(.space) {
-            mpv.togglePlayPause()
-            return .handled
-        }
         .onKeyPress(.leftArrow) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.seek(relative: -10)
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.seek(relative: 10)
             return .handled
         }
         .onKeyPress(.upArrow) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.setVolume(min(mpv.volume + 0.05, 1.0))
             return .handled
         }
         .onKeyPress(.downArrow) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.setVolume(max(mpv.volume - 0.1, 0.0))
             return .handled
         }
         .onKeyPress(KeyEquivalent("m")) {
+            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.toggleMute()
             return .handled
         }
         .onKeyPress(KeyEquivalent("c")) {
-            isControlsVisible = true
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isControlsVisible.toggle()
+            }
             return .handled
         }
         .onAppear {
@@ -214,7 +218,7 @@ struct PlayerView: View {
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             mpv.pause()
             mpv.stop()
-            playerManager.endSession()
+            playerManager.close()
         }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             if let url = newURL {

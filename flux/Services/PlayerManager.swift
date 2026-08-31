@@ -971,7 +971,12 @@ class PlayerManager: ObservableObject {
                 item.runtime = "\(minutes)m"
             }
         }
-        UserDataService.shared.addToHistory(item, progress: progress, season: currentSeason, episode: currentEpisode, episodeImage: currentEpisodeImage)
+        // If an episode in a TV show is completed (progress >= 90%), advance Continue Watching to the next episode!
+        if (item.category == "TV Show" || currentSeason != nil), progress >= 0.90, let next = nextEpisodeInfo {
+            UserDataService.shared.addToHistory(item, progress: 0.0, season: next.season, episode: next.episode, episodeImage: nil)
+        } else {
+            UserDataService.shared.addToHistory(item, progress: progress, season: currentSeason, episode: currentEpisode, episodeImage: currentEpisodeImage)
+        }
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
     
@@ -983,6 +988,7 @@ class PlayerManager: ObservableObject {
                 StremioServerManager.shared.removeTorrent(infoHash: hash)
                 self.activeTorrentHash = nil
             }
+            StremioServerManager.shared.removeAllTorrents()
             self.currentItem = nil
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
