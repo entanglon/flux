@@ -143,6 +143,7 @@ struct SearchView: View {
                                     RecentSearchCard(item: item)
                                 }
                                 .buttonStyle(.plain)
+                                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                         }
                     }
@@ -211,6 +212,7 @@ struct RecentSearchCard: View {
         }
         .padding(8)
         .frame(width: 270, height: 80)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 14))
     }
     

@@ -565,35 +565,24 @@ struct DetailView: View {
                                     HStack(spacing: 20) {
                                         ForEach(providers) { provider in
                                             VStack(spacing: 8) {
-                                                ZStack {
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .fill(Color.white.opacity(0.08))
-                                                    
-                                                    CachedImage(url: provider.logoURL) { phase in
-                                                        if let image = phase.image {
-                                                            image
-                                                                .resizable()
-                                                                .aspectRatio(contentMode: .fit)
-                                                                .padding(6)
-                                                        } else {
-                                                            Image(systemName: "tv")
-                                                                .font(.system(size: 20))
-                                                                .foregroundStyle(.white.opacity(0.3))
-                                                        }
+                                                CachedImage(url: provider.logoURL) { phase in
+                                                    if let image = phase.image {
+                                                        image
+                                                            .resizable()
+                                                            .aspectRatio(contentMode: .fill)
+                                                            .frame(width: 60, height: 60)
+                                                            .cornerRadius(12)
+                                                    } else {
+                                                        RoundedRectangle(cornerRadius: 12)
+                                                            .fill(Color.gray.opacity(0.3))
+                                                            .frame(width: 60, height: 60)
                                                     }
                                                 }
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                                                )
                                                 
                                                 Text(provider.name)
                                                     .font(.caption2)
                                                     .foregroundStyle(.secondary)
-                                                    .lineLimit(2)
-                                                    .multilineTextAlignment(.center)
+                                                    .lineLimit(1)
                                             }
                                             .frame(width: 80)
                                         }
