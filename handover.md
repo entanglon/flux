@@ -1,11 +1,19 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — APPLE TV PLAYER POLISH, LIQUID GLASS SKIP RECAP/INTRO, TOUCH/KEY CONTROLS, 2.5S HIDE TIMER, TORRENT TEARDOWN, CONTINUE WATCHING AUTO-PROGRESSION
+## LATEST: Aug 31, 2026 — BUFFER LOADING SCREEN LAYER REORDER, TRANSPARENT MID-PLAY BUFFERING, ZERO PAUSE-FLASH, APPLE TV CONTROLS & CONTINUE WATCHING NEXT-EPISODE
+
+### Buffer Loading Screen & Layer Reorder (`PlayerView.swift`)
+- **Controls Always Accessible During Buffering:** Reordered view layers so `logoBufferingView` resides directly above the video layer and *behind* `PlayerControlsView` with `.allowsHitTesting(false)`. Users can now see the title, exit anytime via the Close button `X`, or adjust PiP/audio while the buffer loads.
+- **Transparent Mid-Playback Buffering:**
+  - On **initial cold start** (`!hasStartedPlayback`), displays the full dark backdrop and vignette loading screen.
+  - On **mid-playback re-buffering** (`hasStartedPlayback && mpv.isBuffering`), the backdrop and gradients are completely transparent (`Color.clear`), rendering only the centered animated logo fill spinner directly over the frozen video frame without blanking the screen.
+- **Zero Black-Frame Flash on Play-After-Pause:** Eliminated the race condition where `!mpv.isPlaying` during the pause-to-play transition falsely triggered `isInitialLoading = true`. Tracked `hasStartedPlayback` ensures hitting play after pause never triggers the black initial loading overlay.
+- **Instant Audio/Video Sync Dismissal:** As soon as `mpv.timePos > 0.05` and frames render, `hasStartedPlayback` immediately flips to true, eliminating the delay where audio started playing behind the black screen.
 
 ### Apple TV-Style Player Controls Interaction (`PlayerControlsView.swift`, `PlayerView.swift`)
-- **Touch / Tap / Key-Triggered Appearance:** Replaced the sensitive mouse hover tracking (`continuousHover`) with a tap/click gesture (`onTapGesture`) and keyboard triggers (Space, Enter, `C`, arrow keys). Subtle cursor movements no longer pop up the controls while watching a movie.
+- **Touch / Tap / Key-Triggered Appearance:** Replaced continuous mouse tracking with tap/click gesture (`onTapGesture`) and keyboard triggers (Space, Enter, `C`, arrow keys). Subtle cursor movements no longer pop up the controls while watching.
 - **Exact 2.5-Second Hide Timing:** Synchronized the control fade-out timer to 2.5s of inactivity matching macOS Apple TV / QuickTime players.
-- **Pure Liquid Glass (Zero Black Tint):** Removed the bottom `LinearGradient` black tint from `PlayerControlsView.swift`. The glass pills and progress scrubbers now float cleanly with pure translucent glass over the video.
+- **Pure Liquid Glass (Zero Black Tint):** Removed the bottom `LinearGradient` black tint from `PlayerControlsView.swift`. The glass pills and progress scrubbers float cleanly with pure translucent glass over the video.
 
 ### Liquid Glass Floating Skip Recap / Skip Intro Button (`PlayerView.swift`)
 - **Apple TV Placement & Appearance:** The floating button in the bottom right corner uses `.glassEffect(.regular.interactive(), in: .capsule)` with `.padding(.trailing, 40)` and `.padding(.bottom, 36)`.
