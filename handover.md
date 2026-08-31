@@ -1,6 +1,17 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — ACTIVE TORRENT SESSION REUSE, EXACT RESUME POSITION PERSISTENCE & CLOUD SYNC
+## LATEST: Aug 31, 2026 — MODERN SETTINGS UI REDESIGN: TMDB KEY VALIDATION CARD, VISUAL STORAGE GAUGE & ACCORDION STATE
+
+### Redesigned TMDB API Key Section (`SettingsView.swift`)
+- **Clean Two-Row Layout:** The input field now sits cleanly below the "TMDB API Key" header row.
+- **Modern Action Icons:** Save (`checkmark.circle.fill`) and Cancel/Clear (`xmark.circle.fill` / `trash.fill`) action buttons sit on the bottom right below the input field.
+- **Automatic Validation on Save:** Clicking Save validates the key against TMDB (`/configuration?api_key=...`) before saving.
+  - On Success: Key is persisted to `UserDefaults`, input field automatically collapses with a spring animation, and a green `checkmark.circle.fill` "Active" capsule badge appears on the right of the header with pencil (edit) and trash (delete) buttons.
+  - On Failure: Key is rejected with an inline warning (`exclamationmark.triangle.fill`), preventing invalid keys from corrupting metadata enrichment.
+
+### Visual Storage Gauge & Cache Management (`SettingsView.swift`, `StremioServerManager.swift`)
+- **Dynamic Gradient Storage Bar:** Added an Apple-style gradient gauge showing used cache vs total allocation (e.g. `1.18 GB of 2 GB limit`). The gauge turns amber/red when approaching capacity ($>85\%$).
+- **One-Click Purge Actions:** Added styled action buttons with icons for "Clear Images" and "Purge Torrent Cache".
 
 ### Active Torrent Session Reuse & Metadata Persistence (`PlayerManager.swift`, `MediaItem.swift`, `UserDataService.swift`)
 - **Preserved Engine Sessions on Player Close:** Player close no longer prematurely destroys active torrent sessions with `removeAllTorrents()`. Connected peers, open DHT sockets, and downloaded pieces remain hot in the local engine (`127.0.0.1:11470`), enabling instant resumption without re-running handshakes or metadata fetching.
