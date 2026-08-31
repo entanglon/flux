@@ -1,16 +1,16 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — CLEAN SEPARATION OF COLD STARTUP BUFFERING & IN-PLAYER MID-PLAYBACK BUFFERING, LOGO STABILITY & STREAM BUTTON REMOVAL
+## LATEST: Aug 31, 2026 — PURE TMDB LOGO ENRICHMENT & RESTORED LOGO SIZING, ZERO STARTUP CROSS BUTTON & IN-PLAYER BUFFERING
+
+### Restored Logo Sizing & Pure TMDB Logos (`ContinueWatchingCard.swift`, `TMDBEnricher.swift`)
+- **Restored Exact Original Sizing:** Restored original logo frame (`maxWidth: 160, maxHeight: 36, alignment: .leading`) without height clamping.
+- **Pure TMDB Logos When Enrichment Active:** `TMDBEnricher.quickEnrich` now fetches and populates `enriched.logoURL` with TMDB's high-resolution logo directly on the first pass. `ContinueWatchingCard` strictly uses TMDB logos when TMDB enrichment is enabled, completely preventing premature Metahub fallback and the split-second size flash on *Project Hail Mary*.
+
+### Removed Top-Left Cross Button from Startup Buffer Screen (`PlayerView.swift`)
+- **Zero Cross Button Flash:** Removed the top-left `X` button from `logoBufferingView`. Selecting a stream now immediately presents the clean, cinematic title backdrop and animated fill logo without any flashing cross button.
 
 ### Pristine Startup Buffer Screen & In-Player Mid-Playback Buffering (`PlayerView.swift`)
-- **No Controls on Startup Buffer Screen:** Restored the initial cold-start buffering view to be 100% focused on the title artwork, vignette, and animated fill logo with a top-left close button (`X`) and Esc handler. Player controls (play/pause circle, seekbar, track pills) are strictly hidden until the video frames begin rendering (`hasStartedPlayback = true`).
 - **Clean In-Player Mid-Playback Buffering:** When buffering occurs mid-playback, `logoBufferingView` is NOT triggered. Instead, the paused video frame remains on screen with a floating, translucent center `ProgressView` glass badge directly on the video inside the player.
-
-### Continue Watching Card Logo Stability (`ContinueWatchingCard.swift`)
-- **Zero Mid-Flight URL Swapping:** Fixed logo container height to `.frame(height: 34, alignment: .leading)`, preserved existing fetched assets in `.task` on rail scroll, and eliminated asynchronous TMDB logo overwriting for IMDb items with deterministic Metahub artwork. *Project Hail Mary* renders at its true size from the first frame without shrinking or flashing.
-
-### Mid-Playback Stream Button Removal (`PlayerControlsView.swift`)
-- **Removed Sources Button from Audio/Subtitles Pill:** Restored the clean Apple TV audio/subtitles pill (Subtitles + Audio only), eliminating pipeline detachment and crashes during playback.
 
 ### Cursor Auto-Hide & Scrubbing Key Polish (`PlayerControlsView.swift`, `PlayerView.swift`)
 - **Automatic Cursor Hiding After 2.5s:** Added continuous hover activity tracking (`.onContinuousHover`). When the user moves the mouse, the cursor appears; after 2.5s of no movement, `NSCursor.setHiddenUntilMouseMoves(true)` automatically hides the cursor.
