@@ -87,21 +87,13 @@ struct ArchitectureTests {
         #expect(winner?.isTorrent == true)
     }
 
-    @Test func addonStoreCatalogContainsEssentialCategories() {
-        let catalog = AddonStoreCatalog.curatedAddons
-        #expect(!catalog.isEmpty)
+    @Test func addonManagerProvidesStockAddonsAndCloudSyncPayload() {
+        let manager = AddonManager.shared
+        #expect(manager.isAddonInstalled(id: "opensubtitles3"))
         
-        let categories = Set(catalog.map { $0.category })
-        #expect(categories.contains(.subtitles))
-        #expect(categories.contains(.streamingServices))
-        #expect(categories.contains(.publicDomain))
-        #expect(categories.contains(.community))
-
-        let opensubs = catalog.first(where: { $0.id == "opensubtitles3" })
-        #expect(opensubs?.isStock == true)
-
-        let watchhub = catalog.first(where: { $0.id == "official.watchhub" })
-        #expect(watchhub?.category == .streamingServices)
+        let payload = manager.exportAddonsPayload()
+        #expect(!payload.isEmpty)
+        #expect(payload.contains(where: { ($0["id"] as? String) == "opensubtitles3" }))
     }
 
     @Test func stockAddonProtectionPreventsDeletion() {

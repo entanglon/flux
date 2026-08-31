@@ -539,11 +539,9 @@ struct AddonsSettingsTabView: View {
                     
                     Spacer()
                     
-                    // Web Directory Button
+                    // Web Directory Button (SSO Auto-Login)
                     Button(action: {
-                        if let url = URL(string: "https://stremio-addons.netlify.app") {
-                            NSWorkspace.shared.open(url)
-                        }
+                        addonManager.openWebStore()
                     }) {
                         HStack(spacing: 5) {
                             Image(systemName: "safari")
@@ -562,7 +560,7 @@ struct AddonsSettingsTabView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .help("Open community addon directory in browser")
+                    .help("Open community addon store in browser with auto-login")
                     
                     // In-App Store Button
                     Button(action: {

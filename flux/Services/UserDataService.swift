@@ -491,7 +491,8 @@ class UserDataService: ObservableObject {
             },
             "tasteLoved": TasteProfileManager.shared.exportLovedData(),
             "tasteSnapshots": TasteProfileManager.shared.exportSnapshotsData(),
-            "profiles": ProfileManager.shared.exportProfilesData()
+            "profiles": ProfileManager.shared.exportProfilesData(),
+            "addons": AddonManager.shared.exportAddonsPayload()
         ]
     }
 
@@ -618,6 +619,7 @@ class UserDataService: ObservableObject {
         let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
         let profilesData = payload["profiles"] as? [[String: Any]]
+        let addonsData = payload["addons"] as? [[String: Any]]
 
         DispatchQueue.main.async {
             // Persist first so disk matches memory.
@@ -632,6 +634,9 @@ class UserDataService: ObservableObject {
             
             TasteProfileManager.shared.applyCloudData(loved: tasteLoved, snapshots: tasteSnapshots)
             ProfileManager.shared.applyCloudProfilesData(profilesData)
+            if let addonsData {
+                AddonManager.shared.syncWithCloudAddons(addonsData)
+            }
             print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
         }
     }

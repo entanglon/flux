@@ -6,6 +6,14 @@ class AddonManager: ObservableObject {
     static let shared = AddonManager()
     
     @Published var addons: [StremioAddon] = []
+    
+    // Deep Link State for External Addon Installation
+    @Published var pendingDeepLinkManifest: AddonManifest?
+    @Published var pendingDeepLinkURL: String?
+    @Published var showDeepLinkModal: Bool = false
+    @Published var isInstallingDeepLink: Bool = false
+    @Published var deepLinkError: String?
+    
     private let storageKey = "StremioConfiguredAddons"
     
     private init() {
@@ -42,6 +50,89 @@ class AddonManager: ObservableObject {
         return addons.first(where: { $0.id == id })
     }
     
+    // MARK: - Open Web Store with SSO Auto-Login
+    
+    func openWebStore() {
+        let base = "https://flux-addons.pages.dev"
+        if let token = KeychainStore.get("flux.authToken"), !token.isEmpty {
+            if let encodedToken = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+               let url = URL(string: "\(base)/?token=\(encodedToken)") {
+                NSWorkspace.shared.open(url)
+                return
+            }
+        }
+        if let url = URL(string: base) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    // MARK: - Cloud Synchronization
+    
+    func exportAddonsPayload() -> [[String: Any]] {
+        return addons.map { addon in
+            var dict: [String: Any] = [
+                "id": addon.id,
+                "name": addon.name,
+                "url": addon.url,
+                "isEnabled": addon.isEnabled,
+                "isStock": addon.isStock
+            ]
+            if let ver = addon.version { dict["version"] = ver }
+            if let desc = addon.description { dict["description"] = desc }
+            if let logo = addon.logoURL { dict["logoURL"] = logo }
+            if let icon = addon.iconURL { dict["iconURL"] = icon }
+            if let cat = addon.category { dict["category"] = cat }
+            return dict
+        }
+    }
+    
+    func syncWithCloudAddons(_ remoteList: [[String: Any]]) {
+        var map: [String: StremioAddon] = [:]
+        for addon in addons {
+            map[addon.id] = addon
+        }
+        
+        for dict in remoteList {
+            guard let id = dict["id"] as? String,
+                  let name = dict["name"] as? String,
+                  let url = dict["url"] as? String else { continue }
+            let isEnabled = dict["isEnabled"] as? Bool ?? true
+            let isStock = dict["isStock"] as? Bool ?? false
+            let version = dict["version"] as? String
+            let description = dict["description"] as? String
+            let logoURL = dict["logoURL"] as? String
+            let iconURL = dict["iconURL"] as? String
+            let category = dict["category"] as? String
+            
+            if let local = map[id] {
+                var updated = local
+                updated.isEnabled = isEnabled
+                map[id] = updated
+            } else {
+                let newAddon = StremioAddon(
+                    id: id,
+                    name: name,
+                    description: description,
+                    version: version,
+                    logoURL: logoURL,
+                    iconURL: iconURL,
+                    url: url,
+                    transportUrl: url,
+                    isEnabled: isEnabled,
+                    isStock: isStock,
+                    category: category
+                )
+                map[id] = newAddon
+            }
+        }
+        
+        // Ensure stock addons are never removed
+        self.addons = Array(map.values)
+        ensureDefaultAddons()
+    }
+    
+    // MARK: - Local Persistence
+    
     private func loadAddons() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([StremioAddon].self, from: data) {
@@ -53,20 +144,10 @@ class AddonManager: ObservableObject {
     }
     
     private func ensureDefaultAddons() {
-        // Purge Hydra and dead addons from previous sessions
-        addons.removeAll { $0.id == "hydra.local.server" || $0.url.contains("127.0.0.1:51546") || $0.url.contains("hayd.uk") }
-
-        // Cinemeta is internal
-        addons.removeAll { $0.id == "official.cinemeta" || $0.url.contains("cinemeta.strem.io") }
-
         // OpenSubtitles v3 — stock non-deletable subtitle search addon
         let openSubtitlesID = "opensubtitles3"
         let openSubtitlesHost = "https://opensubtitles-v3.strem.io"
-        if let staleIdx = addons.firstIndex(where: { $0.url.contains("v3-opensubtitles") }) {
-            addons[staleIdx].url = openSubtitlesHost
-            addons[staleIdx].transportUrl = openSubtitlesHost
-            addons[staleIdx].isStock = true
-        }
+        
         if let existingIdx = addons.firstIndex(where: { $0.id == openSubtitlesID || $0.url.contains("opensubtitles") }) {
             addons[existingIdx].id = openSubtitlesID
             addons[existingIdx].isStock = true
@@ -98,10 +179,7 @@ class AddonManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(addons) {
             UserDefaults.standard.set(encoded, forKey: storageKey)
         }
-    }
-    
-    func installStoreAddon(_ item: StoreAddonItem) async throws {
-        try await addAddon(url: item.manifestURL, isStock: item.isStock, category: item.category.rawValue, fallbackLogoURL: item.logoURL)
+        AuthManager.shared.scheduleAutoSync()
     }
     
     func addAddon(url: String, isStock: Bool = false, category: String? = nil, fallbackLogoURL: String? = nil) async throws {
@@ -158,102 +236,108 @@ class AddonManager: ObservableObject {
     }
     
     func removeAddon(_ addon: StremioAddon) {
-        // Prevent deletion of protected stock addons
-        guard !addon.isStock && addon.id != "opensubtitles3" else { return }
+        guard !addon.isStock else { return } // Protected
         addons.removeAll { $0.id == addon.id }
         saveAddons()
     }
     
     func toggleAddon(_ addon: StremioAddon) {
-        if let index = addons.firstIndex(where: { $0.id == addon.id }) {
-            addons[index].isEnabled.toggle()
+        if let idx = addons.firstIndex(where: { $0.id == addon.id }) {
+            addons[idx].isEnabled.toggle()
             saveAddons()
         }
     }
     
-    // MARK: - Deep Linking Protocol (stremio:// & flux://)
-    
-    @Published var pendingDeepLinkManifest: AddonManifest?
-    @Published var pendingDeepLinkURL: String?
-    @Published var showDeepLinkModal: Bool = false
-    @Published var isInstallingDeepLink: Bool = false
-    @Published var deepLinkError: String?
+    // MARK: - Deep Link URL Interception & Verification
     
     func handleIncomingURL(_ url: URL) {
-        var targetManifestURL = url.absoluteString
+        var rawString = url.absoluteString
         
-        if url.scheme == "stremio" {
-            targetManifestURL = targetManifestURL.replacingOccurrences(of: "stremio://", with: "https://")
-        } else if url.scheme == "flux" {
+        if url.scheme == "flux" && url.host == "install-addon" {
             if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-               let queryItems = components.queryItems,
-               let urlParam = queryItems.first(where: { $0.name == "url" || $0.name == "addon" })?.value {
-                targetManifestURL = urlParam
+               let queryItem = components.queryItems?.first(where: { $0.name == "url" }),
+               let manifestParam = queryItem.value {
+                rawString = manifestParam
             }
         }
         
-        targetManifestURL = targetManifestURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !targetManifestURL.hasSuffix("/manifest.json") {
-            if targetManifestURL.hasSuffix("/") {
-                targetManifestURL.removeLast()
-            }
-            targetManifestURL += "/manifest.json"
+        if rawString.hasPrefix("stremio://") {
+            rawString = rawString.replacingOccurrences(of: "stremio://", with: "https://")
         }
         
-        guard let fetchURL = URL(string: targetManifestURL) else { return }
+        if !rawString.hasSuffix("/manifest.json") {
+            if rawString.hasSuffix("/") {
+                rawString.removeLast()
+            }
+            rawString += "/manifest.json"
+        }
         
-        Task { @MainActor in
-            do {
-                var request = URLRequest(url: fetchURL)
-                request.timeoutInterval = 10
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    return
-                }
-                let manifest = try JSONDecoder().decode(AddonManifest.self, from: data)
-                self.pendingDeepLinkManifest = manifest
-                self.pendingDeepLinkURL = targetManifestURL
-                self.deepLinkError = nil
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+        guard let finalURL = URL(string: rawString) else { return }
+        
+        Task {
+            await fetchManifestForDeepLink(url: finalURL)
+        }
+    }
+    
+    private func fetchManifestForDeepLink(url: URL) async {
+        await MainActor.run {
+            self.deepLinkError = nil
+            self.pendingDeepLinkURL = url.absoluteString
+            self.isInstallingDeepLink = false
+        }
+        
+        do {
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 10
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let manifest = try JSONDecoder().decode(AddonManifest.self, from: data)
+            
+            await MainActor.run {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                    self.pendingDeepLinkManifest = manifest
                     self.showDeepLinkModal = true
                 }
-            } catch {
-                print("Failed to fetch incoming deep link manifest: \(error)")
+            }
+        } catch {
+            await MainActor.run {
+                self.deepLinkError = "Could not load addon manifest from \(url.host ?? "server")"
+                self.showDeepLinkModal = true
             }
         }
     }
     
     func confirmDeepLinkInstallation() async {
         guard let manifest = pendingDeepLinkManifest, let urlStr = pendingDeepLinkURL else { return }
-        await MainActor.run {
-            self.isInstallingDeepLink = true
-            self.deepLinkError = nil
-        }
+        await MainActor.run { self.isInstallingDeepLink = true }
         
         do {
-            try await addAddon(url: urlStr, isStock: false, category: AddonCategory.community.rawValue, fallbackLogoURL: manifest.logo ?? manifest.icon)
+            try await addAddon(url: urlStr, isStock: false, category: AddonCategory.community.rawValue)
             await MainActor.run {
-                self.isInstallingDeepLink = false
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                withAnimation(.easeOut(duration: 0.2)) {
                     self.showDeepLinkModal = false
                     self.pendingDeepLinkManifest = nil
                     self.pendingDeepLinkURL = nil
+                    self.isInstallingDeepLink = false
                 }
             }
         } catch {
             await MainActor.run {
-                self.isInstallingDeepLink = false
                 self.deepLinkError = "Installation failed: \(error.localizedDescription)"
+                self.isInstallingDeepLink = false
             }
         }
     }
     
     func dismissDeepLinkModal() {
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-            showDeepLinkModal = false
-            pendingDeepLinkManifest = nil
-            pendingDeepLinkURL = nil
-            deepLinkError = nil
+        withAnimation(.easeOut(duration: 0.2)) {
+            self.showDeepLinkModal = false
+            self.pendingDeepLinkManifest = nil
+            self.pendingDeepLinkURL = nil
+            self.deepLinkError = nil
+            self.isInstallingDeepLink = false
         }
     }
 }
