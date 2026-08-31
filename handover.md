@@ -1,6 +1,11 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — MID-PLAYBACK ANIMATED LOGO BUFFER BAR OVERLAY & PERSISTENT DISK STREAM CACHE
+## LATEST: Aug 31, 2026 — CONTINUE WATCHING PERSISTENT INSTANT RESUME VS. TITLE PAGE STREAM SELECTOR
+
+### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
+- **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
+- **Title Page (DetailView) Stream Selector UI:** Playing from the DetailView hero banner or episode list now presents the full Stream Source Selector UI instead of force-locking into a broken past source. Users can easily choose a new quality, provider, or seed without having to restart the app.
+- **"Choose Stream Source…" Context Menu Action:** Added a dedicated "Choose Stream Source…" action (`list.bullet.rectangle`) to the Continue Watching ellipsis menu, allowing users to switch sources directly from the home rail.
 
 ### Mid-Playback Animated Logo Buffer Bar (`PlayerView.swift`)
 - **Replaced Circular Spinner with Animated Logo Bar:** Replaced the center circular ProgressView wheel with a frosted glass container presenting the title's animated fill logo, live buffer percentage telemetry, and a sleek horizontal buffer capsule bar directly over the paused video frame.
