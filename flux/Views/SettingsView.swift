@@ -7,7 +7,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
             StreamingSettingsView()
                 .tabItem { Label("Streaming", systemImage: "antenna.radiowaves.left.and.right") }
-            AddonsView()
+            AddonsSettingsTabView()
                 .tabItem { Label("Addons", systemImage: "puzzlepiece.extension") }
             PlaybackSettingsView()
                 .tabItem { Label("Playback", systemImage: "play.tv") }
@@ -511,6 +511,202 @@ struct AdvancedSettingsView: View {
     }
 }
 
+// MARK: - 3. Addons Settings Tab (Clean macOS Preference Pane)
+struct AddonsSettingsTabView: View {
+    @ObservedObject var addonManager = AddonManager.shared
+    @State private var newAddonUrl = ""
+    @State private var isAdding = false
+    @State private var addError: String?
+
+    var body: some View {
+        Form {
+            // Addon Store Banner
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "puzzlepiece.extension.fill")
+                        .font(.title2)
+                        .foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Addon Store")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Explore streaming providers, platforms, and subtitle extensions.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    
+                    Spacer()
+                    
+                    Button("Browse Store") {
+                        NotificationCenter.default.post(name: .fluxNavigate, object: SidebarItem.addons)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, 4)
+            }
+            
+            // Installed Addons List
+            Section(header: Text("Installed Addons (\(addonManager.addons.count))")) {
+                if addonManager.addons.isEmpty {
+                    Text("No addons installed.")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(addonManager.addons) { addon in
+                        HStack(spacing: 10) {
+                            // Logo
+                            if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
+                                CachedImage(url: url, maxDimension: 60) { phase in
+                                    switch phase {
+                                    case .success(let img):
+                                        img
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 24, height: 24)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    default:
+                                        fallbackIcon(name: addon.name)
+                                    }
+                                }
+                            } else {
+                                fallbackIcon(name: addon.name)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(addon.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                    
+                                    if addon.isStock {
+                                        Text("STOCK")
+                                            .font(.system(size: 9, weight: .heavy))
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(Color.indigo.opacity(0.8))
+                                            .foregroundColor(.white)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                
+                                if let version = addon.version {
+                                    Text("v\(version)")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            Toggle("", isOn: Binding(
+                                get: { addon.isEnabled },
+                                set: { _ in addonManager.toggleAddon(addon) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            
+                            if !addon.url.isEmpty {
+                                Button(action: {
+                                    var urlStr = addon.url
+                                    if !urlStr.contains("/configure") && !urlStr.isEmpty {
+                                        if let configureURL = URL(string: "\(urlStr)/configure") {
+                                            NSWorkspace.shared.open(configureURL)
+                                            return
+                                        }
+                                    }
+                                    if let targetURL = URL(string: urlStr) {
+                                        NSWorkspace.shared.open(targetURL)
+                                    }
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.75))
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Configure addon")
+                            }
+                            
+                            if !addon.isStock {
+                                Button(action: {
+                                    addonManager.removeAddon(addon)
+                                }) {
+                                    Image(systemName: "trash.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.red.opacity(0.85))
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Uninstall addon")
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+            
+            // Install from URL Section
+            Section(header: Text("Install Custom Addon")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("Addon Manifest URL (e.g. https://domain.com/manifest.json)", text: $newAddonUrl)
+                            .textFieldStyle(.roundedBorder)
+                        
+                        Button(action: addAddon) {
+                            if isAdding {
+                                ProgressView()
+                                    .scaleEffect(0.65)
+                            } else {
+                                Text("Install")
+                            }
+                        }
+                        .disabled(newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAdding)
+                    }
+                    
+                    if let error = addError {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+    
+    private func fallbackIcon(name: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 24, height: 24)
+            Text(String(name.prefix(1)).uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white)
+        }
+    }
+    
+    private func addAddon() {
+        let clean = newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        isAdding = true
+        addError = nil
+        Task {
+            do {
+                try await addonManager.addAddon(url: clean, isStock: false, category: AddonCategory.community.rawValue)
+                await MainActor.run {
+                    self.newAddonUrl = ""
+                    self.isAdding = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.addError = "Failed to load addon: \(error.localizedDescription)"
+                    self.isAdding = false
+                }
+            }
+        }
+    }
+}
+
 #Preview {
     SettingsView()
 }
+

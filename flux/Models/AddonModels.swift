@@ -33,9 +33,8 @@ public struct StoreAddonItem: Identifiable, Hashable {
     public let author: String
     public let manifestURL: String
     public let configureURL: String?
+    public let logoURL: String?
     public let category: AddonCategory
-    public let iconSymbol: String
-    public let iconGradient: [Color]
     public let tags: [String]
     public let isStock: Bool
     
@@ -47,9 +46,8 @@ public struct StoreAddonItem: Identifiable, Hashable {
         author: String = "Community",
         manifestURL: String,
         configureURL: String? = nil,
+        logoURL: String? = nil,
         category: AddonCategory,
-        iconSymbol: String,
-        iconGradient: [Color] = [.blue, .cyan],
         tags: [String] = [],
         isStock: Bool = false
     ) {
@@ -60,9 +58,8 @@ public struct StoreAddonItem: Identifiable, Hashable {
         self.author = author
         self.manifestURL = manifestURL
         self.configureURL = configureURL
+        self.logoURL = logoURL
         self.category = category
-        self.iconSymbol = iconSymbol
-        self.iconGradient = iconGradient
         self.tags = tags
         self.isStock = isStock
     }
@@ -85,6 +82,8 @@ public struct StremioAddon: Codable, Identifiable, Hashable {
     public var name: String
     public var description: String?
     public var version: String?
+    public var logoURL: String?
+    public var iconURL: String?
     public var url: String
     public var transportUrl: String
     public var isEnabled: Bool
@@ -98,6 +97,8 @@ public struct StremioAddon: Codable, Identifiable, Hashable {
         name: String,
         description: String? = nil,
         version: String? = nil,
+        logoURL: String? = nil,
+        iconURL: String? = nil,
         url: String,
         transportUrl: String,
         isEnabled: Bool = true,
@@ -110,6 +111,8 @@ public struct StremioAddon: Codable, Identifiable, Hashable {
         self.name = name
         self.description = description
         self.version = version
+        self.logoURL = logoURL
+        self.iconURL = iconURL
         self.url = url
         self.transportUrl = transportUrl
         self.isEnabled = isEnabled
@@ -120,7 +123,7 @@ public struct StremioAddon: Codable, Identifiable, Hashable {
     }
     
     enum CodingKeys: String, CodingKey {
-        case id, name, description, version, url, transportUrl, isEnabled, isStock, category, catalogs, resources
+        case id, name, description, version, logoURL, iconURL, url, transportUrl, isEnabled, isStock, category, catalogs, resources
     }
     
     public init(from decoder: Decoder) throws {
@@ -129,6 +132,8 @@ public struct StremioAddon: Codable, Identifiable, Hashable {
         self.name = try container.decode(String.self, forKey: .name)
         self.description = try container.decodeIfPresent(String.self, forKey: .description)
         self.version = try container.decodeIfPresent(String.self, forKey: .version)
+        self.logoURL = try container.decodeIfPresent(String.self, forKey: .logoURL)
+        self.iconURL = try container.decodeIfPresent(String.self, forKey: .iconURL)
         self.url = try container.decode(String.self, forKey: .url)
         self.transportUrl = try container.decode(String.self, forKey: .transportUrl)
         self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
@@ -144,6 +149,9 @@ public struct AddonManifest: Codable {
     public var name: String
     public var description: String?
     public var version: String?
+    public var logo: String?
+    public var icon: String?
+    public var background: String?
     public var catalogs: [StremioCatalog]?
     public var resources: [String]?
 }
@@ -158,9 +166,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Official",
             manifestURL: "https://opensubtitles-v3.strem.io/manifest.json",
+            logoURL: "https://app.strem.io/images/addons/opensubtitles.png",
             category: .subtitles,
-            iconSymbol: "captions.bubble.fill",
-            iconGradient: [Color.indigo, Color.purple],
             tags: ["Official", "Subtitles", "Multi-Language"],
             isStock: true
         ),
@@ -173,9 +180,8 @@ public struct AddonStoreCatalog {
             version: "1.0.2",
             author: "Official",
             manifestURL: "https://watchhub.strem.io/manifest.json",
+            logoURL: "https://app.strem.io/images/addons/watchhub.png",
             category: .streamingServices,
-            iconSymbol: "play.tv.fill",
-            iconGradient: [Color.red, Color.orange],
             tags: ["Official", "Netflix", "Prime Video", "Apple TV+", "Disney+"]
         ),
         
@@ -187,9 +193,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Archive.org",
             manifestURL: "https://ia-stremio.elfhosted.com/manifest.json",
+            logoURL: "https://ia-stremio.elfhosted.com/logo.png",
             category: .publicDomain,
-            iconSymbol: "building.columns.fill",
-            iconGradient: [Color.teal, Color.cyan],
             tags: ["Free", "Public Domain", "Classic Movies", "HTTP"]
         ),
         StoreAddonItem(
@@ -199,9 +204,8 @@ public struct AddonStoreCatalog {
             version: "1.1.0",
             author: "Community",
             manifestURL: "https://youtube.strem.fun/manifest.json",
+            logoURL: "https://app.strem.io/images/addons/youtube.png",
             category: .publicDomain,
-            iconSymbol: "play.rectangle.fill",
-            iconGradient: [Color.red, Color(red: 0.8, green: 0.1, blue: 0.2)],
             tags: ["Trailers", "Clips", "Live Video", "Free"]
         ),
         StoreAddonItem(
@@ -211,9 +215,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "FreeIPTV",
             manifestURL: "https://free-iptv.strem.fun/manifest.json",
+            logoURL: "https://free-iptv.strem.fun/logo.png",
             category: .publicDomain,
-            iconSymbol: "antenna.radiowaves.left.and.right",
-            iconGradient: [Color.blue, Color.mint],
             tags: ["Free-to-Air", "Live TV", "News", "M3U8"]
         ),
         
@@ -226,9 +229,8 @@ public struct AddonStoreCatalog {
             author: "TheCommunity",
             manifestURL: "https://torrentio.strem.fun/manifest.json",
             configureURL: "https://torrentio.strem.fun/configure",
+            logoURL: "https://torrentio.strem.fun/logo.png",
             category: .community,
-            iconSymbol: "bolt.horizontal.fill",
-            iconGradient: [Color.orange, Color.red],
             tags: ["Torrents", "Debrid-Ready", "Fast Start", "4K HDR"]
         ),
         StoreAddonItem(
@@ -239,9 +241,8 @@ public struct AddonStoreCatalog {
             author: "ElfHosted",
             manifestURL: "https://comet.elfhosted.com/manifest.json",
             configureURL: "https://comet.elfhosted.com/configure",
+            logoURL: "https://comet.elfhosted.com/logo.png",
             category: .community,
-            iconSymbol: "flame.fill",
-            iconGradient: [Color.pink, Color.purple],
             tags: ["Torrents", "Debrid", "High Speed"]
         ),
         StoreAddonItem(
@@ -252,9 +253,8 @@ public struct AddonStoreCatalog {
             author: "MediaFusion",
             manifestURL: "https://mediafusion.elfhosted.com/manifest.json",
             configureURL: "https://mediafusion.elfhosted.com/configure",
+            logoURL: "https://mediafusion.elfhosted.com/logo.png",
             category: .community,
-            iconSymbol: "network",
-            iconGradient: [Color.mint, Color.teal],
             tags: ["Multi-Source", "Torrents", "Debrid"]
         ),
         StoreAddonItem(
@@ -264,9 +264,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "MidnightIgnite",
             manifestURL: "https://meteorfortheweebs.midnightignite.me/manifest.json",
+            logoURL: "https://meteorfortheweebs.midnightignite.me/logo.png",
             category: .community,
-            iconSymbol: "moon.stars.fill",
-            iconGradient: [Color.purple, Color.indigo],
             tags: ["Torrents", "Franchise-Aware", "Anime"]
         ),
         StoreAddonItem(
@@ -276,9 +275,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "ElfHosted",
             manifestURL: "https://stremify.elfhosted.com/manifest.json",
+            logoURL: "https://stremify.elfhosted.com/logo.png",
             category: .community,
-            iconSymbol: "link.badge.plus",
-            iconGradient: [Color.blue, Color.cyan],
             tags: ["HTTP Streams", "Web Direct", "No P2P"]
         ),
         StoreAddonItem(
@@ -288,9 +286,8 @@ public struct AddonStoreCatalog {
             version: "1.0.0",
             author: "Community",
             manifestURL: "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/manifest.json",
+            logoURL: "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club/logo.png",
             category: .community,
-            iconSymbol: "globe",
-            iconGradient: [Color.cyan, Color.blue],
             tags: ["HTTP", "Direct Streams", "No P2P"]
         ),
         StoreAddonItem(
@@ -301,9 +298,8 @@ public struct AddonStoreCatalog {
             author: "CyberFlix",
             manifestURL: "https://cyberflix.elfhosted.com/manifest.json",
             configureURL: "https://cyberflix.elfhosted.com/configure",
+            logoURL: "https://cyberflix.elfhosted.com/logo.png",
             category: .community,
-            iconSymbol: "sparkles.rectangle.stack.fill",
-            iconGradient: [Color.yellow, Color.orange],
             tags: ["Catalogs", "Trending", "Curated"]
         )
     ]

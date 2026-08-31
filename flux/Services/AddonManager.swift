@@ -72,12 +72,14 @@ class AddonManager: ObservableObject {
             addons[existingIdx].isStock = true
             addons[existingIdx].url = openSubtitlesHost
             addons[existingIdx].transportUrl = openSubtitlesHost
+            addons[existingIdx].logoURL = "https://app.strem.io/images/addons/opensubtitles.png"
         } else {
             let openSubs = StremioAddon(
                 id: openSubtitlesID,
                 name: "OpenSubtitles v3",
                 description: "Official multi-language subtitle search",
                 version: "1.0.0",
+                logoURL: "https://app.strem.io/images/addons/opensubtitles.png",
                 url: openSubtitlesHost,
                 transportUrl: openSubtitlesHost,
                 isEnabled: true,
@@ -99,10 +101,10 @@ class AddonManager: ObservableObject {
     }
     
     func installStoreAddon(_ item: StoreAddonItem) async throws {
-        try await addAddon(url: item.manifestURL, isStock: item.isStock, category: item.category.rawValue)
+        try await addAddon(url: item.manifestURL, isStock: item.isStock, category: item.category.rawValue, fallbackLogoURL: item.logoURL)
     }
     
-    func addAddon(url: String, isStock: Bool = false, category: String? = nil) async throws {
+    func addAddon(url: String, isStock: Bool = false, category: String? = nil, fallbackLogoURL: String? = nil) async throws {
         var manifestUrlStr = url.trimmingCharacters(in: .whitespacesAndNewlines)
         if !manifestUrlStr.hasSuffix("/manifest.json") {
             if manifestUrlStr.hasSuffix("/") {
@@ -131,11 +133,14 @@ class AddonManager: ObservableObject {
         let baseURLStr = manifestUrlStr.replacingOccurrences(of: "/manifest.json", with: "")
         
         let isProtected = isStock || manifest.id == "opensubtitles3"
+        let resolvedLogo = manifest.logo ?? manifest.icon ?? fallbackLogoURL
         let newAddon = StremioAddon(
             id: manifest.id,
             name: manifest.name,
             description: manifest.description,
             version: manifest.version,
+            logoURL: resolvedLogo,
+            iconURL: manifest.icon,
             url: baseURLStr,
             transportUrl: baseURLStr,
             isEnabled: true,

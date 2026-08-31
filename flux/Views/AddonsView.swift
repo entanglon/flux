@@ -48,7 +48,7 @@ struct AddonsView: View {
     
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 28) {
                 // Header Bar
                 headerView
                 
@@ -59,7 +59,7 @@ struct AddonsView: View {
                 if filteredStoreAddons.isEmpty && (selectedCategory != .installed || customInstalledAddons.isEmpty) {
                     emptyStateView
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 540), spacing: 18)], spacing: 18) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 540), spacing: 20)], spacing: 20) {
                         // 1. Curated Store Catalog Addons
                         ForEach(filteredStoreAddons) { item in
                             StoreAddonCardView(
@@ -87,9 +87,9 @@ struct AddonsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 42)
-            .padding(.bottom, 60)
+            .padding(.horizontal, 36)
+            .padding(.top, 44)
+            .padding(.bottom, 64)
         }
         .sheet(isPresented: $showCustomURLModal) {
             CustomManifestInstallerModal(isPresented: $showCustomURLModal)
@@ -101,22 +101,24 @@ struct AddonsView: View {
     private var headerView: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: "puzzlepiece.extension.fill")
-                        .font(.title2)
+                        .font(.system(size: 24))
                         .foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
                     
                     Text("Addon Store")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
+                        .lineLimit(1)
                 }
                 
-                Text("\(addonManager.addons.count) installed · Discover streaming providers, metadata, and subtitle extensions")
+                Text("\(addonManager.addons.count) installed · Official streaming platforms, metadata, and community extensions")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
             }
             
-            Spacer()
+            Spacer(minLength: 20)
             
             // Search Input
             HStack(spacing: 8) {
@@ -127,7 +129,7 @@ struct AddonsView: View {
                 TextField("Search extensions…", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .frame(width: 160)
+                    .frame(width: 170)
                 
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
@@ -269,7 +271,7 @@ struct AddonsView: View {
     }
 }
 
-// MARK: - Curated Store Addon Card
+// MARK: - Curated Store Addon Card (Real Logos)
 
 struct StoreAddonCardView: View {
     let item: StoreAddonItem
@@ -292,25 +294,10 @@ struct StoreAddonCardView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Top Row: Icon + Title + Version + Status
+            // Top Row: Real Logo + Title + Version + Status
             HStack(alignment: .top, spacing: 14) {
-                // Extension Icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: item.iconGradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
-                        .shadow(color: item.iconGradient.first?.opacity(0.4) ?? .clear, radius: 8, x: 0, y: 3)
-                    
-                    Image(systemName: item.iconSymbol)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(.white)
-                }
+                // Official Addon Logo
+                addonLogoView
                 
                 // Name & Metadata
                 VStack(alignment: .leading, spacing: 3) {
@@ -493,6 +480,42 @@ struct StoreAddonCardView: View {
             }
         }
     }
+    
+    private var addonLogoView: some View {
+        Group {
+            if let logoStr = item.logoURL ?? installedAddon?.logoURL ?? installedAddon?.iconURL,
+               let url = URL(string: logoStr) {
+                CachedImage(url: url, maxDimension: 120) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    case .empty, .failure:
+                        fallbackLogo
+                    @unknown default:
+                        fallbackLogo
+                    }
+                }
+            } else {
+                fallbackLogo
+            }
+        }
+    }
+    
+    private var fallbackLogo: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 44, height: 44)
+            
+            Text(String(item.name.prefix(1)).uppercased())
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+        }
+    }
 }
 
 // MARK: - Custom User Addon Card (Installed via custom URL)
@@ -508,16 +531,22 @@ struct CustomAddonCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(colors: [Color.purple, Color.indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                        .frame(width: 48, height: 48)
-                    
-                    Image(systemName: "puzzlepiece.extension.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(.white)
+                // Logo
+                if let logoStr = addon.logoURL ?? addon.iconURL, let url = URL(string: logoStr) {
+                    CachedImage(url: url, maxDimension: 120) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        default:
+                            fallbackIcon
+                        }
+                    }
+                } else {
+                    fallbackIcon
                 }
                 
                 VStack(alignment: .leading, spacing: 3) {
@@ -623,6 +652,17 @@ struct CustomAddonCardView: View {
             withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
                 isHovered = hovering
             }
+        }
+    }
+    
+    private var fallbackIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 44, height: 44)
+            Text(String(addon.name.prefix(1)).uppercased())
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
         }
     }
 }
