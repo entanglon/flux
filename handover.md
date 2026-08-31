@@ -1,16 +1,18 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — PURE TMDB LOGO ENRICHMENT & RESTORED LOGO SIZING, ZERO STARTUP CROSS BUTTON & IN-PLAYER BUFFERING
+## LATEST: Aug 31, 2026 — ACTIVE TORRENT SESSION REUSE, EXACT RESUME POSITION PERSISTENCE & CLOUD SYNC
+
+### Active Torrent Session Reuse & Metadata Persistence (`PlayerManager.swift`, `MediaItem.swift`, `UserDataService.swift`)
+- **Preserved Engine Sessions on Player Close:** Player close no longer prematurely destroys active torrent sessions with `removeAllTorrents()`. Connected peers, open DHT sockets, and downloaded pieces remain hot in the local engine (`127.0.0.1:11470`), enabling instant resumption without re-running handshakes or metadata fetching.
+- **Persisted Stream Metadata in History & Cloud:** `MediaItem` and `UserDataService` now store `lastStreamURL`, `lastTorrentInfoHash`, `lastFileIndex`, `lastPlaybackPosition` (in exact seconds), and `lastPlaybackDuration`. These are saved locally to `UserDefaults` and synced automatically to the cloud database.
+- **Instant Replay Fast-Path:** When reopening a title from Continue Watching or recent history, `PlayerManager` reuses the saved stream session directly without re-scraping addons or recreating torrent instances.
+
+### Exact Resume Position on Playback (`PlayerView.swift`, `PlayerManager.swift`)
+- **Exact-Second Resume Seeking:** When launching an item with saved watch progress, `PlayerManager` computes `pendingResumeTime` from `lastPlaybackPosition` (or `progress * duration`). As soon as playback begins or video duration is reported, `PlayerView` seeks directly to the exact millisecond where the user left off, just like Stremio and Apple TV.
 
 ### Restored Logo Sizing & Pure TMDB Logos (`ContinueWatchingCard.swift`, `TMDBEnricher.swift`)
 - **Restored Exact Original Sizing:** Restored original logo frame (`maxWidth: 160, maxHeight: 36, alignment: .leading`) without height clamping.
 - **Pure TMDB Logos When Enrichment Active:** `TMDBEnricher.quickEnrich` now fetches and populates `enriched.logoURL` with TMDB's high-resolution logo directly on the first pass. `ContinueWatchingCard` strictly uses TMDB logos when TMDB enrichment is enabled, completely preventing premature Metahub fallback and the split-second size flash on *Project Hail Mary*.
-
-### Removed Top-Left Cross Button from Startup Buffer Screen (`PlayerView.swift`)
-- **Zero Cross Button Flash:** Removed the top-left `X` button from `logoBufferingView`. Selecting a stream now immediately presents the clean, cinematic title backdrop and animated fill logo without any flashing cross button.
-
-### Pristine Startup Buffer Screen & In-Player Mid-Playback Buffering (`PlayerView.swift`)
-- **Clean In-Player Mid-Playback Buffering:** When buffering occurs mid-playback, `logoBufferingView` is NOT triggered. Instead, the paused video frame remains on screen with a floating, translucent center `ProgressView` glass badge directly on the video inside the player.
 
 ### Cursor Auto-Hide & Scrubbing Key Polish (`PlayerControlsView.swift`, `PlayerView.swift`)
 - **Automatic Cursor Hiding After 2.5s:** Added continuous hover activity tracking (`.onContinuousHover`). When the user moves the mouse, the cursor appears; after 2.5s of no movement, `NSCursor.setHiddenUntilMouseMoves(true)` automatically hides the cursor.
