@@ -2,11 +2,14 @@
 
 ## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
-### App Store-Style Addons Store & Settings Pane (`AddonsView.swift`, `SettingsView.swift`, `AddonModels.swift`, `AddonManager.swift`)
-- **Verified Official Addon Logos:** All 12 curated addons now load real, official brand PNGs directly from tested, active 200 HTTP endpoints (OpenSubtitles, WatchHub, Torrentio, Comet, MediaFusion, Meteor, Internet Archive, YouTube, IPTV, CyberFlix, Stremify, WebStreamr).
-- **Sidebar Alignment & Clean Layout:** Added `LibraryScheme.leadingPadding` (268px) to `AddonsView.swift` so store content and headers are never covered or clipped by the floating sidebar, perfectly aligning with Watchlist, Collections, and Downloads pages.
-- **Clean macOS Settings Addons Pane (`AddonsSettingsTabView`):** Created a dedicated, compact preference pane for the `530x460` Settings window with installed addon toggles, quick URL install, and a "Browse Store" button that opens the full Addon Store in the main window.
-- **Spacious Full-Window Store View (`AddonsView`):** Polished the sidebar Addon Store page with fixed non-wrapping header typography (`lineLimit(1)`), responsive search bar, category filter pills, and adaptive card grid.
+### App Store-Style Addons Store, Deep-Linking & Liquid Glass (`AddonsView.swift`, `SettingsView.swift`, `AddonModels.swift`, `AddonManager.swift`, `ContentView.swift`, `fluxApp.swift`)
+- **Universal Deep-Linking Protocol (`stremio://` & `flux://`):** Registered URL schemes in `project.pbxproj` and `.onOpenURL` in `fluxApp.swift`. Clicking any Stremio or Flux addon link in Safari, Chrome, Reddit, or community websites immediately brings Flux to the foreground and queries the manifest.
+- **Floating Liquid Glass Install Modal (`DeepLinkAddonInstallModal`):** Shows a frosted glass modal presenting the addon's logo, title, version, author, description, requested capabilities (`Streams`, `Subtitles`, `Catalogs`), and **[Cancel]** / **[Install Addon]** buttons.
+- **Full-Width Liquid Glass Input in Settings (`SettingsView.swift`):** Redesigned the "Install Custom Addon" form section in the Settings window so the input field spans the full container width with `.labelsHidden()`, subtle frosted glass styling, inline validation spinner, and an inline "Install" button without 2-column wrapping.
+- **Dimmer Liquid Glass Aesthetic:** Replaced bright electric blue buttons with subtle frosted glass controls (`Color.white.opacity(0.12)` fill, hairline border `Color.white.opacity(0.18)`), spring hover response, and dimmed text across cards and headers.
+- **Web Store Launcher:** Added "Web Store" button in both Settings and Store headers to open community web directories in the browser.
+- **Verified Official Addon Logos:** All 12 curated addons load real, official brand PNGs directly from tested, active 200 HTTP endpoints.
+- **Sidebar Alignment & Clean Layout:** Added `LibraryScheme.leadingPadding` (268px) to `AddonsView.swift` so store content and headers are never covered by the floating sidebar.
 
 ### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
 - **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
