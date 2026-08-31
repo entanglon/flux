@@ -40,16 +40,9 @@ struct PlayerView: View {
                     .zIndex(10)
             }
             
-            // 3. Mid-Playback Buffering Spinner (Clean Apple TV spinner in center of video frame over the paused frame)
+            // 3. Mid-Playback Buffering (Logo buffer bar over the paused video frame)
             if isMidPlaybackBuffering {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white)
-                    .padding(20)
-                    .glassEffect(.regular, in: .circle)
-                    .shadow(color: .black.opacity(0.5), radius: 12)
-                    .transition(.opacity)
-                    .zIndex(15)
+                midPlaybackLogoBufferingView
             }
             
             // 4. Controls Layer (Only active once playback has started)
@@ -469,7 +462,96 @@ struct PlayerView: View {
         }
     }
     
-     private var logoBufferingView: some View {
+    private var midPlaybackLogoBufferingView: some View {
+        ZStack {
+            // Subtle dark glass vignette over the paused video frame
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+
+            let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
+
+            VStack(spacing: 16) {
+                if let media = item {
+                    let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
+                    
+                    ZStack {
+                        if let lURL = logoURL {
+                            // Base translucent watermark logo
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 76)
+                                    .opacity(0.25)
+                                    .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                            
+                            // Real progress fill logo (left-to-right fill)
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 76)
+                                    .opacity(1.0)
+                                    .mask(
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .frame(width: max(0, geo.size.width * realProgress))
+                                                .animation(.linear(duration: 0.25), value: realProgress)
+                                        }
+                                    )
+                                    .shadow(color: .white.opacity(0.5), radius: 10, x: 0, y: 2)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                        } else {
+                            // Text fallback for media with no logo image
+                            Text(media.title.uppercased())
+                                .font(.system(size: 26, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.25))
+                            
+                            Text(media.title.uppercased())
+                                .font(.system(size: 26, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white)
+                                .mask(
+                                    GeometryReader { geo in
+                                        Rectangle()
+                                            .frame(width: max(0, geo.size.width * realProgress))
+                                            .animation(.linear(duration: 0.25), value: realProgress)
+                                    }
+                                )
+                        }
+                    }
+                    .scaleEffect(pulseScale)
+                    .padding(.horizontal, 24)
+                }
+
+                // Sleek progress bar under the logo
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 140, height: 4)
+
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: max(4, 140 * realProgress), height: 4)
+                        .animation(.linear(duration: 0.25), value: realProgress)
+                }
+                .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial.opacity(0.85))
+                    .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
+            )
+        }
+        .transition(.opacity)
+        .zIndex(15)
+    }
+
+    private var logoBufferingView: some View {
         ZStack {
             // Fullscreen backdrop picture & vignette
             if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
