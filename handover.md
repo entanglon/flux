@@ -2,12 +2,10 @@
 
 ## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
-### App Store-Style Addons Store (`AddonsView.swift`, `AddonModels.swift`, `AddonManager.swift`, `ContentView.swift`)
-- **Curated Store Catalog:** Built-in directory of popular extensions categorized into **Official & Subtitles** (OpenSubtitles v3), **Streaming Platforms & Deep Links** (WatchHub for Netflix/Prime/Disney+/Apple TV+), **Free & Public Domain** (Internet Archive, YouTube Streams, Public IPTV), and **Community Streams** (Torrentio, Comet, MediaFusion, Meteor, Stremify, WebStreamr, CyberFlix).
-- **Clean Legal Distribution Model:** The app ships with only official metadata/subtitle addons (OpenSubtitles v3). Community torrent/stream scrapers are not bundled in the default state, keeping the app 100% compliant and legal for distribution. Users can install community providers with one click or configure custom Debrid accounts.
-- **Stock Addons Protection:** Protected system addons (`isStock: true`) do not display a delete button and cannot be uninstalled, ensuring subtitle search and core services remain intact. User-installed addons have full toggle and uninstall controls.
-- **Custom Manifest URL Installer Modal:** Added a dedicated glass modal to install any custom Stremio addon via URL (`https://...` or `stremio://...`) with live validation and error handling.
-- **Sidebar Integration:** Added `Addon Store` (`.addons`) to the main sidebar with the `puzzlepiece.extension` icon.
+### App Store-Style Addons Store & Settings Pane (`AddonsView.swift`, `SettingsView.swift`, `AddonModels.swift`, `AddonManager.swift`)
+- **Real Official Addon Logos:** Replaced generic SF Symbol tiles with official brand PNG logos directly from addon manifests and CDNs (e.g. OpenSubtitles, WatchHub, Torrentio, Comet, MediaFusion, Internet Archive, CyberFlix, YouTube).
+- **Clean macOS Settings Addons Pane (`AddonsSettingsTabView`):** Created a dedicated, compact preference pane for the `530x460` Settings window with installed addon toggles, quick URL install, and a "Browse Store" button that opens the full Addon Store in the main window.
+- **Spacious Full-Window Store View (`AddonsView`):** Polished the sidebar Addon Store page with fixed non-wrapping header typography (`lineLimit(1)`), responsive search bar, category filter pills, and adaptive card grid.
 
 ### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
 - **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
