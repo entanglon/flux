@@ -106,6 +106,13 @@ struct Track: Identifiable, Equatable {
     }
 }
 
+// MARK: - Chapter Model
+struct MediaChapter: Identifiable, Equatable {
+    let id: Int
+    let title: String
+    let time: Double
+}
+
 // MARK: - Controller
 class MPVController: ObservableObject {
     @Published var isPlaying = false
@@ -128,6 +135,7 @@ class MPVController: ObservableObject {
     
     @Published var audioTracks: [Track] = []
     @Published var subtitleTracks: [Track] = []
+    @Published var chapters: [MediaChapter] = []
     
     // Settings
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
@@ -225,6 +233,7 @@ class MPVController: ObservableObject {
                 if let dur = value as? Double {
                     self.duration = dur
                     self.fetchTracks()
+                    self.fetchChapters()
                 }
             case "pause":
                 if let paused = value as? Bool {
@@ -274,6 +283,13 @@ class MPVController: ObservableObject {
         DispatchQueue.main.async {
             self.audioTracks = tracks.filter { $0.type == "audio" }
             self.subtitleTracks = tracks.filter { $0.type == "sub" }
+        }
+    }
+    
+    func fetchChapters() {
+        guard let list = playerView?.getChapters() else { return }
+        DispatchQueue.main.async {
+            self.chapters = list
         }
     }
     
@@ -337,6 +353,7 @@ class MPVViewController: NSViewController {
     
     func setVolume(_ value: Double) { playerView.setVolume(value) }
     func getTracks() -> [Track] { return playerView.getTracks() }
+    func getChapters() -> [MediaChapter] { return playerView.getChapters() }
     func selectTrack(_ track: Track) { playerView.selectTrack(track) }
     func addExternalSubtitle(url: String, title: String) { playerView.addExternalSubtitle(url: url, title: title) }
 
@@ -821,6 +838,20 @@ final class MPVLayerView: NSView {
             }
         }
         return tracks
+    }
+    
+    func getChapters() -> [MediaChapter] {
+        guard mpv != nil else { return [] }
+        var chapters: [MediaChapter] = []
+        var count: Int64 = 0
+        if mpv_get_property(mpv, "chapter-list/count", MPV_FORMAT_INT64, &count) >= 0 {
+            for i in 0..<Int(count) {
+                let title = getPropertyString("chapter-list/\(i)/title") ?? ""
+                let time = getPropertyDouble("chapter-list/\(i)/time") ?? 0.0
+                chapters.append(MediaChapter(id: i, title: title, time: time))
+            }
+        }
+        return chapters
     }
     
     func selectTrack(_ track: Track) {

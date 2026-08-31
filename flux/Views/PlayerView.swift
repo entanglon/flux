@@ -96,19 +96,18 @@ struct PlayerView: View {
                     .zIndex(200)
             }
 
-            // Skip Intro / Next Episode — bottom-right floating button (Apple TV style)
-            // Only visible when player controls are hidden
-            if !isControlsVisible {
+            // Smart Skip Intro / Skip Recap / Next Episode — bottom-right floating button (Apple TV style)
+            if !isControlsVisible, let action = activeSkipAction {
                 VStack {
                     Spacer()
                     HStack {
                         Spacer()
-                        if item?.category == "TV Show" && mpv.isPlaying && !mpv.isUserPaused
-                            && mpv.timePos > 3 && mpv.timePos < 95 && mpv.duration > 120 {
+                        switch action {
+                        case .recap(let targetTime):
                             Button {
-                                mpv.seek(absolute: 95)
+                                mpv.seek(absolute: targetTime)
                             } label: {
-                                Text(mpv.timePos < 35 ? "Skip Recap" : "Skip Intro")
+                                Text("Skip Recap")
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 16)
@@ -117,16 +116,29 @@ struct PlayerView: View {
                             .buttonStyle(.plain)
                             .glassEffect(.regular.interactive(), in: .capsule)
                             .transition(.opacity)
-                        }
-
-                        if let next = playerManager.nextEpisodeInfo, mpv.isPlaying && mpv.progress > 0.90 && mpv.progress < 1.0 {
+                            
+                        case .intro(let targetTime):
+                            Button {
+                                mpv.seek(absolute: targetTime)
+                            } label: {
+                                Text("Skip Intro")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .transition(.opacity)
+                            
+                        case .nextEpisode(let season, let episode):
                             Button {
                                 playerManager.playNextEpisode()
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "forward.end.fill")
                                         .font(.system(size: 11))
-                                    Text("Next: S\(next.season) E\(next.episode)")
+                                    Text("Next: S\(season) E\(episode)")
                                         .font(.system(size: 13, weight: .semibold))
                                 }
                                 .foregroundStyle(.white)
@@ -338,12 +350,71 @@ struct PlayerView: View {
         }
     }
     
+    // MARK: - Smart Skip Action Engine (Native Chapters + TV Heuristics)
+    enum SkipActionType: Equatable {
+        case recap(targetTime: Double)
+        case intro(targetTime: Double)
+        case nextEpisode(season: Int, episode: Int)
+    }
+
+    private var activeSkipAction: SkipActionType? {
+        guard mpv.isPlaying, !mpv.isUserPaused, mpv.duration > 60 else { return nil }
+        
+        let t = mpv.timePos
+        let season = playerManager.currentSeason ?? 1
+        let episode = playerManager.currentEpisode ?? 1
+        let isTV = item?.category == "TV Show" || playerManager.currentSeason != nil
+        
+        // 1. Native embedded chapters from video container (MKV / MP4)
+        if !mpv.chapters.isEmpty {
+            for (idx, chapter) in mpv.chapters.enumerated() {
+                let lowerTitle = chapter.title.lowercased()
+                let nextChapterTime = idx + 1 < mpv.chapters.count ? mpv.chapters[idx + 1].time : (chapter.time + 90)
+                
+                if t >= chapter.time && t < nextChapterTime {
+                    // Recap chapter: NEVER show on Season 1 Episode 1
+                    if (lowerTitle.contains("recap") || lowerTitle.contains("previously")) && (episode > 1 || season > 1) {
+                        return .recap(targetTime: nextChapterTime)
+                    }
+                    if lowerTitle.contains("intro") || lowerTitle.contains("opening") || lowerTitle.contains("theme") || lowerTitle.contains("main title") || lowerTitle.contains("title") {
+                        return .intro(targetTime: nextChapterTime)
+                    }
+                    if lowerTitle.contains("credit") || lowerTitle.contains("outro") || lowerTitle.contains("end") {
+                        if let next = playerManager.nextEpisodeInfo {
+                            return .nextEpisode(season: next.season, episode: next.episode)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 2. Next Episode (end credits)
+        if isTV, let next = playerManager.nextEpisodeInfo, (mpv.progress >= 0.92 || (mpv.duration > 0 && mpv.duration - t <= 90)) {
+            return .nextEpisode(season: next.season, episode: next.episode)
+        }
+        
+        // 3. Fallback Heuristics (only when chapters are absent)
+        guard isTV else { return nil }
+        
+        // Recap: ONLY on Episode 2+ (NEVER on Season 1 Episode 1 or any episode 1)
+        if (episode > 1 || season > 1) && t >= 8 && t <= 35 && mpv.duration > 600 {
+            return .recap(targetTime: 38)
+        }
+        
+        // Intro: Standard TV opening window (25s - 100s)
+        if t >= 25 && t <= 100 && mpv.duration > 600 {
+            return .intro(targetTime: min(t + 85, mpv.duration - 10))
+        }
+        
+        return nil
+    }
+    
     private var isInitialLoading: Bool {
         return !hasStartedPlayback && !playerManager.isLoading && playerManager.currentStreamURL != nil
     }
 
     private var isMidPlaybackBuffering: Bool {
-        return hasStartedPlayback && (mpv.isBuffering || mpv.isSeeking) && !mpv.isUserPaused
+        return hasStartedPlayback && mpv.timePos >= 3.0 && (mpv.isBuffering || mpv.isSeeking) && !mpv.isUserPaused
     }
 
     private var isBufferingOverlayActive: Bool {
@@ -395,10 +466,10 @@ struct PlayerView: View {
                 .ignoresSafeArea()
             }
             
-            // 2. Center Official Logo / Title vibrant fill loading bar
-            let realProgress = CGFloat(min(1.0, max(0.0, animatedProgress)))
+            // 2. Real Telemetry Progress Fill Loading
+            let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
             
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 if let media = item {
                     let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
                     
@@ -408,8 +479,8 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: isInitialLoading ? 150 : 100)
-                                    .opacity(isInitialLoading ? 0.25 : 0.35)
+                                    .frame(maxHeight: isInitialLoading ? 150 : 80)
+                                    .opacity(isInitialLoading ? 0.25 : 0.4)
                                     .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
                             } placeholder: {
                                 EmptyView()
@@ -419,7 +490,7 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: isInitialLoading ? 150 : 100)
+                                    .frame(maxHeight: isInitialLoading ? 150 : 80)
                                     .opacity(1.0)
                                     .mask(
                                         GeometryReader { geo in
@@ -435,11 +506,11 @@ struct PlayerView: View {
                         } else {
                             // Text fallback for media with no logo image
                             Text(media.title.uppercased())
-                                .font(.system(size: isInitialLoading ? 48 : 32, weight: .black, design: .rounded))
+                                .font(.system(size: isInitialLoading ? 48 : 28, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white.opacity(0.25))
                             
                             Text(media.title.uppercased())
-                                .font(.system(size: isInitialLoading ? 48 : 32, weight: .black, design: .rounded))
+                                .font(.system(size: isInitialLoading ? 48 : 28, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white)
                                 .mask(
                                     GeometryReader { geo in
@@ -452,6 +523,22 @@ struct PlayerView: View {
                     }
                     .scaleEffect(pulseScale)
                     .padding(.horizontal, 40)
+                }
+                
+                // Status pill during mid-playback buffering
+                if isMidPlaybackBuffering {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                        Text(mpv.bufferProgress > 0 ? "Buffering \(Int(mpv.bufferProgress * 100))%" : "Buffering...")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .glassEffect(.regular, in: .capsule)
+                    .transition(.opacity)
                 }
             }
         }
