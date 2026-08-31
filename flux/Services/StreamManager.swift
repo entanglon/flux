@@ -369,12 +369,17 @@ class StreamManager {
             containerModifier = 0.80
         }
 
-        // Release group bonus for known fast-encoding streaming groups
+        // Release group bonus for known fast-encoding streaming groups & modern seedboxes
         var groupBonus = 1.0
         let combined = "\(stream.title) \(stream.cleanTitle)".uppercased()
-        let knownFastGroups = ["PSA", "GALAXYRG", "YTS", "YIFY", "QXR", "NTB", "FLUX", "MEGUSTA", "PAHE", "TGX"]
+        let knownFastGroups = ["PSA", "GALAXYRG", "YTS", "YIFY", "QXR", "NTB", "FLUX", "MEGUSTA", "PAHE", "TGX", "SMURF", "KOGI", "PLAYBD"]
         if knownFastGroups.contains(where: { combined.contains($0) }) {
-            groupBonus = 1.25
+            groupBonus *= 1.30
+        }
+
+        // Modern streaming WEB-DL / WEBRip releases are seeded by 24/7 unchoked data center seedboxes
+        if combined.contains("WEB-DL") || combined.contains("WEBDL") || combined.contains("WEBRIP") || combined.contains("AMZN") || combined.contains("ATVP") || combined.contains("MAX") || combined.contains("DSNP") || combined.contains("NF") || combined.contains("HMAX") {
+            groupBonus *= 1.25
         }
 
         return (seedCount / (sizeGB * sizePenalty)) * containerModifier * groupBonus

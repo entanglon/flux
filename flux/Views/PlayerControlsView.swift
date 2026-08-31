@@ -392,6 +392,31 @@ struct PlayerControlsView: View {
         .onAppear {
             showControls()
         }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                NSCursor.unhide()
+                if isControlsVisible {
+                    showControls()
+                } else {
+                    hoverTimer?.invalidate()
+                    hoverTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { _ in
+                        if NSApp.isActive && !isControlsVisible {
+                            NSCursor.setHiddenUntilMouseMoves(true)
+                        }
+                    }
+                }
+            case .ended:
+                break
+            }
+        }
+        .onChange(of: isControlsVisible) { _, newValue in
+            if newValue {
+                showControls()
+            } else {
+                hoverTimer?.invalidate()
+            }
+        }
         .onChange(of: showSubtitlePopover) { _, newValue in
             if newValue { hoverTimer?.invalidate() }
             else { showControls() }

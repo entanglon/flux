@@ -108,13 +108,14 @@ struct PlayerView: View {
                                 mpv.seek(absolute: targetTime)
                             } label: {
                                 Text("Skip Recap")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 14, weight: .bold))
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)
                             .glassEffect(.regular.interactive(), in: .capsule)
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
                             .transition(.opacity)
                             
                         case .intro(let targetTime):
@@ -122,31 +123,33 @@ struct PlayerView: View {
                                 mpv.seek(absolute: targetTime)
                             } label: {
                                 Text("Skip Intro")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 14, weight: .bold))
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)
                             .glassEffect(.regular.interactive(), in: .capsule)
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
                             .transition(.opacity)
                             
                         case .nextEpisode(let season, let episode):
                             Button {
                                 playerManager.playNextEpisode()
                             } label: {
-                                HStack(spacing: 6) {
+                                HStack(spacing: 8) {
                                     Image(systemName: "forward.end.fill")
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 13, weight: .bold))
                                     Text("Next: S\(season) E\(episode)")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 14, weight: .bold))
                                 }
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)
                             .glassEffect(.regular.interactive(), in: .capsule)
+                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
                             .transition(.opacity)
                         }
                     }
@@ -182,12 +185,26 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.leftArrow) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.seek(relative: -10)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
+            mpv.seek(relative: 10)
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent(",")) {
+            mpv.seek(relative: -10)
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent(".")) {
+            mpv.seek(relative: 10)
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("<")) {
+            mpv.seek(relative: -10)
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent(">")) {
             mpv.seek(relative: 10)
             return .handled
         }
@@ -389,21 +406,8 @@ struct PlayerView: View {
         }
         
         // 2. Next Episode (end credits)
-        if isTV, let next = playerManager.nextEpisodeInfo, (mpv.progress >= 0.92 || (mpv.duration > 0 && mpv.duration - t <= 90)) {
+        if isTV, let next = playerManager.nextEpisodeInfo, (mpv.progress >= 0.94 || (mpv.duration > 0 && mpv.duration - t <= 60)) {
             return .nextEpisode(season: next.season, episode: next.episode)
-        }
-        
-        // 3. Fallback Heuristics (only when chapters are absent)
-        guard isTV else { return nil }
-        
-        // Recap: ONLY on Episode 2+ (NEVER on Season 1 Episode 1 or any episode 1)
-        if (episode > 1 || season > 1) && t >= 8 && t <= 35 && mpv.duration > 600 {
-            return .recap(targetTime: 38)
-        }
-        
-        // Intro: Standard TV opening window (25s - 100s)
-        if t >= 25 && t <= 100 && mpv.duration > 600 {
-            return .intro(targetTime: min(t + 85, mpv.duration - 10))
         }
         
         return nil
