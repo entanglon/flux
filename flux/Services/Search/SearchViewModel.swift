@@ -48,6 +48,7 @@ final class SearchViewModel: ObservableObject {
 
         isSearching = true
         isLoading = true
+        searchResults = [] // Clear previous results so ghost cards display cleanly during query refinement
 
         Task {
             let local = await engine.updateQuery(newQuery) { [weak self] remote in

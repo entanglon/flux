@@ -279,6 +279,7 @@ class UserDataService: ObservableObject {
         currentData.removeAll { ($0["id"] as? String) == item.id }
         currentData.append(finalItem)
         UserDefaults.standard.set(currentData, forKey: key)
+        UserDefaults.standard.synchronize()
         
         let newItems = parseItems(currentData)
         DispatchQueue.main.async {
@@ -336,6 +337,7 @@ class UserDataService: ObservableObject {
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
         currentData.removeAll { ($0["id"] as? String) == item.id }
         UserDefaults.standard.set(currentData, forKey: key)
+        UserDefaults.standard.synchronize()
         
         let newItems = parseItems(currentData)
         DispatchQueue.main.async {
@@ -367,6 +369,7 @@ class UserDataService: ObservableObject {
             ]
         }
         UserDefaults.standard.set(raw, forKey: collectionsKey)
+        UserDefaults.standard.synchronize()
     }
     
     /// Same dict shape addToList() writes for watchlist/history entries.

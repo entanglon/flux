@@ -18,18 +18,14 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if viewModel.isSearching {
-                        let displayedItems: [MediaItem] = !viewModel.searchResults.isEmpty 
-                            ? viewModel.searchResults 
-                            : viewModel.instantSuggestions.map { $0.toMediaItem() }
-
-                        if viewModel.isLoading && displayedItems.isEmpty {
+                        if viewModel.isLoading {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()
                                 }
                             }
                             .transition(.opacity)
-                        } else if displayedItems.isEmpty && !viewModel.isLoading {
+                        } else if viewModel.searchResults.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -44,7 +40,7 @@ struct SearchView: View {
                             .transition(.opacity)
                         } else {
                             LazyVGrid(columns: resultColumns, spacing: 24) {
-                                ForEach(displayedItems) { item in
+                                ForEach(viewModel.searchResults) { item in
                                     NavigationLink(value: item) {
                                         GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                                     }

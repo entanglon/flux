@@ -13,6 +13,7 @@ struct PlayerView: View {
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
+    @State private var lastProgressSaveTime: Date = .distantPast
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -276,8 +277,7 @@ struct PlayerView: View {
                 mpv.play(url: url)
             }
         }
-        // Resume playback position: once the stream is producing frames or duration is known,
-        // jump directly to the saved position where the user left off.
+        // Resume playback position & continuously persist watch progress (every 5 seconds during playback)
         .onChange(of: mpv.timePos) { _, t in
             if t > 0.05 && !hasStartedPlayback {
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -285,12 +285,24 @@ struct PlayerView: View {
                     animatedProgress = 1.0
                 }
             }
+            // Continuous autosave during playback
+            if hasStartedPlayback && mpv.duration > 0 && Date().timeIntervalSince(lastProgressSaveTime) >= 5.0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: t, duration: mpv.duration)
+            }
             guard let resume = playerManager.pendingResumeTime else { return }
             guard t > 0.1 || mpv.duration > 0 else { return }
             playerManager.pendingResumeTime = nil
             if abs(t - resume) > 1.5 {
                 print("PlayerView: resuming playback at \(Int(resume))s")
                 mpv.seek(absolute: resume)
+            }
+        }
+        // Save immediately on pause
+        .onChange(of: mpv.isPlaying) { _, isPlaying in
+            if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             }
         }
         .onChange(of: mpv.duration) { _, dur in
