@@ -1,5 +1,19 @@
 import Foundation
 
+enum StartupSpeedTier: String, CaseIterable {
+    case instant = "Instant"
+    case fast = "Fast"
+    case standard = "Standard"
+    
+    var badgeText: String {
+        switch self {
+        case .instant: return "⚡ Instant (~1-2s)"
+        case .fast: return "⚡ Fast (~3-4s)"
+        case .standard: return "Standard"
+        }
+    }
+}
+
 struct Stream: Identifiable {
     let id = UUID()
     let title: String
@@ -26,6 +40,58 @@ struct Stream: Identifiable {
             return String(url.absoluteString[hash]).replacingOccurrences(of: "btih:", with: "") + "#\(fileIdx ?? -1)"
         }
         return url.absoluteString + "#\(fileIdx ?? -1)"
+    }
+
+    /// Detects file container format from title metadata
+    var containerType: String {
+        let combined = "\(title) \(cleanTitle)".uppercased()
+        if combined.contains(".MKV") || combined.contains("MKV") || combined.contains("MATROSKA") {
+            return "MKV"
+        }
+        if combined.contains(".MP4") || combined.contains("MP4") || combined.contains(".M4V") {
+            return "MP4"
+        }
+        if combined.contains(".AVI") || combined.contains("AVI") {
+            return "AVI"
+        }
+        return "UNKNOWN"
+    }
+
+    /// Matroska (MKV) places SeekHead at byte 0 by specification, enabling instant sequential demuxing
+    var isMKV: Bool {
+        containerType == "MKV"
+    }
+
+    /// Checks if MP4 release is from a known faststart (moov at byte 0) release group
+    var isFastStartMP4: Bool {
+        guard containerType == "MP4" else { return false }
+        let combined = "\(title) \(cleanTitle)".uppercased()
+        let knownFastStartGroups = ["PSA", "GALAXYRG", "YTS", "YIFY", "QXR", "NTB", "FLUX", "MEGUSTA", "PAHE", "TGX"]
+        return knownFastStartGroups.contains { combined.contains($0) }
+    }
+
+    /// Parsed file size normalized to Gigabytes
+    var parsedSizeInGB: Double? {
+        guard let sizeStr = size?.uppercased() else { return nil }
+        if sizeStr.contains("GB") {
+            let num = sizeStr.replacingOccurrences(of: "GB", with: "").trimmingCharacters(in: .whitespaces)
+            return Double(num)
+        }
+        if sizeStr.contains("MB") {
+            let num = sizeStr.replacingOccurrences(of: "MB", with: "").trimmingCharacters(in: .whitespaces)
+            if let mb = Double(num) {
+                return mb / 1024.0
+            }
+        }
+        return nil
+    }
+
+    var startupSpeedTier: StartupSpeedTier {
+        StreamManager.shared.speedTier(for: self)
+    }
+
+    var isFastStart: Bool {
+        StreamManager.shared.isFastStartStream(self)
     }
 }
 
@@ -258,6 +324,85 @@ class StreamManager {
             return q1 > q2
         }
         return computeStreamHealthScore(s1) > computeStreamHealthScore(s2)
+    }
+
+    /// Startup Speed Score (SSS): Estimates time-to-first-playable-byte.
+    /// Higher = faster initial playback startup.
+    func computeStartupSpeedScore(_ stream: Stream) -> Double {
+        // Direct / Debrid HTTP streams are instant (0s swarm handshake)
+        if !stream.isTorrent {
+            return 10000.0
+        }
+
+        // Defensively handle missing or zero seeders (cannot be Fast Start)
+        guard let seeders = stream.seeders, seeders > 0 else {
+            return 0.0
+        }
+
+        let seedCount = Double(seeders)
+        let sizeGB = stream.parsedSizeInGB ?? 2.5 // fallback to standard 2.5GB if size unparseable
+
+        // Size penalty: heavily penalize massive 40GB+ remuxes, reward compact streams
+        let sizePenalty: Double
+        if sizeGB <= 1.5 {
+            sizePenalty = 0.8 // very fast to buffer
+        } else if sizeGB <= 4.0 {
+            sizePenalty = 1.0 // standard sweet spot
+        } else if sizeGB <= 10.0 {
+            sizePenalty = 1.6
+        } else {
+            sizePenalty = max(2.5, sizeGB / 4.0) // heavy penalty for 20-50GB remuxes
+        }
+
+        // Container modifier:
+        // MKV: SeekHead is at byte 0 by spec, sequential streaming starts immediately
+        // MP4 with faststart: moov atom at byte 0
+        // Generic MP4/AVI: moov atom may be at file end requiring range requests
+        let containerModifier: Double
+        if stream.isMKV {
+            containerModifier = 1.35
+        } else if stream.isFastStartMP4 {
+            containerModifier = 1.30
+        } else if stream.containerType == "MP4" {
+            containerModifier = 0.90
+        } else {
+            containerModifier = 0.80
+        }
+
+        // Release group bonus for known fast-encoding streaming groups
+        var groupBonus = 1.0
+        let combined = "\(stream.title) \(stream.cleanTitle)".uppercased()
+        let knownFastGroups = ["PSA", "GALAXYRG", "YTS", "YIFY", "QXR", "NTB", "FLUX", "MEGUSTA", "PAHE", "TGX"]
+        if knownFastGroups.contains(where: { combined.contains($0) }) {
+            groupBonus = 1.25
+        }
+
+        return (seedCount / (sizeGB * sizePenalty)) * containerModifier * groupBonus
+    }
+
+    /// Evaluates if a stream qualifies for the "Fast Start" tab (< 3.5s estimated startup)
+    func isFastStartStream(_ stream: Stream) -> Bool {
+        if !stream.isTorrent { return true }
+        guard let seeders = stream.seeders, seeders >= 20 else { return false }
+        let sizeGB = stream.parsedSizeInGB ?? 2.5
+        // Exclude massive 40GB+ remuxes from Fast Start tab
+        if sizeGB > 12.0 { return false }
+        return computeStartupSpeedScore(stream) >= 8.0
+    }
+
+    /// Categorizes stream into speed tier
+    func speedTier(for stream: Stream) -> StartupSpeedTier {
+        if !stream.isTorrent { return .instant }
+        guard let seeders = stream.seeders, seeders >= 15 else { return .standard }
+        
+        let score = computeStartupSpeedScore(stream)
+        if score >= 35.0 && (stream.parsedSizeInGB ?? 2.5) <= 5.0 {
+            return .instant
+        } else if score >= 10.0 {
+            return .fast
+        } else {
+            return .standard
+        }
     }
     
     private func normalizeAddonURL(_ rawUrl: String) -> String {

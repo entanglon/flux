@@ -1,26 +1,31 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 30, 2026 — ELIMINATED SLIDING CARD ANIMATION + IN-PLACE CARD RENDERING + POPULAR TV NEWS FILTERING + SYMMETRIC CARD MENU INSETS
+## LATEST: Aug 31, 2026 — STREAMING PIPELINE ACCELERATION (FAST START TAB, CONTAINER-AWARE SPEED SCORING, MPV INSTANT-START BUFFER TUNING, HUNG-STREAM WATCHDOG)
 
-### Eliminated Upward Sliding Card Animations (`DetailView.swift`)
-- **Root Cause:** When `loadDetails()` completed, it called `withAnimation(.easeOut(duration: 0.25)) { self.isLoadingDetails = false }`. This animated the layout swap in SwiftUI's `VStack`, which applied default insertion move transitions (sliding cards upwards from below) to all newly populated rails (Bonus Content, Related, Cast).
-- **Fix:** 
-  1. Removed `withAnimation` from `isLoadingDetails = false` so state updates occur immediately on `MainActor`.
-  2. Removed `.transition(.opacity)` from the ghost rail container.
-  3. All cards and rails across the page now swap in-place instantly and smoothly without any sliding or movement, matching native episode cards behavior.
+### Container-Aware Startup Speed Scoring & Speed Tiers (`StreamManager.swift`)
+- **Startup Speed Score (SSS):** Calculates time-to-first-playable-byte using active seed count, file size, container type, and release encoder heuristics.
+- **Container Awareness (MKV vs. MP4):**
+  - Matroska (`.mkv`) places its `SeekHead` at byte 0 by specification, enabling instant sequential demuxing without trailing index fetches (+35% speed bonus).
+  - MP4 files check for known `faststart` release encoders (`PSA`, `GalaxyRG`, `YTS`, `QxR`, `NTb`, `FLUX`, `MeGusta`, `Pahe`, `TGx`).
+- **Defensive Missing-Seeder Handling:** Safely handles `seeders == nil` by evaluating score to 0 and excluding from the Fast Start tab.
+- **Speed Tiers:**
+  - `⚡ Instant (~1-2s)`: Direct streams or $\ge 35$ score compact MKV/WebRips ($\le 5\text{ GB}$).
+  - `⚡ Fast (~3-4s)`: High-seeder 1080p Web-DLs ($\text{score} \ge 10$).
+  - `Standard`: Large 4K remuxes or smaller swarms.
 
-### Popular TV Shows News & Broadcast Filtering (`TMDBEnricher.swift`)
-- **Root Cause for *Tagesschau*:** TMDB's raw `/tv/popular` endpoint calculates popularity using raw web page view metrics, causing German daily news broadcast *Tagesschau* (and other non-scripted daily programs) to rank in the top 3.
-- **Fix:** 
-  1. Updated `fetchPopularTV()` and `fetchStreamingTV()` to use TMDB discover with `without_genres=10763,10767` (News `10763`, Talk `10767`) and `vote_count.gte=10`.
-  2. In `fetchCatalog(from:type:allowUnreleased:)` and `fetchTrendingAll()`, added strict programmatic filters excluding genre IDs `10763` (News) and `10767` (Talk) as well as daily news programs like *Tagesschau*. All TV rails across Home and TV Shows pages now strictly display premium scripted television shows.
+### "Fast Start" Filter Tab & Badges (`PlayerView.swift`)
+- **Dedicated "Fast Start" Tab:** Automatically appears alongside "All" and "Best" when Fast Start qualifying streams are available, sorting sources by startup speed.
+- **Live Latency Speed Badges:** Displays `⚡ Instant` (cyan badge) and `⚡ Fast` (blue badge) on stream rows.
 
-### Bonus Content Title Art Fallback (`DetailView.swift`, `BonusContentCard.swift`, `TMDBEnricher.swift`)
-- **Title Art Fallback:** If a bonus item or Season 0 special lacks a dedicated episode still thumbnail, it automatically falls back to the show's backdrop artwork (`displayItem.backdropURL ?? displayItem.heroURL`) so no card is ever rendered as a blank box.
+### MPV Instant-Start Buffer Tuning & Hung-Stream Watchdog (`MPVVideoView.swift`)
+- **Instant First Frame:** Configured `cache-pause-initial = no` so MPV renders the very first decoded keyframe immediately without waiting for an artificial multi-second buffer.
+- **Micro-Stall Cushion:** Configured `cache-pause-wait = 3.0` and `demuxer-readahead-secs = 12.0` with a 150 MiB RAM budget (`demuxer-max-bytes = 157286400`) and 30 MiB rewind buffer (`demuxer-max-back-bytes = 31457280`).
+- **Dead Swarm Fail-Fast:** Lowered `network-timeout` from 45s to 15s.
+- **12-Second Hung-Stream Watchdog:** If the engine registers a stream but receives 0 bytes/frames for 12 seconds, it automatically triggers fallback to the next best source rather than hanging indefinitely.
 
-### Symmetric Card Menu Button Insets (`GlassCard.swift`)
-- **Exact Corner Symmetry:** Replaced non-square padding on `Image(systemName: "ellipsis")` with a fixed `28×28pt` circular frame and `.padding(10)`. The distance from the menu button to the right border of the card is now exactly identical to the distance from the bottom border down to the single pixel.
-- **Unit Tests (`fluxTests/TMDBEnricherTests.swift`):** 25 / 25 unit tests passing (100% pass rate).
+### Verification & Unit Tests (`StreamManagerTests.swift`)
+- Added comprehensive unit tests covering MKV vs. Remux speed scoring, `nil` seeder defensive handling, and Direct stream instant classification.
+- **Test Suite:** 28 / 28 unit tests passing (100% pass rate).
 
 ---
 

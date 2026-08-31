@@ -513,6 +513,9 @@ struct PlayerView: View {
         
         // Clean filter layout: type → quality → sources
         var dynamicFilters: [String] = ["All", "Best"]
+        if allStreams.contains(where: { $0.isFastStart }) {
+            dynamicFilters.append("Fast Start")
+        }
         if allStreams.contains(where: { $0.isTorrent }) {
             dynamicFilters.append("Torrents")
         }
@@ -534,6 +537,13 @@ struct PlayerView: View {
                     .filter { playerManager.probeStatus[$0.stableKey]?.ok == true }
                     .sorted { s1, s2 in
                         StreamManager.shared.streamSortComparator(s1, s2)
+                    }
+            }
+            if selectedStreamFilter == "Fast Start" {
+                return allStreams
+                    .filter { $0.isFastStart }
+                    .sorted { s1, s2 in
+                        StreamManager.shared.computeStartupSpeedScore(s1) > StreamManager.shared.computeStartupSpeedScore(s2)
                     }
             }
             if selectedStreamFilter == "Torrents" { return allStreams.filter { $0.isTorrent } }
@@ -719,6 +729,38 @@ struct StreamRowItemView: View {
         }
     }
 
+    /// Speed tier badge: highlights streams estimated to start in <2s (Instant) or <4s (Fast).
+    private var speedBadge: some View {
+        Group {
+            let tier = stream.startupSpeedTier
+            if tier == .instant {
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 9))
+                    Text("Instant")
+                        .font(.system(size: 9, weight: .heavy))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(Color.cyan.opacity(0.85))
+                .foregroundColor(.black)
+                .cornerRadius(6)
+            } else if tier == .fast {
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 9))
+                    Text("Fast")
+                        .font(.system(size: 9, weight: .heavy))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.8))
+                .foregroundColor(.white)
+                .cornerRadius(6)
+            }
+        }
+    }
+
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 8) {
@@ -784,6 +826,8 @@ struct StreamRowItemView: View {
                     }
                     
                     Spacer()
+
+                    speedBadge
 
                     packBadge
 

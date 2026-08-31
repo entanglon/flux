@@ -135,6 +135,40 @@ class MPVController: ObservableObject {
     var onPlaybackError: (() -> Void)?
     weak var playerView: MPVViewController?
     
+    private var watchdogTimer: Timer?
+    private var loadStartTime: CFAbsoluteTime = 0
+
+    private func startHungStreamWatchdog() {
+        watchdogTimer?.invalidate()
+        loadStartTime = CFAbsoluteTimeGetCurrent()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            guard self.hasLoadedMedia, !self.isUserPaused else { return }
+
+            if self.timePos > 0.5 || (self.duration > 0 && self.demuxerCacheTime > 0.5) {
+                timer.invalidate()
+                self.watchdogTimer = nil
+                return
+            }
+
+            let elapsed = CFAbsoluteTimeGetCurrent() - self.loadStartTime
+            if elapsed >= 12.0 && self.demuxerCacheTime <= 0.0 && self.timePos <= 0.0 {
+                print("[MPVController] Hung-stream watchdog triggered: 0 bytes/frames received in \(Int(elapsed))s. Auto-falling over to next stream...")
+                timer.invalidate()
+                self.watchdogTimer = nil
+                self.onPlaybackError?()
+            }
+        }
+    }
+
+    private func disarmWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+    }
+
     func play(url: URL) {
         // Same media already loading/loaded on this controller (warm-core
         // adoption races finishSelect) — reloading would discard the buffer.
@@ -145,6 +179,7 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = true
         self.loadedURL = url
+        startHungStreamWatchdog()
         playerView?.play(url)
     }
 
@@ -159,6 +194,7 @@ class MPVController: ObservableObject {
     }
 
     func stop() {
+        disarmWatchdog()
         self.isUserPaused = false
         self.hasLoadedMedia = false
         self.loadedURL = nil
@@ -217,6 +253,9 @@ class MPVController: ObservableObject {
             case "time-pos":
                 if let time = value as? Double {
                     self.timePos = time
+                    if time > 0.5 {
+                        self.disarmWatchdog()
+                    }
                     if self.duration > 0 {
                         self.progress = time / self.duration
                     }
@@ -633,10 +672,8 @@ final class MPVLayerView: NSView {
         mpv_set_option_string(mpv, "load-stats-overlay", "no")
         mpv_set_option_string(mpv, "ytdl", "yes")
         mpv_set_option_string(mpv, "osc", "no")
-        // Fail over reasonably fast when a torrent swarm is dead: the Stremio
-        // server holds the file response silent until pieces flow, so without a
-        // timeout mpv would wait forever instead of triggering auto-fallback.
-        mpv_set_option_string(mpv, "network-timeout", "45")
+        // Fail over fast when a torrent swarm is dead (15s instead of 45s)
+        mpv_set_option_string(mpv, "network-timeout", "15")
         mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
         
         if mpv_initialize(mpv) < 0 {
@@ -656,10 +693,12 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "sub-ass-override", "no")
         
         mpv_set_property_string(mpv, "cache", "yes")
-        mpv_set_property_string(mpv, "cache-secs", "10")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "52428800")      // 50 MB demuxer buffer
-        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "10485760") // 10 MB backward buffer
-        mpv_set_property_string(mpv, "demuxer-readahead-secs", "10")
+        mpv_set_property_string(mpv, "cache-pause-initial", "no")          // Start playback immediately on first decodable keyframe
+        mpv_set_property_string(mpv, "cache-pause-wait", "3.0")            // Tolerate 3.0s cushion before re-pausing on stalls
+        mpv_set_property_string(mpv, "cache-secs", "60")                   // 60-second forward buffer target
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "157286400")      // 150 MB demuxer buffer
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "31457280") // 30 MB backward seek buffer
+        mpv_set_property_string(mpv, "demuxer-readahead-secs", "12")       // 12s background lookahead
         mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
         mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll", "yes")
         mpv_set_property_string(mpv, "stream-buffer-size", "131072")       // 128 KB initial network buffer for instant start
