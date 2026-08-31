@@ -39,24 +39,7 @@ struct BonusContentCard: View {
             )
             .allowsHitTesting(false)
             
-            // 3. Top-Trailing Category Pill
-            VStack {
-                HStack {
-                    Spacer()
-                    Text(item.categoryType.uppercased())
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.black.opacity(0.65)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.5))
-                        .padding(10)
-                }
-                Spacer()
-            }
-            
-            // 4. Hover Subtle Brightness Wash (Zero Zoom)
+            // 3. Hover Subtle Brightness Wash (Zero Zoom)
             Color.white.opacity(isHovered ? 0.04 : 0.0)
                 .allowsHitTesting(false)
             
