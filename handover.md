@@ -1,6 +1,9 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — PERSISTENT DISK STREAM CACHE (24H TTL), ZERO-SCRAPE INSTANT REPLAY & CACHE EVICTION
+## LATEST: Aug 31, 2026 — MID-PLAYBACK ANIMATED LOGO BUFFER BAR OVERLAY & PERSISTENT DISK STREAM CACHE
+
+### Mid-Playback Animated Logo Buffer Bar (`PlayerView.swift`)
+- **Replaced Circular Spinner with Animated Logo Bar:** Replaced the center circular ProgressView wheel with a frosted glass container presenting the title's animated fill logo, live buffer percentage telemetry, and a sleek horizontal buffer capsule bar directly over the paused video frame.
 
 ### 24-Hour Disk-Persisted Stream Cache (`StreamCacheActor.swift`, `StreamManager.swift`)
 - **Zero-Latency Stream Loading for Visited Titles:** `StreamCacheActor` now persists scraped stream lists (including seeders, fast-start rankings, infohashes, and file indices) directly to disk (`flux_streams_cache.json`) with a 24-hour TTL. Replaying or opening ANY title previously scraped loads the complete ranked stream list in **0 milliseconds** without repeating HTTP requests to addons.
