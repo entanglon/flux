@@ -137,7 +137,13 @@ struct HistoryView: View {
                             LazyVGrid(columns: columns, spacing: 32) {
                                 ForEach(filteredItems) { item in
                                     Button(action: {
-                                        PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                                        PlayerManager.shared.play(
+                                            item,
+                                            season: item.lastSeason,
+                                            episode: item.lastEpisode,
+                                            episodeImage: item.lastEpisodeImage,
+                                            fromContinueWatching: true
+                                        )
                                         openWindow(id: "player", value: item.id)
                                     }) {
                                         ContinueWatchingCard(item: item, mode: showAsContinueWatching ? .continueWatching : .recentlyWatched)

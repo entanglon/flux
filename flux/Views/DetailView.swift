@@ -161,7 +161,14 @@ struct DetailView: View {
                                     let progress = getEpisodeProgress(heroEpisode)
                                     
                                     Button(action: {
-                                        PlayerManager.shared.play(displayItem, season: heroEpisode?.seasonNumber, episode: heroEpisode?.episodeNumber, episodeImage: heroEpisode?.stillURL)
+                                        PlayerManager.shared.play(
+                                            displayItem,
+                                            season: heroEpisode?.seasonNumber,
+                                            episode: heroEpisode?.episodeNumber,
+                                            episodeImage: heroEpisode?.stillURL,
+                                            fromContinueWatching: false,
+                                            forceStreamPicker: true
+                                        )
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
                                         if progress > 0 && progress < 0.95 {
@@ -454,7 +461,14 @@ struct DetailView: View {
                                 
                                 DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
                                     Button(action: {
-                                        PlayerManager.shared.play(displayItem, season: selectedSeason?.seasonNumber, episode: episode.episodeNumber, episodeImage: episode.stillURL)
+                                        PlayerManager.shared.play(
+                                            displayItem,
+                                            season: selectedSeason?.seasonNumber,
+                                            episode: episode.episodeNumber,
+                                            episodeImage: episode.stillURL,
+                                            fromContinueWatching: false,
+                                            forceStreamPicker: true
+                                        )
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
                                         LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode), item: displayItem)

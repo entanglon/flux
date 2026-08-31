@@ -490,7 +490,15 @@ class PlayerManager: ObservableObject {
     
     private init() {}
     
-    func play(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeImage: URL? = nil, isAutoAdvance: Bool = false) {
+    func play(
+        _ item: MediaItem,
+        season: Int? = nil,
+        episode: Int? = nil,
+        episodeImage: URL? = nil,
+        isAutoAdvance: Bool = false,
+        fromContinueWatching: Bool = false,
+        forceStreamPicker: Bool = false
+    ) {
         pruneSessionCaches()
         // USER-initiated playback while a PiP session floats: same title =
         // expand (resume at the floating position); different title = tear the
@@ -559,52 +567,54 @@ class PlayerManager: ObservableObject {
             return
         }
         
-        // 1. Instant Replay / Active Session Reuse Check
-        let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
-        
-        let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
-        let isMatchingEpisode: Bool
-        if item.category == "TV Show" || season != nil {
-            isMatchingEpisode = (historyItem?.lastSeason == season || (season == nil && historyItem?.lastSeason != nil)) &&
-                                (historyItem?.lastEpisode == episode || (episode == nil && historyItem?.lastEpisode != nil))
-        } else {
-            isMatchingEpisode = true
-        }
-
-        if let cached = lastPlayedStreams[key] {
-            let elapsed = Date().timeIntervalSince(cached.timestamp)
+        // 1. Instant Replay / Active Session Reuse Check (ONLY for Continue Watching cards when not forcing picker)
+        if fromContinueWatching && !forceStreamPicker {
+            let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
             
-            // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session
-            if elapsed < 86400 {
-                print("[PlayerManager] Active Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
-                self.currentStreamURL = cached.url
-                self.isLoading = false
-                if let hash = activeTorrentHash {
-                    AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
-                }
-                self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                return
+            let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+            let isMatchingEpisode: Bool
+            if item.category == "TV Show" || season != nil {
+                isMatchingEpisode = (historyItem?.lastSeason == season || (season == nil && historyItem?.lastSeason != nil)) &&
+                                    (historyItem?.lastEpisode == episode || (episode == nil && historyItem?.lastEpisode != nil))
             } else {
-                self.lastPlayedStreams.removeValue(forKey: key)
+                isMatchingEpisode = true
             }
-        } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL {
-            let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
-            if elapsed < 86400 {
-                print("[PlayerManager] Persisted History Stream Available: Playing \(savedURL)")
-                self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
-                self.currentStreamURL = savedURL
-                self.isLoading = false
-                if let hash = historyItem?.lastTorrentInfoHash {
-                    self.activeTorrentHash = hash
-                    AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+
+            if let cached = lastPlayedStreams[key] {
+                let elapsed = Date().timeIntervalSince(cached.timestamp)
+                
+                // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session
+                if elapsed < 86400 {
+                    print("[PlayerManager] Active Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
+                    self.currentStreamURL = cached.url
+                    self.isLoading = false
+                    if let hash = activeTorrentHash {
+                        AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                    }
+                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                    return
+                } else {
+                    self.lastPlayedStreams.removeValue(forKey: key)
                 }
-                self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                return
+            } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL {
+                let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
+                if elapsed < 86400 {
+                    print("[PlayerManager] Persisted History Stream Available (Across Restarts): Playing \(savedURL)")
+                    self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
+                    self.currentStreamURL = savedURL
+                    self.isLoading = false
+                    if let hash = historyItem?.lastTorrentInfoHash {
+                        self.activeTorrentHash = hash
+                        AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                    }
+                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                    return
+                }
             }
         }
         
-        // 2. Normal Flow
-        fetchAndRace(item: item, season: season, episode: episode)
+        // 2. Normal Flow (Fetch and race, or show stream picker if forceStreamPicker / from detail view)
+        fetchAndRace(item: item, season: season, episode: episode, forceStreamPicker: forceStreamPicker)
     }
     
     private func populateStreamsInBackground(item: MediaItem, season: Int?, episode: Int?) {
@@ -620,16 +630,15 @@ class PlayerManager: ObservableObject {
         }
     }
 
-    private func fetchAndRace(item: MediaItem, season: Int?, episode: Int?) {
+    private func fetchAndRace(item: MediaItem, season: Int?, episode: Int?, forceStreamPicker: Bool = false) {
         self.isFetchingStreams = true
         self.isLoading = true
 
         AsyncTask {
-            // ⚡ ADVANCED LOADING fast-path (Flux Mode): the detail page already
-            // resolved + primed + warm-buffered this exact title — start instantly.
+            // ⚡ ADVANCED LOADING fast-path (Flux Mode): if not forcing stream picker
             let key = self.prefetchKey(for: item, season: season, episode: episode)
             let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-            if isFluxEnabled,
+            if !forceStreamPicker, isFluxEnabled,
                self.prefetchedKey == key,
                let pf = self.prefetchedStream,
                let at = self.prefetchedAt,
@@ -648,7 +657,7 @@ class PlayerManager: ObservableObject {
             }
 
             if let cachedStreams = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode), !cachedStreams.isEmpty {
-                print("[PlayerManager] Cache Hit! Ready to Race.")
+                print("[PlayerManager] Cache Hit! Ready to display available streams.")
                 await MainActor.run {
                     self.availableStreams = cachedStreams
                 }
@@ -672,9 +681,14 @@ class PlayerManager: ObservableObject {
                 self.verifyStreamHealth(streams)
             }
             
-            // Flux Mode Debugging
-            print("[DEBUG] Flux Mode Enabled: \(isFluxEnabled)")
-            print("[DEBUG] Stream Count: \(streams.count)")
+            // If user or caller requested the Stream Selector UI:
+            if forceStreamPicker {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.currentStreamURL = nil
+                }
+                return
+            }
 
             // Flux Mode Auto-Play Engine
             if isFluxEnabled, !streams.isEmpty {

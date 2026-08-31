@@ -69,7 +69,13 @@ struct HomeView: View {
                             
                             CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
                                 Button(action: {
-                                    PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                                    PlayerManager.shared.play(
+                                        item,
+                                        season: item.lastSeason,
+                                        episode: item.lastEpisode,
+                                        episodeImage: item.lastEpisodeImage,
+                                        fromContinueWatching: true
+                                    )
                                     openWindow(id: "player", value: item.id)
                                 }) {
                                     ContinueWatchingCard(item: item, mode: .continueWatching)
@@ -322,7 +328,13 @@ struct HomeView: View {
                 
                 CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
                     Button(action: {
-                        PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                        PlayerManager.shared.play(
+                            item,
+                            season: item.lastSeason,
+                            episode: item.lastEpisode,
+                            episodeImage: item.lastEpisodeImage,
+                            fromContinueWatching: true
+                        )
                         openWindow(id: "player", value: item.id)
                     }) {
                         ContinueWatchingCard(item: item, mode: .recentlyWatched)

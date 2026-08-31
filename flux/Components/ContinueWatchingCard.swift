@@ -180,11 +180,31 @@ struct ContinueWatchingCard: View {
                     // Ellipsis Context Menu Button
                     Menu {
                         Button {
-                            PlayerManager.shared.play(item, season: item.lastSeason, episode: item.lastEpisode, episodeImage: item.lastEpisodeImage)
+                            PlayerManager.shared.play(
+                                item,
+                                season: item.lastSeason,
+                                episode: item.lastEpisode,
+                                episodeImage: item.lastEpisodeImage,
+                                fromContinueWatching: true
+                            )
                             openWindow(id: "player", value: item.id)
                         } label: {
                             Label(mode == .continueWatching ? "Resume" : "Play Again",
                                   systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
+                        }
+
+                        Button {
+                            PlayerManager.shared.play(
+                                item,
+                                season: item.lastSeason,
+                                episode: item.lastEpisode,
+                                episodeImage: item.lastEpisodeImage,
+                                fromContinueWatching: false,
+                                forceStreamPicker: true
+                            )
+                            openWindow(id: "player", value: item.id)
+                        } label: {
+                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
                         }
 
                         Button {
