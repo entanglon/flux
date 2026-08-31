@@ -193,6 +193,11 @@ struct ContentView: View {
                 path = NavigationPath()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await AuthManager.shared.syncNowAsync(forcePull: true)
+            }
+        }
     }
 
     // MARK: - Sidebar Sections (Apple TV / Music SF Symbols)

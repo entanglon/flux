@@ -184,20 +184,25 @@ class AuthManager: ObservableObject {
     }
 
     func syncOnLogin() {
-        Task { await syncNowInternal(pullFirst: true) }
+        Task { await syncNowInternal(pullFirst: true, forcePull: false) }
     }
 
-    func syncNow() {
-        Task { await syncNowInternal(pullFirst: true) }
+    func syncNow(forcePull: Bool = false) {
+        Task { await syncNowInternal(pullFirst: true, forcePull: forcePull) }
     }
 
-    private func syncNowInternal(pullFirst: Bool) async {
+    func syncNowAsync(forcePull: Bool = true) async {
+        await syncNowInternal(pullFirst: true, forcePull: forcePull)
+    }
+
+    private func syncNowInternal(pullFirst: Bool, forcePull: Bool = false) async {
         guard let token = authToken else { return }
         do {
             if pullFirst, let remote = try await client.fetchData(token: token) {
                 let lastSync = UserDefaults.standard.double(forKey: UserDefaults.Key.cloudLastSyncAt)
-                if remote.updatedAt > lastSync {
+                if forcePull || remote.updatedAt > lastSync {
                     await UserDataService.shared.applyCloudPayload(remote.payload)
+                    UserDefaults.standard.set(remote.updatedAt, forKey: UserDefaults.Key.cloudLastSyncAt)
                     Logger.auth.info("Cloud library pulled (\(remote.updatedAt))")
                 }
             }

@@ -514,8 +514,10 @@ struct AdvancedSettingsView: View {
 // MARK: - 3. Addons Settings Tab (Clean macOS Preference Pane)
 struct AddonsSettingsTabView: View {
     @ObservedObject var addonManager = AddonManager.shared
+    @ObservedObject var authManager = AuthManager.shared
     @State private var newAddonUrl = ""
     @State private var isAdding = false
+    @State private var isSyncing = false
     @State private var addError: String?
 
     var body: some View {
@@ -538,6 +540,41 @@ struct AddonsSettingsTabView: View {
                     }
                     
                     Spacer()
+                    
+                    // Refresh Cloud Addons Button
+                    Button(action: {
+                        Task {
+                            isSyncing = true
+                            await authManager.syncNowAsync(forcePull: true)
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            await MainActor.run { isSyncing = false }
+                        }
+                    }) {
+                        HStack(spacing: 5) {
+                            if isSyncing {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            Text(isSyncing ? "Syncing…" : "Refresh")
+                                .font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSyncing)
+                    .help("Fetch latest installed addons and settings from Flux Cloud")
                     
                     // Web Directory Button (SSO Auto-Login)
                     Button(action: {
@@ -566,7 +603,15 @@ struct AddonsSettingsTabView: View {
             }
             
             // Installed Addons List
-            Section(header: Text("Installed Addons (\(addonManager.addons.count))")) {
+            Section(header: HStack {
+                Text("Installed Addons (\(addonManager.addons.count))")
+                Spacer()
+                if isSyncing {
+                    Text("Syncing…")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }) {
                 if addonManager.addons.isEmpty {
                     Text("No addons installed.")
                         .foregroundColor(.secondary)
@@ -727,6 +772,11 @@ struct AddonsSettingsTabView: View {
             }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await authManager.syncNowAsync(forcePull: true)
+            }
+        }
     }
     
     private func fallbackIcon(name: String) -> some View {
