@@ -39,6 +39,52 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
     var imdbID: String?
     let source: CatalogSource
     
+    // Derived precomputed fields for fast zero-cost matching
+    let normalizedTitle: String
+    let articleStrippedTitle: String
+    let franchiseStem: String
+    let hasSubtitle: Bool
+    let subtitle: String?
+    
+    init(
+        id: String,
+        title: String,
+        mediaType: SearchMediaType,
+        popularity: Double,
+        voteCount: Int,
+        voteAverage: Double,
+        posterPath: String?,
+        backdropPath: String?,
+        overview: String?,
+        releaseDate: Date?,
+        isAdult: Bool,
+        imdbID: String?,
+        source: CatalogSource
+    ) {
+        self.id = id
+        self.title = title
+        self.mediaType = mediaType
+        self.popularity = popularity
+        self.voteCount = voteCount
+        self.voteAverage = voteAverage
+        self.posterPath = posterPath
+        self.backdropPath = backdropPath
+        self.overview = overview
+        self.releaseDate = releaseDate
+        self.isAdult = isAdult
+        self.imdbID = imdbID
+        self.source = source
+        
+        let norm = title.normalizedForSearch
+        self.normalizedTitle = norm
+        self.articleStrippedTitle = norm.articleStripped
+        
+        let decomposed = title.decomposedFranchise
+        self.franchiseStem = decomposed.stem
+        self.hasSubtitle = decomposed.hasSubtitle
+        self.subtitle = decomposed.subtitle
+    }
+    
     var releaseDateString: String? {
         guard let date = releaseDate else { return nil }
         let formatter = DateFormatter()
@@ -137,11 +183,10 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
     }
 }
 
-// MARK: - Search Query String Normalization
+// MARK: - Search Query String Normalization & Structural Title Decomposition
 
 extension String {
-    /// Lowercases, strips diacritics and punctuation so "Transformers: Rise of the Beasts"
-    /// and "Transformers" share clean tokens ("transformers").
+    /// Lowercases, strips diacritics and replaces punctuation with spaces
     var normalizedForSearch: String {
         let folded = folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -151,7 +196,38 @@ extension String {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Strips leading stop articles ("the ", "a ", "an ") from normalized strings
+    var articleStripped: String {
+        let trimmed = self.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("the ") {
+            return String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.hasPrefix("a ") {
+            return String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.hasPrefix("an ") {
+            return String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
     var searchTokens: [Substring] {
         normalizedForSearch.split(separator: " ")
+    }
+    
+    /// Splits raw title into (stem, subtitle) on strong delimiters (:, —, -)
+    var decomposedFranchise: (stem: String, hasSubtitle: Bool, subtitle: String?) {
+        // Look for common franchise subtitle separators
+        let delimiters = [":", " — ", " – ", " - "]
+        for delimiter in delimiters {
+            if let range = self.range(of: delimiter) {
+                let stemPart = String(self[..<range.lowerBound]).normalizedForSearch.articleStripped
+                let subPart = String(self[range.upperBound...]).normalizedForSearch
+                if !stemPart.isEmpty && !subPart.isEmpty {
+                    return (stem: stemPart, hasSubtitle: true, subtitle: subPart)
+                }
+            }
+        }
+        
+        let normalizedStem = self.normalizedForSearch.articleStripped
+        return (stem: normalizedStem, hasSubtitle: false, subtitle: nil)
     }
 }

@@ -110,9 +110,9 @@ actor PrefixTrie {
     private func indexableKeys(for title: String) -> [String] {
         let normalized = title.normalizedForSearch
         guard !normalized.isEmpty else { return [] }
-        var keys = [normalized]
+        var keys = [normalized, normalized.articleStripped]
         keys.append(contentsOf: normalized.split(separator: " ").map(String.init))
-        return keys
+        return Array(Set(keys))
     }
 
     private func insertPath(_ text: String, entry: TrieEntry) {
@@ -130,7 +130,7 @@ actor PrefixTrie {
     }
 
     func suggestions(forPrefix prefix: String, limit: Int = 6) -> [TrieEntry] {
-        let normalized = prefix.normalizedForSearch
+        let normalized = prefix.normalizedForSearch.articleStripped
         guard !normalized.isEmpty else { return [] }
 
         var node = root
@@ -151,6 +151,38 @@ actor PrefixTrie {
             if deduped.count >= limit { break }
         }
         return deduped
+    }
+
+    /// Fallback fuzzy search using first-character pruning and Damerau-Levenshtein distance
+    func fuzzySuggestions(for query: String, limit: Int = 6) -> [TrieEntry] {
+        let normalized = query.normalizedForSearch.articleStripped
+        guard normalized.count >= 4 else { return [] }
+        let maxDist = DamerauLevenshtein.maxDistance(forQueryLength: normalized.count)
+        guard maxDist > 0 else { return [] }
+        
+        guard let firstChar = normalized.first, let firstNode = root.children[firstChar] else {
+            return []
+        }
+        
+        var pool: [TrieEntry] = []
+        collect(from: firstNode, into: &pool, cap: 200)
+        
+        var matches: [(entry: TrieEntry, dist: Int)] = []
+        var seen = Set<String>()
+        
+        for entry in pool {
+            guard seen.insert(entry.id).inserted else { continue }
+            let entryNorm = entry.title.normalizedForSearch.articleStripped
+            let dist = DamerauLevenshtein.distance(normalized, entryNorm)
+            if dist <= maxDist {
+                matches.append((entry, dist))
+            }
+        }
+        
+        return matches
+            .sorted { ($0.dist, -$0.entry.sortWeight) < ($1.dist, -$1.entry.sortWeight) }
+            .prefix(limit)
+            .map(\.entry)
     }
 
     private func collect(from node: Node, into result: inout [TrieEntry], cap: Int) {

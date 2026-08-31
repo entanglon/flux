@@ -41,18 +41,44 @@ actor SearchEngine {
         // Cancelling the previous task cooperatively stops in-flight network requests
         activeTask?.cancel()
 
-        let localResults = await trie.suggestions(forPrefix: rawQuery, limit: 6)
+        // 1. Tier A: Fast prefix trie walk
+        var localResults = await trie.suggestions(forPrefix: rawQuery, limit: 6)
 
+        // 2. Tier B (Fallback): If prefix lookup returns thin/empty results and query >= 4 chars, run fuzzy matching
         let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if localResults.count < 3 && trimmed.count >= 4 {
+            let fuzzyHits = await trie.fuzzySuggestions(for: trimmed, limit: 6)
+            var seen = Set(localResults.map(\.id))
+            for hit in fuzzyHits {
+                if seen.insert(hit.id).inserted {
+                    localResults.append(hit)
+                }
+            }
+        }
+
         guard trimmed.count >= 2 else {
             activeTask = nil
             return localResults
         }
 
+        // Determine if local fuzzy found a high-confidence correction to rewrite the remote query
+        let remoteQueryTarget: String = {
+            if let bestLocal = localResults.first, trimmed.count >= 4 {
+                let dist = DamerauLevenshtein.distance(
+                    trimmed.normalizedForSearch.articleStripped,
+                    bestLocal.title.normalizedForSearch.articleStripped
+                )
+                if dist == 1 {
+                    return bestLocal.title
+                }
+            }
+            return trimmed
+        }()
+
         activeTask = Task { [debounceNanoseconds] in
             try? await Task.sleep(nanoseconds: debounceNanoseconds)
             guard !Task.isCancelled else { return }
-            await self.performRemoteSearch(query: trimmed, onResults: onRemoteResults)
+            await self.performRemoteSearch(query: remoteQueryTarget, originalQuery: trimmed, onResults: onRemoteResults)
         }
 
         return localResults
@@ -60,14 +86,18 @@ actor SearchEngine {
 
     private func performRemoteSearch(
         query: String,
+        originalQuery: String,
         onResults: @escaping @Sendable ([MediaCandidate]) -> Void
     ) async {
         guard !Task.isCancelled else { return }
 
         let candidates = await withTaskGroup(of: [MediaCandidate].self) { group -> [MediaCandidate] in
+            // TMDB Client (Enrichment source - gracefully returns [] if key is missing)
             group.addTask { [tmdbClient] in
                 (try? await tmdbClient.multiSearch(query: query)) ?? []
             }
+            
+            // Cinemeta Client (Always available catalog source)
             group.addTask { [cinemetaClient] in
                 (try? await cinemetaClient.search(query: query)) ?? []
             }
@@ -84,7 +114,7 @@ actor SearchEngine {
 
         let deduped = Self.deduplicate(candidates)
         let eligible = filter.filter(deduped)
-        let ranked = scorer.rank(candidates: eligible, query: query)
+        let ranked = scorer.rank(candidates: eligible, query: originalQuery)
 
         onResults(ranked)
     }
@@ -104,7 +134,7 @@ actor SearchEngine {
             await trie.insertMediaItem(item, category: .watchlist)
         }
 
-        // 2. Index Top Trending & Popular Titles from TMDB
+        // 2. Index Top Trending & Popular Titles from TMDB (if available)
         if let trending = try? await TMDBEnricher.shared.fetchTrendingAll(window: "week") {
             for item in trending {
                 await trie.insertMediaItem(item, category: .trending)

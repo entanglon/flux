@@ -52,6 +52,104 @@ struct SearchEngineTests {
         #expect(knightResults.first?.title == "The Dark Knight")
     }
 
+    @Test func franchiseStemExactMatchRanksFlagshipAboveSequels() {
+        let scorer = RelevanceScorer()
+
+        let originalAvengers = MediaCandidate(
+            id: "av-1",
+            title: "The Avengers",
+            mediaType: .movie,
+            popularity: 90.0,
+            voteCount: 29000,
+            voteAverage: 7.7,
+            posterPath: "/avengers1.jpg",
+            backdropPath: nil,
+            overview: "Earth's mightiest heroes assemble.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0848228",
+            source: .tmdb
+        )
+
+        let infinityWar = MediaCandidate(
+            id: "av-3",
+            title: "Avengers: Infinity War",
+            mediaType: .movie,
+            popularity: 180.0, // Higher popularity and votes than 2012 Avengers
+            voteCount: 32000,
+            voteAverage: 8.3,
+            posterPath: "/infinitywar.jpg",
+            backdropPath: nil,
+            overview: "Thanos collects the Infinity Stones.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt4154756",
+            source: .tmdb
+        )
+
+        let endgame = MediaCandidate(
+            id: "av-4",
+            title: "Avengers: Endgame",
+            mediaType: .movie,
+            popularity: 200.0,
+            voteCount: 35000,
+            voteAverage: 8.4,
+            posterPath: "/endgame.jpg",
+            backdropPath: nil,
+            overview: "The grave course of events.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt4154796",
+            source: .tmdb
+        )
+
+        let candidates = [infinityWar, endgame, originalAvengers]
+        let ranked = scorer.rank(candidates: candidates, query: "avengers")
+
+        // The original 2012 "The Avengers" MUST rank #1 ahead of Infinity War and Endgame!
+        #expect(ranked.first?.title == "The Avengers")
+    }
+
+    @Test func damerauLevenshteinDistanceCalculatesCorrectly() {
+        // Exact match
+        #expect(DamerauLevenshtein.distance("avengers", "avengers") == 0)
+        
+        // Single character drop ("avengrs" -> "avengers")
+        #expect(DamerauLevenshtein.distance("avengrs", "avengers") == 1)
+        
+        // Single character transposition ("oppenhimr" -> "oppenheimer")
+        #expect(DamerauLevenshtein.distance("hte", "the") == 1)
+        
+        // Missing letter ("interstelar" -> "interstellar")
+        #expect(DamerauLevenshtein.distance("interstelar", "interstellar") == 1)
+    }
+
+    @Test func fuzzySuggestionsMatchTyposInPrefixTrie() async {
+        let trie = PrefixTrie()
+
+        let avengers = MediaCandidate(
+            id: "av-1",
+            title: "The Avengers",
+            mediaType: .movie,
+            popularity: 90.0,
+            voteCount: 29000,
+            voteAverage: 7.7,
+            posterPath: "/avengers1.jpg",
+            backdropPath: nil,
+            overview: "Earth's mightiest heroes assemble.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0848228",
+            source: .localCache
+        )
+
+        await trie.insert(avengers, category: .trending)
+
+        // Exact typo query "avengrs"
+        let fuzzyResults = await trie.fuzzySuggestions(for: "avengrs")
+        #expect(fuzzyResults.first?.title == "The Avengers")
+    }
+
     @Test func qualityFilterPrunesZeroVoteEntriesWithoutPoster() {
         let filter = QualityFilter(config: QualityGateConfig(minVoteCountThreshold: 10, minPopularityFloor: 1.0))
 
@@ -144,22 +242,6 @@ struct SearchEngineTests {
             source: .tmdb
         )
 
-        let mockbuster = MediaCandidate(
-            id: "mock-1",
-            title: "Transmorphers",
-            mediaType: .movie,
-            popularity: 1.5,
-            voteCount: 15,
-            voteAverage: 1.8,
-            posterPath: "/transmorphers.jpg",
-            backdropPath: nil,
-            overview: "A race of alien robots conquer Earth.",
-            releaseDate: nil,
-            isAdult: false,
-            imdbID: "tt0960835",
-            source: .tmdb
-        )
-
         let fanFilm = MediaCandidate(
             id: "fan-1",
             title: "Transformers: Genesis Fan Project",
@@ -192,5 +274,8 @@ struct SearchEngineTests {
         let normalized = "  Amélie  ".normalizedForSearch
         #expect(normalized == "amelie")
         #expect(normalized.searchTokens.contains("amelie"))
+        #expect("The Avengers".normalizedForSearch.articleStripped == "avengers")
+        #expect("Avengers: Infinity War".decomposedFranchise.stem == "avengers")
+        #expect("Avengers: Infinity War".decomposedFranchise.hasSubtitle == true)
     }
 }
