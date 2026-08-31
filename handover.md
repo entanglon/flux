@@ -2,14 +2,12 @@
 
 ## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
-### App Store-Style Addons Store, Deep-Linking & Liquid Glass (`AddonsView.swift`, `SettingsView.swift`, `AddonModels.swift`, `AddonManager.swift`, `ContentView.swift`, `fluxApp.swift`)
-- **Universal Deep-Linking Protocol (`stremio://` & `flux://`):** Registered URL schemes in `project.pbxproj` and `.onOpenURL` in `fluxApp.swift`. Clicking any Stremio or Flux addon link in Safari, Chrome, Reddit, or community websites immediately brings Flux to the foreground and queries the manifest.
-- **Floating Liquid Glass Install Modal (`DeepLinkAddonInstallModal`):** Shows a frosted glass modal presenting the addon's logo, title, version, author, description, requested capabilities (`Streams`, `Subtitles`, `Catalogs`), and **[Cancel]** / **[Install Addon]** buttons.
-- **Full-Width Liquid Glass Input in Settings (`SettingsView.swift`):** Redesigned the "Install Custom Addon" form section in the Settings window so the input field spans the full container width with `.labelsHidden()`, subtle frosted glass styling, inline validation spinner, and an inline "Install" button without 2-column wrapping.
-- **Dimmer Liquid Glass Aesthetic:** Replaced bright electric blue buttons with subtle frosted glass controls (`Color.white.opacity(0.12)` fill, hairline border `Color.white.opacity(0.18)`), spring hover response, and dimmed text across cards and headers.
-- **Web Store Launcher:** Added "Web Store" button in both Settings and Store headers to open community web directories in the browser.
-- **Verified Official Addon Logos:** All 12 curated addons load real, official brand PNGs directly from tested, active 200 HTTP endpoints.
-- **Sidebar Alignment & Clean Layout:** Added `LibraryScheme.leadingPadding` (268px) to `AddonsView.swift` so store content and headers are never covered by the floating sidebar.
+### Cloudflare Addon Web Store, Zero-Scraper Binary & SSO Integration (`/Users/zainulnazir/Projects/addons`, `AddonsView.swift`, `SettingsView.swift`, `AddonManager.swift`, `UserDataService.swift`)
+- **Cloudflare Pages Web Store (`https://flux-addons.pages.dev`):** Created and deployed a standalone, responsive, dark liquid glass Addon Store web app in `/Users/zainulnazir/Projects/addons`. Includes live search, category filtering, verified official logos, and two-way cloud sync.
+- **Zero Scraper Binary Liability:** Removed the hardcoded curated scraper directory (`AddonStoreCatalog`) from the macOS app binary. The app is now a 100% legal, neutral player/metadata client with zero embedded scraper names or torrent domains.
+- **Single Sign-On (SSO) Auto-Login:** Clicking "Browse Web Store" in Flux (Sidebar or Settings) generates the user's JWT auth token and opens `https://flux-addons.pages.dev/?token=...`. The web store automatically authenticates the user, loads their installed addons, and syncs changes.
+- **1-Click Deep-Link Install & Remote Uninstall:** Clicking "Install" on the web store triggers `flux://install-addon?url=...` which presents the floating glass confirmation modal in Flux. Clicking "Uninstall" on the web store updates the user's cloud payload via `PUT /v1/data` to the Cloudflare Worker backend.
+- **Two-Way Cloud Sync for Addons (`UserDataService.swift`):** `exportCloudPayload()` and `applyCloudPayload()` now include the user's installed addons list, seamlessly synchronizing between the macOS app, web store, and Cloudflare Worker D1 database.
 
 ### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
 - **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
