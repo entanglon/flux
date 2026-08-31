@@ -294,6 +294,23 @@ struct PlayerControlsView: View {
                                         onSelectExternal: { _ in }
                                     )
                                 }
+
+                                Divider()
+                                    .frame(height: 20)
+                                    .background(Color.white.opacity(0.2))
+
+                                // Sources / Stream Selector Button
+                                Button {
+                                    PlayerManager.shared.currentStreamURL = nil
+                                } label: {
+                                    Image(systemName: "film.stack")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.white.opacity(0.9))
+                                }
+                                .frame(width: 44, height: 36)
+                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Change stream source")
                             }
                             .glassEffect(.regular.interactive(), in: .capsule)
                             .padding(.bottom, 6)
