@@ -483,28 +483,6 @@ struct PlayerView: View {
             )
             .ignoresSafeArea()
             
-            // Top-left dismiss button
-            VStack {
-                HStack {
-                    Button {
-                        playerManager.close()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white.opacity(0.85))
-                            .padding(10)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 28)
-                    .padding(.leading, 28)
-                    
-                    Spacer()
-                }
-                Spacer()
-            }
-            
             // Real Telemetry Progress Fill Loading
             let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
             

@@ -51,7 +51,7 @@ struct ContinueWatchingCard: View {
     private var activeLogoURL: URL? {
         if let logo = item.logoURL { return logo }
         if let logo = fetchedLogo { return logo }
-        if item.id.starts(with: "tt") {
+        if !TMDBEnricher.shared.hasKey, item.id.starts(with: "tt") {
             return URL(string: "https://images.metahub.space/logo/medium/\(item.id)/img")
         }
         return nil
@@ -126,17 +126,15 @@ struct ContinueWatchingCard: View {
                             case .success(let img):
                                 img
                                     .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: 170, maxHeight: 34, alignment: .leading)
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 160, maxHeight: 36, alignment: .leading)
                                     .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
                             default:
                                 fallbackTitleText
                             }
                         }
-                        .frame(height: 34, alignment: .leading)
                     } else {
                         fallbackTitleText
-                            .frame(height: 34, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -252,8 +250,8 @@ struct ContinueWatchingCard: View {
             }
 
             if let id = tmdbIDToUse {
-                // Fetch logo only if not already present on item or deterministic Metahub endpoint
-                if item.logoURL == nil && !item.id.starts(with: "tt") && fetchedLogo == nil {
+                // Fetch TMDB logo if not already set
+                if fetchedLogo == nil && (item.logoURL == nil || item.logoURL?.absoluteString.contains("tmdb.org") == false) {
                     if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
                         await MainActor.run { self.fetchedLogo = logo }
                     }

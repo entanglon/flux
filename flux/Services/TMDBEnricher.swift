@@ -127,8 +127,8 @@ class TMDBEnricher {
         let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
         guard let id = tmdbIDString else { return item }
         
-        // 2. Fetch basic metadata
-        let urlString = "\(baseURL)/\(type)/\(id)?api_key=\(apiKey)"
+        // 2. Fetch basic metadata + images (logos)
+        let urlString = "\(baseURL)/\(type)/\(id)?api_key=\(apiKey)&append_to_response=images&include_image_language=en,null"
         guard let url = URL(string: urlString),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return item }
@@ -140,6 +140,13 @@ class TMDBEnricher {
             }
             if let posterPath = json["poster_path"] as? String {
                 enriched.posterURL = adaptiveURL(path: posterPath, quality: .poster)
+            }
+            if let images = json["images"] as? [String: Any],
+               let logos = images["logos"] as? [[String: Any]], !logos.isEmpty {
+                let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
+                if let path = enLogo?["file_path"] as? String {
+                    enriched.logoURL = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+                }
             }
             if let popularity = json["popularity"] as? Double {
                 enriched.popularity = popularity
