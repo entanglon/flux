@@ -1,12 +1,13 @@
 # Flux — Active Session Journal
 
-## LATEST: Aug 31, 2026 — POLISHED STREAM SELECTION MODAL, SPRING HOVER EFFECTS & RICH FEATURE BADGES
+## LATEST: Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
-### Stream Selection UI & Smooth Transitions (`PlayerView.swift`)
-- **Cinematic Blur Backdrop & Spring Modal:** `streamSelectionView` now appears with a dark blur overlay (`Color.black.opacity(0.65)`) and smooth `.scale.combined(with: .opacity)` transitions.
-- **Fluid Spring Hover Effects & Zero Layout Shifts:** Replaced the line expansion on hover with fixed 2-line tail truncation to eliminate scroll list jitter. Rows animate with fluid spring curves (`.spring(response: 0.22, dampingFraction: 0.78)`), subtle scale (`1.01x`), background illumination, and glowing blue/cyan gradient borders.
-- **Rich Feature & Codec Badges:** Added vibrant pills for `HDR` / `HDR10+` (Amber), `DV` / `Dolby Vision` (Pink), `Atmos` / `5.1` / `7.1` (Cyan), `HEVC` (Indigo), brand-specific provider gradients (Torrentio, Hydra, Debrid, Comet, MediaFusion, EasyNews), speed tiers (`Instant` / `Fast`), and seeder counters.
-- **Header with Close Button:** Added a header with dynamic search status and a circular `xmark.circle.fill` close button in the top right.
+### App Store-Style Addons Store (`AddonsView.swift`, `AddonModels.swift`, `AddonManager.swift`, `ContentView.swift`)
+- **Curated Store Catalog:** Built-in directory of popular extensions categorized into **Official & Subtitles** (OpenSubtitles v3), **Streaming Platforms & Deep Links** (WatchHub for Netflix/Prime/Disney+/Apple TV+), **Free & Public Domain** (Internet Archive, YouTube Streams, Public IPTV), and **Community Streams** (Torrentio, Comet, MediaFusion, Meteor, Stremify, WebStreamr, CyberFlix).
+- **Clean Legal Distribution Model:** The app ships with only official metadata/subtitle addons (OpenSubtitles v3). Community torrent/stream scrapers are not bundled in the default state, keeping the app 100% compliant and legal for distribution. Users can install community providers with one click or configure custom Debrid accounts.
+- **Stock Addons Protection:** Protected system addons (`isStock: true`) do not display a delete button and cannot be uninstalled, ensuring subtitle search and core services remain intact. User-installed addons have full toggle and uninstall controls.
+- **Custom Manifest URL Installer Modal:** Added a dedicated glass modal to install any custom Stremio addon via URL (`https://...` or `stremio://...`) with live validation and error handling.
+- **Sidebar Integration:** Added `Addon Store` (`.addons`) to the main sidebar with the `puzzlepiece.extension` icon.
 
 ### Continue Watching Auto-Resume vs. Title Page Source Selector (`PlayerManager.swift`, `DetailView.swift`, `ContinueWatchingCard.swift`)
 - **Continue Watching 1-Click Auto-Resume Across Restarts:** Clicking a Continue Watching or Recently Watched card auto-plays the last saved source with exact-second seek position, persisting even across app restarts via `UserDataService`.
