@@ -105,9 +105,9 @@ actor TMDBMemoryCacheActor {
     }
 }
 
-/// Swift actor managing thread-safe stream caches.
+/// Swift actor managing thread-safe and disk-persisted stream caches.
 actor StreamCacheActor {
-    private struct CacheEntry {
+    private struct CacheEntry: Codable {
         let streams: [Stream]
         let timestamp: Date
     }
@@ -115,16 +115,33 @@ actor StreamCacheActor {
     private var cache: [String: CacheEntry] = [:]
     private let ttl: TimeInterval
     private let maxEntries: Int
+    private let diskURL: URL?
 
-    init(ttl: TimeInterval = 10 * 60, maxEntries: Int = 100) {
+    init(ttl: TimeInterval = 24 * 3600, maxEntries: Int = 200) {
         self.ttl = ttl
         self.maxEntries = maxEntries
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        self.diskURL = dir?.appendingPathComponent("flux_streams_cache.json")
+        self.loadFromDisk()
+    }
+
+    private func loadFromDisk() {
+        guard let url = diskURL, let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([String: CacheEntry].self, from: data) else { return }
+        let now = Date()
+        self.cache = decoded.filter { now.timeIntervalSince($0.value.timestamp) < ttl }
+    }
+
+    private func saveToDisk() {
+        guard let url = diskURL, let data = try? JSONEncoder().encode(cache) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     func get(key: String) -> [Stream]? {
         guard let entry = cache[key] else { return nil }
         if Date().timeIntervalSince(entry.timestamp) > ttl {
             cache.removeValue(forKey: key)
+            saveToDisk()
             return nil
         }
         return entry.streams
@@ -138,9 +155,13 @@ actor StreamCacheActor {
             }
         }
         cache[key] = CacheEntry(streams: streams, timestamp: Date())
+        saveToDisk()
     }
 
     func clear() {
         cache.removeAll()
+        if let url = diskURL {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }

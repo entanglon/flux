@@ -14,8 +14,8 @@ enum StartupSpeedTier: String, CaseIterable {
     }
 }
 
-struct Stream: Identifiable {
-    let id = UUID()
+struct Stream: Identifiable, Codable, Hashable, Equatable {
+    var id = UUID()
     let title: String
     let cleanTitle: String
     let url: URL

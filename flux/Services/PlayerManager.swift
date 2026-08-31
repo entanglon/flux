@@ -562,6 +562,15 @@ class PlayerManager: ObservableObject {
         // 1. Instant Replay / Active Session Reuse Check
         let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
         
+        let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+        let isMatchingEpisode: Bool
+        if item.category == "TV Show" || season != nil {
+            isMatchingEpisode = (historyItem?.lastSeason == season || (season == nil && historyItem?.lastSeason != nil)) &&
+                                (historyItem?.lastEpisode == episode || (episode == nil && historyItem?.lastEpisode != nil))
+        } else {
+            isMatchingEpisode = true
+        }
+
         if let cached = lastPlayedStreams[key] {
             let elapsed = Date().timeIntervalSince(cached.timestamp)
             
@@ -570,21 +579,25 @@ class PlayerManager: ObservableObject {
                 print("[PlayerManager] Active Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
                 self.currentStreamURL = cached.url
                 self.isLoading = false
+                if let hash = activeTorrentHash {
+                    AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                }
                 self.populateStreamsInBackground(item: item, season: season, episode: episode)
                 return
             } else {
                 self.lastPlayedStreams.removeValue(forKey: key)
-                fetchAndRace(item: item, season: season, episode: episode)
-                return
             }
-        } else if let savedURL = item.lastStreamURL ?? UserDataService.shared.getHistoryItem(id: item.id)?.lastStreamURL {
-            let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+        } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL {
             let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
             if elapsed < 86400 {
                 print("[PlayerManager] Persisted History Stream Available: Playing \(savedURL)")
                 self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
                 self.currentStreamURL = savedURL
                 self.isLoading = false
+                if let hash = historyItem?.lastTorrentInfoHash {
+                    self.activeTorrentHash = hash
+                    AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                }
                 self.populateStreamsInBackground(item: item, season: season, episode: episode)
                 return
             }
@@ -914,8 +927,20 @@ class PlayerManager: ObservableObject {
 
         self.saveLastPlayedStream(url: targetURL)
 
-        if let item = self.currentItem {
-            UserDataService.shared.addToHistory(item, season: self.currentSeason, episode: self.currentEpisode, episodeImage: self.currentEpisodeImage)
+        if var item = self.currentItem {
+            item.lastStreamURL = targetURL
+            let hash = stream.isTorrent ? torrentHash(stream) : nil
+            item.lastTorrentInfoHash = hash
+            item.lastFileIndex = stream.fileIdx
+            UserDataService.shared.addToHistory(
+                item,
+                season: self.currentSeason,
+                episode: self.currentEpisode,
+                episodeImage: self.currentEpisodeImage,
+                streamURL: targetURL,
+                torrentInfoHash: hash,
+                fileIndex: stream.fileIdx
+            )
         }
 
         UserDefaults.standard.set(stream.source, forKey: UserDefaults.Key.lastUsedSource)
@@ -948,10 +973,13 @@ class PlayerManager: ObservableObject {
         let next = idx + 1
         if next < availableStreams.count {
             statusText = "Source unavailable — trying next (\(next + 1)/\(availableStreams.count))"
-            print("[PlayerManager] Source dead. Falling through (\(next + 1)/\(availableStreams.count)): \(availableStreams[next].cleanTitle)")
-            attemptStream(availableStreams[next])
+            let nextStream = availableStreams[next]
+            selectStream(nextStream)
         } else {
-            errorMessage = "Unable to play video. Please try another source."
+            errorMessage = "All top sources failed to stream. Please pick another stream manually."
+            statusText = nil
+            isLoading = false
+            currentStreamURL = nil
         }
     }
     
@@ -1027,9 +1055,8 @@ class PlayerManager: ObservableObject {
     func close() {
         DispatchQueue.main.async {
             self.cancelDetailPrefetch()
-            // Do NOT forcefully destroy the active torrent session on every brief window close.
-            // Keeping the session active in StremioServerManager allows instant replay/resume
-            // without re-running DHT handshakes, peer discovery, and piece re-indexing.
+            // When closing the player, MPV stops reading from the stream, naturally
+            // pausing downloads in FluxEngine while preserving verified cache on disk.
             self.currentItem = nil
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
@@ -1047,6 +1074,11 @@ class PlayerManager: ObservableObject {
             self.prefetchedSubtitles = nil
             self.discardWarmCore()
             self.endSession()
+
+            // Run cache eviction in background to strictly enforce the user's cache limit (e.g. 2 GB)
+            AsyncTask {
+                await StremioServerManager.shared.evictCacheIfNeeded()
+            }
         }
     }
     
