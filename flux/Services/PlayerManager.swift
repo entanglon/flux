@@ -1077,6 +1077,7 @@ class PlayerManager: ObservableObject {
     
     func close() {
         DispatchQueue.main.async {
+            SleepAssertionManager.shared.disableSleepPrevention()
             self.cancelDetailPrefetch()
             // When closing the player, MPV stops reading from the stream, naturally
             // pausing downloads in FluxEngine while preserving verified cache on disk.

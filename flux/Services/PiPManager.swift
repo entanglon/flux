@@ -242,7 +242,14 @@ final class PiPManager: ObservableObject {
 
         mpv.$isPlaying
             .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.miniIsPlaying = $0 }
+            .sink { [weak self] isPlaying in
+                self?.miniIsPlaying = isPlaying
+                if isPlaying {
+                    SleepAssertionManager.shared.enableSleepPrevention(reason: "Flux PiP Video Playback")
+                } else {
+                    SleepAssertionManager.shared.disableSleepPrevention()
+                }
+            }
             .store(in: &overlayCancellables)
         mpv.$progress
             .receive(on: RunLoop.main)
@@ -266,6 +273,7 @@ final class PiPManager: ObservableObject {
     // MARK: Teardown
 
     private func performFullStop(saveProgress: Bool) {
+        SleepAssertionManager.shared.disableSleepPrevention()
         if saveProgress, let m = mpvController, m.duration > 0 {
             PlayerManager.shared.updateWatchProgress(time: m.timePos, duration: m.duration)
         }

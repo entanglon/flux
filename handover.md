@@ -1,8 +1,16 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 6:30 PM — ZERO-LATENCY INSTANT SEEK PERSISTENCE & PURE LOGO FILL BUFFERING
+## LATEST: Sep 1, 2026, 7:05 PM — MACOS DISPLAY SLEEP PREVENTION & ZERO-LATENCY SEEK PERSISTENCE
 
 ### Current Status & Resolutions:
+- **macOS Display & System Sleep Prevention During Playback (`SleepAssertionManager.swift`, `PlayerView.swift`, `PiPManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
+  - **Resolution:** Added a dedicated power management controller (`SleepAssertionManager`) using dual-layer macOS power management:
+    1. **IOKit Power Management Assertion:** Creates an `IOPMAssertionCreateWithName` assertion with `kIOPMAssertionTypePreventUserIdleDisplaySleep` at level `kIOPMAssertionLevelOn` whenever video playback begins or resumes.
+    2. **ProcessInfo System Activity:** Holds a `ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled, .userInitiated])` token.
+    3. **Automatic Lifecycle Synchronization:**
+       - Enables assertion on warm core adoption and when playback actively starts/resumes in both main player and PiP mode.
+       - Disables assertion cleanly whenever the video is paused, when the player window is dismissed, on full stop, or when `PlayerManager.close()` is called.
+    - *Result:* The Mac display and system will never dim or sleep while watching media, and will resume normal power management when paused or closed.
 - **Instant Seek / Fast-Forward Progress Persistence (`PlayerView.swift`, `PlayerManager.swift`, `UserDataService.swift`):** *Status: Completed & Verified.*
   - **Resolution:** In addition to the 5-second autosave timer during playback and pause-trigger save, `playerManager.updateWatchProgress(...)` is now called **immediately** whenever a seek is triggered or completed:
     1. **Timeline Scrubbing / Slider Dragging:** Progress is saved on the target seek time in 0ms.
@@ -13,13 +21,7 @@
     6. **MPV `isSeeking` Event Observer:** When MPV completes seeking (`.onChange(of: mpv.isSeeking)`), `updateWatchProgress` executes immediately.
     - *Result:* If the user scrubs/fast-forwards and immediately quits/restarts the app, clicking Continue Watching resumes from the exact second without losing any progress.
 - **Mid-Playback Pure Logo Fill Buffering (`PlayerView.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Removed the separate progress capsule bar and all card background wrappers from `midPlaybackLogoBufferingView`. Just like the initial start loading screen, the title logo itself serves as the entire loading animation: a 25% translucent watermark base is filled progressively from left-to-right by the full 100% bright logo with a glowing specular shadow as demuxer/buffer telemetry advances, floating cleanly directly over the paused video frame.
-- **Apple TV Hero Starring & Director Section (`DetailView.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Implemented the exact Apple TV design (Starring in grey + actors in white, Director in grey + director in white, left-aligned, omitted for TV shows when missing).
-- **Removed "Play Trailer in Flux" Button from Hero:** *Status: Completed & Verified.*
-  - Removed the redundant Trailer button from the hero action bar in `DetailView.swift`.
-- **Enlarged Cast & Crew and Where to Watch Rails (`DetailView.swift`):** *Status: Completed & Verified.*
-  - Increased `CastCircle` to 104pt and Where to Watch provider badges to 76x76pt.
+  - **Resolution:** Removed the separate progress capsule bar and all card background wrappers from `midPlaybackLogoBufferingView`. Title logo itself fills progressively from left-to-right based on demuxer buffer telemetry.
 - **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---

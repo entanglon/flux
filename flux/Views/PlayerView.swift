@@ -51,154 +51,13 @@ struct PlayerView: View {
             }
             
             // 4. Controls Layer (Only active once playback has started)
-            if hasStartedPlayback {
-                PlayerControlsView(
-                    isPlaying: $mpv.isPlaying,
-                    progress: Binding(
-                        get: { mpv.progress },
-                        set: { 
-                             // Seek to absolute time based on percentage
-                             let targetTime = $0 * mpv.duration
-                             mpv.seek(absolute: targetTime)
-                             if mpv.duration > 0 {
-                                 lastProgressSaveTime = Date()
-                                 playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-                             }
-                             
-                             // Smart Preload Trigger
-                             if $0 > 0.9 {
-                                 playerManager.preloadNextEpisodeIfNeeded()
-                             }
-                        }
-                    ),
-                    currentTime: $mpv.timePos,
-                    duration: $mpv.duration,
-                    volume: Binding(
-                        get: { mpv.volume },
-                        set: { mpv.setVolume($0) }
-                    ),
-                    isControlsVisible: $isControlsVisible,
-                    title: item?.title ?? "Unknown Title",
-                    subtitle: getSubtitle(),
-                    onPlayPause: { mpv.togglePlayPause() },
-                    onSkipForward: { 
-                        let targetTime = min(mpv.duration, mpv.timePos + 15)
-                        mpv.seek(relative: 15)
-                        if mpv.duration > 0 {
-                            lastProgressSaveTime = Date()
-                            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-                        }
-                    }, 
-                    onSkipBackward: { 
-                        let targetTime = max(0, mpv.timePos - 15)
-                        mpv.seek(relative: -15)
-                        if mpv.duration > 0 {
-                            lastProgressSaveTime = Date()
-                            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-                        }
-                    },
-                    onClose: {
-                        playerManager.close()
-                        dismiss() // Dismiss the window
-                    },
-                    onTogglePiP: {
-                        PiPManager.shared.toggle(mpv: mpv)
-                    },
-                    audioTracks: mpv.audioTracks,
-                    subtitleTracks: mpv.subtitleTracks,
-                    externalTracks: playerManager.externalSubtitles,
-                    onSelectTrack: { track in
-                        mpv.selectTrack(track)
-                    },
-                    onSelectExternalSub: { sub in
-                        mpv.addExternalSubtitle(sub)
-                    }
-                )
-                .transition(.opacity)
-                .zIndex(20)
-            }
+            controlsLayer
             
-            // Exit Warning Overlay
-            if showExitWarning {
-                Text("Press Esc again to exit")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .glassEffect(.clear, in: .rect(cornerRadius: 12))
-                    .cornerRadius(12)
-                    .transition(.opacity)
-                    .zIndex(200)
-            }
+            // 5. Exit Warning Overlay
+            exitWarningOverlay
 
-            // Smart Skip Intro / Skip Recap / Next Episode — bottom-right floating button (Apple TV style)
-            if !isControlsVisible, let action = activeSkipAction {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        switch action {
-                        case .recap(let targetTime):
-                            Button {
-                                mpv.seek(absolute: targetTime)
-                                if mpv.duration > 0 {
-                                    lastProgressSaveTime = Date()
-                                    playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-                                }
-                            } label: {
-                                Text("Skip Recap")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 22)
-                                    .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                            .transition(.opacity)
-                            
-                        case .intro(let targetTime):
-                            Button {
-                                mpv.seek(absolute: targetTime)
-                                if mpv.duration > 0 {
-                                    lastProgressSaveTime = Date()
-                                    playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-                                }
-                            } label: {
-                                Text("Skip Intro")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 22)
-                                    .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                            .transition(.opacity)
-                            
-                        case .nextEpisode(let season, let episode):
-                            Button {
-                                playerManager.playNextEpisode()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "forward.end.fill")
-                                        .font(.system(size: 13, weight: .bold))
-                                    Text("Next: S\(season) E\(episode)")
-                                        .font(.system(size: 14, weight: .bold))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                            .transition(.opacity)
-                        }
-                    }
-                    .padding(.trailing, 40)
-                    .padding(.bottom, 36)
-                }
-            }
+            // 6. Smart Skip Intro / Skip Recap / Next Episode
+            skipActionOverlay
         }
         .background(
             PlayerWindowAccessor { window in
@@ -235,57 +94,27 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.leftArrow) {
-            let targetTime = max(0, mpv.timePos - 10)
-            mpv.seek(relative: -10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: -10)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            let targetTime = min(mpv.duration, mpv.timePos + 10)
-            mpv.seek(relative: 10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: 10)
             return .handled
         }
         .onKeyPress(KeyEquivalent(",")) {
-            let targetTime = max(0, mpv.timePos - 10)
-            mpv.seek(relative: -10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: -10)
             return .handled
         }
         .onKeyPress(KeyEquivalent(".")) {
-            let targetTime = min(mpv.duration, mpv.timePos + 10)
-            mpv.seek(relative: 10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: 10)
             return .handled
         }
         .onKeyPress(KeyEquivalent("<")) {
-            let targetTime = max(0, mpv.timePos - 10)
-            mpv.seek(relative: -10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: -10)
             return .handled
         }
         .onKeyPress(KeyEquivalent(">")) {
-            let targetTime = min(mpv.duration, mpv.timePos + 10)
-            mpv.seek(relative: 10)
-            if mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
-            }
+            handleRelativeSeek(delta: 10)
             return .handled
         }
         .onKeyPress(.upArrow) {
@@ -309,18 +138,21 @@ struct PlayerView: View {
             }
             return .handled
         }
+        .onKeyPress(KeyEquivalent("f")) {
+            toggleFullScreen()
+            return .handled
+        }
         .onAppear {
             mpv.onPlaybackError = {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
                 playerManager.tryNextStream()
             }
             if mpv.hasLoadedMedia {
-                // Warm core from the detail-page prefetch — already holding the
-                // stream buffered. Just release the hold; do NOT reload.
                 print("PlayerView: adopting warm core, releasing hold...")
                 mpv.play()
                 animatedProgress = 1.0
                 hasStartedPlayback = true
+                SleepAssertionManager.shared.enableSleepPrevention()
             } else if let url = playerManager.currentStreamURL {
                 // If URL is already present (Instant Replay), start playing
                 print("PlayerView: onAppear found url, playing...")
@@ -334,6 +166,7 @@ struct PlayerView: View {
             // floating panel owns the core now. Saving progress or stopping
             // mpv here would kill playback mid-handoff.
             guard !PiPManager.shared.isHandingOffCore else { return }
+            SleepAssertionManager.shared.disableSleepPrevention()
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             mpv.pause()
             mpv.stop()
@@ -349,48 +182,17 @@ struct PlayerView: View {
                 mpv.play(url: url)
             }
         }
-        // Resume playback position & continuously persist watch progress (every 5 seconds during playback)
         .onChange(of: mpv.timePos) { _, t in
-            if t > 0.05 && !hasStartedPlayback {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    hasStartedPlayback = true
-                    animatedProgress = 1.0
-                }
-            }
-            // Continuous autosave during playback
-            if hasStartedPlayback && mpv.duration > 0 && Date().timeIntervalSince(lastProgressSaveTime) >= 5.0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: t, duration: mpv.duration)
-            }
-            guard let resume = playerManager.pendingResumeTime else { return }
-            guard t > 0.1 || mpv.duration > 0 else { return }
-            playerManager.pendingResumeTime = nil
-            if abs(t - resume) > 1.5 {
-                print("PlayerView: resuming playback at \(Int(resume))s")
-                mpv.seek(absolute: resume)
-            }
+            handleTimePosChange(t)
         }
-        // Save immediately on pause
         .onChange(of: mpv.isPlaying) { _, isPlaying in
-            if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
-            }
+            handleIsPlayingChange(isPlaying)
         }
-        // Save immediately when seeking finishes
         .onChange(of: mpv.isSeeking) { wasSeeking, isSeeking in
-            if wasSeeking && !isSeeking && hasStartedPlayback && mpv.duration > 0 {
-                lastProgressSaveTime = Date()
-                playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
-            }
+            handleSeekEnd(wasSeeking: wasSeeking, isSeeking: isSeeking)
         }
         .onChange(of: mpv.duration) { _, dur in
-            guard dur > 0, let resume = playerManager.pendingResumeTime else { return }
-            playerManager.pendingResumeTime = nil
-            if abs(mpv.timePos - resume) > 1.5 {
-                print("PlayerView: duration received, seeking to resume position: \(Int(resume))s")
-                mpv.seek(absolute: resume)
-            }
+            handleDurationChange(dur)
         }
         .onChange(of: mpv.progress) { _, newProgress in
              if newProgress > 0.9 {
@@ -399,6 +201,215 @@ struct PlayerView: View {
         }
         .overlay {
             overlayContent
+        }
+    }
+    
+    private func handleTimePosChange(_ t: Double) {
+        if t > 0.05 && !hasStartedPlayback {
+            withAnimation(.easeOut(duration: 0.2)) {
+                hasStartedPlayback = true
+                animatedProgress = 1.0
+            }
+            if mpv.isPlaying {
+                SleepAssertionManager.shared.enableSleepPrevention()
+            }
+        }
+        // Continuous autosave during playback
+        if hasStartedPlayback && mpv.duration > 0 && Date().timeIntervalSince(lastProgressSaveTime) >= 5.0 {
+            lastProgressSaveTime = Date()
+            playerManager.updateWatchProgress(time: t, duration: mpv.duration)
+        }
+        guard let resume = playerManager.pendingResumeTime else { return }
+        guard t > 0.1 || mpv.duration > 0 else { return }
+        playerManager.pendingResumeTime = nil
+        if abs(t - resume) > 1.5 {
+            print("PlayerView: resuming playback at \(Int(resume))s")
+            mpv.seek(absolute: resume)
+        }
+    }
+
+    private func handleIsPlayingChange(_ isPlaying: Bool) {
+        if isPlaying && hasStartedPlayback {
+            SleepAssertionManager.shared.enableSleepPrevention()
+        } else {
+            SleepAssertionManager.shared.disableSleepPrevention()
+        }
+        if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
+            lastProgressSaveTime = Date()
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+        }
+    }
+
+    private func handleSeekEnd(wasSeeking: Bool, isSeeking: Bool) {
+        if wasSeeking && !isSeeking && hasStartedPlayback && mpv.duration > 0 {
+            lastProgressSaveTime = Date()
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+        }
+    }
+
+    private func handleDurationChange(_ dur: Double) {
+        guard dur > 0, let resume = playerManager.pendingResumeTime else { return }
+        playerManager.pendingResumeTime = nil
+        if abs(mpv.timePos - resume) > 1.5 {
+            print("PlayerView: duration received, seeking to resume position: \(Int(resume))s")
+            mpv.seek(absolute: resume)
+        }
+    }
+
+    private func handleRelativeSeek(delta: Double) {
+        let targetTime = delta < 0 ? max(0, mpv.timePos + delta) : min(mpv.duration, mpv.timePos + delta)
+        mpv.seek(relative: delta)
+        if mpv.duration > 0 {
+            lastProgressSaveTime = Date()
+            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+        }
+    }
+
+    private func handleAbsoluteSeek(time: Double) {
+        mpv.seek(absolute: time)
+        if mpv.duration > 0 {
+            lastProgressSaveTime = Date()
+            playerManager.updateWatchProgress(time: time, duration: mpv.duration)
+        }
+    }
+
+    private func toggleFullScreen() {
+        if let window = hostWindow ?? NSApp.keyWindow {
+            window.toggleFullScreen(nil)
+        }
+    }
+
+    @ViewBuilder
+    private func skipActionButton(for action: SkipActionType) -> some View {
+        switch action {
+        case .recap(let targetTime):
+            Button {
+                handleAbsoluteSeek(time: targetTime)
+            } label: {
+                Text("Skip Recap")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .transition(.opacity)
+            
+        case .intro(let targetTime):
+            Button {
+                handleAbsoluteSeek(time: targetTime)
+            } label: {
+                Text("Skip Intro")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .transition(.opacity)
+            
+        case .nextEpisode(let season, let episode):
+            Button {
+                playerManager.playNextEpisode()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "forward.end.fill")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("Next: S\(season) E\(episode)")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var controlsLayer: some View {
+        if hasStartedPlayback {
+            PlayerControlsView(
+                isPlaying: $mpv.isPlaying,
+                progress: Binding(
+                    get: { mpv.progress },
+                    set: { 
+                        let targetTime = $0 * mpv.duration
+                        handleAbsoluteSeek(time: targetTime)
+                        if $0 > 0.9 {
+                            playerManager.preloadNextEpisodeIfNeeded()
+                        }
+                    }
+                ),
+                currentTime: $mpv.timePos,
+                duration: $mpv.duration,
+                volume: Binding(
+                    get: { mpv.volume },
+                    set: { mpv.setVolume($0) }
+                ),
+                isControlsVisible: $isControlsVisible,
+                title: item?.title ?? "Unknown Title",
+                subtitle: getSubtitle(),
+                onPlayPause: { mpv.togglePlayPause() },
+                onSkipForward: { handleRelativeSeek(delta: 15) }, 
+                onSkipBackward: { handleRelativeSeek(delta: -15) },
+                onClose: {
+                    playerManager.close()
+                    dismiss()
+                },
+                onTogglePiP: {
+                    PiPManager.shared.toggle(mpv: mpv)
+                },
+                audioTracks: mpv.audioTracks,
+                subtitleTracks: mpv.subtitleTracks,
+                externalTracks: playerManager.externalSubtitles,
+                onSelectTrack: { track in
+                    mpv.selectTrack(track)
+                },
+                onSelectExternalSub: { sub in
+                    mpv.addExternalSubtitle(sub)
+                }
+            )
+            .transition(.opacity)
+            .zIndex(20)
+        }
+    }
+
+    @ViewBuilder
+    private var exitWarningOverlay: some View {
+        if showExitWarning {
+            Text("Press Esc again to exit")
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding()
+                .glassEffect(.clear, in: .rect(cornerRadius: 12))
+                .cornerRadius(12)
+                .transition(.opacity)
+                .zIndex(200)
+        }
+    }
+
+    @ViewBuilder
+    private var skipActionOverlay: some View {
+        if !isControlsVisible, let action = activeSkipAction {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    skipActionButton(for: action)
+                }
+                .padding(.trailing, 40)
+                .padding(.bottom, 36)
+            }
+            .transition(.opacity)
+            .zIndex(100)
         }
     }
     
