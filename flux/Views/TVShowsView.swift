@@ -15,7 +15,7 @@ struct TVShowsView: View {
     
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            VStack(spacing: 0) {
                 if isLoading && heroShows.isEmpty && popularShows.isEmpty {
                     VStack(alignment: .leading, spacing: 44) {
                         GhostHero()

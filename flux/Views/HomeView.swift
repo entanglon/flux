@@ -43,7 +43,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            VStack(spacing: 0) {
                 if isLoading && heroContent.isEmpty && trendingTodayItems.isEmpty {
                     // Ghost loading layout — hero + skeleton rails
                     VStack(alignment: .leading, spacing: 44) {

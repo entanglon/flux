@@ -16,8 +16,9 @@ class PlayerManager: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var availableStreams: [Stream] = []
-    @Published var isFetchingStreams: Bool = false
+    @Published var isFetchingStreams = false
     @Published var currentStreamURL: URL?
+    @Published var currentMagnetURL: String?
     @Published var externalSubtitles: [StremioSubtitleTrack] = []
     /// Human-readable progress during source resolution ("Resolving source…", "Trying next (2/8)…")
     @Published var statusText: String? = nil
@@ -939,6 +940,12 @@ class PlayerManager: ObservableObject {
     private func finishSelect(_ stream: Stream) {
         let targetURL = getPlayableURL(for: stream)
         self.currentStreamURL = targetURL
+        let hash = stream.isTorrent ? torrentHash(stream) : nil
+        if stream.isTorrent, let h = hash {
+            self.currentMagnetURL = stream.url.absoluteString.hasPrefix("magnet:") ? stream.url.absoluteString : "magnet:?xt=urn:btih:\(h)"
+        } else {
+            self.currentMagnetURL = nil
+        }
         self.isLoading = false
         self.errorMessage = nil
 
@@ -946,7 +953,6 @@ class PlayerManager: ObservableObject {
 
         if var item = self.currentItem {
             item.lastStreamURL = targetURL
-            let hash = stream.isTorrent ? torrentHash(stream) : nil
             item.lastTorrentInfoHash = hash
             item.lastFileIndex = stream.fileIdx
             UserDataService.shared.addToHistory(

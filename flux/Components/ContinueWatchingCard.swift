@@ -226,13 +226,13 @@ struct ContinueWatchingCard: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.80))
-                            .frame(width: 26, height: 26)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                            .contentShape(Circle())
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.75))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
-                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .menuStyle(.borderlessButton)
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
@@ -243,7 +243,7 @@ struct ContinueWatchingCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -258,8 +258,7 @@ struct ContinueWatchingCard: View {
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
-        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 12, x: 0, y: 0)
+        .shadow(color: Color.black.opacity(isHovering ? 0.45 : 0.20), radius: isHovering ? 14 : 5, x: 0, y: isHovering ? 7 : 2)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }

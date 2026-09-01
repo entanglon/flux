@@ -84,7 +84,7 @@ struct ChannelCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -99,8 +99,7 @@ struct ChannelCard: View {
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? channel.brandColor.opacity(0.45) : Color.black.opacity(0.25), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 6 : 3)
-        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+        .shadow(color: isHovering ? channel.brandColor.opacity(0.45) : Color.black.opacity(0.20), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovering = hovering

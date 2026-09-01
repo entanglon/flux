@@ -120,13 +120,12 @@ struct GlassCard: View {
         .clipShape(cardShape)
         .background(
             cardShape
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
         .overlay(
             cardShape.stroke(strokeGradient, lineWidth: isHovering ? 1.5 : 0.75)
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovering ? 14 : 5, x: 0, y: isHovering ? 7 : 2)
-        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+        .shadow(color: Color.black.opacity(isHovering ? 0.40 : 0.16), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
     }
 
     @ViewBuilder
@@ -173,19 +172,27 @@ struct GlassCard: View {
 
     @ViewBuilder
     private var badgeOverlay: some View {
+        // Date / "In Theatres" badge (Apple TV / Letterboxd style)
         if !displayItem.isReleased {
             Text(displayItem.cardReleaseDateBadge)
-                .font(.system(size: 10, weight: .bold))
-                .tracking(0.5)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .glassEffect(.regular, in: .capsule)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.95))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4.5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .glassEffect(.regular, in: .capsule)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
                 .padding(8)
         } else if hasNewEpisode {
             Text("NEW EPISODE")
-                .font(.system(size: 10, weight: .heavy))
-                .tracking(0.5)
+                .font(.system(size: 9, weight: .black))
                 .foregroundStyle(.black)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -202,10 +209,6 @@ struct GlassCard: View {
                     Label(item.category == "Movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle")
                 }
                 
-                Button(action: {}) {
-                    Label(item.category == "Movie" ? "Share Movie" : "Share Show", systemImage: "square.and.arrow.up")
-                }
-                
                 Button(action: {
                     userData.toggleWatchlist(item)
                 }) {
@@ -216,12 +219,12 @@ struct GlassCard: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 28, height: 28)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .contentShape(Circle())
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
-            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .menuStyle(.borderlessButton)
             .buttonStyle(.plain)
             .padding(10)
         }

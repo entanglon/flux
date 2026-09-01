@@ -34,7 +34,7 @@ struct PlayerControlsView: View {
     @State private var hoverTimer: Timer?
     @State private var showSubtitlePopover = false
     @State private var showAudioPopover = false
-    @Namespace private var glassNamespace // WWDC 2025 Namespace
+    @State private var isCopiedFeedback = false
     
     var body: some View {
         ZStack {
@@ -71,15 +71,30 @@ struct PlayerControlsView: View {
                                 .frame(height: 16)
                                 .background(Color.white.opacity(0.2))
                                 
-                            Button(action: {}) {
-                                Image(systemName: "square.and.arrow.up")
+                            Button(action: {
+                                let link = PlayerManager.shared.currentMagnetURL ?? PlayerManager.shared.currentStreamURL?.absoluteString ?? ""
+                                if !link.isEmpty {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(link, forType: .string)
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        isCopiedFeedback = true
+                                    }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                        withAnimation {
+                                            isCopiedFeedback = false
+                                        }
+                                    }
+                                }
+                            }) {
+                                Image(systemName: isCopiedFeedback ? "checkmark" : "square.and.arrow.up")
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.9))
+                                    .foregroundColor(isCopiedFeedback ? .green : .white.opacity(0.9))
                                     .frame(width: 44, height: 32)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Share")
+                            .help(isCopiedFeedback ? "Copied to clipboard!" : "Copy playing magnet / stream link")
+                            .accessibilityLabel("Copy Stream Link")
                         }
                         .glassEffect(.regular.interactive(), in: .capsule)
                         

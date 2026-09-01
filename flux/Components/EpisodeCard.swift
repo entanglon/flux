@@ -100,7 +100,7 @@ struct EpisodeCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -115,8 +115,7 @@ struct EpisodeCard: View {
                     lineWidth: isHovered ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovered ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovered ? 14 : 6, x: 0, y: isHovered ? 7 : 3)
-        .shadow(color: isHovered ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+        .shadow(color: Color.black.opacity(isHovered ? 0.40 : 0.16), radius: isHovered ? 12 : 4, x: 0, y: isHovered ? 6 : 2)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering

@@ -124,25 +124,10 @@ struct DetailView: View {
         return true
     }
     
-    @State private var scrollOffsetY: CGFloat = 0
-    
-    var topBarOpacity: Double {
-        let offset = -scrollOffsetY
-        if offset <= 0 { return 0 }
-        return min(1.0, Double(offset / 150.0))
-    }
-
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    GeometryReader { innerGeo in
-                        Color.clear.preference(
-                            key: DetailScrollOffsetKey.self,
-                            value: innerGeo.frame(in: .named("detailScrollSpace")).minY
-                        )
-                    }
-                    .frame(height: 0)
+                VStack(spacing: 0) {
                     // MARK: - 1. Immersive Hero (60% Height)
                     ZStack(alignment: .bottomLeading) {
                         // Background Image
@@ -896,10 +881,6 @@ struct DetailView: View {
                     .background(Color.black.opacity(0.5))
                 }
             }
-            .coordinateSpace(name: "detailScrollSpace")
-            .onPreferenceChange(DetailScrollOffsetKey.self) { value in
-                self.scrollOffsetY = value
-            }
             .ignoresSafeArea(edges: .top)
         }
         .background(
@@ -1252,11 +1233,10 @@ struct LiquidEpisodeCard: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.80))
-                            .frame(width: 28, height: 28)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                            .contentShape(Circle())
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.75))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .menuIndicator(.hidden)
                     .menuStyle(.borderlessButton)
@@ -1270,7 +1250,7 @@ struct LiquidEpisodeCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1285,8 +1265,7 @@ struct LiquidEpisodeCard: View {
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 7 : 3)
-        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+        .shadow(color: Color.black.opacity(isHovering ? 0.40 : 0.15), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
         .animation(.spring(response: 0.35, dampingFraction: 0.78), value: isHovering)
         .onHover { isHovering = $0 }
     }
@@ -1299,12 +1278,8 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
     let itemWidth: CGFloat
     let itemHeight: CGFloat
     let content: (Data.Element) -> Content
-    
-    @State private var canScrollLeft: Bool = false
-    @State private var canScrollRight: Bool = false
-    @State private var scrollTargetIndex: Int = 0
-    @State private var containerWidth: CGFloat = 0
     @State private var isHovering: Bool = false
+    @State private var scrollTargetIndex: Int = 0
     private let scrollStep = 3
     
     var body: some View {
@@ -1318,38 +1293,12 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
                 }
                 .padding(.leading, 268)
                 .padding(.trailing, 60)
-                .padding(.top, 10) // Reduced top padding
-                .padding(.bottom, 30) // Keep bottom for shadow
-                .background(
-                    GeometryReader { contentGeo in
-                        Color.clear.preference(
-                            key: DetailRailBoundsPreferenceKey.self,
-                            value: CarouselScrollBounds(
-                                canScrollLeft: contentGeo.frame(in: .named("scrollContainer")).minX < -15,
-                                canScrollRight: contentGeo.frame(in: .named("scrollContainer")).maxX > containerWidth + 15
-                            )
-                        )
-                    }
-                )
+                .padding(.top, 10)
+                .padding(.bottom, 24)
             }
-            .coordinateSpace(name: "scrollContainer")
-            .onPreferenceChange(DetailRailBoundsPreferenceKey.self) { bounds in
-                if self.canScrollLeft != bounds.canScrollLeft {
-                    self.canScrollLeft = bounds.canScrollLeft
-                }
-                if self.canScrollRight != bounds.canScrollRight {
-                    self.canScrollRight = bounds.canScrollRight
-                }
-            }
-            .background(
-                GeometryReader { geo in
-                    Color.clear.onAppear { containerWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
-                }
-            )
             // Left Arrow
             .overlay(alignment: .leading) {
-                if isHovering && canScrollLeft {
+                if isHovering && scrollTargetIndex > 0 {
                     Button(action: { scrollLeft(proxy: proxy) }) { arrowButton("left") }
                         .buttonStyle(.plain)
                         .padding(.leading, 268)
@@ -1358,7 +1307,7 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
             }
             // Right Arrow
             .overlay(alignment: .trailing) {
-                if isHovering && canScrollRight {
+                if isHovering && scrollTargetIndex < items.count - 1 {
                    Button(action: { scrollRight(proxy: proxy) }) { arrowButton("right") }
                         .buttonStyle(.plain)
                         .padding(.trailing, 20)
@@ -1391,20 +1340,6 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
             proxy.scrollTo(scrollTargetIndex, anchor: .leading)
         }
-    }
-}
-
-private struct DetailRailBoundsPreferenceKey: PreferenceKey {
-    static var defaultValue = CarouselScrollBounds(canScrollLeft: false, canScrollRight: true)
-    static func reduce(value: inout CarouselScrollBounds, nextValue: () -> CarouselScrollBounds) {
-        value = nextValue()
-    }
-}
-
-struct DetailScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

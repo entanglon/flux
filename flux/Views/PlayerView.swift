@@ -639,6 +639,21 @@ struct PlayerView: View {
             }
         })
 
+        // 8. Copy Stream / Magnet Link
+        menu.addItem(ClosureMenuItem(
+            title: "Copy Stream Link",
+            systemImage: "square.and.arrow.up",
+            isEnabled: isPlaybackEnabled
+        ) { [weak playerManager] in
+            let link = playerManager?.currentMagnetURL ?? playerManager?.currentStreamURL?.absoluteString ?? ""
+            if !link.isEmpty {
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(link, forType: .string)
+                }
+            }
+        })
+
         return menu
     }
 

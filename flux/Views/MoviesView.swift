@@ -16,7 +16,7 @@ struct MoviesView: View {
     
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            VStack(spacing: 0) {
                 if isLoading && heroMovies.isEmpty && popularMovies.isEmpty {
                     VStack(alignment: .leading, spacing: 44) {
                         GhostHero()
