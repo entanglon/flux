@@ -252,7 +252,7 @@ struct DetailView: View {
                                                 episode: resume?.episode,
                                                 episodeImage: resume?.image ?? matchingEp?.stillURL,
                                                 fromContinueWatching: true,
-                                                forceStreamPicker: true,
+                                                forceStreamPicker: false,
                                                 startFromBeginning: false
                                             )
                                         } else if displayItem.category == "TV Show" || displayItem.category == "Series" {
@@ -615,14 +615,16 @@ struct DetailView: View {
                                 
                                 DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
                                     Button(action: {
+                                        let prog = getEpisodeProgress(episode)
+                                        let hasProgress = prog > 0.01 && prog < 0.90
                                         PlayerManager.shared.play(
                                             displayItem,
                                             season: selectedSeason?.seasonNumber,
                                             episode: episode.episodeNumber,
                                             episodeImage: episode.stillURL,
-                                            fromContinueWatching: false,
-                                            forceStreamPicker: true,
-                                            startFromBeginning: true
+                                            fromContinueWatching: hasProgress,
+                                            forceStreamPicker: !hasProgress,
+                                            startFromBeginning: !hasProgress
                                         )
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
@@ -1130,6 +1132,7 @@ struct LiquidEpisodeCard: View {
     var item: MediaItem? = nil
     @State private var isHovering = false
     @ObservedObject private var userData = UserDataService.shared
+    @Environment(\.openWindow) private var openWindow
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -1172,19 +1175,19 @@ struct LiquidEpisodeCard: View {
                     .frame(height: 60, alignment: .topLeading)
                 
                 // Bottom Row
-                HStack(spacing: 12) {
-                    if progress > 0 && progress < 0.95 {
-                        // Progress Bar (Unfinished)
+                HStack(spacing: 10) {
+                    // Play Icon (Always visible on all episode cards)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                    
+                    // Progress Bar (Conditional: displayed only when in-progress)
+                    if progress > 0.01 && progress < 0.95 {
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.white.opacity(0.3)).frame(height: 4)
-                            Capsule().fill(Color.white).frame(width: max(4, 80 * min(1.0, progress)), height: 4)
+                            Capsule().fill(Color.white).frame(width: max(4, 70 * min(1.0, progress)), height: 4)
                         }
-                        .frame(width: 80)
-                    } else {
-                        // Play Icon (Default)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white)
+                        .frame(width: 70)
                     }
                     
                     Text("\(episode.runtime ?? 50)m")
@@ -1194,22 +1197,43 @@ struct LiquidEpisodeCard: View {
                     Spacer()
                     
                     Menu {
-                        Button {} label: { Label("Download", systemImage: "arrow.down.circle") }
-                        Button {} label: { Label("Share Episode", systemImage: "square.and.arrow.up") }
-                        Button {} label: { Label("Share Show", systemImage: "square.and.arrow.up.on.square") }
                         Button {
                             if let item = item {
-                                userData.toggleWatched(item, season: episode.seasonNumber, episode: episode.episodeNumber, episodeTitle: episode.name, episodeImage: episode.stillURL)
+                                PlayerManager.shared.play(
+                                    item,
+                                    season: episode.seasonNumber,
+                                    episode: episode.episodeNumber,
+                                    episodeImage: episode.stillURL,
+                                    fromContinueWatching: false,
+                                    forceStreamPicker: true,
+                                    startFromBeginning: false
+                                )
+                                openWindow(id: "player", value: item.id)
+                            }
+                        } label: {
+                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+                        }
+
+                        Button {
+                            if let item = item {
+                                userData.toggleWatched(
+                                    item,
+                                    season: episode.seasonNumber,
+                                    episode: episode.episodeNumber,
+                                    episodeTitle: episode.name,
+                                    episodeImage: episode.stillURL
+                                )
                             }
                         } label: {
                             Label("Mark as Watched", systemImage: "checkmark.circle")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 20)) // Slightly larger touch target
+                            .font(.system(size: 20))
                             .foregroundStyle(.white.opacity(0.8))
                             .contentShape(Rectangle())
                     }
+                    .menuIndicator(.hidden)
                     .menuStyle(.borderlessButton)
                     .buttonStyle(.plain)
                 }
