@@ -16,6 +16,8 @@ struct PlayerView: View {
     @State private var hasStartedPlayback = false
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
+    @State private var hostWindow: NSWindow?
+    @State private var contextMenuMonitor: PlayerContextMenuMonitor?
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -169,13 +171,15 @@ struct PlayerView: View {
                     .padding(.bottom, 36)
                 }
             }
-
-            // Native Right-Click Context Menu Overlay (Decoupled from SwiftUI render loop to eliminate flickering)
-            NativeContextMenuOverlay {
-                buildNativeContextMenu()
-            }
-            .ignoresSafeArea()
         }
+        .background(
+            PlayerWindowAccessor { window in
+                if self.hostWindow !== window {
+                    self.hostWindow = window
+                    self.setupContextMenuMonitor(for: window)
+                }
+            }
+        )
         .focusable() // Make the view capable of receiving key presses
         .focusEffectDisabled() // Remove the blue focus ring
         .onKeyPress(.space) {
@@ -266,6 +270,8 @@ struct PlayerView: View {
             }
         }
         .onDisappear {
+            contextMenuMonitor?.stop()
+            contextMenuMonitor = nil
             // Entering PiP closes this window as a deliberate handoff — the
             // floating panel owns the core now. Saving progress or stopping
             // mpv here would kill playback mid-handoff.
@@ -466,6 +472,18 @@ struct PlayerView: View {
         return nil
     }
     
+    private func setupContextMenuMonitor(for window: NSWindow) {
+        contextMenuMonitor?.stop()
+        let monitor = PlayerContextMenuMonitor()
+        monitor.start(for: window) { [self] in
+            if self.showManualStreamPicker {
+                return NSMenu()
+            }
+            return self.buildNativeContextMenu()
+        }
+        self.contextMenuMonitor = monitor
+    }
+
     private func buildNativeContextMenu() -> NSMenu {
         let menu = NSMenu(title: "Player Context Menu")
         let isPlaying = mpv.isPlaying
@@ -477,7 +495,9 @@ struct PlayerView: View {
             systemImage: isPlaying ? "pause.fill" : "play.fill",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
-            mpv?.togglePlayPause()
+            DispatchQueue.main.async {
+                mpv?.togglePlayPause()
+            }
         })
 
         // 2. Rewind / Forward
@@ -486,7 +506,9 @@ struct PlayerView: View {
             systemImage: "gobackward.15",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
-            mpv?.seek(relative: -15)
+            DispatchQueue.main.async {
+                mpv?.seek(relative: -15)
+            }
         })
 
         menu.addItem(ClosureMenuItem(
@@ -494,7 +516,9 @@ struct PlayerView: View {
             systemImage: "goforward.15",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
-            mpv?.seek(relative: 15)
+            DispatchQueue.main.async {
+                mpv?.seek(relative: 15)
+            }
         })
 
         menu.addItem(NSMenuItem.separator())
@@ -506,7 +530,9 @@ struct PlayerView: View {
             systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
-            mpv?.toggleMute()
+            DispatchQueue.main.async {
+                mpv?.toggleMute()
+            }
         })
 
         // 4. Subtitles Submenu
@@ -525,7 +551,9 @@ struct PlayerView: View {
                 title: "Off",
                 isChecked: isNoneSelected
             ) { [weak mpv] in
-                mpv?.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                DispatchQueue.main.async {
+                    mpv?.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                }
             })
 
             if !subTracks.isEmpty {
@@ -535,7 +563,9 @@ struct PlayerView: View {
                         title: track.displayName,
                         isChecked: track.isSelected
                     ) { [weak mpv] in
-                        mpv?.selectTrack(track)
+                        DispatchQueue.main.async {
+                            mpv?.selectTrack(track)
+                        }
                     })
                 }
             }
@@ -547,7 +577,9 @@ struct PlayerView: View {
                     subMenu.addItem(ClosureMenuItem(
                         title: label
                     ) { [weak mpv] in
-                        mpv?.addExternalSubtitle(sub)
+                        DispatchQueue.main.async {
+                            mpv?.addExternalSubtitle(sub)
+                        }
                     })
                 }
             }
@@ -570,7 +602,9 @@ struct PlayerView: View {
                     title: track.displayName,
                     isChecked: track.isSelected
                 ) { [weak mpv] in
-                    mpv?.selectTrack(track)
+                    DispatchQueue.main.async {
+                        mpv?.selectTrack(track)
+                    }
                 })
             }
             audioMenuItem.submenu = audioMenu
@@ -585,8 +619,10 @@ struct PlayerView: View {
             systemImage: "list.bullet.rectangle",
             isEnabled: true
         ) {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                showManualStreamPicker = true
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    self.showManualStreamPicker = true
+                }
             }
         })
 
@@ -597,7 +633,9 @@ struct PlayerView: View {
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
             if let mpv = mpv {
-                PiPManager.shared.toggle(mpv: mpv)
+                DispatchQueue.main.async {
+                    PiPManager.shared.toggle(mpv: mpv)
+                }
             }
         })
 
@@ -1413,45 +1451,84 @@ struct StreamRowItemView: View {
     }
 }
 
-// MARK: - Native AppKit Context Menu Host (Flicker-Free During 60FPS Playback)
+// MARK: - Native AppKit Context Menu Monitor (Flicker-Free During 60FPS Playback)
 
-struct NativeContextMenuOverlay: NSViewRepresentable {
-    let menuBuilder: () -> NSMenu?
+final class PlayerContextMenuMonitor {
+    private var monitor: Any?
+    private weak var window: NSWindow?
 
-    func makeNSView(context: Context) -> NativeContextMenuView {
-        let view = NativeContextMenuView()
-        view.menuBuilder = menuBuilder
-        return view
+    func start(for window: NSWindow, menuBuilder: @escaping () -> NSMenu) {
+        self.window = window
+        stop()
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
+            guard let self = self else { return event }
+
+            let isRightClick = event.type == .rightMouseDown
+            let isControlLeftClick = event.type == .leftMouseDown && event.modifierFlags.contains(.control)
+
+            guard isRightClick || isControlLeftClick else {
+                return event
+            }
+
+            guard let eventWindow = event.window else {
+                return event
+            }
+
+            // Ensure event is targeted at the player window
+            if let hostWindow = self.window {
+                guard eventWindow == hostWindow else { return event }
+            } else {
+                guard eventWindow.isKeyWindow else { return event }
+            }
+
+            let menu = menuBuilder()
+            guard !menu.items.isEmpty, let contentView = eventWindow.contentView else {
+                return event
+            }
+
+            NSMenu.popUpContextMenu(menu, with: event, for: contentView)
+            return nil
+        }
     }
 
-    func updateNSView(_ nsView: NativeContextMenuView, context: Context) {
-        nsView.menuBuilder = menuBuilder
+    func stop() {
+        if let monitor = monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    deinit {
+        stop()
     }
 }
 
-final class NativeContextMenuView: NSView {
-    var menuBuilder: (() -> NSMenu?)?
+struct PlayerWindowAccessor: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        if let event = NSApp.currentEvent,
-           event.type == .rightMouseDown ||
-           event.type == .rightMouseUp ||
-           (event.type == .leftMouseDown && event.modifierFlags.contains(.control)) {
-            return self
-        }
-        return nil
+    func makeNSView(context: Context) -> PlayerWindowAccessorView {
+        let view = PlayerWindowAccessorView()
+        view.onWindowAcquired = onWindow
+        return view
     }
 
-    override func menu(for event: NSEvent) -> NSMenu? {
-        return menuBuilder?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        guard let menu = menu(for: event) else {
-            super.rightMouseDown(with: event)
-            return
+    func updateNSView(_ nsView: PlayerWindowAccessorView, context: Context) {
+        nsView.onWindowAcquired = onWindow
+        if let window = nsView.window {
+            onWindow(window)
         }
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
+final class PlayerWindowAccessorView: NSView {
+    var onWindowAcquired: ((NSWindow) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window = self.window {
+            onWindowAcquired?(window)
+        }
     }
 }
 
@@ -1460,7 +1537,7 @@ final class ClosureMenuItem: NSMenuItem {
 
     init(title: String, systemImage: String? = nil, isChecked: Bool = false, isEnabled: Bool = true, action: (() -> Void)? = nil) {
         self.actionClosure = action
-        super.init(title: title, action: action != nil ? #selector(didSelect) : nil, keyEquivalent: "")
+        super.init(title: title, action: action != nil ? #selector(didSelect(_:)) : nil, keyEquivalent: "")
         self.target = self
         self.isEnabled = isEnabled
         self.state = isChecked ? .on : .off
@@ -1476,7 +1553,7 @@ final class ClosureMenuItem: NSMenuItem {
         super.init(coder: coder)
     }
 
-    @objc private func didSelect() {
+    @objc private func didSelect(_ sender: Any?) {
         actionClosure?()
     }
 }
