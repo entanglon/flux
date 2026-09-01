@@ -32,11 +32,12 @@ class SubtitleManager: ObservableObject {
                     do {
                         let (data, _) = try await URLSession.shared.data(from: url)
                         let response = try JSONDecoder().decode(StremioSubtitleResponse.self, from: data)
-                        return response.subtitles.map { 
-                            StremioSubtitleTrack(
-                                id: $0.id, 
-                                url: URL(string: $0.url) ?? url, 
-                                language: $0.lang,
+                        return response.subtitles.compactMap { sub in
+                            guard let subURL = sub.url, let subLang = sub.lang else { return nil }
+                            return StremioSubtitleTrack(
+                                id: sub.id ?? subURL,
+                                url: URL(string: subURL) ?? url,
+                                language: subLang,
                                 source: addon.name
                             )
                         }
@@ -62,7 +63,7 @@ struct StremioSubtitleResponse: Codable {
 }
 
 struct StremioSubtitle: Codable {
-    let id: String
-    let url: String
-    let lang: String
+    let id: String?
+    let url: String?
+    let lang: String?
 }

@@ -28,7 +28,6 @@ class AddonManager: ObservableObject {
     private func syncAddonManifests() async {
         for addon in addons {
             if addon.catalogs == nil || addon.catalogs!.isEmpty {
-                if addon.id == "local.raspberry.webstreamer" { continue }
                 do {
                     try await addAddon(url: addon.url)
                 } catch {

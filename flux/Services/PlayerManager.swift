@@ -686,7 +686,7 @@ class PlayerManager: ObservableObject {
 
             async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
             
-            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { updatedStreams in
+            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode, forceRefresh: forceStreamPicker) { updatedStreams in
                 Task { @MainActor in
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)

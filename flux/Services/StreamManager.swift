@@ -23,6 +23,9 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
     let quality: String
     var size: String?
     var language: String?
+    var codec: String?
+    var bitrate: String?
+    var subtitles: String?
     var seeders: Int?
     var leechers: Int?
     var fileIdx: Int? = nil
@@ -102,20 +105,30 @@ struct StremioResponse: Codable {
 struct StremioBehaviorHints: Codable {
     let proxyHeaders: [String: [String: String]]?
     let notWebReady: Bool?
+    let bingeGroup: String?
+    let filename: String?
+    let videoSize: Int?
 
     enum CodingKeys: String, CodingKey {
         case proxyHeaders
         case notWebReady
+        case bingeGroup
+        case filename
+        case videoSize
     }
 }
 
 struct StremioStream: Codable {
     let name: String?
     let title: String?
+    let description: String?
     let url: String?
+    let ytId: String?
     let infoHash: String?
     let fileIdx: Int?
+    let externalUrl: String?
     let sources: [String]?
+    let subtitles: [StremioSubtitle]?
     let behaviorHints: StremioBehaviorHints?
 }
 
@@ -126,10 +139,12 @@ class StreamManager {
 
     /// Shared session: connection reuse + bounded timeouts so a hanging addon
     /// never stalls the whole source list (Stremio-style fast failure).
+    /// 20s request timeout accommodates scraping-based addons (PenguPlay etc.)
+    /// that query multiple providers sequentially.
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 12
-        config.timeoutIntervalForResource = 20
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 30
         config.httpShouldUsePipelining = true
         return URLSession(configuration: config)
     }()
@@ -155,16 +170,23 @@ class StreamManager {
         return await fetchStreamsRealtime(for: item, season: season, episode: episode, onStreamsUpdated: { _ in })
     }
     
-    func fetchStreamsRealtime(for item: MediaItem, season: Int? = nil, episode: Int? = nil, onStreamsUpdated: @escaping ([Stream]) -> Void) async -> [Stream] {
+    func fetchStreamsRealtime(for item: MediaItem, season: Int? = nil, episode: Int? = nil, forceRefresh: Bool = false, onStreamsUpdated: @escaping ([Stream]) -> Void) async -> [Stream] {
         let s = season ?? 1
         let e = episode ?? 1
         let isSeries = item.category == "TV Show" || item.category == "Series"
         let type = isSeries ? "series" : "movie"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        if let cached = await cacheActor.get(key: cacheKey) {
-            onStreamsUpdated(cached)
-            return cached
+        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+
+        if !forceRefresh, let cached = await cacheActor.get(key: cacheKey) {
+            let filtered = cached.filter { s in
+                if sourceMode == "http" { return !s.isTorrent }
+                if sourceMode == "torrent" { return s.isTorrent }
+                return true
+            }
+            onStreamsUpdated(filtered)
+            return filtered
         }
         
         // Resolve IMDb ID (Stremio addons expect tt... IDs)
@@ -178,14 +200,10 @@ class StreamManager {
         var allStreams: [Stream] = []
 
         await withTaskGroup(of: [Stream].self) { group in
-            // Only addons that actually provide streams — Cinemeta (catalog/meta)
-            // would just waste a request in the fan-out. Addons with unknown
-            // resource flags are included conservatively.
-            let enabledAddons = AddonManager.shared.addons.filter {
-                guard $0.isEnabled else { return false }
-                guard let resources = $0.resources, !resources.isEmpty else { return true }
-                return resources.contains("stream")
-            }
+            // Fan out to all enabled addons. The Stremio protocol returns an empty
+            // array or 404 for unsupported resources, so there's no harm including
+            // addons that might only provide catalogs — they just won't return streams.
+            let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled }
 
             for addon in enabledAddons {
                 let cleanBaseURL = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
@@ -202,26 +220,35 @@ class StreamManager {
                     allStreams.append(contentsOf: result)
                     let currentDeduped = self.deduped(allStreams)
                     let currentSorted = currentDeduped.sorted { self.streamSortComparator($0, $1) }
-                    onStreamsUpdated(currentSorted)
+                    let currentFiltered = currentSorted.filter { s in
+                        if sourceMode == "http" { return !s.isTorrent }
+                        if sourceMode == "torrent" { return s.isTorrent }
+                        return true
+                    }
+                    onStreamsUpdated(currentFiltered)
                 }
             }
         }
         
-        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
-        let finalFiltered = deduped(allStreams).filter { s in
-            guard self.isWithinMaxResolution(s) else { return false }
-            let isTorrent = s.isTorrent || (s.seeders != nil && s.seeders! > 0)
-            if sourceMode == "http" { return !isTorrent }
-            if sourceMode == "torrent" { return isTorrent }
-            return true
+        let resolutionFiltered = deduped(allStreams).filter { s in
+            self.isWithinMaxResolution(s)
         }
 
-        let sortedStreams = finalFiltered.sorted { s1, s2 in
+        let sortedStreams = resolutionFiltered.sorted { s1, s2 in
             streamSortComparator(s1, s2)
         }
 
+        // Cache the UNFILTERED (by source mode) result so switching between
+        // http/torrent/both doesn't require re-fetching from all addons.
         await cacheActor.set(key: cacheKey, streams: sortedStreams)
-        return sortedStreams
+
+        // Apply source mode filter AFTER caching
+        let modeFiltered = sortedStreams.filter { s in
+            if sourceMode == "http" { return !s.isTorrent }
+            if sourceMode == "torrent" { return s.isTorrent }
+            return true
+        }
+        return modeFiltered
     }
 
     /// Collapses duplicate entries for the same underlying source (same torrent from
@@ -280,17 +307,11 @@ class StreamManager {
 
         // Language preference:
         let defaultLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
-        if defaultLang.uppercased() != "ENGLISH" {
-            if matchesPreferredLanguage(stream, preferred: defaultLang) {
-                score += 3000.0 // Major priority boost for matching the user's preferred audio language
-            } else {
-                score *= 0.40 // Demote releases that lack the preferred language
-            }
+        if matchesPreferredLanguage(stream, preferred: defaultLang) {
+            score += 3000.0 // Major priority boost for matching the user's preferred audio language
         } else {
-            // For English, penalize foreign-dub releases with no English original track
-            if let lang = stream.language?.uppercased(), isForeignDub(lang, title: stream.title) {
-                score *= 0.25
-            }
+            // Demote releases that lack the preferred language
+            score *= 0.40
         }
 
         // Size efficiency bonus for reasonable file sizes
@@ -313,14 +334,21 @@ class StreamManager {
         let pref = preferred.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if pref.isEmpty || pref == "ENGLISH" {
             let lang = stream.language?.uppercased() ?? ""
+            // Explicitly English or no language tag (assumed English for HTTP streams)
+            if lang.contains("EN") || lang.isEmpty {
+                return true
+            }
+            // Has a non-English language tag — check if it's a foreign dub
             if isForeignDub(lang, title: stream.title) {
                 return false
             }
-            return true
+            // Has some other language — not a match for English preference
+            return false
         }
 
         let combined = "\(stream.title) \(stream.cleanTitle) \(stream.language ?? "")".uppercased()
         let langKeywords: [String: [String]] = [
+            "ENGLISH": ["ENGLISH", "EN", "ENG"],
             "HINDI": ["HINDI", "HIN", "BOLLYWOOD"],
             "TAMIL": ["TAMIL", "TAM"],
             "TELUGU": ["TELUGU", "TEL"],
@@ -481,7 +509,7 @@ class StreamManager {
         print("[\(sourceName)] Requesting: \(urlString)")
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 12
+        request.timeoutInterval = 20
 
         do {
             let (data, response) = try await self.session.data(for: request)
@@ -491,7 +519,17 @@ class StreamManager {
             
             let stremioResponse = try JSONDecoder().decode(StremioResponse.self, from: data)
             let streams = stremioResponse.streams.compactMap { stream -> Stream? in
+                // Protocol-compliant URL resolution: url → ytId → infoHash → externalUrl
                 var targetURLString = stream.url
+
+                // YouTube ID → construct YouTube URL
+                if targetURLString == nil || targetURLString == "about:blank" {
+                    if let ytId = stream.ytId {
+                        targetURLString = "https://www.youtube.com/watch?v=\(ytId)"
+                    }
+                }
+
+                // Torrent infoHash → magnet URI
                 if (targetURLString == nil || targetURLString == "about:blank"), let hash = stream.infoHash {
                     var magnet = "magnet:?xt=urn:btih:\(hash)"
                     if let trackers = stream.sources {
@@ -506,19 +544,30 @@ class StreamManager {
                     }
                     targetURLString = magnet
                 }
-                
+
+                // externalUrl (e.g. Netflix links, external players)
+                if (targetURLString == nil || targetURLString == "about:blank") {
+                    if let extUrl = stream.externalUrl {
+                        targetURLString = extUrl
+                    }
+                }
+
                 guard var finalURLStr = targetURLString, finalURLStr != "about:blank" else { return nil }
-                if !finalURLStr.starts(with: "magnet:") {
+                if !finalURLStr.starts(with: "magnet:") && !finalURLStr.starts(with: "https://www.youtube.com") {
                     finalURLStr = normalizeAddonURL(finalURLStr)
                 }
                 guard let streamUrl = URL(string: finalURLStr) else { return nil }
-                
-                let rawTitle = stream.title ?? stream.name ?? "Unknown Stream"
+
+                // Protocol: description is primary (replaces deprecated title), title is fallback
+                let rawTitle = stream.description ?? stream.title ?? stream.name ?? "Unknown Stream"
                 let nameHeader = stream.name ?? ""
                 let combinedTitle = "\(nameHeader) \(rawTitle)"
                 let quality = parseQuality(from: combinedTitle)
                 let size = parseSize(from: rawTitle)
-                let language = parseLanguage(from: rawTitle)
+                let language = parseLanguage(from: combinedTitle)
+                let codec = parseCodec(from: combinedTitle)
+                let bitrate = parseBitrate(from: combinedTitle)
+                let subtitles = parseSubtitles(from: combinedTitle)
                 let seeders = parseSeeders(from: rawTitle)
                 let leechers = parseLeechers(from: rawTitle)
                 let clean = cleanTitleString(name: nameHeader, title: rawTitle)
@@ -534,6 +583,9 @@ class StreamManager {
                     quality: quality,
                     size: size,
                     language: language,
+                    codec: codec,
+                    bitrate: bitrate,
+                    subtitles: subtitles,
                     seeders: seeders,
                     leechers: leechers,
                     fileIdx: stream.fileIdx,
@@ -683,6 +735,58 @@ class StreamManager {
         }
         
         return languages.isEmpty ? nil : languages.joined(separator: ", ")
+    }
+
+    private func parseCodec(from title: String) -> String? {
+        let upper = title.uppercased()
+        if upper.contains("AV1") { return "AV1" }
+        if upper.contains("HEVC") || upper.contains("X265") || upper.contains("H.265") { return "HEVC" }
+        if upper.contains("X264") || upper.contains("H.264") || upper.contains("AVC") { return "x264" }
+        if upper.contains("MPEG") { return "MPEG" }
+        return nil
+    }
+
+    private func parseBitrate(from title: String) -> String? {
+        let patterns = [
+            #"~?(\d+(?:\.\d+)?)\s*Mbps"#,
+            #"~?(\d+(?:\.\d+)?)\s*Mb/s"#,
+            #"(?i)bitrate[:\s]*(\d+(?:\.\d+)?)\s*(?:Mbps|Mb/s)"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+               let range = Range(match.range(at: 1), in: title) {
+                return "~\(title[range]) Mbps"
+            }
+        }
+        return nil
+    }
+
+    private func parseSubtitles(from title: String) -> String? {
+        let upper = title.uppercased()
+        var subs: [String] = []
+
+        if let subRange = upper.range(of: "SUB") ?? upper.range(of: "SUBS") ?? upper.range(of: "SUBTITLE") {
+            let subPart = String(upper[subRange.lowerBound...])
+            if subPart.contains("ENGLISH") || subPart.contains("ENG") { subs.append("English") }
+            if subPart.contains("SPANISH") || subPart.contains("SPA") { subs.append("Spanish") }
+            if subPart.contains("FRENCH") || subPart.contains("FRE") { subs.append("French") }
+            if subPart.contains("GERMAN") || subPart.contains("DEU") { subs.append("German") }
+            if subPart.contains("HINDI") || subPart.contains("HIN") { subs.append("Hindi") }
+            if subPart.contains("ARABIC") || subPart.contains("ARA") { subs.append("Arabic") }
+            if subPart.contains("PORTUGUESE") || subPart.contains("POR") { subs.append("Portuguese") }
+            if subPart.contains("ITALIAN") || subPart.contains("ITA") { subs.append("Italian") }
+            if subPart.contains("JAPANESE") || subPart.contains("JPN") { subs.append("Japanese") }
+            if subPart.contains("KOREAN") || subPart.contains("KOR") { subs.append("Korean") }
+            if subPart.contains("CHINESE") || subPart.contains("CHI") { subs.append("Chinese") }
+            if subPart.contains("SDH") { subs.append("SDH") }
+        }
+
+        if subs.isEmpty && (upper.contains("SUBBED") || upper.contains("ENGSUB")) {
+            subs.append("English")
+        }
+
+        return subs.isEmpty ? nil : subs.joined(separator: ", ")
     }
     
     private func fetchKitsuID(for title: String) async -> String? {

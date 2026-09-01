@@ -1,6 +1,98 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 10:25 PM — FLUX MODE PURE LOGO BUFFER SCREEN & PARALLEL PREFETCH
+## LATEST: Sep 2, 2026, 12:50 AM — STREMIO ADDON COMPATIBILITY + UI STREAM PICKER REDESIGN
+
+### Current Status & Resolutions:
+
+#### Stremio Protocol Compliance & Addon Compatibility
+
+- **Fix 1 — HTTP-only sourceMode filter bug (`StreamManager.swift:213`):** *Status: Completed.*
+  - `fetchFromAddon` had a seeder-based heuristic that incorrectly skipped HTTP-only addons when `sourceMode == .http`. Removed the heuristic — now only addon type filtering applies.
+
+- **Fix 2 — Stream picker stuck state (`PlayerView.swift:434`):** *Status: Completed.*
+  - Picker overlay condition had `!availableStreams.isEmpty` which prevented it from showing during fetching. Removed the condition; picker now shows during `isFetchingStreams` regardless of stream count.
+
+- **Fix 3 — Sequential loading screens (`PlayerView.swift:42`):** *Status: Completed.*
+  - Logo buffer view now only shows after a stream is actually selected (`selectedStream != nil`), eliminating the false "buffering" screen before stream selection.
+
+- **Fix 4 — Real buffer progress (`PlayerView.swift:875, 791`):** *Status: Completed.*
+  - `logoBufferingView` now prefers `mpv.bufferProgress` (real demuxer cache fill) over the fake animated progress. Seamless handoff from stream discovery to actual playback buffer.
+
+- **Fix 5 — PenguPlay language parsing (`StreamManager.swift:520`):** *Status: Completed.*
+  - PenguPlay combines language info into `name`+`title` fields. Parsing now checks both fields.
+
+- **Fix 6 — PenguPlay timeout (`StreamManager.swift:131, 483`):** *Status: Completed.*
+  - HTTP request timeout: 12s → 20s. Resource timeout: 20s → 30s. Prevents premature abort on slower addon responses.
+
+- **Fix 7 — Cache busting (`StreamManager.swift:160`, `PlayerManager.swift:689`):** *Status: Completed.*
+  - `forceRefresh` parameter on `fetchStreamsRealtime` bypasses 24h disk cache when user manually triggers stream search.
+
+- **StremioStream struct update (`StreamManager.swift:121`):** Added `description` (primary per Stremio protocol, replaces deprecated `title`), `ytId`, `externalUrl`, `subtitles` fields.
+
+- **StremioBehaviorHints (`StreamManager.swift:105`):** Added `bingeGroup`, `filename`, `videoSize` fields.
+
+- **Stream struct update (`StreamManager.swift:17`):** Added `codec`, `bitrate`, `subtitles` fields.
+
+- **New parsing methods (`StreamManager.swift:653+`):** `parseCodec`, `parseBitrate`, `parseSubtitles` methods.
+
+- **fetchFromAddon updated (`StreamManager.swift:497`):** Handles all Stremio URL types: `url` → `ytId` → `infoHash` → `externalUrl`. `description` is the primary stream title field per protocol, `title` used as fallback.
+
+- **Resource filter removed (`StreamManager.swift:203`):** Now queries ALL enabled addons. Stremio protocol correctly returns 404/empty for unsupported resources — no need for app-level resource filtering.
+
+- **WebStreamrMBG skip guard removed (`AddonManager.swift:31`):** No longer blocked from fetching.
+
+- **StremioSubtitle optional fields (`SubtitleManager.swift:64`):** Protocol-compliant optionality with safe unwrapping.
+
+- **HTTP filter cache fix (`StreamManager.swift:221`):** Source mode filter now applied AFTER caching, not before. Switching http/torrent/both no longer requires re-fetch from addons.
+
+- **Language ranking (`StreamManager.swift:283`):** `computeStreamHealthScore` boosts matching language streams by +3000 health points, demotes non-matching by 60%. English added to langKeywords.
+
+- **Provider gradients (`PlayerView.swift:1540`):** Added PenguPlay, WebStreamrMBG, Comet, MediaFusion gradient styles.
+
+#### SourceMode Filter on All Return Paths
+
+- **SourceMode filter on cache reads (`StreamManager.swift:180-190`):** *Status: Completed.* `sourceMode` filter now applied on ALL return paths — cache hit, real-time streaming callback, and final return. Previously cached unfiltered streams bypassed the sourceMode filter entirely.
+
+- **SourceMode filter on real-time callback (`StreamManager.swift:223-227`):** UI now receives correctly filtered results as streams arrive from each addon during TaskGroup fan-out.
+
+#### Stream Picker Race Condition
+
+- **Picker race condition fix (`PlayerView.swift:434`):** Added `!playerManager.isFetchingStreams` check so picker only shows when not actively fetching.
+
+#### Stream Selector Redesign (macOS-style)
+
+- **Stream selector layout replaced (`PlayerView.swift`):** *Status: Completed — first half.*
+  - Left sidebar (170px) with search field + Type/Quality/Sources sections
+  - Top bar with traffic light controls (red active, yellow+green greyed)
+  - `StreamCategory` struct for sidebar items
+  - `sidebarSection` helper function for grouped sidebar categories
+  - Keyboard navigation (↑↓ arrows, Enter, Escape, `/` to focus search)
+  - `@FocusState` for search field
+  - Filter logic using switch statement
+  - Larger frame: 900×540 (was 640 wide), rounded corners (14px), liquid glass material
+
+- **StreamRowItemView replacement (`PlayerView.swift`):** *Status: Completed.*
+  - New `isSelected: Bool` parameter for selection highlight
+  - Hover detail popup with **2.5 second delay** via `DispatchWorkItem` timer (matching Stremio's delayed hover pattern)
+  - Detail panel: 310px floating `.ultraThinMaterial` panel showing full metadata (title, source, quality, codec, size, seeders, language, subtitles, bitrate)
+  - Hover effects: subtle opacity fill + thin border highlight (no scale/glow/bounce)
+  - Subtle selection highlight via accent color opacity
+
+### Open Issues / Remaining Work
+
+- **WebStreamrMBG returning no results** — No special handling exists; flows through generic pipeline. Needs debug logging or URL/response verification.
+- **Addon-level sourceMode filtering** — User explicitly wants "http" mode to only fire HTTP addons (skip torrent-only), not just filter streams after fetching. May need addon classification based on URL patterns.
+- **Visual testing** — App builds cleanly; needs live verification of detail popup timing/position and overall stream picker UX.
+
+### Verification
+
+- Build: **BUILD SUCCEEDED** (xcodebuild, Sep 2, 2026 12:51 AM)
+- 5 files changed: `AddonManager.swift`, `PlayerManager.swift`, `StreamManager.swift`, `SubtitleManager.swift`, `PlayerView.swift`
+- 676 insertions, 425 deletions
+
+---
+
+## Sep 1, 2026, 10:25 PM — FLUX MODE PURE LOGO BUFFER SCREEN & PARALLEL PREFETCH
 
 ### Current Status & Resolutions:
 - **Pure Cinematic Logo Buffering in Flux Mode (`PlayerView.swift`):** *Status: Completed & Verified.*
@@ -233,75 +325,6 @@
 ## Previous Sessions
 
 ### Player UI — Skip Intro & Next Episode (Apple TV style)
-- Moved from floating overlays to **bottom-right floating capsules** (like Apple TV's "Skip Recap")
-- Only visible when player controls auto-hide (after 3s of no mouse movement)
-- Disappear when mouse moves and controls reappear
-- Uses `ultraThinMaterial` glass effect for clean look
-- `isControlsVisible` is a `@Binding` from PlayerView → PlayerControlsView
-
-### Memory Fixes
-- **FluxEngine**: `GOMEMLIMIT=500MB`, `GOGC=20` (GC at 20% growth), `STREMIO_MEM_LIMIT=500MB`
-  - Was 890MB with GOGC=50 — now 25-30MB at idle
-- **mpv demuxer buffer**: 100MB → 50MB (warm core + player)
-- **mpv backward buffer**: 20MB → 10MB
-- **Detail hero image**: maxDimension 4096 → 1920 (saves ~25MB per hero)
-- **Image URLCache**: 128MB → 32MB memory, 1GB → 512MB disk
-- **NSCache**: 200 count / 100MB → 80 count / 30MB
-
-### Double Torrent Download Fix
-- Added `activeTorrentHash` tracking to PlayerManager
-- `play()`: calls `cancelDetailPrefetch()` + removes old torrent before new playback
-- `attemptStream()`: removes old torrent before registering new source (prevents auto-fallback stacking)
-- `close()`: removes active torrent to stop background downloads
-- Prevents race conditions where prefetch fire-and-forget /create competes with play's /create
-
-### Search Improvements
-- **Dropdown suggestions**: show while typing, hidden after submit
-- **Full results**: only trigger on Enter/submit
-- **Typing after results**: resets back to suggestion mode
-- **Search card art**: increased GlassCard maxDimension 800 → 1200 for Retina
-
-### OTT Catalog
-- Streaming Catalogs addon data is stale (third-party issue — addon expired Oct 2025)
-- `sharpPosterURL` correctly upgrades Cinemeta `/poster/small/` → `/poster/large/`
-- OTT items with tt-prefixed IDs get metahub posters
-
-### Thumbnail System
-- In-memory NSCache with limits (80 count, 30MB cost)
-- URLCache for disk storage (32MB memory, 512MB disk)
-- Previous disk-only attempt reverted (hash collision bug)
-
----
-
-## Previous Sessions
-
-### Memory Lifecycle + Prefetch Cancellation (Aug 27)
-- `STREMIO_MEM_LIMIT=512MB` env var, `applicationWillTerminate` handler
-- `removeTorrent`/`removeAllTorrents` methods, `stopServer()` cleanup
-- `cancelDetailPrefetch()` with `DetailView.onDisappear`
-
-### Hero Quality Fix (Aug 26)
-- WebP embedded thumbnail bug fixed (`CreateThumbnailFromImageAlways`)
-- Image cache button fixed
-
-### OTT Rail + Quality Fixes (Aug 26)
-- 9 platforms with branded logos, portrait cards, GlassCard hover
-- Backdrops 4K, posters metahub large, cache eviction
-
-### Go Engine Shipped (Aug 26)
-- FluxEngine sidecar (stremio-server-go v0.12.1, 24MB binary)
-- Client firewall, registration tracking, supervisor
-
-### Advanced Loading / Prefetch (Aug 26)
-- DetailPage prefetch: stream fetch + torrent prime + warm mpv core
-- Instant playback on Play after prefetch
-
-### PiP v2 (Aug 26)
-- Cascade architecture, working controls, expand/close round-trip
-
-### Streaming Backend Overhaul (Aug 24)
-- Hydra → Stremio server.js + FluxEngine
-- Fire-and-forget /create protocol
 
 ---
 
@@ -350,4 +373,4 @@ open "$DEBUG_APP"
 - `flux/Components/ContinueWatchingCard.swift` — Apple TV style landscape continue watching cards
 - `flux/Components/GlassCard.swift` — Media card component with hover states
 
-*Last Updated: Sep 1, 2026, 10:30 PM*
+*Last Updated: Sep 2, 2026, 12:55 AM*

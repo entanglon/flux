@@ -38,8 +38,8 @@ struct PlayerView: View {
             MPVVideoView(controller: mpv)
                 .ignoresSafeArea()
             
-            // 2. Initial Buffer Loading Screen (Cold start: full artwork + animated logo fill, only BEFORE playback starts)
-            if isInitialLoading {
+            // 2. Initial Buffer Loading Screen (Cold start: full artwork + animated logo fill, only AFTER stream selected & BEFORE playback starts)
+            if isInitialLoading && playerManager.currentStreamURL != nil {
                 logoBufferingView
                     .transition(.opacity)
                     .zIndex(10)
@@ -431,7 +431,7 @@ struct PlayerView: View {
         }
         
         // Stream Selection UI (Initial automatic picker OR manually opened via Right-Click overlay)
-        if showManualStreamPicker || (!playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.availableStreams.isEmpty) {
+        if showManualStreamPicker || (!playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.isFetchingStreams) {
             ZStack {
                 Color.black.opacity(0.65)
                     .ignoresSafeArea()
@@ -788,7 +788,8 @@ struct PlayerView: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
 
-            let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
+            let mpvProgressMid = max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0))
+            let realProgress = CGFloat(mpvProgressMid > 0.005 ? mpvProgressMid : animatedProgress)
 
             if let media = item {
                 let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
@@ -871,8 +872,10 @@ struct PlayerView: View {
             )
             .ignoresSafeArea()
             
-            // Real Telemetry Progress Fill Loading
-            let realProgress = CGFloat(max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0), animatedProgress))
+            // Real Telemetry Progress Fill Loading — prefer mpv's actual buffer telemetry, 
+            // fall back to animated progress only when mpv hasn't reported yet
+            let mpvProgress = max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 10.0))
+            let realProgress = CGFloat(mpvProgress > 0.005 ? mpvProgress : animatedProgress)
             
             VStack(spacing: 20) {
                 if let media = item {
@@ -993,10 +996,63 @@ struct PlayerView: View {
     }
     
     @State private var selectedStreamFilter: String = "All"
+    @State private var searchText: String = ""
+    @State private var focusedStreamIndex: Int? = nil
+    @FocusState private var isSearchFocused: Bool
+
+    private struct StreamCategory: Identifiable {
+        let id = UUID()
+        let name: String
+        let icon: String
+    }
+
+    @ViewBuilder
+    private func sidebarSection(_ title: String, categories: [StreamCategory]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.3))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 3)
+
+            ForEach(categories) { cat in
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        selectedStreamFilter = cat.name
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: cat.icon)
+                            .font(.system(size: 11))
+                            .frame(width: 16)
+                        Text(cat.name)
+                            .font(.system(size: 12, weight: selectedStreamFilter == cat.name ? .semibold : .regular))
+                        Spacer()
+                        if cat.name == selectedStreamFilter {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 5, height: 5)
+                        }
+                    }
+                    .foregroundColor(selectedStreamFilter == cat.name ? .white : .white.opacity(0.5))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        selectedStreamFilter == cat.name
+                        ? Color.white.opacity(0.07)
+                        : Color.clear
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 6)
+    }
 
     private var streamSelectionView: some View {
         let allStreams = playerManager.availableStreams
-        
+
         let availableSources: [String] = {
             var sourcesSet = Set<String>()
             for s in allStreams {
@@ -1004,223 +1060,256 @@ struct PlayerView: View {
             }
             return Array(sourcesSet).sorted()
         }()
-        
-        // Clean filter layout: type → quality → sources
-        var dynamicFilters: [String] = ["All", "Best"]
+
+        var categories: [StreamCategory] = [
+            StreamCategory(name: "All", icon: "square.grid.2x2"),
+            StreamCategory(name: "Best", icon: "star.circle"),
+        ]
         if allStreams.contains(where: { $0.isFastStart }) {
-            dynamicFilters.append("Fast Start")
+            categories.append(StreamCategory(name: "Fast Start", icon: "bolt.circle"))
         }
         if allStreams.contains(where: { $0.isTorrent }) {
-            dynamicFilters.append("Torrents")
+            categories.append(StreamCategory(name: "Torrents", icon: "arrow.triangle.2.circlepath"))
         }
         if allStreams.contains(where: { !$0.isTorrent }) {
-            dynamicFilters.append("Direct")
+            categories.append(StreamCategory(name: "Direct", icon: "link"))
         }
-        // Quality filters
         let availableQualities = Set(allStreams.map { $0.quality })
         for q in ["4K", "1080p", "720p"] {
-            if availableQualities.contains(q) { dynamicFilters.append(q) }
+            if availableQualities.contains(q) {
+                categories.append(StreamCategory(name: q, icon: "sparkles"))
+            }
         }
-        // Source filters
-        dynamicFilters += availableSources
+        for source in availableSources {
+            categories.append(StreamCategory(name: source, icon: "puzzlepiece.extension.fill"))
+        }
 
+        let searchLower = searchText.lowercased()
         let filteredStreams: [Stream] = {
-            if selectedStreamFilter == "All" { return allStreams }
-            if selectedStreamFilter == "Best" {
-                return allStreams
+            var streams: [Stream]
+            switch selectedStreamFilter {
+            case "Best":
+                streams = allStreams
                     .filter { playerManager.probeStatus[$0.stableKey]?.ok == true }
-                    .sorted { s1, s2 in
-                        StreamManager.shared.streamSortComparator(s1, s2)
-                    }
-            }
-            if selectedStreamFilter == "Fast Start" {
-                return allStreams
+                    .sorted { StreamManager.shared.streamSortComparator($0, $1) }
+            case "Fast Start":
+                streams = allStreams
                     .filter { $0.isFastStart }
-                    .sorted { s1, s2 in
-                        StreamManager.shared.computeStartupSpeedScore(s1) > StreamManager.shared.computeStartupSpeedScore(s2)
-                    }
+                    .sorted { StreamManager.shared.computeStartupSpeedScore($0) > StreamManager.shared.computeStartupSpeedScore($1) }
+            case "Torrents":
+                streams = allStreams.filter { $0.isTorrent }
+            case "Direct":
+                streams = allStreams.filter { !$0.isTorrent }
+            case "4K", "1080p", "720p":
+                streams = allStreams.filter { $0.quality == selectedStreamFilter }
+            default:
+                streams = allStreams.filter {
+                    $0.source.lowercased() == selectedStreamFilter.lowercased()
+                }
             }
-            if selectedStreamFilter == "Torrents" { return allStreams.filter { $0.isTorrent } }
-            if selectedStreamFilter == "Direct" { return allStreams.filter { !$0.isTorrent } }
-            if selectedStreamFilter == "4K" || selectedStreamFilter == "1080p" || selectedStreamFilter == "720p" {
-                return allStreams.filter { $0.quality == selectedStreamFilter }
+            if !searchText.isEmpty {
+                streams = streams.filter {
+                    $0.cleanTitle.lowercased().contains(searchLower) ||
+                    $0.source.lowercased().contains(searchLower) ||
+                    $0.quality.lowercased().contains(searchLower) ||
+                    ($0.language?.lowercased().contains(searchLower) ?? false)
+                }
             }
-            return allStreams.filter { $0.source == selectedStreamFilter || $0.source.lowercased().contains(selectedStreamFilter.lowercased()) }
+            return streams
         }()
 
         let isVerifyingBest = selectedStreamFilter == "Best"
             && filteredStreams.isEmpty
             && allStreams.contains { playerManager.probeStatus[$0.stableKey] == nil }
-        
+
         return VStack(spacing: 0) {
-            // Header Bar
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Select Stream Source")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(playerManager.isFetchingStreams ? Color.blue : Color.green)
-                            .frame(width: 6, height: 6)
-                        
-                        if playerManager.isFetchingStreams {
-                            Text("Searching streams… (\(allStreams.count) found)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.65))
-                        } else {
-                            Text("\(allStreams.count) sources available")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.65))
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        if showManualStreamPicker {
-                            showManualStreamPicker = false
-                        } else {
-                            playerManager.close()
-                            dismiss()
-                        }
-                    }
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .padding(4)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-            
-            // Dynamic Category / Source Filter Tabs
-            ScrollView(.horizontal, showsIndicators: false) {
+            // ── Top Bar ──
+            HStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    ForEach(dynamicFilters, id: \.self) { filter in
-                        Button(action: {
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
-                                selectedStreamFilter = filter
-                            }
-                        }) {
-                            Text(filter)
-                                .font(.system(size: 12, weight: selectedStreamFilter == filter ? .bold : .medium))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    selectedStreamFilter == filter
-                                    ? AnyShapeStyle(LinearGradient(colors: [Color.blue, Color.cyan.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                                    : AnyShapeStyle(Color.white.opacity(0.08))
-                                )
-                                .foregroundColor(
-                                    selectedStreamFilter == filter ? .white : .white.opacity(0.75)
-                                )
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .stroke(selectedStreamFilter == filter ? Color.white.opacity(0.3) : Color.white.opacity(0.05), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 22)
-            }
-            .padding(.bottom, 12)
-            
-            Divider()
-                .background(Color.white.opacity(0.1))
-                .padding(.horizontal, 16)
-            
-            // Streams List
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if filteredStreams.isEmpty && isVerifyingBest {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                                .tint(.blue)
-                            Text("Verifying sources…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text("Probing response times and swarm health")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-                        .padding(.vertical, 50)
-                    } else if filteredStreams.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "film.stack")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.secondary)
-                            Text("No streams found for \"\(selectedStreamFilter)\"")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 50)
-                    } else {
-                        ForEach(filteredStreams) { stream in
-                            StreamRowItemView(stream: stream) {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 12, height: 12)
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                if showManualStreamPicker {
                                     showManualStreamPicker = false
-                                    playerManager.selectStream(stream)
+                                } else {
+                                    playerManager.close()
+                                    dismiss()
                                 }
                             }
                         }
+                    Circle().fill(Color.gray.opacity(0.35)).frame(width: 12, height: 12)
+                    Circle().fill(Color.gray.opacity(0.35)).frame(width: 12, height: 12)
+                }
+                .padding(.leading, 16)
+
+                Text("Stream Sources")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                    .padding(.leading, 12)
+
+                Spacer()
+
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(playerManager.isFetchingStreams ? Color.blue : Color.green)
+                        .frame(width: 5, height: 5)
+                    if playerManager.isFetchingStreams {
+                        Text("Searching… (\(allStreams.count))")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.4))
+                    } else {
+                        Text("\(filteredStreams.count)/\(allStreams.count)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+                .padding(.trailing, 16)
             }
-            .frame(maxHeight: 460)
-            
-            Divider()
-                .background(Color.white.opacity(0.1))
-                .padding(.horizontal, 16)
-            
-            // Footer Bar
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        if showManualStreamPicker {
-                            showManualStreamPicker = false
-                        } else {
-                            playerManager.close()
-                            dismiss()
+            .padding(.vertical, 12)
+
+            Divider().background(Color.white.opacity(0.06))
+
+            // ── Body: Sidebar + Stream List ──
+            HStack(spacing: 0) {
+                // Left Sidebar
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.3))
+                            TextField("Search…", text: $searchText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12))
+                                .foregroundColor(.white)
+                                .focused($isSearchFocused)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
+                        )
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 10)
+
+                        sidebarSection("Type", categories: categories.filter {
+                            ["All", "Best", "Fast Start", "Torrents", "Direct"].contains($0.name)
+                        })
+
+                        let qualityCats = categories.filter { ["4K", "1080p", "720p"].contains($0.name) }
+                        if !qualityCats.isEmpty {
+                            sidebarSection("Quality", categories: qualityCats)
+                        }
+
+                        let sourceCats = categories.filter { cat in
+                            !["All", "Best", "Fast Start", "Torrents", "Direct", "4K", "1080p", "720p"].contains(cat.name)
+                        }
+                        if !sourceCats.isEmpty {
+                            sidebarSection("Sources", categories: sourceCats)
+                        }
+                    }
+                    .padding(.vertical, 10)
+                }
+                .frame(width: 170)
+
+                Divider().background(Color.white.opacity(0.06))
+
+                // Stream List
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 6) {
+                            if filteredStreams.isEmpty && isVerifyingBest {
+                                VStack(spacing: 12) {
+                                    ProgressView().tint(.blue)
+                                    Text("Verifying sources…")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 60)
+                            } else if filteredStreams.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: "film.stack")
+                                        .font(.system(size: 30))
+                                        .foregroundStyle(.secondary)
+                                    Text("No streams found")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 60)
+                            } else {
+                                ForEach(Array(filteredStreams.enumerated()), id: \.element.id) { idx, stream in
+                                    StreamRowItemView(
+                                        stream: stream,
+                                        isSelected: focusedStreamIndex == idx,
+                                        onSelect: {
+                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                                showManualStreamPicker = false
+                                                playerManager.selectStream(stream)
+                                            }
+                                        }
+                                    )
+                                    .id(idx)
+                                }
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .onChange(of: focusedStreamIndex) { _, idx in
+                        if let idx {
+                            withAnimation { proxy.scrollTo(idx, anchor: .center) }
                         }
                     }
                 }
-                .font(.system(size: 13, weight: .medium))
-                .buttonStyle(.plain)
-                .foregroundColor(.white.opacity(0.75))
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
         }
-        .frame(width: 640)
+        .frame(width: 900, height: 540)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.92))
-                .shadow(color: .black.opacity(0.6), radius: 30, x: 0, y: 12)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.95))
+                .shadow(color: .black.opacity(0.65), radius: 36, x: 0, y: 14)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(
-                    LinearGradient(
-                        colors: [.white.opacity(0.25), .white.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
+                    LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.04)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 0.5
                 )
         )
+        .onKeyPress(.upArrow) {
+            if focusedStreamIndex == nil { focusedStreamIndex = max(0, filteredStreams.count - 1) }
+            else if focusedStreamIndex! > 0 { focusedStreamIndex! -= 1 }
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            if focusedStreamIndex == nil { focusedStreamIndex = 0 }
+            else if focusedStreamIndex! < filteredStreams.count - 1 { focusedStreamIndex! += 1 }
+            return .handled
+        }
+        .onKeyPress(.return) {
+            if let idx = focusedStreamIndex, idx < filteredStreams.count {
+                showManualStreamPicker = false
+                playerManager.selectStream(filteredStreams[idx])
+            }
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                if showManualStreamPicker { showManualStreamPicker = false }
+                else { playerManager.close(); dismiss() }
+            }
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("/")) {
+            isSearchFocused = true
+            return .handled
+        }
     }
     
     private func getSubtitle() -> String {
@@ -1234,9 +1323,12 @@ struct PlayerView: View {
 
 struct StreamRowItemView: View {
     let stream: Stream
+    var isSelected: Bool = false
     let onSelect: () -> Void
-    @State private var isHovered = false
     @ObservedObject private var playerManager = PlayerManager.shared
+    @State private var isHovered = false
+    @State private var showDetail = false
+    @State private var hoverWorkItem: DispatchWorkItem?
 
     private var isHDR: Bool {
         let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
@@ -1257,255 +1349,296 @@ struct StreamRowItemView: View {
     }
 
     private var codecBadgeText: String? {
+        if let c = stream.codec { return c }
         let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
         if t.contains("HEVC") || t.contains("X265") || t.contains("H.265") { return "HEVC" }
         if t.contains("AV1") { return "AV1" }
+        if t.contains("X264") || t.contains("H.264") || t.contains("AVC") { return "x264" }
         return nil
     }
 
-    /// Health badge: green check for probe/seeder-verified sources, gray dot while pending.
-    private var healthBadge: some View {
-        Group {
-            if let status = playerManager.probeStatus[stream.stableKey] {
-                if status.ok {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 10))
-                        if !stream.isTorrent && status.latency > 0 && status.latency < 3 {
-                            Text(String(format: "%.2fs", status.latency))
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                        }
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3.5)
-                    .background(Color.mint.opacity(0.85))
-                    .foregroundColor(.white)
-                    .cornerRadius(6)
-                } else {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3.5)
-                        .background(Color.white.opacity(0.12))
-                        .foregroundColor(.yellow)
-                        .cornerRadius(6)
-                }
-            }
-        }
-    }
-
-    /// Season-pack indicator: listed size is the whole pack; playback extracts only the requested episode.
-    private var packBadge: some View {
-        Group {
-            if stream.isSeasonPack {
-                HStack(spacing: 3) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 9))
-                    Text("PACK")
-                        .font(.system(size: 9, weight: .heavy))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3.5)
-                .background(Color.orange.opacity(0.85))
-                .foregroundColor(.white)
-                .cornerRadius(6)
-            }
-        }
-    }
-
-    /// Speed tier badge: highlights streams estimated to start in <2s (Instant) or <4s (Fast).
-    private var speedBadge: some View {
-        Group {
-            let tier = stream.startupSpeedTier
-            if tier == .instant {
-                HStack(spacing: 3) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 9))
-                    Text("Instant")
-                        .font(.system(size: 9, weight: .heavy))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3.5)
-                .background(
-                    LinearGradient(colors: [Color.cyan, Color.blue.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .foregroundColor(.black)
-                .cornerRadius(6)
-            } else if tier == .fast {
-                HStack(spacing: 3) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 9))
-                    Text("Fast")
-                        .font(.system(size: 9, weight: .heavy))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3.5)
-                .background(
-                    LinearGradient(colors: [Color.blue, Color.indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .foregroundColor(.white)
-                .cornerRadius(6)
-            }
-        }
+    private var addonLogoURL: URL? {
+        guard let addon = AddonManager.shared.addons.first(where: {
+            $0.name.lowercased() == stream.source.lowercased()
+        }) else { return nil }
+        if let logo = addon.logoURL, let url = URL(string: logo) { return url }
+        if let icon = addon.iconURL, let url = URL(string: icon) { return url }
+        return nil
     }
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 7) {
-                // Top Tag Bar
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
-                    // Provider Badge
-                    Text(stream.source)
-                        .font(.system(size: 11, weight: .heavy))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3.5)
+                    if let logoURL = addonLogoURL {
+                        CachedImage(url: logoURL) { phase in
+                            if let img = phase.image {
+                                img.resizable().scaledToFill()
+                            } else {
+                                Text(stream.source.prefix(2).uppercased())
+                                    .font(.system(size: 9, weight: .heavy))
+                            }
+                        }
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
                         .background(providerGradient(stream.source))
                         .foregroundColor(.white)
                         .cornerRadius(6)
-                    
-                    // Quality Badge
+                    } else {
+                        Text(stream.source)
+                            .font(.system(size: 10, weight: .heavy))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(providerGradient(stream.source))
+                            .foregroundColor(.white)
+                            .cornerRadius(6)
+                    }
+
                     Text(stream.quality)
-                        .font(.system(size: 11, weight: .heavy))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3.5)
+                        .font(.system(size: 10, weight: .heavy))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
                         .background(qualityGradient(stream.quality))
                         .foregroundColor(.white)
                         .cornerRadius(6)
-                    
-                    // Seeders / Peers
-                    if let seeders = stream.seeders {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 9))
-                            Text("\(seeders)")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3.5)
-                        .background(Color.green.opacity(0.8))
-                        .foregroundColor(.white)
-                        .cornerRadius(6)
-                    }
-                    
-                    // Size Badge
-                    if let size = stream.size {
-                        Text(stream.isSeasonPack ? "\(size) pack" : size)
-                            .font(.system(size: 11, weight: .semibold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3.5)
-                            .background(Color.white.opacity(0.12))
-                            .foregroundColor(.white.opacity(0.9))
-                            .cornerRadius(6)
-                    }
 
-                    // HDR Badge
-                    if isHDR {
-                        Text("HDR")
-                            .font(.system(size: 9, weight: .black))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3.5)
-                            .background(Color.orange.opacity(0.85))
-                            .foregroundColor(.white)
-                            .cornerRadius(5)
-                    }
-
-                    // Dolby Vision Badge
-                    if isDolbyVision {
-                        Text("DV")
-                            .font(.system(size: 9, weight: .black))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3.5)
-                            .background(Color.pink.opacity(0.85))
-                            .foregroundColor(.white)
-                            .cornerRadius(5)
-                    }
-
-                    // Audio Badge (Atmos / 5.1)
-                    if let audio = audioBadgeText {
-                        Text(audio)
-                            .font(.system(size: 9, weight: .heavy))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3.5)
-                            .background(Color.cyan.opacity(0.75))
-                            .foregroundColor(.black)
-                            .cornerRadius(5)
-                    }
-
-                    // Codec Badge (HEVC)
                     if let codec = codecBadgeText {
                         Text(codec)
-                            .font(.system(size: 9, weight: .heavy))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3.5)
-                            .background(Color.indigo.opacity(0.75))
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Color.indigo.opacity(0.65))
                             .foregroundColor(.white)
-                            .cornerRadius(5)
+                            .cornerRadius(4)
                     }
 
-                    // Language Badge
-                    if let lang = stream.language {
-                        Text(lang)
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3.5)
-                            .background(Color.purple.opacity(0.65))
-                            .foregroundColor(.white)
-                            .cornerRadius(6)
+                    if let audio = audioBadgeText {
+                        HStack(spacing: 2) {
+                            Image(systemName: "speaker.wave.2.fill").font(.system(size: 7))
+                            Text(audio).font(.system(size: 9, weight: .bold, design: .monospaced))
+                        }
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .background(Color.cyan.opacity(0.65))
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
                     }
-                    
-                    Spacer()
 
-                    speedBadge
-                    packBadge
-                    healthBadge
+                    if isHDR {
+                        Text("HDR")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.8))
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
 
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(isHovered ? AnyShapeStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(Color.white.opacity(0.85)))
-                        .scaleEffect(isHovered ? 1.15 : 1.0)
+                    if isDolbyVision {
+                        Text("DV")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 3)
+                            .background(Color.pink.opacity(0.8))
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if stream.startupSpeedTier == .instant {
+                        Image(systemName: "bolt.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.cyan)
+                    } else if stream.startupSpeedTier == .fast {
+                        Image(systemName: "bolt.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.blue)
+                    }
+
+                    if let status = playerManager.probeStatus[stream.stableKey] {
+                        Image(systemName: status.ok ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(status.ok ? .green : .yellow)
+                    }
                 }
-                
-                // Stream Clean Title
+
+                Spacer(minLength: 5)
+
                 Text(stream.cleanTitle)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundColor(.white.opacity(0.95))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 3)
+
+                HStack(spacing: 8) {
+                    if let size = stream.size {
+                        HStack(spacing: 3) {
+                            Image(systemName: stream.isSeasonPack ? "square.stack.3d.up.fill" : "doc.fill")
+                                .font(.system(size: 8))
+                            Text(stream.isSeasonPack ? "\(size) pack" : size)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundColor(.white.opacity(0.55))
+                    }
+
+                    if let seeders = stream.seeders {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.up.circle.fill").font(.system(size: 8))
+                            Text("\(seeders)").font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundColor(.green)
+                    }
+
+                    if let br = stream.bitrate {
+                        HStack(spacing: 3) {
+                            Image(systemName: "waveform").font(.system(size: 8))
+                            Text(br).font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundColor(.white.opacity(0.45))
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if let lang = stream.language {
+                        let truncated = Self.truncateBadge(lang, max: 2)
+                        HStack(spacing: 3) {
+                            Image(systemName: "globe").font(.system(size: 8))
+                            Text(truncated).font(.system(size: 9, weight: .semibold)).lineLimit(1)
+                        }
+                        .foregroundColor(.purple)
+                    }
+
+                    if let subs = stream.subtitles {
+                        let truncated = Self.truncateBadge(subs, max: 2)
+                        HStack(spacing: 3) {
+                            Image(systemName: "captions.bubble").font(.system(size: 8))
+                            Text(truncated).font(.system(size: 9, weight: .semibold)).lineLimit(1)
+                        }
+                        .foregroundColor(.mint)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(minHeight: 68)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.10 : 0.035))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(isSelected ? 0.10 : isHovered ? 0.05 : 0.02))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(
-                        LinearGradient(
-                            colors: isHovered
-                                ? [Color.blue.opacity(0.75), Color.cyan.opacity(0.45)]
-                                : [Color.white.opacity(0.08), Color.white.opacity(0.02)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: isHovered ? 1.5 : 1
+                        isSelected ? Color.accentColor.opacity(0.5)
+                        : Color.white.opacity(isHovered ? 0.08 : 0.03),
+                        lineWidth: isSelected ? 1 : 0.5
                     )
             )
-            .scaleEffect(isHovered ? 1.01 : 1.0)
-            .shadow(color: isHovered ? Color.blue.opacity(0.25) : Color.clear, radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
-                isHovered = hovering
+            isHovered = hovering
+            if hovering {
+                let work = DispatchWorkItem { showDetail = true }
+                hoverWorkItem?.cancel()
+                hoverWorkItem = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+            } else {
+                hoverWorkItem?.cancel()
+                hoverWorkItem = nil
+                withAnimation(.easeOut(duration: 0.12)) { showDetail = false }
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if showDetail {
+                streamDetailPanel
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                    .zIndex(100)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: showDetail)
     }
-    
+
+    private var streamDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(stream.cleanTitle)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(4)
+
+            Divider().background(Color.white.opacity(0.12))
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
+                GridRow {
+                    Label("Source", systemImage: "puzzlepiece.extension")
+                    Text(stream.source)
+                }
+                GridRow {
+                    Label("Quality", systemImage: "sparkles")
+                    Text(stream.quality)
+                }
+                if let codec = stream.codec ?? codecBadgeText {
+                    GridRow {
+                        Label("Codec", systemImage: "film")
+                        Text(codec)
+                    }
+                }
+                if let size = stream.size {
+                    GridRow {
+                        Label("Size", systemImage: "doc.fill")
+                        Text(size)
+                    }
+                }
+                if let seeders = stream.seeders {
+                    GridRow {
+                        Label("Seeders", systemImage: "arrow.up.circle.fill")
+                        Text("\(seeders)").foregroundColor(.green)
+                    }
+                }
+                if let lang = stream.language {
+                    GridRow {
+                        Label("Language", systemImage: "globe")
+                        Text(lang)
+                    }
+                }
+                if let subs = stream.subtitles {
+                    GridRow {
+                        Label("Subtitles", systemImage: "captions.bubble")
+                        Text(subs)
+                    }
+                }
+                if let br = stream.bitrate {
+                    GridRow {
+                        Label("Bitrate", systemImage: "waveform")
+                        Text(br)
+                    }
+                }
+            }
+            .font(.system(size: 11))
+            .foregroundColor(.white.opacity(0.65))
+        }
+        .padding(12)
+        .frame(width: 310)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.95))
+                .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 6)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+        )
+        .offset(x: -330, y: -8)
+    }
+
     private func providerGradient(_ source: String) -> LinearGradient {
         let src = source.lowercased()
         if src.contains("torrentio") {
@@ -1523,12 +1656,18 @@ struct StreamRowItemView: View {
         if src.contains("mediafusion") {
             return LinearGradient(colors: [Color(red: 0.15, green: 0.80, blue: 0.60), Color(red: 0.05, green: 0.65, blue: 0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
+        if src.contains("pengu") {
+            return LinearGradient(colors: [Color(red: 0.30, green: 0.80, blue: 0.90), Color(red: 0.15, green: 0.60, blue: 0.80)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if src.contains("webstream") {
+            return LinearGradient(colors: [Color(red: 0.55, green: 0.20, blue: 0.90), Color(red: 0.40, green: 0.10, blue: 0.75)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
         if src.contains("easy") {
             return LinearGradient(colors: [Color(red: 0.35, green: 0.40, blue: 0.95), Color(red: 0.20, green: 0.25, blue: 0.80)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         return LinearGradient(colors: [Color(red: 0.25, green: 0.50, blue: 0.95), Color(red: 0.15, green: 0.35, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    
+
     private func qualityGradient(_ quality: String) -> LinearGradient {
         switch quality.uppercased() {
         case "4K", "2160P", "UHD":
@@ -1538,8 +1677,16 @@ struct StreamRowItemView: View {
         case "720P", "HD":
             return LinearGradient(colors: [Color(red: 0.15, green: 0.75, blue: 0.70), Color(red: 0.05, green: 0.60, blue: 0.55)], startPoint: .topLeading, endPoint: .bottomTrailing)
         default:
-            return LinearGradient(colors: [Color.white.opacity(0.25), Color.white.opacity(0.15)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            return LinearGradient(colors: [Color.white.opacity(0.2), Color.white.opacity(0.1)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
+    }
+
+    private static func truncateBadge(_ text: String, max: Int) -> String {
+        let parts = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        if parts.count <= max { return text }
+        let shown = parts.prefix(max).joined(separator: ", ")
+        let remaining = parts.count - max
+        return "\(shown) +\(remaining)"
     }
 }
 
