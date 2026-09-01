@@ -1,18 +1,17 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 9:40 PM — RESILIENT MULTI-FORMAT STREMIO ADDON MANIFEST SUPPORT
+## LATEST: Sep 1, 2026, 9:55 PM — STREAM FILTER OVERRIDE & COMPREHENSIVE LANGUAGE/QUALITY RANKING
 
 ### Current Status & Resolutions:
-- **Resilient Stremio Addon Manifest Parsing (`AddonModels.swift`, `AddonManager.swift`, `DeepLinkAddonInstallModal.swift`):** *Status: Completed & Verified.*
-  - **Root Cause of Failed Install:** In the Stremio v3 protocol specification, the `resources` field in `manifest.json` can be declared as either simple strings (`["stream", "subtitles"]`) or detailed objects (`[{"name": "stream", "types": ["movie", "series"], "idPrefixes": [...]}]`). Modern community scraper/debrid addons (such as PenguPlay, Torrentio, MediaFusion) use object-based resources. Because `AddonManifest.resources` was strictly typed as `[String]?`, Swift's `JSONDecoder` failed with `DecodingError.typeMismatch` ("The data couldn't be read because it isn't in the correct format").
+- **Streaming Source Filter Override & History Invalidation (`PlayerManager.swift`):** *Status: Completed & Verified.*
+  - **Issue:** When resuming media from Continue Watching or clicking Play on a detail page, `PlayerManager` reused the previously saved stream from history without validating whether that stream matched the active `streamingSourceMode` filter (e.g. replaying a previously saved torrent stream from `127.0.0.1:11470` even when the user changed Settings to "HTTP Streams Only").
+  - **Resolution:** Added `isSavedURLCompatible` in `PlayerManager.loadAndPlay`. If a saved stream from history conflicts with the current filter (e.g. torrent stream when in HTTP-only mode, or HTTP stream when in Torrent-only mode), the stale session is discarded and Flux Mode automatically fetches and races fresh streams matching the active filter.
+- **Flux Mode Audio Language & Maximum Quality Ranking (`StreamManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
   - **Resolution:**
-    1. Created `AddonResource` with a polymorphic single-value / keyed container decoder supporting both string declarations (`"stream"`) and structured object declarations (`{"name": "stream", ...}`).
-    2. Added `resourceNames` helper on `AddonManifest` to seamlessly normalize resources for capability checking.
-    3. Made `version` decoding resilient to both String (`"1.3.9"`) and numeric (`1.2` / `1`) formats in community manifests.
-    4. Enhanced `AddonManager` URL handling to safely percent-encode configuration strings and auth tokens embedded in addon URL paths.
-    5. Added unit test `addonManifestDecodesObjectAndStringResources` verifying both object-based and string-based manifests.
-- **macOS Display & System Sleep Prevention During Playback (`SleepAssertionManager.swift`, `PlayerView.swift`, `PiPManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Added dedicated power management controller (`SleepAssertionManager`) using dual-layer `IOPMAssertionCreateWithName` (`kIOPMAssertionTypePreventUserIdleDisplaySleep`) and `ProcessInfo` activity assertions to prevent display dimming/sleep while video is playing.
+    1. **Multi-Lingual Audio Detection (`matchesPreferredLanguage`):** Expanded audio language detection across English, Hindi, Tamil, Telugu, Japanese, Korean, French, Spanish, German, Italian, Russian, Chinese, Portuguese, and multi-audio releases (`[Hindi]`, `Dual Audio`, `Multi-Audio`, `Dubbed`, `Hin`, `Jap`, `VF`, `VOSTFR`, `Spa`, etc.).
+    2. **Language Priority Boost:** Streams containing the user's preferred audio language (`defaultAudioLang`) receive a massive +3000 health score priority boost so they are ranked at the top of the stream list and selected by Flux Mode. Foreign-dub releases without the user's audio track are demoted.
+    3. **Maximum Resolution Enforcement:** All stream queries strictly adhere to the `preferredQuality` cap (`isWithinMaxResolution`), and Flux Mode selects the highest health-ranked stream within that resolution.
+    4. **Parallel HTTP Candidate Racing:** Flux Mode races up to 5 HTTP candidates in parallel with fast HEAD checks when in HTTP mode or when the top-ranked stream is an HTTP direct link.
 - **Verification:** All 40 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---

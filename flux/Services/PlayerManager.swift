@@ -584,7 +584,21 @@ class PlayerManager: ObservableObject {
                 isMatchingEpisode = true
             }
 
-            if let cached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey] {
+            let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+
+            // Helper to verify that saved URL matches the user's active streaming filter
+            func isSavedURLCompatible(_ url: URL, hash: String?) -> Bool {
+                let isTorrent = (hash != nil && !hash!.isEmpty) ||
+                                url.absoluteString.contains("127.0.0.1:11470") ||
+                                url.scheme == "magnet" ||
+                                url.absoluteString.contains("xt=urn:btih:")
+                if sourceMode == "http" && isTorrent { return false }
+                if sourceMode == "torrent" && !isTorrent { return false }
+                return true
+            }
+
+            if let cached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey],
+               isSavedURLCompatible(cached.url, hash: activeTorrentHash) {
                 let elapsed = Date().timeIntervalSince(cached.timestamp)
                 
                 // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session
@@ -600,7 +614,8 @@ class PlayerManager: ObservableObject {
                 } else {
                     self.lastPlayedStreams.removeValue(forKey: key)
                 }
-            } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL {
+            } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL,
+                      isSavedURLCompatible(savedURL, hash: historyItem?.lastTorrentInfoHash) {
                 let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
                 if elapsed < 86400 {
                     print("[PlayerManager] Persisted History Stream Available (Across Restarts): Playing \(savedURL)")
@@ -614,6 +629,8 @@ class PlayerManager: ObservableObject {
                     self.populateStreamsInBackground(item: item, season: season, episode: episode)
                     return
                 }
+            } else {
+                print("[PlayerManager] Saved session is incompatible with current stream filter '\(sourceMode)' or missing. Fetching fresh streams...")
             }
         }
         
@@ -715,33 +732,57 @@ class PlayerManager: ObservableObject {
     }
     
     // Flux Mode source pick — respects the Settings stream filter:
-    //   "both"    → top health-ranked torrent wins instantly; HTTP HEAD-races only if no torrent exists
+    //   "both"    → top-ranked candidate (HTTP instant head-checked, or top torrent)
     //   "torrent" → torrents only
     //   "http"    → parallel HEAD race over HTTP candidates
-    // The Stremio server's /create returns 200 for ANY well-formed magnet (dead
-    // swarm or not), so racing creates proves nothing — mpv + auto-fallback
-    // handle dead swarms instead (Stremio behavior).
     private func raceBestStream(from streams: [Stream]) async -> Stream? {
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
 
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
 
-        if sourceMode != "http", let topTorrent = healthy.first(where: { $0.isTorrent }) {
-            print("[PlayerManager] Flux Mode: top-ranked torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
-            return topTorrent
-        }
-
-        guard sourceMode != "torrent" else {
+        if sourceMode == "torrent" {
+            if let topTorrent = healthy.first(where: { $0.isTorrent }) {
+                print("[PlayerManager] Flux Mode: top-ranked torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
+                return topTorrent
+            }
             print("[PlayerManager] Flux Mode: torrent-only filter, no healthy torrent found")
             return nil
         }
 
-        let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(3))
-        print("[PlayerManager] Flux Mode: racing \(httpCandidates.count) HTTP candidates in parallel...")
+        if sourceMode == "http" {
+            let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(5))
+            print("[PlayerManager] Flux Mode: racing \(httpCandidates.count) HTTP candidates in parallel...")
+            return await raceHTTPCandidates(httpCandidates)
+        }
 
+        // Mode: "both"
+        // Evaluates sorted list: if top stream is an HTTP stream, race it; if it succeeds, play immediately.
+        // If top stream is a torrent or HTTP race fails, fallback to top torrent.
+        if let topStream = healthy.first {
+            if !topStream.isTorrent {
+                let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(3))
+                if let winner = await raceHTTPCandidates(httpCandidates) {
+                    return winner
+                }
+            }
+            
+            if let topTorrent = healthy.first(where: { $0.isTorrent }) {
+                print("[PlayerManager] Flux Mode: selected top torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
+                return topTorrent
+            }
+
+            let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(5))
+            return await raceHTTPCandidates(httpCandidates)
+        }
+
+        return nil
+    }
+
+    private func raceHTTPCandidates(_ candidates: [Stream]) async -> Stream? {
+        guard !candidates.isEmpty else { return nil }
         return await withTaskGroup(of: Stream?.self) { group in
-            for stream in httpCandidates {
+            for stream in candidates {
                 group.addTask {
                     var request = URLRequest(url: self.getPlayableURL(for: stream))
                     request.httpMethod = "HEAD"
@@ -758,15 +799,14 @@ class PlayerManager: ObservableObject {
                 }
             }
 
-            // First successful completion wins; cancel remaining tasks immediately
             for await result in group {
                 if let winner = result {
-                    print("[PlayerManager] Race winner: \(winner.cleanTitle) (\(winner.source))")
+                    print("[PlayerManager] HTTP Race winner: \(winner.cleanTitle) (\(winner.source))")
                     group.cancelAll()
                     return winner
                 }
             }
-            return nil
+            return candidates.first
         }
     }
     

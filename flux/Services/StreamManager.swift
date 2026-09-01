@@ -278,11 +278,19 @@ class StreamManager {
             score += 1000.0
         }
 
-        // Language preference: penalize foreign-dub releases so a 191-seeder
-        // "Dubbing PL" doesn't outrank the English original. Releases carrying
-        // the original English audio (or unmarked) are unaffected.
-        if let lang = stream.language?.uppercased(), isForeignDub(lang, title: stream.title) {
-            score *= 0.35
+        // Language preference:
+        let defaultLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        if defaultLang.uppercased() != "ENGLISH" {
+            if matchesPreferredLanguage(stream, preferred: defaultLang) {
+                score += 3000.0 // Major priority boost for matching the user's preferred audio language
+            } else {
+                score *= 0.40 // Demote releases that lack the preferred language
+            }
+        } else {
+            // For English, penalize foreign-dub releases with no English original track
+            if let lang = stream.language?.uppercased(), isForeignDub(lang, title: stream.title) {
+                score *= 0.25
+            }
         }
 
         // Size efficiency bonus for reasonable file sizes
@@ -298,6 +306,49 @@ class StreamManager {
         }
 
         return score
+    }
+
+    /// Checks if a stream contains or matches the user's preferred audio language
+    func matchesPreferredLanguage(_ stream: Stream, preferred: String) -> Bool {
+        let pref = preferred.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if pref.isEmpty || pref == "ENGLISH" {
+            let lang = stream.language?.uppercased() ?? ""
+            if isForeignDub(lang, title: stream.title) {
+                return false
+            }
+            return true
+        }
+
+        let combined = "\(stream.title) \(stream.cleanTitle) \(stream.language ?? "")".uppercased()
+        let langKeywords: [String: [String]] = [
+            "HINDI": ["HINDI", "HIN", "BOLLYWOOD"],
+            "TAMIL": ["TAMIL", "TAM"],
+            "TELUGU": ["TELUGU", "TEL"],
+            "JAPANESE": ["JAPANESE", "JAP", "JPN", "ANIME"],
+            "KOREAN": ["KOREAN", "KOR"],
+            "FRENCH": ["FRENCH", "FR", "VF", "VOSTFR", "VFF", "TRUEFRENCH"],
+            "SPANISH": ["SPANISH", "SPA", "ESP", "LATINO", "CASTELLANO"],
+            "GERMAN": ["GERMAN", "GER", "DEUTSCH", "DL"],
+            "ITALIAN": ["ITALIAN", "ITA"],
+            "RUSSIAN": ["RUSSIAN", "RUS"],
+            "CHINESE": ["CHINESE", "CHI", "MANDARIN", "CANTONESE"],
+            "PORTUGUESE": ["PORTUGUESE", "POR", "PT-BR"]
+        ]
+
+        if let keywords = langKeywords[pref] {
+            if keywords.contains(where: { combined.contains($0) }) {
+                return true
+            }
+        } else if combined.contains(pref) {
+            return true
+        }
+
+        // Multi-audio / Dual audio usually carries multiple regional/dub tracks
+        if combined.contains("MULTI") || combined.contains("DUAL") {
+            return true
+        }
+
+        return false
     }
 
     /// True when the release is a hard foreign DUB (no original English audio
