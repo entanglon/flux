@@ -756,7 +756,7 @@ struct PlayerView: View {
                 // Sleek progress bar under the logo
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.2))
+                        .fill(Color.white.opacity(0.25))
                         .frame(width: 140, height: 4)
 
                     Capsule()
@@ -764,15 +764,8 @@ struct PlayerView: View {
                         .frame(width: max(4, 140 * realProgress), height: 4)
                         .animation(.linear(duration: 0.25), value: realProgress)
                 }
-                .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.8), radius: 6, y: 2)
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 20)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.ultraThinMaterial.opacity(0.85))
-                    .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
-            )
         }
         .transition(.opacity)
         .zIndex(15)

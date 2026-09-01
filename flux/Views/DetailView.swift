@@ -472,29 +472,6 @@ struct DetailView: View {
                                     }
                                     .help("Add to list")
 
-                                    // Play Trailer Button
-                                    if !trailers.isEmpty || !bonusContent.isEmpty || trailerURL != nil {
-                                        Button {
-                                            if let firstTrailer = trailers.first ?? bonusContent.first {
-                                                playBonusContent(firstTrailer)
-                                            } else if let trailer = trailerURL {
-                                                NSWorkspace.shared.open(trailer)
-                                            }
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "play.rectangle.fill")
-                                                    .font(.title3)
-                                                Text("Trailer")
-                                                    .font(.system(size: 14, weight: .bold))
-                                            }
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 20)
-                                            .padding(.vertical, 12)
-                                            .glassEffect(.regular.interactive(), in: .capsule)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help("Play trailer in Flux")
-                                    }
                                 }
                             }
                             .padding(.top, 10)
@@ -502,32 +479,37 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 268)
                         
-                        // Starring — bottom-right of the hero
-                        if let starring = starringCast, !starring.isEmpty {
-                            VStack(alignment: .trailing, spacing: 6) {
-                                Text("STARRING")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .tracking(1.5)
-                                    .foregroundStyle(.white.opacity(0.5))
+                        // Starring & Director — bottom-right of the hero (Apple TV style)
+                        let castNames = starringCast?.map { $0.name } ?? []
+                        let directorName = displayItem.director
+                        let hasDirector = directorName != nil && !directorName!.isEmpty && directorName != "N/A"
+                        
+                        if !castNames.isEmpty || hasDirector {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !castNames.isEmpty {
+                                    (
+                                        Text("Starring ")
+                                            .foregroundColor(Color(white: 0.6))
+                                        + Text(castNames.joined(separator: ", "))
+                                            .foregroundColor(.white)
+                                    )
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
                                 
-                                ForEach(starring, id: \.name) { member in
-                                    VStack(alignment: .trailing, spacing: 1) {
-                                        Text(member.name)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                            .foregroundStyle(.white)
-                                            .lineLimit(1)
-                                        if let role = member.role, !role.isEmpty {
-                                            Text(role)
-                                                .font(.caption)
-                                                .foregroundStyle(.white.opacity(0.6))
-                                                .lineLimit(1)
-                                        }
-                                    }
+                                if hasDirector {
+                                    (
+                                        Text("Director ")
+                                            .foregroundColor(Color(white: 0.6))
+                                        + Text(directorName!)
+                                            .foregroundColor(.white)
+                                    )
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
                                 }
                             }
-                            .frame(minWidth: 160, maxWidth: 280, alignment: .trailing)
+                            .frame(minWidth: 160, maxWidth: 280, alignment: .leading)
                             .padding(.trailing, 60)
                             .transition(.opacity)
                         }
@@ -691,29 +673,28 @@ struct DetailView: View {
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
 
-                                DetailRail(items: cast, idPath: \.id, itemWidth: 100, itemHeight: 200) { member in
+                                DetailRail(items: cast, idPath: \.id, itemWidth: 124, itemHeight: 180) { member in
                                     NavigationLink(value: PersonNavigation(id: member.personID ?? 0, fallbackName: member.name)) {
-                                        VStack(spacing: 8) {
-                                            CastCircle(name: member.name, imageURL: member.imageURL, size: 80)
+                                        VStack(spacing: 10) {
+                                            CastCircle(name: member.name, imageURL: member.imageURL, size: 104)
 
                                             // Fixed-height text block keeps every
                                             // circle on the same axis
                                             VStack(spacing: 2) {
                                                 Text(member.name)
-                                                    .font(.caption)
-                                                    .fontWeight(.bold)
+                                                    .font(.system(size: 13, weight: .semibold))
                                                     .foregroundStyle(.white)
                                                     .multilineTextAlignment(.center)
                                                     .lineLimit(1)
                                                 Text(member.role ?? "")
-                                                    .font(.caption2)
+                                                    .font(.system(size: 11, weight: .regular))
                                                     .foregroundStyle(.secondary)
                                                     .multilineTextAlignment(.center)
                                                     .lineLimit(1)
                                             }
-                                            .frame(height: 44)
+                                            .frame(height: 38)
                                         }
-                                        .frame(width: 100)
+                                        .frame(width: 124)
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
@@ -735,27 +716,31 @@ struct DetailView: View {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 20) {
                                         ForEach(providers) { provider in
-                                            VStack(spacing: 8) {
+                                            VStack(spacing: 10) {
                                                 CachedImage(url: provider.logoURL) { phase in
                                                     if let image = phase.image {
                                                         image
                                                             .resizable()
                                                             .aspectRatio(contentMode: .fill)
-                                                            .frame(width: 60, height: 60)
-                                                            .cornerRadius(12)
+                                                            .frame(width: 76, height: 76)
+                                                            .cornerRadius(18)
+                                                            .overlay(
+                                                                RoundedRectangle(cornerRadius: 18)
+                                                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
+                                                            )
                                                     } else {
-                                                        RoundedRectangle(cornerRadius: 12)
-                                                            .fill(Color.gray.opacity(0.3))
-                                                            .frame(width: 60, height: 60)
+                                                        RoundedRectangle(cornerRadius: 18)
+                                                            .fill(Color(white: 0.14))
+                                                            .frame(width: 76, height: 76)
                                                     }
                                                 }
                                                 
                                                 Text(provider.name)
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundStyle(.white.opacity(0.85))
                                                     .lineLimit(1)
                                             }
-                                            .frame(width: 80)
+                                            .frame(width: 90)
                                         }
                                     }
                                 }
@@ -838,7 +823,9 @@ struct DetailView: View {
                                 
                                 VStack(alignment: .leading, spacing: 16) {
                                     InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
-                                    InfoDetailRow(label: "Director", value: displayItem.director ?? "N/A")
+                                    if let director = displayItem.director, !director.isEmpty && director != "N/A" {
+                                        InfoDetailRow(label: "Director", value: director)
+                                    }
                                     // TV runtimes are per-episode; a single value in the
                                     // footer would misleadingly show only episode 1's length.
                                     if displayItem.category != "TV Show" {

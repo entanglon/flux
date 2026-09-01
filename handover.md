@@ -1,18 +1,22 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 5:43 PM — ZERO-OVERHEAD SCROLL ARCHITECTURE, SLEEK MINIMAL MENU BUTTONS & PLAYER MAGNET SHARE
+## LATEST: Sep 1, 2026, 6:00 PM — APPLE TV HERO STARRING/DIRECTOR, CLEAN FLOATING BUFFER BAR & ENLARGED DETAIL RAILS
 
 ### Current Status & Resolutions:
-- **Scroll Performance Overhaul (Fixed Root-Cause Stutter & Lag across Rails/Pages):** *Status: Completed & Verified.*
-  - **1. Replaced `LazyVStack` with `VStack` on Rail Containers (`HomeView`, `MoviesView`, `TVShowsView`, `DetailView`):** Previously, `LazyVStack(spacing: 0)` actively destroyed and recreated entire horizontal collection rails (`CarouselView`, `DetailRail`) as they moved across the viewport boundary, causing noticeable hitching and re-layout lag on vertical scrolling. Since there are only ~8 rails per page, keeping them stable in a `VStack` allows macOS to translate the scroll view via CoreAnimation hardware layers with 0 view recreation overhead, while `LazyHStack` handles card recycling horizontally.
-  - **2. Eliminated High-Frequency GeometryReader Preference Keys:** Removed `DetailScrollOffsetKey`, unused `scrollOffsetY`, and continuous `CarouselBoundsPreferenceKey` / `DetailRailBoundsPreferenceKey` coordinate calculations from every frame of scrolling. Arrow button navigation now operates cleanly without continuous layout invalidation passes.
-  - **3. Solid Substrates & Single Drop Shadows:** Replaced live `.fill(.ultraThinMaterial)` sampling passes and double dynamic Gaussian blur shadows on 100+ cards (`GlassCard`, `ContinueWatchingCard`, `Top10Card`, `TopTenCard`, `BonusContentCard`, `GenreCard`, `ChannelCard`, `EpisodeCard`, `OTTCard`) with solid dark substrates (`Color(red: 0.10, green: 0.10, blue: 0.12)`) and single subtle drop shadows (`.shadow(color: Color.black.opacity(isHovering ? 0.40 : 0.16), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)`). This drops the GPU off-screen compositor pass count from 100+ passes to 0 per frame during scroll.
-- **Card Menu Buttons Polish (Removed Round Liquid Glass Disc):** *Status: Completed & Verified.*
-  - Removed the round `.glassEffect(.regular.interactive(), in: .circle)` disc from the bottom right of `ContinueWatchingCard`, `GlassCard`, and `DetailView` (`LiquidEpisodeCard`). The button is now a sleek, minimal, borderless ellipsis icon (`menuStyle(.borderlessButton)`) that perfectly matches the clean aesthetic of `EpisodeCard`.
-- **Menu Cleanup & Player Magnet/Stream Share Button:** *Status: Completed & Verified.*
-  - **Removed Unused Share Buttons:** Removed fake/unsupported "Share Movie" and "Share Show" menu options from `GlassCard`.
-  - **Functional Player Magnet / Stream URL Sharing:** Updated the Share button in `PlayerControlsView` and added "Copy Stream Link" to `PlayerView`'s right-click context menu. Clicking the button immediately copies the active torrent magnet link (`magnet:?xt=urn:btih:...`) or stream URL directly to the macOS system clipboard, displaying a green checkmark feedback indicator and a tooltip.
-- **Verification:** All 39 unit tests passed with 0 failures (`** TEST SUCCEEDED **`). Live app rebuilt and running smoothly on macOS.
+- **Mid-Playback Buffer Loading Bar (Removed Card Container Background):** *Status: Completed & Verified.*
+  - **Resolution:** Removed the rounded rectangular dark card background container (`.background(RoundedRectangle(...).fill(.ultraThinMaterial)...)`) from `midPlaybackLogoBufferingView` in `PlayerView.swift`. The translucent-to-filled logo and the progress bar capsule now float directly and cleanly over the paused video frame with a crisp drop shadow, eliminating all clutter.
+- **Apple TV Hero Starring & Director Section (`DetailView.swift`):** *Status: Completed & Verified.*
+  - **Resolution:** Implemented the exact Apple TV design:
+    1. Top line: `Starring ` in grey (`Color(white: 0.6)`), followed by comma-separated actor names in white (`.white`).
+    2. Director line: `Director ` in grey (`Color(white: 0.6)`), followed by director name in white (`.white`).
+    3. Left-aligned within the bottom-right block of the hero banner.
+    4. For TV shows: Only displays "Director" if director data actually exists (`displayItem.director != nil && !displayItem.director!.isEmpty`). If no director data exists for TV shows, the director line is cleanly omitted from both the hero and footer Information section.
+- **Removed "Play Trailer in Flux" Button from Hero:** *Status: Completed & Verified.*
+  - Removed the redundant Trailer button from the hero action bar in `DetailView.swift` since trailers already have their own dedicated Trailers rail.
+- **Enlarged Cast & Crew and Where to Watch Rails (`DetailView.swift`):** *Status: Completed & Verified.*
+  - **Cast & Crew:** Increased `CastCircle` size from 80pt to 104pt (`itemWidth: 124`, `itemHeight: 180`) with high-contrast typography (name in 13pt bold white, role in 11pt secondary).
+  - **Where to Watch:** Increased provider logo badges from 60x60pt to 76x76pt (`cornerRadius: 18`, `frame(width: 90)`) with subtle rim stroke.
+- **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and launched on macOS.
 
 ---
 
