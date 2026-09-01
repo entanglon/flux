@@ -27,6 +27,15 @@ struct DetailView: View {
     // Computed
     var displayItem: MediaItem { fullItem ?? item }
     
+    /// Top-billed cast for the hero "Starring" block. Falls back to the
+    /// pre-enrichment item's cast so names can show before TMDB responds.
+    var starringCast: [CastMember]? {
+        let cast = fullItem?.cast ?? item.cast ?? []
+        let named = cast.filter { !$0.name.isEmpty }
+        guard !named.isEmpty else { return nil }
+        return Array(named.prefix(4))
+    }
+    
     private var isReleased: Bool {
         guard let dateString = displayItem.releaseDate else { return true }
         let formatter = DateFormatter()
@@ -387,6 +396,39 @@ struct DetailView: View {
                         }
                         .padding(.leading, 268)
                         .padding(.bottom, 60)
+                        
+                        // Starring — bottom-right of the hero
+                        if let starring = starringCast, !starring.isEmpty {
+                            VStack(alignment: .trailing, spacing: 6) {
+                                Text("Starring")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .tracking(1.5)
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                
+                                ForEach(starring, id: \.name) { member in
+                                    VStack(alignment: .trailing, spacing: 1) {
+                                        Text(member.name)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundStyle(.white)
+                                            .lineLimit(1)
+                                        if let role = member.role, !role.isEmpty {
+                                            Text(role)
+                                                .font(.caption)
+                                                .foregroundStyle(.white.opacity(0.6))
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                }
+                            }
+                            .frame(width: 220, alignment: .trailing)
+                            .padding(.trailing, 60)
+                            .padding(.bottom, 60)
+                            .transition(.opacity)
+                        }
                     }
                     .frame(height: geo.size.height * 0.80)
                     
@@ -689,7 +731,11 @@ struct DetailView: View {
                                 VStack(alignment: .leading, spacing: 16) {
                                     InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
                                     InfoDetailRow(label: "Director", value: displayItem.director ?? "N/A")
-                                    InfoDetailRow(label: "Runtime", value: displayItem.runtime ?? "N/A")
+                                    // TV runtimes are per-episode; a single value in the
+                                    // footer would misleadingly show only episode 1's length.
+                                    if displayItem.category != "TV Show" {
+                                        InfoDetailRow(label: "Runtime", value: displayItem.runtime ?? "N/A")
+                                    }
                                     InfoDetailRow(label: "Region of Origin", value: displayItem.displayOriginCountry ?? "N/A")
                                 }
                             }
