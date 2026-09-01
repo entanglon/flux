@@ -1,28 +1,19 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 7:05 PM — MACOS DISPLAY SLEEP PREVENTION & ZERO-LATENCY SEEK PERSISTENCE
+## LATEST: Sep 1, 2026, 9:40 PM — RESILIENT MULTI-FORMAT STREMIO ADDON MANIFEST SUPPORT
 
 ### Current Status & Resolutions:
+- **Resilient Stremio Addon Manifest Parsing (`AddonModels.swift`, `AddonManager.swift`, `DeepLinkAddonInstallModal.swift`):** *Status: Completed & Verified.*
+  - **Root Cause of Failed Install:** In the Stremio v3 protocol specification, the `resources` field in `manifest.json` can be declared as either simple strings (`["stream", "subtitles"]`) or detailed objects (`[{"name": "stream", "types": ["movie", "series"], "idPrefixes": [...]}]`). Modern community scraper/debrid addons (such as PenguPlay, Torrentio, MediaFusion) use object-based resources. Because `AddonManifest.resources` was strictly typed as `[String]?`, Swift's `JSONDecoder` failed with `DecodingError.typeMismatch` ("The data couldn't be read because it isn't in the correct format").
+  - **Resolution:**
+    1. Created `AddonResource` with a polymorphic single-value / keyed container decoder supporting both string declarations (`"stream"`) and structured object declarations (`{"name": "stream", ...}`).
+    2. Added `resourceNames` helper on `AddonManifest` to seamlessly normalize resources for capability checking.
+    3. Made `version` decoding resilient to both String (`"1.3.9"`) and numeric (`1.2` / `1`) formats in community manifests.
+    4. Enhanced `AddonManager` URL handling to safely percent-encode configuration strings and auth tokens embedded in addon URL paths.
+    5. Added unit test `addonManifestDecodesObjectAndStringResources` verifying both object-based and string-based manifests.
 - **macOS Display & System Sleep Prevention During Playback (`SleepAssertionManager.swift`, `PlayerView.swift`, `PiPManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Added a dedicated power management controller (`SleepAssertionManager`) using dual-layer macOS power management:
-    1. **IOKit Power Management Assertion:** Creates an `IOPMAssertionCreateWithName` assertion with `kIOPMAssertionTypePreventUserIdleDisplaySleep` at level `kIOPMAssertionLevelOn` whenever video playback begins or resumes.
-    2. **ProcessInfo System Activity:** Holds a `ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled, .userInitiated])` token.
-    3. **Automatic Lifecycle Synchronization:**
-       - Enables assertion on warm core adoption and when playback actively starts/resumes in both main player and PiP mode.
-       - Disables assertion cleanly whenever the video is paused, when the player window is dismissed, on full stop, or when `PlayerManager.close()` is called.
-    - *Result:* The Mac display and system will never dim or sleep while watching media, and will resume normal power management when paused or closed.
-- **Instant Seek / Fast-Forward Progress Persistence (`PlayerView.swift`, `PlayerManager.swift`, `UserDataService.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** In addition to the 5-second autosave timer during playback and pause-trigger save, `playerManager.updateWatchProgress(...)` is now called **immediately** whenever a seek is triggered or completed:
-    1. **Timeline Scrubbing / Slider Dragging:** Progress is saved on the target seek time in 0ms.
-    2. **Skip Forward / Backward Buttons (+15s / -15s):** Calculates target seek time and immediately writes to `UserDataService.shared` with `synchronize()`.
-    3. **Keyboard Arrows & Keybindings (Left/Right, `,`, `.`, `<`, `>`):** Immediately updates playback position in history.
-    4. **Smart Skip Buttons (Skip Recap / Skip Intro):** Instantly updates progress to the destination timecode.
-    5. **Context Menu Seek (Forward 15s / Rewind 15s):** Instantly writes updated time to history.
-    6. **MPV `isSeeking` Event Observer:** When MPV completes seeking (`.onChange(of: mpv.isSeeking)`), `updateWatchProgress` executes immediately.
-    - *Result:* If the user scrubs/fast-forwards and immediately quits/restarts the app, clicking Continue Watching resumes from the exact second without losing any progress.
-- **Mid-Playback Pure Logo Fill Buffering (`PlayerView.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Removed the separate progress capsule bar and all card background wrappers from `midPlaybackLogoBufferingView`. Title logo itself fills progressively from left-to-right based on demuxer buffer telemetry.
-- **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
+  - **Resolution:** Added dedicated power management controller (`SleepAssertionManager`) using dual-layer `IOPMAssertionCreateWithName` (`kIOPMAssertionTypePreventUserIdleDisplaySleep`) and `ProcessInfo` activity assertions to prevent display dimming/sleep while video is playing.
+- **Verification:** All 40 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---
 

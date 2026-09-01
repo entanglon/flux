@@ -213,7 +213,7 @@ class AddonManager: ObservableObject {
             manifestUrlStr = manifestUrlStr.replacingOccurrences(of: "stremio://", with: "https://")
         }
         
-        guard let manifestURL = URL(string: manifestUrlStr) else {
+        guard let manifestURL = URL(string: manifestUrlStr) ?? URL(string: manifestUrlStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") else {
             throw URLError(.badURL)
         }
         
@@ -244,7 +244,7 @@ class AddonManager: ObservableObject {
             isStock: isProtected,
             category: category,
             catalogs: manifest.catalogs,
-            resources: manifest.resources
+            resources: manifest.resourceNames
         )
         
         await MainActor.run {
@@ -293,7 +293,7 @@ class AddonManager: ObservableObject {
             rawString += "/manifest.json"
         }
         
-        guard let finalURL = URL(string: rawString) else { return }
+        guard let finalURL = URL(string: rawString) ?? URL(string: rawString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") else { return }
         
         Task {
             await fetchManifestForDeepLink(url: finalURL)

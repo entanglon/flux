@@ -93,8 +93,8 @@ struct DeepLinkAddonInstallModal: View {
                             .tracking(0.8)
                         
                         HStack(spacing: 8) {
-                            if let resources = manifest.resources, !resources.isEmpty {
-                                ForEach(resources, id: \.self) { res in
+                            if !manifest.resourceNames.isEmpty {
+                                ForEach(manifest.resourceNames, id: \.self) { res in
                                     HStack(spacing: 4) {
                                         Image(systemName: iconForResource(res))
                                             .font(.system(size: 10))

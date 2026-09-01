@@ -109,5 +109,62 @@ struct ArchitectureTests {
             #expect(manager.isAddonInstalled(id: "opensubtitles3"))
         }
     }
+
+    @Test func addonManifestDecodesObjectAndStringResources() throws {
+        // Object-based resources (e.g. PenguPlay, Torrentio, MediaFusion)
+        let jsonObjectResources = """
+        {
+            "id": "com.penguplay",
+            "version": "1.3.9",
+            "name": "PenguPlay",
+            "description": "Stream movies and series",
+            "resources": [
+                {
+                    "name": "stream",
+                    "types": ["movie", "series"],
+                    "idPrefixes": ["tt", "tmdb:"]
+                },
+                {
+                    "name": "subtitles",
+                    "types": ["movie", "series"]
+                }
+            ],
+            "types": ["movie", "series"],
+            "catalogs": []
+        }
+        """.data(using: .utf8)!
+
+        let manifestObj = try JSONDecoder().decode(AddonManifest.self, from: jsonObjectResources)
+        #expect(manifestObj.id == "com.penguplay")
+        #expect(manifestObj.name == "PenguPlay")
+        #expect(manifestObj.version == "1.3.9")
+        #expect(manifestObj.resourceNames == ["stream", "subtitles"])
+
+        // String-based resources & numeric version
+        let jsonStringResources = """
+        {
+            "id": "org.stremio.cinemeta",
+            "version": 1.2,
+            "name": "Cinemeta",
+            "description": "Official Cinemeta",
+            "resources": ["catalog", "meta"],
+            "types": ["movie", "series"],
+            "catalogs": [
+                {
+                    "type": "movie",
+                    "id": "top",
+                    "name": "Top Movies",
+                    "extra": [{"name": "genre", "isRequired": false}]
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let manifestStr = try JSONDecoder().decode(AddonManifest.self, from: jsonStringResources)
+        #expect(manifestStr.id == "org.stremio.cinemeta")
+        #expect(manifestStr.resourceNames == ["catalog", "meta"])
+        #expect(manifestStr.catalogs?.count == 1)
+        #expect(manifestStr.catalogs?.first?.name == "Top Movies")
+    }
 }
 
