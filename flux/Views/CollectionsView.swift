@@ -230,11 +230,11 @@ private struct CollectionCard: View {
         }
     }
 
-    // Poster stack: up to three members fanned behind the newest one.
     private var posterStack: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(.ultraThinMaterial)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
 
             let posters = collection.previewPosters.compactMap { $0 }
             ForEach(Array(posters.dropFirst().enumerated().reversed()), id: \.offset) { index, url in
@@ -253,12 +253,26 @@ private struct CollectionCard: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(isHovered ? 0.35 : 0.12), lineWidth: 1)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovered
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovered ? 1.5 : 0.75
+                )
         )
         .scaleEffect(isHovered ? 1.03 : 1.0)
-        .shadow(color: .black.opacity(0.45), radius: isHovered ? 16 : 8, y: 6)
+        .shadow(color: .black.opacity(isHovered ? 0.50 : 0.25), radius: isHovered ? 16 : 8, y: 6)
+        .shadow(color: isHovered ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
     }
 
     private func stackPoster(url: URL) -> some View {

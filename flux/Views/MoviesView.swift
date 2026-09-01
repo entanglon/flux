@@ -102,6 +102,12 @@ struct MoviesView: View {
         .task {
             await loadData()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await TMDBCatalogCacheActor.shared.clear()
+                await loadData()
+            }
+        }
     }
     
     @ViewBuilder

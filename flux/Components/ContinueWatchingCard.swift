@@ -83,11 +83,12 @@ struct ContinueWatchingCard: View {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                default:
+                    default:
                     Rectangle()
-                        .fill(
+                        .fill(.ultraThinMaterial)
+                        .overlay(
                             LinearGradient(
-                                colors: [Color(red: 0.18, green: 0.20, blue: 0.32), Color(red: 0.05, green: 0.06, blue: 0.12)],
+                                colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -95,7 +96,7 @@ struct ContinueWatchingCard: View {
                         .overlay(
                             Image(systemName: "film.stack")
                                 .font(.system(size: 32))
-                                .foregroundStyle(.white.opacity(0.25))
+                                .foregroundStyle(.white.opacity(0.35))
                         )
                 }
             }
@@ -106,9 +107,9 @@ struct ContinueWatchingCard: View {
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.30),
-                    .init(color: .black.opacity(0.45), location: 0.65),
-                    .init(color: .black.opacity(0.90), location: 1.0)
+                    .init(color: .clear, location: 0.35),
+                    .init(color: .black.opacity(0.40), location: 0.68),
+                    .init(color: .black.opacity(0.88), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -225,10 +226,11 @@ struct ContinueWatchingCard: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.75))
-                            .padding(4)
-                            .contentShape(Rectangle())
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.80))
+                            .frame(width: 26, height: 26)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                            .contentShape(Circle())
                     }
                     .menuStyle(.button)
                     .buttonStyle(.plain)
@@ -239,18 +241,25 @@ struct ContinueWatchingCard: View {
         }
         .frame(width: 290, height: 163)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: isHovering ? [.white.opacity(0.55), .white.opacity(0.2)] : [.white.opacity(0.1), .clear],
+                        colors: isHovering
+                            ? [Color.white.opacity(0.75), Color.white.opacity(0.25), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.15), Color.white.opacity(0.04)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 14 : 8, x: 0, y: isHovering ? 6 : 4)
+        .shadow(color: isHovering ? Color.black.opacity(0.55) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 12, x: 0, y: 0)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }

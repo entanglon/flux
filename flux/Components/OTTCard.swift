@@ -8,34 +8,42 @@ struct OTTCard: View {
 
     private var assetName: String { "ott-\(platform.id)" }
 
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+    }
+
+    private var strokeGradient: LinearGradient {
+        LinearGradient(
+            colors: isHovering
+                ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     var body: some View {
         Color.clear
             .aspectRatio(2/3, contentMode: .fit)
-            .overlay {
+            .overlay(
                 Image(assetName)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-            }
-            .overlay(
-                Color.black.opacity(isHovering ? 0.3 : 0.0)
-                    .animation(.easeInOut(duration: 0.2), value: isHovering)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: isHovering ? [.white.opacity(0.6), .white.opacity(0.2)] : [.white.opacity(0.12), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: isHovering ? 1.5 : 0.75
-                    )
+            .clipShape(cardShape)
+            .background(
+                cardShape
+                    .fill(.ultraThinMaterial)
             )
-            .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25),
-                    radius: isHovering ? 16 : 6, x: 0, y: isHovering ? 10 : 4)
+            .overlay(
+                cardShape
+                    .stroke(strokeGradient, lineWidth: isHovering ? 1.5 : 0.75)
+            )
+            .shadow(color: isHovering ? Color.black.opacity(0.50) : Color.black.opacity(0.22),
+                    radius: isHovering ? 16 : 6, x: 0, y: isHovering ? 8 : 3)
+            .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
             .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(cardShape)
             .onHover { hovering in
                 isHovering = hovering
             }

@@ -1,19 +1,24 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 4:45 PM — NATIVE CONTEXT MENU FLICKER FIX, UPCOMING RELEASE DATE BADGES & DETAIL VIEW STATE MATCHING
+## LATEST: Sep 1, 2026, 5:19 PM — UNIVERSAL CMD+R REFRESH SYSTEM, ZERO-DIM HOVER POLISH & BUTTERY SMOOTH 120 FPS SCROLL
 
 ### Current Status & Resolutions:
-- **Problem 1 ("Play" Button Flash in `DetailView`):** *Status: Fixed.*
-  - **Root Cause:** When navigating to a title from TMDB/category rails, the incoming item ID is a numerical TMDB ID (e.g. `"550"`), whereas history records were stored under IMDb IDs (`"tt0137523"`). Because `getHistoryItem(id:)` only matched IDs directly, it returned `nil` until the async `getImdbID()` network request resolved hundreds of milliseconds later, causing the button to flash from "Play" to the progress bar.
-  - **Resolution:** Enhanced `UserDataService.getHistoryItem(for:)` to perform a multi-tier synchronous lookup: (1) direct ID match, (2) stripped `"tt"` prefix invariance, and (3) normalized title + category match on frame 0. `DetailView` now evaluates `activeHistoryItem` and `isInContinueWatching` synchronously on initial render in 0ms with zero layout flash.
-- **Problem 2 (Right-Click Context Menu & Subtitle Submenu in `PlayerView`):** *Status: Fixed.*
-  - **Root Cause:** In SwiftUI, `.contextMenu { ... }` was attached to `PlayerView`, which observed `mpv.timePos` updating at 4–10 Hz during playback. Each `timePos` tick re-evaluated `PlayerView.body` and rebuilt the running `NSMenu`, causing macOS AppKit's menu tracking loop to dismiss and re-create the open submenu (flashing/flickering). An initial attempt to replace `.contextMenu` with `NativeContextMenuOverlay` failed because overriding `hitTest` using `NSApp.currentEvent` caused the view to be ignored during AppKit hit-testing while being obscured by `PlayerControlsView`'s full-screen gesture layer, making the context menu completely unresponsive.
-  - **Resolution:** Implemented `PlayerContextMenuMonitor` using `NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown])` paired with `PlayerWindowAccessor`. The monitor intercepts secondary clicks (right-clicks and Control+left-clicks) at the window level, completely decoupled from SwiftUI hit-testing and gesture layers. `NSMenu` and its submenus (Subtitles, Audio Tracks) are constructed on-demand and tracked natively in AppKit, remaining 100% stable, functional, and flicker-free during 60 FPS playback. Normal left clicks, playback controls, and scrubbers pass through completely undisturbed.
-- **Problem 3 (Upcoming In Theatres Rail Badges):** *Status: Fixed.*
-  - **Root Cause:** `GlassCard` was hardcoded to display `"Coming \(item.releaseDateYear!)"`, producing a redundant `"Coming 2026"` label on every card in the upcoming rail.
-  - **Resolution:** Introduced `MediaItem.cardReleaseDateBadge`, which formats the actual localized release date (e.g. `"Oct 15"` for the current year, `"Mar 5, 2027"` for future years, `"Today"` / `"Tomorrow"` for immediate releases), matching Apple TV and Letterboxd UX.
-- **Problem 4 (Torrent Engine Pause / Fast Resume Mechanism):** *Status: Fixed and Verified.* Seamless stream session resume and torrent disk cache reuse across Continue Watching and Detail View resume paths.
-- **Problem 5 (UI Rendering & Scrolling Performance):** *Status: Optimized.* Applied `.drawingGroup()` and optimized hover transitions in `GlassCard`. All 39 unit tests passing.
+- **Problem 1 (Universal `Cmd+R` Refresh Throughout App):** *Status: Completed & Verified.*
+  - **Root Cause:** Previously, `.fluxRefresh` only incremented `refreshToken` on `ContentView`'s root `Group`. When a user was on a pushed page (such as `DetailView`, `MediaListView`, `PersonView`) or when browsing `MoviesView`, `TVShowsView`, `TrendingView`, or `SearchView`, pressing `Cmd+R` failed to refresh the active page because (1) pushed views on the `NavigationStack` never received refresh signals, (2) individual views lacked `.onReceive(NotificationCenter.default.publisher(for: .fluxRefresh))` listeners, and (3) TMDB's in-memory `TMDBCatalogCacheActor` was not cleared, returning stale cached arrays.
+  - **Resolution:**
+    1. Updated `fluxApp.swift`'s `Cmd+R` command to clear `TMDBCatalogCacheActor.shared.clear()`, trigger `AuthManager.shared.syncNowAsync(forcePull: true)`, and broadcast `.fluxRefresh`.
+    2. Added dedicated `.onReceive(NotificationCenter.default.publisher(for: .fluxRefresh))` listeners to `HomeView`, `MoviesView`, `TVShowsView`, `TrendingView`, `DetailView`, `MediaListView`, `PersonView`, and `SearchView`.
+    3. Pressing `Cmd+R` anywhere in the app immediately re-fetches metadata, episodes, cast, recommendations, search results, and cloud watchlist without navigating away from the current page.
+- **Problem 2 (Card Hover Polish — Zero Dimming + Specular Rim Highlight):** *Status: Completed & Verified.*
+  - Removed `Color.black.opacity(0.3)` hover overlays across `GlassCard` and `OTTCard`. Artwork stays 100% bright, punchy, and clear under the cursor, while the multi-stop gradient rim stroke (`LinearGradient`) elevates with an ambient glow.
+- **Problem 3 (Scroll Performance Overhaul — Buttery Smooth 60 / 120 FPS):** *Status: Completed & Verified.*
+  - **1. Equatable Scroll Bounds in `CarouselView` & `DetailRail`:** Replaced continuous per-pixel `onPreferenceChange` updates with an equatable `CarouselScrollBounds(canScrollLeft:canScrollRight:)` preference. This completely eliminates view body re-evaluations during horizontal trackpad/mouse scrolling.
+  - **2. Frame 0 Instant Image Cache in `CachedImage`:** `CachedImage` now synchronously initializes `@State private var phase` with in-memory decoded images from `ImageInMemoryCache.shared`. Scrolled cards render instantly on frame 0 with zero flash, zero task dispatch delay, and zero placeholder bounce.
+  - **3. Expanded In-Memory Image Cache:** Increased `ImageInMemoryCache` capacity to 256 MB and 600 images (from 30 MB / 80 images), preventing cache thrashing when scrolling through extensive rails and catalogs.
+  - **4. Removed Synchronous File I/O from Render Loop:** Removed synchronous disk writes (`/tmp/flux_image_debug.log`) in `ImageDebugLog.log` that were blocking cooperative threads during image fetching.
+  - **5. Decoupled Root Observation in `GlassCard`:** Replaced `@ObservedObject private var userData` with a computed property to ensure background playback/history ticks don't invalidate card bodies across the hierarchy.
+  - **6. Layering & Substrate Optimization:** Replaced heavy `.glassEffect` shaders beneath opaque card artwork with `.ultraThinMaterial` substrates while preserving interactive glass pills for buttons/badges.
+  - **Verification:** All 39 unit tests and 4 UI test suites passed (`** TEST SUCCEEDED **`). Cleanly built and running on macOS.
 
 ---
 

@@ -70,19 +70,26 @@ struct Top10Card: View {
             }
         }
         .frame(width: 170, height: 255)
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: isHovering ? [.white.opacity(0.5), .white.opacity(0.15)] : [.white.opacity(0.1), .clear],
+                        colors: isHovering
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isHovering ? 1.5 : 0.5
+                    lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 10 : 4)
+        .shadow(color: isHovering ? Color.black.opacity(0.50) : Color.black.opacity(0.22), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 3)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
         .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
         .onHover { isHovering = $0 }
     }

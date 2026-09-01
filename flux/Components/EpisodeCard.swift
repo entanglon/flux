@@ -97,16 +97,31 @@ struct EpisodeCard: View {
             .padding(.bottom, 6) // Lift up from absolute bottom
         }
         .frame(width: 250, height: 250)
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovered
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.14), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovered ? 1.5 : 0.75
+                )
+        )
+        .shadow(color: isHovered ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovered ? 14 : 6, x: 0, y: isHovered ? 7 : 3)
+        .shadow(color: isHovered ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering
             }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(isHovered ? 1.0 : 0.0), lineWidth: 2)
-        )
     }
 }
 

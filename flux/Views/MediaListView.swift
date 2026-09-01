@@ -119,6 +119,12 @@ struct MediaListView: View {
             await TMDBCatalogCacheActor.shared.clear()
             await loadData(reset: true)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await TMDBCatalogCacheActor.shared.clear()
+                await loadData(reset: true)
+            }
+        }
         .onChange(of: genreMediaType) { _, _ in
             items = []
             currentPage = 1

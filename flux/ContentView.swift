@@ -182,6 +182,10 @@ struct ContentView: View {
             path = NavigationPath()
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await TMDBCatalogCacheActor.shared.clear()
+                await AuthManager.shared.syncNowAsync(forcePull: true)
+            }
             withAnimation(.easeInOut(duration: 0.15)) {
                 refreshToken += 1
             }

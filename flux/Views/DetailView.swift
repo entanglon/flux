@@ -924,6 +924,12 @@ struct DetailView: View {
             await loadDetails()
             prefetchPlaybackSources()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await loadDetails()
+                prefetchPlaybackSources()
+            }
+        }
         .onDisappear {
             PlayerManager.shared.cancelDetailPrefetch()
         }
@@ -1149,17 +1155,25 @@ struct LiquidEpisodeCard: View {
             AsyncImage(url: episode.stillURL) { img in
                 img.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Rectangle().fill(Color(white: 0.1))
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
             .frame(width: 380, height: 214)
             .clipped()
             
             // 2. Liquid Glass Overlay
             LinearGradient(colors: [
-                .black.opacity(0.1),
-                .black.opacity(0.4),
-                .black.opacity(0.8),
-                .black.opacity(0.95)
+                .clear,
+                .black.opacity(0.35),
+                .black.opacity(0.75),
+                .black.opacity(0.92)
             ], startPoint: .top, endPoint: .bottom)
             
             // 3. Content
@@ -1178,7 +1192,7 @@ struct LiquidEpisodeCard: View {
                 
                 Text(episode.overview)
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(3)
                     .lineSpacing(2)
                     .frame(height: 60, alignment: .topLeading)
@@ -1193,7 +1207,7 @@ struct LiquidEpisodeCard: View {
                     // Progress Bar (Conditional: displayed only when in-progress)
                     if progress > 0.01 && progress < 0.95 {
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.3)).frame(height: 4)
+                            Capsule().fill(Color.white.opacity(0.35)).frame(height: 4)
                             Capsule().fill(Color.white).frame(width: max(4, 70 * min(1.0, progress)), height: 4)
                         }
                         .frame(width: 70)
@@ -1237,10 +1251,12 @@ struct LiquidEpisodeCard: View {
                             Label("Mark as Watched", systemImage: "checkmark.circle")
                         }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .contentShape(Rectangle())
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white.opacity(isHovering ? 1.0 : 0.80))
+                            .frame(width: 28, height: 28)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                            .contentShape(Circle())
                     }
                     .menuIndicator(.hidden)
                     .menuStyle(.borderlessButton)
@@ -1251,14 +1267,27 @@ struct LiquidEpisodeCard: View {
             .padding(20)
         }
         .frame(width: 380, height: 214)
-        .background(Color(white: 0.1))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(isHovering ? 0.5 : 0.1), lineWidth: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
         )
-        .shadow(color: isHovering ? Color.black.opacity(0.3) : Color.black.opacity(0.1), radius: isHovering ? 10 : 4, x: 0, y: isHovering ? 6 : 2)
-        .animation(.spring(duration: 0.3), value: isHovering)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovering
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.14), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovering ? 1.5 : 0.75
+                )
+        )
+        .shadow(color: isHovering ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 7 : 3)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: isHovering)
         .onHover { isHovering = $0 }
     }
 }
@@ -1271,16 +1300,12 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
     let itemHeight: CGFloat
     let content: (Data.Element) -> Content
     
-    @State private var scrollPosition: CGFloat = 0
-    @State private var contentWidth: CGFloat = 0
+    @State private var canScrollLeft: Bool = false
+    @State private var canScrollRight: Bool = false
+    @State private var scrollTargetIndex: Int = 0
     @State private var containerWidth: CGFloat = 0
-    
-    // Missing properties restored
     @State private var isHovering: Bool = false
     private let scrollStep = 3
-    
-    // Threshold to consider "scrolled"
-    private let tolerance: CGFloat = 10 
     
     var body: some View {
         ScrollViewReader { proxy in
@@ -1295,27 +1320,36 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
                 .padding(.trailing, 60)
                 .padding(.top, 10) // Reduced top padding
                 .padding(.bottom, 30) // Keep bottom for shadow
-                .background(GeometryReader { geo in
-                    Color.clear
-                        .preference(key: ScrollOffsetKey.self, value: geo.frame(in: .named("scrollContainer")).minX)
-                        .onAppear { contentWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { _, newValue in contentWidth = newValue }
-                })
+                .background(
+                    GeometryReader { contentGeo in
+                        Color.clear.preference(
+                            key: DetailRailBoundsPreferenceKey.self,
+                            value: CarouselScrollBounds(
+                                canScrollLeft: contentGeo.frame(in: .named("scrollContainer")).minX < -15,
+                                canScrollRight: contentGeo.frame(in: .named("scrollContainer")).maxX > containerWidth + 15
+                            )
+                        )
+                    }
+                )
             }
             .coordinateSpace(name: "scrollContainer")
-            .onPreferenceChange(ScrollOffsetKey.self) { value in
-                if let value = value {
-                    self.scrollPosition = value
+            .onPreferenceChange(DetailRailBoundsPreferenceKey.self) { bounds in
+                if self.canScrollLeft != bounds.canScrollLeft {
+                    self.canScrollLeft = bounds.canScrollLeft
+                }
+                if self.canScrollRight != bounds.canScrollRight {
+                    self.canScrollRight = bounds.canScrollRight
                 }
             }
-            .background(GeometryReader { geo in
-                Color.clear.onAppear { containerWidth = geo.size.width }
-                           .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
-            })
+            .background(
+                GeometryReader { geo in
+                    Color.clear.onAppear { containerWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+                }
+            )
             // Left Arrow
             .overlay(alignment: .leading) {
-                // Only show if we have scrolled past start (negative offset)
-                if isHovering && scrollPosition < -tolerance {
+                if isHovering && canScrollLeft {
                     Button(action: { scrollLeft(proxy: proxy) }) { arrowButton("left") }
                         .buttonStyle(.plain)
                         .padding(.leading, 268)
@@ -1324,10 +1358,7 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
             }
             // Right Arrow
             .overlay(alignment: .trailing) {
-                // Show if content extends beyond current view
-                // (scrollPosition is negative, so we add contentWidth to see where the end is)
-                // If end > containerWidth, we have more to see.
-                if isHovering && (scrollPosition + contentWidth > containerWidth + tolerance) {
+                if isHovering && canScrollRight {
                    Button(action: { scrollRight(proxy: proxy) }) { arrowButton("right") }
                         .buttonStyle(.plain)
                         .padding(.trailing, 20)
@@ -1346,28 +1377,27 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
             .glassEffect(.regular.interactive(), in: .capsule)
     }
     
-    // Update scroll logic to deduce index from visual estimation if needed, 
-    // but simple scrollTo relative to current index is safer. 
-    // We need to track `firstVisibleIndex` roughly.
-    // For now, let's just increment/decrement a reliable state or find the item closest to -scrollPosition.
     private func scrollRight(proxy: ScrollViewProxy) {
-        // Simple heuristic: Move +3
-        let currentIdx = Int(abs(scrollPosition - 60) / (itemWidth + 24)) // 60 is padding
-        let nextIndex = min(currentIdx + scrollStep, items.count - 1)
-        withAnimation { proxy.scrollTo(nextIndex, anchor: .leading) }
+        guard !items.isEmpty else { return }
+        scrollTargetIndex = min(scrollTargetIndex + scrollStep, items.count - 1)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(scrollTargetIndex, anchor: .leading)
+        }
     }
     
     private func scrollLeft(proxy: ScrollViewProxy) {
-        let currentIdx = Int(abs(scrollPosition - 60) / (itemWidth + 24))
-        let nextIndex = max(currentIdx - scrollStep, 0)
-        withAnimation { proxy.scrollTo(nextIndex, anchor: .leading) }
+        guard !items.isEmpty else { return }
+        scrollTargetIndex = max(scrollTargetIndex - scrollStep, 0)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(scrollTargetIndex, anchor: .leading)
+        }
     }
 }
 
-struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = value ?? nextValue()
+private struct DetailRailBoundsPreferenceKey: PreferenceKey {
+    static var defaultValue = CarouselScrollBounds(canScrollLeft: false, canScrollRight: true)
+    static func reduce(value: inout CarouselScrollBounds, nextValue: () -> CarouselScrollBounds) {
+        value = nextValue()
     }
 }
 

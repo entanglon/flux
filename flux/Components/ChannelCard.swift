@@ -81,13 +81,26 @@ struct ChannelCard: View {
             .glassEffect(.clear, in: .rect)
         }
         .frame(width: 160, height: 240) // Standard Portrait Size
-        .background(Color.black.opacity(0.3))
-        .cornerRadius(12)
-        .shadow(color: isHovering ? channel.brandColor.opacity(0.5) : Color.black.opacity(0.3), radius: isHovering ? 12 : 6, x: 0, y: isHovering ? 6 : 3)
-        .overlay(
-             RoundedRectangle(cornerRadius: 12)
-                 .stroke(channel.brandColor.opacity(isHovering ? 1.0 : 0.0), lineWidth: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovering
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), channel.brandColor.opacity(0.40)]
+                            : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovering ? 1.5 : 0.75
+                )
+        )
+        .shadow(color: isHovering ? channel.brandColor.opacity(0.45) : Color.black.opacity(0.25), radius: isHovering ? 14 : 6, x: 0, y: isHovering ? 6 : 3)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovering = hovering

@@ -71,13 +71,26 @@ struct TopTenCard: View {
             .padding(.top, 0)
         }
         .frame(width: 180, height: 270)
-        .background(Color.black.opacity(0.3))
-        .cornerRadius(16)
-        .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.3), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(isHovering ? 0.2 : 0.0), lineWidth: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: isHovering
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isHovering ? 1.5 : 0.75
+                )
+        )
+        .shadow(color: isHovering ? Color.black.opacity(0.50) : Color.black.opacity(0.25), radius: isHovering ? 16 : 8, x: 0, y: isHovering ? 8 : 4)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovering)
         .onHover { hovering in
             isHovering = hovering

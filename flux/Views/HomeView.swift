@@ -197,6 +197,12 @@ struct HomeView: View {
         .task {
             await loadData()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await TMDBCatalogCacheActor.shared.clear()
+                await loadData()
+            }
+        }
         // Live-refresh the For You rail when the user toggles ♥ anywhere.
         .onReceive(TasteProfileManager.shared.$lovedItems) { _ in
             refreshForYouTask?.cancel()

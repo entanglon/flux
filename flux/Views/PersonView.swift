@@ -54,9 +54,20 @@ struct PersonView: View {
             .ignoresSafeArea()
         )
         .task {
-            async let d: TMDBPersonDetail? = TMDBEnricher.shared.fetchPerson(personID: personID)
-            async let c: [MediaItem] = TMDBEnricher.shared.fetchPersonCredits(personID: personID)
-            let (detailsRes, creditsRes) = await (d, c)
+            await loadPersonData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await loadPersonData()
+            }
+        }
+    }
+
+    private func loadPersonData() async {
+        async let d: TMDBPersonDetail? = TMDBEnricher.shared.fetchPerson(personID: personID)
+        async let c: [MediaItem] = TMDBEnricher.shared.fetchPersonCredits(personID: personID)
+        let (detailsRes, creditsRes) = await (d, c)
+        await MainActor.run {
             self.details = detailsRes
             self.credits = creditsRes.filter { $0.isReleased }
             self.isLoading = false

@@ -27,10 +27,10 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
         self.content = { item, _ in content(item) }
     }
     
-    @State private var scrollPosition: CGFloat = 0
-    @State private var contentWidth: CGFloat = 0
+    @State private var canScrollLeft: Bool = false
+    @State private var canScrollRight: Bool = false
+    @State private var scrollTargetIndex: Int = 0
     @State private var containerWidth: CGFloat = 0
-    private let tolerance: CGFloat = 10
     
     var body: some View {
         ZStack {
@@ -45,27 +45,37 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                     .padding(.bottom, 20)
-                    .background(GeometryReader { geo in
-                        Color.clear
-                            .preference(key: CarouselScrollOffsetKey.self, value: geo.frame(in: .named("carouselScrollContainer")).minX)
-                            .onAppear { contentWidth = geo.size.width }
-                            .onChange(of: geo.size.width) { _, newValue in contentWidth = newValue }
-                    })
+                    .background(
+                        GeometryReader { contentGeo in
+                            Color.clear.preference(
+                                key: CarouselBoundsPreferenceKey.self,
+                                value: CarouselScrollBounds(
+                                    canScrollLeft: contentGeo.frame(in: .named("carouselScrollContainer")).minX < -15,
+                                    canScrollRight: contentGeo.frame(in: .named("carouselScrollContainer")).maxX > containerWidth + 15
+                                )
+                            )
+                        }
+                    )
                 }
                 .coordinateSpace(name: "carouselScrollContainer")
-                .onPreferenceChange(CarouselScrollOffsetKey.self) { value in
-                    if let value = value {
-                        self.scrollPosition = value
+                .onPreferenceChange(CarouselBoundsPreferenceKey.self) { bounds in
+                    if self.canScrollLeft != bounds.canScrollLeft {
+                        self.canScrollLeft = bounds.canScrollLeft
+                    }
+                    if self.canScrollRight != bounds.canScrollRight {
+                        self.canScrollRight = bounds.canScrollRight
                     }
                 }
-                .background(GeometryReader { geo in
-                    Color.clear.onAppear { containerWidth = geo.size.width }
-                               .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
-                })
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.onAppear { containerWidth = geo.size.width }
+                            .onChange(of: geo.size.width) { _, newValue in containerWidth = newValue }
+                    }
+                )
                 
                 // Left Arrow
                 .overlay(alignment: .leading) {
-                    if isHovering && scrollPosition < -tolerance {
+                    if isHovering && canScrollLeft {
                         Button(action: {
                             scrollLeft(proxy: proxy)
                         }) {
@@ -73,8 +83,6 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                         }
                         .buttonStyle(.plain)
                         .padding(.leading, 268)
-                        // Scroll content carries .padding(.bottom, 20), which pushes
-                        // the overlay's vertical center below the card axis.
                         .offset(y: -10)
                         .transition(.opacity)
                     }
@@ -82,7 +90,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
 
                 // Right Arrow
                 .overlay(alignment: .trailing) {
-                    if isHovering && (scrollPosition + contentWidth > containerWidth + tolerance) {
+                    if isHovering && canScrollRight {
                         Button(action: {
                             scrollRight(proxy: proxy)
                         }) {
@@ -113,33 +121,30 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
     }
     
     private func scrollRight(proxy: ScrollViewProxy) {
-        // Estimate current index based on scroll position + 40 padding
-        // scrollPosition is negative. Distance scrolled = abs(scrollPosition - 40)
-        let scrolledDistance = abs(scrollPosition - 40)
-        let itemTotalWidth = itemWidth + spacing
-        let currentIdx = Int(scrolledDistance / itemTotalWidth)
-        
-        let nextIndex = min(currentIdx + scrollStep, items.count - 1)
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-            proxy.scrollTo(nextIndex, anchor: .leading)
+        guard !items.isEmpty else { return }
+        scrollTargetIndex = min(scrollTargetIndex + scrollStep, items.count - 1)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(items[scrollTargetIndex].id, anchor: .leading)
         }
     }
     
     private func scrollLeft(proxy: ScrollViewProxy) {
-        let scrolledDistance = abs(scrollPosition - 40)
-        let itemTotalWidth = itemWidth + spacing
-        let currentIdx = Int(scrolledDistance / itemTotalWidth)
-        
-        let nextIndex = max(currentIdx - scrollStep, 0)
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-            proxy.scrollTo(nextIndex, anchor: .leading)
+        guard !items.isEmpty else { return }
+        scrollTargetIndex = max(scrollTargetIndex - scrollStep, 0)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(items[scrollTargetIndex].id, anchor: .leading)
         }
     }
 }
 
-private struct CarouselScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = value ?? nextValue()
+struct CarouselScrollBounds: Equatable {
+    let canScrollLeft: Bool
+    let canScrollRight: Bool
+}
+
+private struct CarouselBoundsPreferenceKey: PreferenceKey {
+    static var defaultValue = CarouselScrollBounds(canScrollLeft: false, canScrollRight: true)
+    static func reduce(value: inout CarouselScrollBounds, nextValue: () -> CarouselScrollBounds) {
+        value = nextValue()
     }
 }

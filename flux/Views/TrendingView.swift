@@ -64,6 +64,11 @@ struct TrendingView: View {
         .task {
             await loadTrendingData()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await loadTrendingData()
+            }
+        }
     }
     
     private func loadTrendingData() async {

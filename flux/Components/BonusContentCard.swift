@@ -63,20 +63,26 @@ struct BonusContentCard: View {
         }
         .frame(width: 300, height: 169)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
         // Specular Rim Stroke Highlight on Hover
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: isHovered ? [.white.opacity(0.75), .white.opacity(0.25)] : [.white.opacity(0.14), .clear],
+                        colors: isHovered
+                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                            : [Color.white.opacity(0.14), Color.white.opacity(0.03)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isHovered ? 1.5 : 0.5
+                    lineWidth: isHovered ? 1.5 : 0.75
                 )
         )
-        .shadow(color: Color.black.opacity(isHovered ? 0.50 : 0.25), radius: isHovered ? 12 : 5, x: 0, y: isHovered ? 6 : 2)
-        .shadow(color: isHovered ? Color.white.opacity(0.12) : Color.clear, radius: 8, x: 0, y: 0)
+        .shadow(color: Color.black.opacity(isHovered ? 0.50 : 0.22), radius: isHovered ? 14 : 5, x: 0, y: isHovered ? 7 : 2)
+        .shadow(color: isHovered ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isHovered)
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -93,11 +99,11 @@ struct BonusContentCard: View {
                         .resizable()
                         .aspectRatio(16/9, contentMode: .fill)
                 } else {
-                    Rectangle().fill(Color(white: 0.12))
+                    Rectangle().fill(.ultraThinMaterial)
                 }
             }
         } else {
-            Rectangle().fill(Color(white: 0.12))
+            Rectangle().fill(.ultraThinMaterial)
         }
     }
 }

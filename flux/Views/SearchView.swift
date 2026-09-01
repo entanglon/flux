@@ -114,6 +114,14 @@ struct SearchView: View {
                 await SearchEngine.shared.indexUserAndTrendingData()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+            Task {
+                await SearchEngine.shared.indexUserAndTrendingData()
+                if !viewModel.query.isEmpty {
+                    viewModel.commitSearch()
+                }
+            }
+        }
     }
     
     private var defaultBrowseView: some View {

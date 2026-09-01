@@ -32,152 +32,25 @@ struct GlassCard: View {
         self.showTitle = showTitle
     }
     
-    @ObservedObject private var userData = UserDataService.shared
+    private var userData: UserDataService { UserDataService.shared }
     
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+    }
+
+    private var strokeGradient: LinearGradient {
+        LinearGradient(
+            colors: isHovering
+                ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Image Container
-            Color.clear
-                .aspectRatio(aspectRatio.ratio, contentMode: .fit)
-                .overlay(
-                    Group {
-                        if aspectRatio == .landscape && displayItem.backdropURL == nil {
-                            ZStack {
-                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
-                                    if let img = phase.image {
-                                        img.resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .blur(radius: 16)
-                                            .overlay(Color.black.opacity(0.45))
-                                    } else {
-                                        Rectangle().fill(Color.gray.opacity(0.2))
-                                    }
-                                }
-                                
-                                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL, maxDimension: 800) { phase in
-                                    if let img = phase.image {
-                                        img.resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .padding(.vertical, 6)
-                                            .shadow(color: .black.opacity(0.6), radius: 6)
-                                    }
-                                }
-                            }
-                        } else {
-                            // Decode at render resolution — the 300px default
-                            // left cards soft on Retina (cards draw ~480px).
-                            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 1200) { phase in
-                                switch phase {
-                                case .empty:
-                                    placeholderView
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                case .failure:
-                                    placeholderView
-                                @unknown default:
-                                    placeholderView
-                                }
-                            }
-                        }
-                    }
-                )
-                // Dimming on Hover
-                .overlay(
-                    Color.black.opacity(isHovering ? 0.3 : 0.0)
-                        .animation(.easeInOut(duration: 0.2), value: isHovering)
-                )
-                // Badges: Coming Soon (unreleased with exact release date) / NEW EPISODE (watchlisted, aired ≤7d)
-                .overlay(alignment: .topLeading) {
-                    if !displayItem.isReleased {
-                        Text(displayItem.cardReleaseDateBadge)
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.5)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
-                            .padding(8)
-                    } else if hasNewEpisode {
-                        Text("NEW EPISODE")
-                            .font(.system(size: 10, weight: .heavy))
-                            .tracking(0.5)
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color(red: 0.30, green: 0.95, blue: 0.45)))
-                            .padding(8)
-                    }
-                }
-                // Menu Button
-                .overlay(alignment: .bottomTrailing) {
-                    if isHovering {
-                         Menu {
-                             NavigationLink(value: item) {
-                                 Label(item.category == "Movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle")
-                             }
-                             
-                             Button(action: {}) {
-                                 Label(item.category == "Movie" ? "Share Movie" : "Share Show", systemImage: "square.and.arrow.up")
-                             }
-                             
-                             Button(action: {
-                                 userData.toggleWatchlist(item)
-                             }) {
-                                 let isInWatchlist = userData.watchlist.contains { $0.id == item.id }
-                                 Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
-                                       systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
-                             }
-                             
-                         } label: {
-                             Image(systemName: "ellipsis")
-                                 .font(.system(size: 13, weight: .bold))
-                                 .foregroundColor(.white)
-                                 .frame(width: 28, height: 28)
-                                 .glassEffect(.regular.interactive(), in: .circle)
-                                 .contentShape(Circle())
-                         }
-                         .menuStyle(.button)
-                         .buttonStyle(.plain)
-                         .padding(10)
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if let progress = progress {
-                        GeometryReader { geo in
-                            VStack {
-                                Spacer()
-                                ZStack(alignment: .leading) {
-                                    Rectangle()
-                                        .fill(Color.white.opacity(0.3))
-                                        .frame(height: 4)
-                                    Rectangle()
-                                        .fill(Color.white)
-                                        .frame(width: geo.size.width * progress, height: 4)
-                                }
-                                .frame(height: 4)
-                                .padding(.bottom, 12)
-                                .padding(.horizontal, 12)
-                            }
-                        }
-                    }
-                }
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(
-                            LinearGradient(
-                                colors: isHovering ? [.white.opacity(0.6), .white.opacity(0.2)] : [.white.opacity(0.12), .clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: isHovering ? 1.5 : 0.5
-                        )
-                )
-                .clipped()
-                .shadow(color: isHovering ? Color.black.opacity(0.4) : Color.black.opacity(0.2), radius: isHovering ? 10 : 4, x: 0, y: isHovering ? 6 : 2)
-                .drawingGroup()
+            imagePlate
             
             // Text Content
             if showTitle {
@@ -221,22 +94,179 @@ struct GlassCard: View {
         .accessibilityHint("Opens title details")
     }
 
+    private var imagePlate: some View {
+        ZStack(alignment: .bottomLeading) {
+            imageContent
+
+            VStack {
+                HStack {
+                    badgeOverlay
+                    Spacer()
+                }
+                Spacer()
+                HStack {
+                    Spacer()
+                    menuOverlay
+                }
+            }
+
+            if progress != nil {
+                GeometryReader { geo in
+                    progressBarView(totalWidth: geo.size.width)
+                }
+            }
+        }
+        .aspectRatio(aspectRatio.ratio, contentMode: .fit)
+        .clipShape(cardShape)
+        .background(
+            cardShape
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            cardShape.stroke(strokeGradient, lineWidth: isHovering ? 1.5 : 0.75)
+        )
+        .shadow(color: isHovering ? Color.black.opacity(0.45) : Color.black.opacity(0.20), radius: isHovering ? 14 : 5, x: 0, y: isHovering ? 7 : 2)
+        .shadow(color: isHovering ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
+    }
+
+    @ViewBuilder
+    private var imageContent: some View {
+        if aspectRatio == .landscape && displayItem.backdropURL == nil {
+            ZStack {
+                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
+                    if let img = phase.image {
+                        img.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .blur(radius: 16)
+                            .overlay(Color.black.opacity(0.45))
+                    } else {
+                        Rectangle().fill(Color.gray.opacity(0.2))
+                    }
+                }
+                
+                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL, maxDimension: 800) { phase in
+                    if let img = phase.image {
+                        img.resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .padding(.vertical, 6)
+                            .shadow(color: .black.opacity(0.6), radius: 6)
+                    }
+                }
+            }
+        } else {
+            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 1200) { phase in
+                switch phase {
+                case .empty:
+                    placeholderView
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure:
+                    placeholderView
+                @unknown default:
+                    placeholderView
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var badgeOverlay: some View {
+        if !displayItem.isReleased {
+            Text(displayItem.cardReleaseDateBadge)
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .glassEffect(.regular, in: .capsule)
+                .padding(8)
+        } else if hasNewEpisode {
+            Text("NEW EPISODE")
+                .font(.system(size: 10, weight: .heavy))
+                .tracking(0.5)
+                .foregroundStyle(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color(red: 0.30, green: 0.95, blue: 0.45)))
+                .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var menuOverlay: some View {
+        if isHovering {
+            Menu {
+                NavigationLink(value: item) {
+                    Label(item.category == "Movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle")
+                }
+                
+                Button(action: {}) {
+                    Label(item.category == "Movie" ? "Share Movie" : "Share Show", systemImage: "square.and.arrow.up")
+                }
+                
+                Button(action: {
+                    userData.toggleWatchlist(item)
+                }) {
+                    let isInWatchlist = userData.watchlist.contains { $0.id == item.id }
+                    Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
+                          systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 28, height: 28)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .contentShape(Circle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .padding(10)
+        }
+    }
+
+    @ViewBuilder
+    private func progressBarView(totalWidth: CGFloat) -> some View {
+        if let progress = progress {
+            VStack {
+                Spacer()
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.3))
+                        .frame(height: 4)
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(width: totalWidth * progress, height: 4)
+                }
+                .frame(height: 4)
+                .padding(.bottom, 12)
+                .padding(.horizontal, 12)
+            }
+        }
+    }
+
     private var placeholderView: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.16, green: 0.18, blue: 0.28).opacity(0.6), Color(red: 0.08, green: 0.09, blue: 0.15)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
             
             VStack(spacing: 8) {
                 Image(systemName: displayItem.category.lowercased().contains("movie") ? "film" : "tv")
                     .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.white.opacity(0.40))
                 
                 Text(displayItem.title)
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.60))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .padding(.horizontal, 10)
