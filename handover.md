@@ -335,17 +335,19 @@ open "$DEBUG_APP"
 ```
 
 ## Key File Locations
-- `flux/Services/PlayerManager.swift` — playback, prefetch, auto-fallback, torrent tracking
-- `flux/Services/StremioServerManager.swift` — FluxEngine process, env vars, torrent CRUD
-- `flux/Services/StremioService.swift` — catalog fetching, OTT addon, search
-- `flux/Services/StreamManager.swift` — addon fan-out, stream caching
-- `flux/Services/TMDBEnricher.swift` — TMDB enrichment, poster URL upgrade
-- `flux/Views/PlayerView.swift` — player UI, floating skip intro/next episode
-- `flux/Views/PlayerControlsView.swift` — controls bar, subtitle/audio popovers
-- `flux/Views/DetailView.swift` — detail page, prefetch trigger
-- `flux/Views/SearchView.swift` — search with dropdown suggestions
-- `flux/Views/SettingsView.swift` — settings (TMDB key validation UI)
-- `flux/Components/CachedImage.swift` — image loading + caching
-- `flux/Components/GlassCard.swift` — card component with image loading
+- `flux/Services/PlayerManager.swift` — Playback session manager, warm core prefetch, Flux Mode source racing, Continue Watching stream replay validation
+- `flux/Services/SleepAssertionManager.swift` — macOS IOKit display sleep and ProcessInfo power assertions
+- `flux/Services/StremioServerManager.swift` — FluxEngine sidecar process, env vars, torrent lifecycle
+- `flux/Services/StremioService.swift` — Catalog fetching, OTT addons, search engine integration
+- `flux/Services/StreamManager.swift` — Addon fan-out, multi-lingual audio matching, stream scoring, health checks
+- `flux/Services/TMDBEnricher.swift` — TMDB metadata enrichment, posters, transparent logos, cast & crew
+- `flux/Services/AddonManager.swift` — Addon management, polymorphic manifest decoding, sync
+- `flux/Views/PlayerView.swift` — Full cinematic player, pure logo buffering, chapters, skip intro
+- `flux/Views/PlayerControlsView.swift` — Glass controls bar, subtitle & audio track popovers
+- `flux/Views/DetailView.swift` — Detail view with instant parallel prefetch and auto-play
+- `flux/Views/SearchView.swift` — Prefix-trie search engine with instant autocomplete
+- `flux/Views/SettingsView.swift` — Settings (Streaming source mode, Flux Mode, Audio language, Quality, TMDB key)
+- `flux/Components/ContinueWatchingCard.swift` — Apple TV style landscape continue watching cards
+- `flux/Components/GlassCard.swift` — Media card component with hover states
 
-*Last Updated: Aug 28, 2026*
+*Last Updated: Sep 1, 2026, 10:30 PM*
