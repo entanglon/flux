@@ -219,6 +219,12 @@ struct PlayerView: View {
             lastProgressSaveTime = Date()
             playerManager.updateWatchProgress(time: t, duration: mpv.duration)
         }
+
+        // Automatically preload next episode when reaching the final stretch (> 80% progress or < 2 min remaining)
+        if hasStartedPlayback && mpv.duration > 60 && (mpv.progress > 0.80 || (mpv.duration - t) <= 120) {
+            playerManager.preloadNextEpisodeIfNeeded()
+        }
+
         guard let resume = playerManager.pendingResumeTime else { return }
         guard t > 0.1 || mpv.duration > 0 else { return }
         playerManager.pendingResumeTime = nil
@@ -415,7 +421,8 @@ struct PlayerView: View {
     
     @ViewBuilder
     private var overlayContent: some View {
-        if playerManager.isLoading {
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        if playerManager.isLoading && !isFluxEnabled {
             loadingView
         }
         
@@ -744,7 +751,7 @@ struct PlayerView: View {
     }
 
     private var isInitialLoading: Bool {
-        return !hasStartedPlayback && !playerManager.isLoading && playerManager.currentStreamURL != nil
+        return !hasStartedPlayback
     }
 
     private var isMidPlaybackBuffering: Bool {
@@ -925,8 +932,6 @@ struct PlayerView: View {
             }
         }
         .onReceive(loadingTimer) { _ in
-            guard playerManager.currentStreamURL != nil else { return }
-
             if mpv.isPlaying && mpv.timePos >= 0.05 {
                 withAnimation(.easeOut(duration: 0.2)) {
                     self.hasStartedPlayback = true
@@ -942,8 +947,16 @@ struct PlayerView: View {
                 return
             }
 
+            if playerManager.currentStreamURL == nil {
+                // Smooth incremental progress while Flux Mode discovers and races streams
+                withAnimation(.linear(duration: 0.5)) {
+                    self.animatedProgress = min(0.40, self.animatedProgress + 0.06)
+                }
+                return
+            }
+
             let cacheTime = mpv.demuxerCacheTime
-            let fill = min(0.99, cacheTime / 10.0)
+            let fill = min(0.99, max(0.40, cacheTime / 8.0))
 
             if fill > 0.005 {
                 withAnimation(.linear(duration: 0.35)) {

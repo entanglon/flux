@@ -1,17 +1,24 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 9:55 PM — STREAM FILTER OVERRIDE & COMPREHENSIVE LANGUAGE/QUALITY RANKING
+## LATEST: Sep 1, 2026, 10:25 PM — FLUX MODE PURE LOGO BUFFER SCREEN & PARALLEL PREFETCH
 
 ### Current Status & Resolutions:
-- **Streaming Source Filter Override & History Invalidation (`PlayerManager.swift`):** *Status: Completed & Verified.*
-  - **Issue:** When resuming media from Continue Watching or clicking Play on a detail page, `PlayerManager` reused the previously saved stream from history without validating whether that stream matched the active `streamingSourceMode` filter (e.g. replaying a previously saved torrent stream from `127.0.0.1:11470` even when the user changed Settings to "HTTP Streams Only").
-  - **Resolution:** Added `isSavedURLCompatible` in `PlayerManager.loadAndPlay`. If a saved stream from history conflicts with the current filter (e.g. torrent stream when in HTTP-only mode, or HTTP stream when in Torrent-only mode), the stale session is discarded and Flux Mode automatically fetches and races fresh streams matching the active filter.
-- **Flux Mode Audio Language & Maximum Quality Ranking (`StreamManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
+- **Pure Cinematic Logo Buffering in Flux Mode (`PlayerView.swift`):** *Status: Completed & Verified.*
+  - **Issue:** When opening player in Flux Mode, `overlayContent` previously rendered a generic spinning indicator with `"Finding Streams..."` / `"Connecting to Stream..."` text before switching to the logo fill view.
   - **Resolution:**
-    1. **Multi-Lingual Audio Detection (`matchesPreferredLanguage`):** Expanded audio language detection across English, Hindi, Tamil, Telugu, Japanese, Korean, French, Spanish, German, Italian, Russian, Chinese, Portuguese, and multi-audio releases (`[Hindi]`, `Dual Audio`, `Multi-Audio`, `Dubbed`, `Hin`, `Jap`, `VF`, `VOSTFR`, `Spa`, etc.).
-    2. **Language Priority Boost:** Streams containing the user's preferred audio language (`defaultAudioLang`) receive a massive +3000 health score priority boost so they are ranked at the top of the stream list and selected by Flux Mode. Foreign-dub releases without the user's audio track are demoted.
-    3. **Maximum Resolution Enforcement:** All stream queries strictly adhere to the `preferredQuality` cap (`isWithinMaxResolution`), and Flux Mode selects the highest health-ranked stream within that resolution.
-    4. **Parallel HTTP Candidate Racing:** Flux Mode races up to 5 HTTP candidates in parallel with fast HEAD checks when in HTTP mode or when the top-ranked stream is an HTTP direct link.
+    1. In `PlayerView.swift`, `isInitialLoading` is now active immediately upon window creation until `hasStartedPlayback` becomes true.
+    2. Suppressed the generic `loadingView` spinner overlay whenever Flux Mode is enabled (`!isFluxEnabled`), so the user only ever sees the full cinematic backdrop artwork and the progressive left-to-right title logo fill loading animation.
+    3. Enhanced `loadingTimer` to smoothly advance logo progress during stream discovery/racing, handing off seamlessly to MPV demuxer cache filling.
+- **Fixed Detail Page Play Buttons Bypassing Flux Mode & Active Prefetching (`DetailView.swift`, `PlayerView.swift`):** *Status: Completed & Verified.*
+  - **Issue:** `DetailView` play actions (Hero Play, Episode Cards) had hardcoded `forceStreamPicker: true`, which forced the stream picker dialog and completely bypassed Flux Mode and its pre-warmed background playback core. Furthermore, `DetailView.task` waited for `loadDetails()` (TMDB API) to finish before kicking off prefetch, and next episode preloading during playback was never triggered during normal uninterrupted watching.
+  - **Resolution:**
+    1. Changed all DetailView Play actions to pass `forceStreamPicker: !isFlux` (where `isFlux = enableFluxMode`), instantly launching the pre-warmed playback core in 0ms without opening stream pickers.
+    2. Detail page prefetch now starts immediately in parallel with metadata loading, and automatically re-prefetches whenever the user changes season or episode.
+    3. In `PlayerView.swift`, `handleTimePosChange` automatically triggers `preloadNextEpisodeIfNeeded()` as soon as playback passes 80% or has <2 minutes remaining.
+- **Streaming Source Filter Override & History Invalidation (`PlayerManager.swift`):** *Status: Completed & Verified.*
+  - Discards incompatible saved streams (e.g. torrents when in HTTP-only mode) so Flux Mode selects fresh matching streams.
+- **Flux Mode Audio Language & Maximum Quality Ranking (`StreamManager.swift`, `PlayerManager.swift`):** *Status: Completed & Verified.*
+  - Multi-lingual audio matching with +3000 health priority boost for preferred audio languages and maximum resolution filtering.
 - **Verification:** All 40 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---

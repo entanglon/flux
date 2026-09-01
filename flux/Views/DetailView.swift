@@ -250,23 +250,25 @@ struct DetailView: View {
                                             )
                                         } else if displayItem.category == "TV Show" || displayItem.category == "Series" {
                                             let firstEp = episodes.first(where: { $0.seasonNumber > 0 }) ?? episodes.first
+                                            let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
                                             PlayerManager.shared.play(
                                                 displayItem,
                                                 season: selectedSeason?.seasonNumber ?? firstEp?.seasonNumber ?? 1,
                                                 episode: firstEp?.episodeNumber ?? 1,
                                                 episodeImage: firstEp?.stillURL,
                                                 fromContinueWatching: false,
-                                                forceStreamPicker: true,
+                                                forceStreamPicker: !isFlux,
                                                 startFromBeginning: true
                                             )
                                         } else {
+                                            let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
                                             PlayerManager.shared.play(
                                                 displayItem,
                                                 season: nil,
                                                 episode: nil,
                                                 episodeImage: nil,
                                                 fromContinueWatching: false,
-                                                forceStreamPicker: true,
+                                                forceStreamPicker: !isFlux,
                                                 startFromBeginning: true
                                             )
                                         }
@@ -593,13 +595,14 @@ struct DetailView: View {
                                     Button(action: {
                                         let prog = getEpisodeProgress(episode)
                                         let hasProgress = prog > 0.01 && prog < 0.90
+                                        let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
                                         PlayerManager.shared.play(
                                             displayItem,
                                             season: selectedSeason?.seasonNumber,
                                             episode: episode.episodeNumber,
                                             episodeImage: episode.stillURL,
                                             fromContinueWatching: hasProgress,
-                                            forceStreamPicker: !hasProgress,
+                                            forceStreamPicker: !isFlux,
                                             startFromBeginning: !hasProgress
                                         )
                                         openWindow(id: "player", value: displayItem.id)
@@ -889,7 +892,14 @@ struct DetailView: View {
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
+            prefetchPlaybackSources()
             await loadDetails()
+            prefetchPlaybackSources()
+        }
+        .onChange(of: selectedSeason?.seasonNumber) { _, _ in
+            prefetchPlaybackSources()
+        }
+        .onChange(of: heroEpisode?.episodeNumber) { _, _ in
             prefetchPlaybackSources()
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
