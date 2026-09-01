@@ -88,10 +88,10 @@ struct GlassCard: View {
                     Color.black.opacity(isHovering ? 0.3 : 0.0)
                         .animation(.easeInOut(duration: 0.2), value: isHovering)
                 )
-                // Badges: Coming Soon (unreleased) / NEW EPISODE (watchlisted, aired ≤7d)
+                // Badges: Coming Soon (unreleased with exact release date) / NEW EPISODE (watchlisted, aired ≤7d)
                 .overlay(alignment: .topLeading) {
                     if !displayItem.isReleased {
-                        Text(displayItem.releaseDateYear != nil ? "Coming \(displayItem.releaseDateYear!)" : "Coming Soon")
+                        Text(displayItem.cardReleaseDateBadge)
                             .font(.system(size: 10, weight: .bold))
                             .tracking(0.5)
                             .foregroundStyle(.white)

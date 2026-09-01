@@ -29,9 +29,9 @@ struct DetailView: View {
     
     /// The active history item for this title (if any).
     private var activeHistoryItem: MediaItem? {
-        userData.getHistoryItem(id: displayItem.id)
-            ?? userData.getHistoryItem(id: item.id)
-            ?? (activeImdbID.flatMap { userData.getHistoryItem(id: $0) })
+        userData.getHistoryItem(for: displayItem)
+            ?? userData.getHistoryItem(for: item)
+            ?? (activeImdbID.flatMap { userData.getHistoryItem(id: $0, title: displayItem.title, category: displayItem.category) })
             ?? (item.progress != nil ? item : nil)
     }
 
@@ -953,7 +953,7 @@ struct DetailView: View {
     
     func getEpisodeProgress(_ episode: Episode?) -> Double {
         guard let episode = episode else { return 0.0 }
-        guard let historyItem = userData.getHistoryItem(id: displayItem.id) else { return 0.0 }
+        guard let historyItem = activeHistoryItem else { return 0.0 }
         
         if displayItem.category == "TV Show" || displayItem.category == "Series" {
             let matchesSeason = (historyItem.lastSeason == nil && episode.seasonNumber == 1) || (historyItem.lastSeason == episode.seasonNumber)
@@ -1010,7 +1010,7 @@ struct DetailView: View {
             if type == "series" {
                 let regularSeasons = merged.seasons?.filter { $0.seasonNumber > 0 && !$0.name.lowercased().contains("special") } ?? []
                 let targetSeason: Season?
-                if let hist = UserDataService.shared.getHistoryItem(id: displayItem.id),
+                if let hist = activeHistoryItem,
                    let lastS = hist.lastSeason,
                    let matchedSeason = regularSeasons.first(where: { $0.seasonNumber == lastS }) {
                     targetSeason = matchedSeason
@@ -1071,7 +1071,7 @@ struct DetailView: View {
         // Initial set to show something immediately
         await MainActor.run {
             self.episodes = currentSeasonEpisodes
-            if let hist = UserDataService.shared.getHistoryItem(id: displayItem.id),
+            if let hist = activeHistoryItem,
                let lastE = hist.lastEpisode,
                let matched = currentSeasonEpisodes.first(where: { $0.episodeNumber == lastE }) {
                 self.heroEpisode = matched

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 
 struct PlayerView: View {
     // Acquired at init: adopts the detail-page prefetch's warm mpv core when
@@ -168,6 +169,12 @@ struct PlayerView: View {
                     .padding(.bottom, 36)
                 }
             }
+
+            // Native Right-Click Context Menu Overlay (Decoupled from SwiftUI render loop to eliminate flickering)
+            NativeContextMenuOverlay {
+                buildNativeContextMenu()
+            }
+            .ignoresSafeArea()
         }
         .focusable() // Make the view capable of receiving key presses
         .focusEffectDisabled() // Remove the blue focus ring
@@ -239,9 +246,6 @@ struct PlayerView: View {
                 isControlsVisible.toggle()
             }
             return .handled
-        }
-        .contextMenu {
-            playerContextMenu
         }
         .onAppear {
             mpv.onPlaybackError = {
@@ -462,125 +466,142 @@ struct PlayerView: View {
         return nil
     }
     
-    @ViewBuilder
-    private var playerContextMenu: some View {
-        // Playback controls (Disabled on initial buffer loading)
-        Button {
-            mpv.togglePlayPause()
-        } label: {
-            Label(mpv.isPlaying ? "Pause" : "Play", systemImage: mpv.isPlaying ? "pause.fill" : "play.fill")
-        }
-        .disabled(!hasStartedPlayback && isInitialLoading)
+    private func buildNativeContextMenu() -> NSMenu {
+        let menu = NSMenu(title: "Player Context Menu")
+        let isPlaying = mpv.isPlaying
+        let isPlaybackEnabled = hasStartedPlayback || !isInitialLoading
 
-        Button {
-            mpv.seek(relative: -15)
-        } label: {
-            Label("Rewind 15s", systemImage: "gobackward.15")
-        }
-        .disabled(!hasStartedPlayback && isInitialLoading)
+        // 1. Play / Pause
+        menu.addItem(ClosureMenuItem(
+            title: isPlaying ? "Pause" : "Play",
+            systemImage: isPlaying ? "pause.fill" : "play.fill",
+            isEnabled: isPlaybackEnabled
+        ) { [weak mpv] in
+            mpv?.togglePlayPause()
+        })
 
-        Button {
-            mpv.seek(relative: 15)
-        } label: {
-            Label("Forward 15s", systemImage: "goforward.15")
-        }
-        .disabled(!hasStartedPlayback && isInitialLoading)
+        // 2. Rewind / Forward
+        menu.addItem(ClosureMenuItem(
+            title: "Rewind 15s",
+            systemImage: "gobackward.15",
+            isEnabled: isPlaybackEnabled
+        ) { [weak mpv] in
+            mpv?.seek(relative: -15)
+        })
 
-        Divider()
+        menu.addItem(ClosureMenuItem(
+            title: "Forward 15s",
+            systemImage: "goforward.15",
+            isEnabled: isPlaybackEnabled
+        ) { [weak mpv] in
+            mpv?.seek(relative: 15)
+        })
 
-        // Audio & Volume controls (Disabled on initial buffer loading)
-        Button {
-            mpv.toggleMute()
-        } label: {
-            Label(mpv.volume <= 0.001 ? "Unmute" : "Mute", systemImage: mpv.volume <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-        }
-        .disabled(!hasStartedPlayback && isInitialLoading)
+        menu.addItem(NSMenuItem.separator())
 
-        // Subtitle Selection Submenu
-        if !mpv.subtitleTracks.isEmpty || !playerManager.externalSubtitles.isEmpty {
-            Menu {
-                let isNoneSelected = !mpv.subtitleTracks.contains(where: { $0.isSelected })
-                Button {
-                    mpv.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
-                } label: {
-                    HStack {
-                        Text("Off")
-                        if isNoneSelected {
-                            Image(systemName: "checkmark")
-                        }
-                    }
+        // 3. Mute / Unmute
+        let isMuted = mpv.volume <= 0.001
+        menu.addItem(ClosureMenuItem(
+            title: isMuted ? "Unmute" : "Mute",
+            systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+            isEnabled: isPlaybackEnabled
+        ) { [weak mpv] in
+            mpv?.toggleMute()
+        })
+
+        // 4. Subtitles Submenu
+        let subTracks = mpv.subtitleTracks
+        let extSubs = playerManager.externalSubtitles
+        if !subTracks.isEmpty || !extSubs.isEmpty {
+            let subMenuItem = ClosureMenuItem(
+                title: "Subtitles",
+                systemImage: "captions.bubble",
+                isEnabled: isPlaybackEnabled
+            )
+            let subMenu = NSMenu(title: "Subtitles")
+
+            let isNoneSelected = !subTracks.contains(where: { $0.isSelected })
+            subMenu.addItem(ClosureMenuItem(
+                title: "Off",
+                isChecked: isNoneSelected
+            ) { [weak mpv] in
+                mpv?.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+            })
+
+            if !subTracks.isEmpty {
+                subMenu.addItem(NSMenuItem.separator())
+                for track in subTracks {
+                    subMenu.addItem(ClosureMenuItem(
+                        title: track.displayName,
+                        isChecked: track.isSelected
+                    ) { [weak mpv] in
+                        mpv?.selectTrack(track)
+                    })
                 }
-
-                Divider()
-
-                ForEach(mpv.subtitleTracks) { track in
-                    Button {
-                        mpv.selectTrack(track)
-                    } label: {
-                        HStack {
-                            Text(track.displayName)
-                            if track.isSelected {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-
-                if !playerManager.externalSubtitles.isEmpty {
-                    Divider()
-                    ForEach(playerManager.externalSubtitles, id: \.id) { sub in
-                        Button {
-                            mpv.addExternalSubtitle(sub)
-                        } label: {
-                            Text(sub.source != nil ? "\(sub.language) (\(sub.source!))" : sub.language)
-                        }
-                    }
-                }
-            } label: {
-                Label("Subtitles", systemImage: "captions.bubble")
             }
-            .disabled(!hasStartedPlayback && isInitialLoading)
-        }
 
-        // Audio Track Selection Submenu
-        if mpv.audioTracks.count > 1 {
-            Menu {
-                ForEach(mpv.audioTracks) { track in
-                    Button {
-                        mpv.selectTrack(track)
-                    } label: {
-                        HStack {
-                            Text(track.displayName)
-                            if track.isSelected {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
+            if !extSubs.isEmpty {
+                subMenu.addItem(NSMenuItem.separator())
+                for sub in extSubs {
+                    let label = sub.source != nil ? "\(sub.language) (\(sub.source!))" : sub.language
+                    subMenu.addItem(ClosureMenuItem(
+                        title: label
+                    ) { [weak mpv] in
+                        mpv?.addExternalSubtitle(sub)
+                    })
                 }
-            } label: {
-                Label("Audio Tracks", systemImage: "waveform")
             }
-            .disabled(!hasStartedPlayback && isInitialLoading)
+
+            subMenuItem.submenu = subMenu
+            menu.addItem(subMenuItem)
         }
 
-        Divider()
+        // 5. Audio Tracks Submenu
+        let audioTracks = mpv.audioTracks
+        if audioTracks.count > 1 {
+            let audioMenuItem = ClosureMenuItem(
+                title: "Audio Tracks",
+                systemImage: "waveform",
+                isEnabled: isPlaybackEnabled
+            )
+            let audioMenu = NSMenu(title: "Audio Tracks")
+            for track in audioTracks {
+                audioMenu.addItem(ClosureMenuItem(
+                    title: track.displayName,
+                    isChecked: track.isSelected
+                ) { [weak mpv] in
+                    mpv?.selectTrack(track)
+                })
+            }
+            audioMenuItem.submenu = audioMenu
+            menu.addItem(audioMenuItem)
+        }
 
-        // Stream Source Selector (Always clickable, even on initial buffer screen!)
-        Button {
+        menu.addItem(NSMenuItem.separator())
+
+        // 6. Choose Stream Source… (Always active)
+        menu.addItem(ClosureMenuItem(
+            title: "Choose Stream Source…",
+            systemImage: "list.bullet.rectangle",
+            isEnabled: true
+        ) {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                 showManualStreamPicker = true
             }
-        } label: {
-            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
-        }
+        })
 
-        // PiP Toggle
-        Button {
-            PiPManager.shared.toggle(mpv: mpv)
-        } label: {
-            Label("Picture in Picture", systemImage: "pip.enter")
-        }
-        .disabled(!hasStartedPlayback && isInitialLoading)
+        // 7. Picture in Picture
+        menu.addItem(ClosureMenuItem(
+            title: "Picture in Picture",
+            systemImage: "pip.enter",
+            isEnabled: isPlaybackEnabled
+        ) { [weak mpv] in
+            if let mpv = mpv {
+                PiPManager.shared.toggle(mpv: mpv)
+            }
+        })
+
+        return menu
     }
 
     private var isInitialLoading: Bool {
@@ -1389,5 +1410,73 @@ struct StreamRowItemView: View {
         default:
             return LinearGradient(colors: [Color.white.opacity(0.25), Color.white.opacity(0.15)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
+    }
+}
+
+// MARK: - Native AppKit Context Menu Host (Flicker-Free During 60FPS Playback)
+
+struct NativeContextMenuOverlay: NSViewRepresentable {
+    let menuBuilder: () -> NSMenu?
+
+    func makeNSView(context: Context) -> NativeContextMenuView {
+        let view = NativeContextMenuView()
+        view.menuBuilder = menuBuilder
+        return view
+    }
+
+    func updateNSView(_ nsView: NativeContextMenuView, context: Context) {
+        nsView.menuBuilder = menuBuilder
+    }
+}
+
+final class NativeContextMenuView: NSView {
+    var menuBuilder: (() -> NSMenu?)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let event = NSApp.currentEvent,
+           event.type == .rightMouseDown ||
+           event.type == .rightMouseUp ||
+           (event.type == .leftMouseDown && event.modifierFlags.contains(.control)) {
+            return self
+        }
+        return nil
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        return menuBuilder?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = menu(for: event) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
+final class ClosureMenuItem: NSMenuItem {
+    private var actionClosure: (() -> Void)?
+
+    init(title: String, systemImage: String? = nil, isChecked: Bool = false, isEnabled: Bool = true, action: (() -> Void)? = nil) {
+        self.actionClosure = action
+        super.init(title: title, action: action != nil ? #selector(didSelect) : nil, keyEquivalent: "")
+        self.target = self
+        self.isEnabled = isEnabled
+        self.state = isChecked ? .on : .off
+        if let systemImage = systemImage {
+            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+            if let img = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)?.withSymbolConfiguration(config) {
+                self.image = img
+            }
+        }
+    }
+
+    required init(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    @objc private func didSelect() {
+        actionClosure?()
     }
 }

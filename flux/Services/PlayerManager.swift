@@ -512,7 +512,7 @@ class PlayerManager: ObservableObject {
         
         // Automatic saved watch history resume position calculation (exact seconds)
         if !startFromBeginning && resumePos == nil {
-            let historyItem = UserDataService.shared.getHistoryItem(id: item.id) ?? item
+            let historyItem = UserDataService.shared.getHistoryItem(for: item) ?? item
             let isMatchingEpisode: Bool
             if item.category == "TV Show" || season != nil {
                 isMatchingEpisode = (historyItem.lastSeason == season || (season == nil && historyItem.lastSeason != nil)) &&
@@ -570,7 +570,7 @@ class PlayerManager: ObservableObject {
         
         // 1. Instant Replay / Active Session Reuse Check (ONLY for Continue Watching cards and Detail View resume when not forcing picker)
         if fromContinueWatching && !forceStreamPicker {
-            let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+            let historyItem = UserDataService.shared.getHistoryItem(for: item)
             let matchedId = historyItem?.id ?? item.id
             let key = item.category == "TV Show" ? "\(matchedId):\(season ?? 1):\(episode ?? 1)" : "\(matchedId)"
             let fallbackKey = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"

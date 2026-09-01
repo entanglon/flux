@@ -113,10 +113,44 @@ struct MediaItem: Identifiable, Hashable, Codable {
                 dayFormatter.dateFormat = "EEEE"
                 return "Coming \(dayFormatter.string(from: date))"
             } else {
+                let currentYear = cal.component(.year, from: Date())
+                let releaseYear = cal.component(.year, from: date)
                 let displayFormatter = DateFormatter()
-                displayFormatter.dateFormat = "MMMM d"
-                return "Coming \(displayFormatter.string(from: date))"
+                if currentYear == releaseYear {
+                    displayFormatter.dateFormat = "MMMM d"
+                } else {
+                    displayFormatter.dateFormat = "MMMM d, yyyy"
+                }
+                return "In Theatres \(displayFormatter.string(from: date))"
             }
+        }
+    }
+
+    var cardReleaseDateBadge: String {
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: dateStr) else {
+            if dateStr.count >= 4 {
+                return "Coming \(dateStr.prefix(4))"
+            }
+            return "Coming Soon"
+        }
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            return "Today"
+        } else if cal.isDateInTomorrow(date) {
+            return "Tomorrow"
+        } else {
+            let currentYear = cal.component(.year, from: Date())
+            let releaseYear = cal.component(.year, from: date)
+            let displayFormatter = DateFormatter()
+            if currentYear == releaseYear {
+                displayFormatter.dateFormat = "MMM d"
+            } else {
+                displayFormatter.dateFormat = "MMM d, yyyy"
+            }
+            return displayFormatter.string(from: date)
         }
     }
     

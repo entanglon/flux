@@ -297,16 +297,42 @@ class UserDataService: ObservableObject {
     }
 
     func isInHistory(_ item: MediaItem) -> Bool {
-        return getHistoryItem(id: item.id) != nil
+        return getHistoryItem(for: item) != nil
     }
 
-    func getHistoryItem(id: String) -> MediaItem? {
+    func getHistoryItem(for item: MediaItem) -> MediaItem? {
+        return getHistoryItem(id: item.id, title: item.title, category: item.category)
+    }
+
+    func getHistoryItem(id: String, title: String? = nil, category: String? = nil) -> MediaItem? {
+        // 1. Direct ID Match
         if let direct = history.first(where: { $0.id == id }) {
             return direct
         }
+        // 2. "tt" Prefix Invariance Match
         let stripped = id.replacingOccurrences(of: "tt", with: "")
         if !stripped.isEmpty {
-            return history.first(where: { $0.id.replacingOccurrences(of: "tt", with: "") == stripped })
+            if let matched = history.first(where: { $0.id.replacingOccurrences(of: "tt", with: "") == stripped }) {
+                return matched
+            }
+        }
+        // 3. Exact Normalized Title and Category Match
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !title.isEmpty {
+            let cat = category?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let matched = history.first(where: {
+                let histTitle = $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let isTitleSame = histTitle == title
+                if let cat = cat, !cat.isEmpty {
+                    let histCat = $0.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let isSameCat = (histCat == cat) ||
+                                    ((cat.contains("tv") || cat.contains("series")) && (histCat.contains("tv") || histCat.contains("series"))) ||
+                                    (cat.contains("movie") && histCat.contains("movie"))
+                    return isTitleSame && isSameCat
+                }
+                return isTitleSame
+            }) {
+                return matched
+            }
         }
         return nil
     }

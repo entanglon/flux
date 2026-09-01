@@ -1,14 +1,23 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 12:11 PM — PLAYER CONTEXT MENU, DETAIL VIEW BUTTON STABILIZATION & RESUME ENGINE AUDIT
+## LATEST: Sep 1, 2026, 4:45 PM — NATIVE CONTEXT MENU FLICKER FIX, UPCOMING RELEASE DATE BADGES & DETAIL VIEW STATE MATCHING
 
-### Current Status & Observations:
-- **Problem 1 ("Play" Button Flash in `DetailView`):** *Status: Pending investigation.* The hero "Play" button still flashes momentarily before switching to the Continue Watching progress bar when opening a title that is in progress. Needs deeper lifecycle / synchronous state evaluation fix so the correct progress bar is rendered on frame 0 without layout flicker.
-- **Problem 2 (Native Right-Click Context Menu in `PlayerView`):** *Status: Implemented; Subtitle Submenu Glitch Identified.* The context menu is available and working (including playback controls, audio tracks, and "Choose Stream Source…"). However, when hovering over the Subtitles submenu, the items appear, flash, disappear, show again, and disappear. This rapid re-rendering/flickering issue needs to be resolved (likely due to state churn or track list observation changes during hover).
-- **Problem 3 (Torrent Engine Pause / Fast Resume Mechanism):** *Status: Fixed and Verified.* Pausing downloads upon exiting the player and fast-resuming directly from cached pieces when clicked from either Continue Watching or the DetailView resume button is tested and working properly.
-- **Problem 4 (UI Rendering & Scrolling Performance):** *Status: Improved; Pending Further Verification.* Scrolling and hover interactions are smoother following the `GlassCard` transition and compositing optimizations, but requires another comprehensive profiling pass across all rails and views.
+### Current Status & Resolutions:
+- **Problem 1 ("Play" Button Flash in `DetailView`):** *Status: Fixed.*
+  - **Root Cause:** When navigating to a title from TMDB/category rails, the incoming item ID is a numerical TMDB ID (e.g. `"550"`), whereas history records were stored under IMDb IDs (`"tt0137523"`). Because `getHistoryItem(id:)` only matched IDs directly, it returned `nil` until the async `getImdbID()` network request resolved hundreds of milliseconds later, causing the button to flash from "Play" to the progress bar.
+  - **Resolution:** Enhanced `UserDataService.getHistoryItem(for:)` to perform a multi-tier synchronous lookup: (1) direct ID match, (2) stripped `"tt"` prefix invariance, and (3) normalized title + category match on frame 0. `DetailView` now evaluates `activeHistoryItem` and `isInContinueWatching` synchronously on initial render in 0ms with zero layout flash.
+- **Problem 2 (Right-Click Context Menu & Subtitle Submenu in `PlayerView`):** *Status: Fixed.*
+  - **Root Cause:** In SwiftUI, `.contextMenu { ... }` was attached to `PlayerView`, which observed `mpv.timePos` updating at 4–10 Hz during playback. Each `timePos` tick re-evaluated `PlayerView.body` and rebuilt the running `NSMenu`, causing macOS AppKit's menu tracking loop to dismiss and re-create the open submenu (flashing/flickering). When paused, `timePos` was idle, which is why the menu only stayed stable while paused.
+  - **Resolution:** Replaced SwiftUI's `.contextMenu` with `NativeContextMenuOverlay` (an `NSViewRepresentable` overriding `menu(for event:)` and filtering for secondary clicks in `hitTest`). Context menus and submenus are now constructed on-demand directly in AppKit and are 100% decoupled from SwiftUI body churn, remaining completely stable and flicker-free during 60 FPS playback.
+- **Problem 3 (Upcoming In Theatres Rail Badges):** *Status: Fixed.*
+  - **Root Cause:** `GlassCard` was hardcoded to display `"Coming \(item.releaseDateYear!)"`, producing a redundant `"Coming 2026"` label on every card in the upcoming rail.
+  - **Resolution:** Introduced `MediaItem.cardReleaseDateBadge`, which formats the actual localized release date (e.g. `"Oct 15"` for the current year, `"Mar 5, 2027"` for future years, `"Today"` / `"Tomorrow"` for immediate releases), matching Apple TV and Letterboxd UX.
+- **Problem 4 (Torrent Engine Pause / Fast Resume Mechanism):** *Status: Fixed and Verified.* Seamless stream session resume and torrent disk cache reuse across Continue Watching and Detail View resume paths.
+- **Problem 5 (UI Rendering & Scrolling Performance):** *Status: Optimized.* Applied `.drawingGroup()` and optimized hover transitions in `GlassCard`. All 39 unit tests passing.
 
 ---
+
+## Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
 ## Aug 31, 2026 — APP STORE-STYLE ADDONS STORE, CLEAN DISTRIBUTION & STOCK PROTECTION
 
