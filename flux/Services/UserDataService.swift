@@ -177,6 +177,7 @@ class UserDataService: ObservableObject {
                 genres: nil,
                 popularity: nil,
                 releaseDate: nil,
+                originalLanguage: nil,
                 spokenLanguages: nil,
                 originCountry: nil,
                 voteAverage: nil,

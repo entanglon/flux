@@ -134,6 +134,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
             genres: nil,
             popularity: popularity,
             releaseDate: releaseDateString,
+            originalLanguage: nil,
             spokenLanguages: nil,
             originCountry: nil,
             voteAverage: voteAverage,

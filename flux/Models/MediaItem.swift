@@ -39,11 +39,43 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var genres: [String]?
     var popularity: Double? // For search ranking
     var releaseDate: String? // YYYY-MM-DD
+    var originalLanguage: String? // ISO 639-1 code, e.g. "ko", "ja", "en"
     var spokenLanguages: [String]? // e.g. ["English", "Spanish"]
-    var originCountry: String? // e.g. "United States"
+    var originCountry: String? // ISO 3166-1 code, e.g. "US", "KR", "JP"
     var voteAverage: Double? // e.g. 7.8
     var episodes: [Episode]? // To store all Stremio videos
     var watchProviders: [WatchProvider]?
+    
+    /// Localized display name for the original language (e.g. "Korean", "Japanese", "English").
+    var displayOriginalLanguage: String? {
+        guard let code = originalLanguage, !code.isEmpty else { return nil }
+        return Locale.current.localizedString(forLanguageCode: code)?.localizedCapitalized
+    }
+    
+    /// Localized display name for the origin country (e.g. "South Korea", "Japan", "United States").
+    var displayOriginCountry: String? {
+        guard let code = originCountry, !code.isEmpty else { return nil }
+        // If the code is already a full name (legacy data), return it directly
+        if code.count > 2 { return code }
+        return Locale.current.localizedString(forRegionCode: code)
+    }
+    
+    /// Formatted release date for display (e.g. "June 15, 2024" or "2024").
+    var displayReleaseDate: String? {
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return nil }
+        // Try full date format first
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        if let date = formatter.date(from: dateStr) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateStyle = .long
+            return displayFormatter.string(from: date)
+        }
+        // Fallback: extract year if possible
+        let year = String(dateStr.prefix(4))
+        if year.count == 4, Int(year) != nil { return year }
+        return nil
+    }
     
     var releaseDateYear: String? {
         guard let date = releaseDate else { return nil }
@@ -109,8 +141,8 @@ extension MediaItem {
             backdropURL: nil, heroURL: nil, logoURL: nil, streamURL: nil,
             category: category, progress: progress, trailerURL: nil, cast: nil,
             director: nil, seasons: nil, runtime: nil, certification: nil,
-            genres: genres, popularity: nil, releaseDate: nil, spokenLanguages: nil,
-            originCountry: nil, voteAverage: nil, episodes: nil, watchProviders: nil,
+            genres: genres, popularity: nil, releaseDate: nil, originalLanguage: nil,
+            spokenLanguages: nil, originCountry: nil, voteAverage: nil, episodes: nil, watchProviders: nil,
             lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil,
             timestamp: nil, lastPlaybackPosition: nil, lastPlaybackDuration: nil,
             lastStreamURL: nil, lastTorrentInfoHash: nil, lastFileIndex: nil

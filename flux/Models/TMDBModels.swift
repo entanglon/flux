@@ -105,6 +105,7 @@ struct TMDBTrendingItem: Codable {
             genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: isMovie ? releaseDate : firstAirDate,
+            originalLanguage: nil,
             spokenLanguages: nil,
             originCountry: nil,
             voteAverage: voteAverage
@@ -438,6 +439,8 @@ struct TMDBMovieDetail: Codable, Identifiable {
     let genres: [TMDBGenre]?
     let spokenLanguages: [TMDBSpokenLanguage]?
     let productionCountries: [TMDBProductionCountry]?
+    let originalLanguage: String?
+    let originCountry: [String]?
     
     enum CodingKeys: String, CodingKey {
         case id, title, overview, genres, runtime
@@ -447,6 +450,8 @@ struct TMDBMovieDetail: Codable, Identifiable {
         case voteAverage = "vote_average"
         case spokenLanguages = "spoken_languages"
         case productionCountries = "production_countries"
+        case originalLanguage = "original_language"
+        case originCountry = "origin_country"
     }
     
     nonisolated var posterURL: URL? {
@@ -481,8 +486,9 @@ struct TMDBMovieDetail: Codable, Identifiable {
             genres: genres?.map { $0.name },
             popularity: nil,
             releaseDate: releaseDate,
+            originalLanguage: originalLanguage,
             spokenLanguages: spokenLanguages?.map { $0.english_name },
-            originCountry: productionCountries?.first?.name,
+            originCountry: originCountry?.first ?? productionCountries?.first?.iso_3166_1,
             voteAverage: voteAverage
         )
     }
@@ -500,6 +506,8 @@ struct TMDBTVShowDetail: Codable, Identifiable {
     let seasons: [TMDBSeasonSummary]?
     let spokenLanguages: [TMDBSpokenLanguage]?
     let productionCountries: [TMDBProductionCountry]?
+    let originalLanguage: String?
+    let originCountry: [String]?
     
     enum CodingKeys: String, CodingKey {
         case id, name, overview, genres, seasons
@@ -509,6 +517,8 @@ struct TMDBTVShowDetail: Codable, Identifiable {
         case voteAverage = "vote_average"
         case spokenLanguages = "spoken_languages"
         case productionCountries = "production_countries"
+        case originalLanguage = "original_language"
+        case originCountry = "origin_country"
     }
     
     nonisolated var posterURL: URL? {
@@ -543,8 +553,9 @@ struct TMDBTVShowDetail: Codable, Identifiable {
             genres: genres?.map { $0.name },
             popularity: nil,
             releaseDate: firstAirDate,
+            originalLanguage: originalLanguage,
             spokenLanguages: spokenLanguages?.map { $0.english_name },
-            originCountry: productionCountries?.first?.name,
+            originCountry: originCountry?.first ?? productionCountries?.first?.iso_3166_1,
             voteAverage: voteAverage
         )
     }
@@ -645,6 +656,9 @@ extension TMDBMovie {
             genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: releaseDate,
+            originalLanguage: nil,
+            spokenLanguages: nil,
+            originCountry: nil,
             voteAverage: voteAverage
         )
     }
@@ -671,6 +685,9 @@ extension TMDBTVShow {
             genres: TMDBGenreMapper.names(for: genreIds),
             popularity: popularity,
             releaseDate: firstAirDate,
+            originalLanguage: nil,
+            spokenLanguages: nil,
+            originCountry: nil,
             voteAverage: voteAverage
         )
     }

@@ -687,10 +687,10 @@ struct DetailView: View {
                                     .foregroundStyle(.white)
                                 
                                 VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailRow(label: "Released", value: displayItem.releaseDate ?? "2025")
+                                    InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
                                     InfoDetailRow(label: "Director", value: displayItem.director ?? "N/A")
                                     InfoDetailRow(label: "Runtime", value: displayItem.runtime ?? "N/A")
-                                    InfoDetailRow(label: "Region of Origin", value: displayItem.originCountry ?? "United States")
+                                    InfoDetailRow(label: "Region of Origin", value: displayItem.displayOriginCountry ?? "N/A")
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -701,9 +701,9 @@ struct DetailView: View {
                                     .foregroundStyle(.white)
                                 
                                 VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailRow(label: "Original Audio", value: "English")
-                                    InfoDetailRow(label: "Audio", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? "English")
-                                    InfoDetailRow(label: "Subtitles", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? "English")
+                                    InfoDetailRow(label: "Original Audio", value: displayItem.displayOriginalLanguage ?? "N/A")
+                                    InfoDetailRow(label: "Audio", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? displayItem.displayOriginalLanguage ?? "N/A")
+                                    InfoDetailRow(label: "Subtitles", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? displayItem.displayOriginalLanguage ?? "N/A")
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)

@@ -171,6 +171,20 @@ class TMDBEnricher {
             if let releaseDate = (json["release_date"] as? String) ?? (json["first_air_date"] as? String), !releaseDate.isEmpty {
                 enriched.releaseDate = releaseDate
             }
+            if let originalLanguage = json["original_language"] as? String, !originalLanguage.isEmpty {
+                enriched.originalLanguage = originalLanguage
+            }
+            if let countries = json["production_countries"] as? [[String: Any]] {
+                let codes = countries.compactMap { $0["iso_3166_1"] as? String }
+                if let first = codes.first { enriched.originCountry = first }
+            }
+            if let originCountryCodes = json["origin_country"] as? [String], let first = originCountryCodes.first, !first.isEmpty {
+                enriched.originCountry = first
+            }
+            if let spoken = json["spoken_languages"] as? [[String: Any]] {
+                let names = spoken.compactMap { $0["english_name"] as? String }.filter { !$0.isEmpty }
+                if !names.isEmpty { enriched.spokenLanguages = names }
+            }
         }
         
         // Retain caller's episode session properties
@@ -232,6 +246,15 @@ class TMDBEnricher {
                             if let runtime = detail.runtime {
                                 enriched.runtime = "\(runtime / 60)h \(runtime % 60)m"
                             }
+                            if let originalLanguage = detail.originalLanguage, !originalLanguage.isEmpty {
+                                enriched.originalLanguage = originalLanguage
+                            }
+                            if let country = detail.originCountry?.first ?? detail.productionCountries?.first?.iso_3166_1, !country.isEmpty {
+                                enriched.originCountry = country
+                            }
+                            if let spoken = detail.spokenLanguages?.map({ $0.english_name }).filter({ !$0.isEmpty }), !spoken.isEmpty {
+                                enriched.spokenLanguages = spoken
+                            }
                         }
                     } else if type == "tv", let detail = try? JSONDecoder().decode(TMDBTVShowDetail.self, from: data) {
                         await MainActor.run {
@@ -253,6 +276,15 @@ class TMDBEnricher {
                             }
                             if let releaseDate = detail.firstAirDate, !releaseDate.isEmpty {
                                 enriched.releaseDate = releaseDate
+                            }
+                            if let originalLanguage = detail.originalLanguage, !originalLanguage.isEmpty {
+                                enriched.originalLanguage = originalLanguage
+                            }
+                            if let country = detail.originCountry?.first ?? detail.productionCountries?.first?.iso_3166_1, !country.isEmpty {
+                                enriched.originCountry = country
+                            }
+                            if let spoken = detail.spokenLanguages?.map({ $0.english_name }).filter({ !$0.isEmpty }), !spoken.isEmpty {
+                                enriched.spokenLanguages = spoken
                             }
                         }
                     }
