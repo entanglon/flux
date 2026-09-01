@@ -1,21 +1,25 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 6:20 PM — PURE LOGO FILL BUFFERING, APPLE TV HERO STARRING/DIRECTOR & ENLARGED DETAIL RAILS
+## LATEST: Sep 1, 2026, 6:30 PM — ZERO-LATENCY INSTANT SEEK PERSISTENCE & PURE LOGO FILL BUFFERING
 
 ### Current Status & Resolutions:
+- **Instant Seek / Fast-Forward Progress Persistence (`PlayerView.swift`, `PlayerManager.swift`, `UserDataService.swift`):** *Status: Completed & Verified.*
+  - **Resolution:** In addition to the 5-second autosave timer during playback and pause-trigger save, `playerManager.updateWatchProgress(...)` is now called **immediately** whenever a seek is triggered or completed:
+    1. **Timeline Scrubbing / Slider Dragging:** Progress is saved on the target seek time in 0ms.
+    2. **Skip Forward / Backward Buttons (+15s / -15s):** Calculates target seek time and immediately writes to `UserDataService.shared` with `synchronize()`.
+    3. **Keyboard Arrows & Keybindings (Left/Right, `,`, `.`, `<`, `>`):** Immediately updates playback position in history.
+    4. **Smart Skip Buttons (Skip Recap / Skip Intro):** Instantly updates progress to the destination timecode.
+    5. **Context Menu Seek (Forward 15s / Rewind 15s):** Instantly writes updated time to history.
+    6. **MPV `isSeeking` Event Observer:** When MPV completes seeking (`.onChange(of: mpv.isSeeking)`), `updateWatchProgress` executes immediately.
+    - *Result:* If the user scrubs/fast-forwards and immediately quits/restarts the app, clicking Continue Watching resumes from the exact second without losing any progress.
 - **Mid-Playback Pure Logo Fill Buffering (`PlayerView.swift`):** *Status: Completed & Verified.*
   - **Resolution:** Removed the separate progress capsule bar and all card background wrappers from `midPlaybackLogoBufferingView`. Just like the initial start loading screen, the title logo itself serves as the entire loading animation: a 25% translucent watermark base is filled progressively from left-to-right by the full 100% bright logo with a glowing specular shadow as demuxer/buffer telemetry advances, floating cleanly directly over the paused video frame.
 - **Apple TV Hero Starring & Director Section (`DetailView.swift`):** *Status: Completed & Verified.*
-  - **Resolution:** Implemented the exact Apple TV design:
-    1. Top line: `Starring ` in grey (`Color(white: 0.6)`), followed by comma-separated actor names in white (`.white`).
-    2. Director line: `Director ` in grey (`Color(white: 0.6)`), followed by director name in white (`.white`).
-    3. Left-aligned within the bottom-right block of the hero banner.
-    4. For TV shows: Only displays "Director" if director data actually exists (`displayItem.director != nil && !displayItem.director!.isEmpty`). If no director data exists for TV shows, the director line is cleanly omitted from both the hero and footer Information section.
+  - **Resolution:** Implemented the exact Apple TV design (Starring in grey + actors in white, Director in grey + director in white, left-aligned, omitted for TV shows when missing).
 - **Removed "Play Trailer in Flux" Button from Hero:** *Status: Completed & Verified.*
-  - Removed the redundant Trailer button from the hero action bar in `DetailView.swift` since trailers already have their own dedicated Trailers rail.
+  - Removed the redundant Trailer button from the hero action bar in `DetailView.swift`.
 - **Enlarged Cast & Crew and Where to Watch Rails (`DetailView.swift`):** *Status: Completed & Verified.*
-  - **Cast & Crew:** Increased `CastCircle` size from 80pt to 104pt (`itemWidth: 124`, `itemHeight: 180`) with high-contrast typography (name in 13pt bold white, role in 11pt secondary).
-  - **Where to Watch:** Increased provider logo badges from 60x60pt to 76x76pt (`cornerRadius: 18`, `frame(width: 90)`) with subtle rim stroke.
+  - Increased `CastCircle` to 104pt and Where to Watch provider badges to 76x76pt.
 - **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---

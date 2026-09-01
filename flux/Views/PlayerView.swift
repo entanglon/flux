@@ -60,6 +60,10 @@ struct PlayerView: View {
                              // Seek to absolute time based on percentage
                              let targetTime = $0 * mpv.duration
                              mpv.seek(absolute: targetTime)
+                             if mpv.duration > 0 {
+                                 lastProgressSaveTime = Date()
+                                 playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+                             }
                              
                              // Smart Preload Trigger
                              if $0 > 0.9 {
@@ -77,8 +81,22 @@ struct PlayerView: View {
                     title: item?.title ?? "Unknown Title",
                     subtitle: getSubtitle(),
                     onPlayPause: { mpv.togglePlayPause() },
-                    onSkipForward: { mpv.seek(relative: 15) }, 
-                    onSkipBackward: { mpv.seek(relative: -15) },
+                    onSkipForward: { 
+                        let targetTime = min(mpv.duration, mpv.timePos + 15)
+                        mpv.seek(relative: 15)
+                        if mpv.duration > 0 {
+                            lastProgressSaveTime = Date()
+                            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+                        }
+                    }, 
+                    onSkipBackward: { 
+                        let targetTime = max(0, mpv.timePos - 15)
+                        mpv.seek(relative: -15)
+                        if mpv.duration > 0 {
+                            lastProgressSaveTime = Date()
+                            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+                        }
+                    },
                     onClose: {
                         playerManager.close()
                         dismiss() // Dismiss the window
@@ -96,8 +114,10 @@ struct PlayerView: View {
                         mpv.addExternalSubtitle(sub)
                     }
                 )
+                .transition(.opacity)
                 .zIndex(20)
             }
+            
             // Exit Warning Overlay
             if showExitWarning {
                 Text("Press Esc again to exit")
@@ -120,6 +140,10 @@ struct PlayerView: View {
                         case .recap(let targetTime):
                             Button {
                                 mpv.seek(absolute: targetTime)
+                                if mpv.duration > 0 {
+                                    lastProgressSaveTime = Date()
+                                    playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+                                }
                             } label: {
                                 Text("Skip Recap")
                                     .font(.system(size: 14, weight: .bold))
@@ -135,6 +159,10 @@ struct PlayerView: View {
                         case .intro(let targetTime):
                             Button {
                                 mpv.seek(absolute: targetTime)
+                                if mpv.duration > 0 {
+                                    lastProgressSaveTime = Date()
+                                    playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+                                }
                             } label: {
                                 Text("Skip Intro")
                                     .font(.system(size: 14, weight: .bold))
@@ -207,27 +235,57 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.leftArrow) {
+            let targetTime = max(0, mpv.timePos - 10)
             mpv.seek(relative: -10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            let targetTime = min(mpv.duration, mpv.timePos + 10)
             mpv.seek(relative: 10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(KeyEquivalent(",")) {
+            let targetTime = max(0, mpv.timePos - 10)
             mpv.seek(relative: -10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(KeyEquivalent(".")) {
+            let targetTime = min(mpv.duration, mpv.timePos + 10)
             mpv.seek(relative: 10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(KeyEquivalent("<")) {
+            let targetTime = max(0, mpv.timePos - 10)
             mpv.seek(relative: -10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(KeyEquivalent(">")) {
+            let targetTime = min(mpv.duration, mpv.timePos + 10)
             mpv.seek(relative: 10)
+            if mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            }
             return .handled
         }
         .onKeyPress(.upArrow) {
@@ -315,6 +373,13 @@ struct PlayerView: View {
         // Save immediately on pause
         .onChange(of: mpv.isPlaying) { _, isPlaying in
             if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
+                lastProgressSaveTime = Date()
+                playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+            }
+        }
+        // Save immediately when seeking finishes
+        .onChange(of: mpv.isSeeking) { wasSeeking, isSeeking in
+            if wasSeeking && !isSeeking && hasStartedPlayback && mpv.duration > 0 {
                 lastProgressSaveTime = Date()
                 playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             }
@@ -505,9 +570,14 @@ struct PlayerView: View {
             title: "Rewind 15s",
             systemImage: "gobackward.15",
             isEnabled: isPlaybackEnabled
-        ) { [weak mpv] in
+        ) { [weak mpv, weak playerManager] in
             DispatchQueue.main.async {
-                mpv?.seek(relative: -15)
+                guard let mpv = mpv else { return }
+                let target = max(0, mpv.timePos - 15)
+                mpv.seek(relative: -15)
+                if mpv.duration > 0 {
+                    playerManager?.updateWatchProgress(time: target, duration: mpv.duration)
+                }
             }
         })
 
@@ -515,9 +585,14 @@ struct PlayerView: View {
             title: "Forward 15s",
             systemImage: "goforward.15",
             isEnabled: isPlaybackEnabled
-        ) { [weak mpv] in
+        ) { [weak mpv, weak playerManager] in
             DispatchQueue.main.async {
-                mpv?.seek(relative: 15)
+                guard let mpv = mpv else { return }
+                let target = min(mpv.duration, mpv.timePos + 15)
+                mpv.seek(relative: 15)
+                if mpv.duration > 0 {
+                    playerManager?.updateWatchProgress(time: target, duration: mpv.duration)
+                }
             }
         })
 
