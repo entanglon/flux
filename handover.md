@@ -1,10 +1,10 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 1, 2026, 6:00 PM — APPLE TV HERO STARRING/DIRECTOR, CLEAN FLOATING BUFFER BAR & ENLARGED DETAIL RAILS
+## LATEST: Sep 1, 2026, 6:20 PM — PURE LOGO FILL BUFFERING, APPLE TV HERO STARRING/DIRECTOR & ENLARGED DETAIL RAILS
 
 ### Current Status & Resolutions:
-- **Mid-Playback Buffer Loading Bar (Removed Card Container Background):** *Status: Completed & Verified.*
-  - **Resolution:** Removed the rounded rectangular dark card background container (`.background(RoundedRectangle(...).fill(.ultraThinMaterial)...)`) from `midPlaybackLogoBufferingView` in `PlayerView.swift`. The translucent-to-filled logo and the progress bar capsule now float directly and cleanly over the paused video frame with a crisp drop shadow, eliminating all clutter.
+- **Mid-Playback Pure Logo Fill Buffering (`PlayerView.swift`):** *Status: Completed & Verified.*
+  - **Resolution:** Removed the separate progress capsule bar and all card background wrappers from `midPlaybackLogoBufferingView`. Just like the initial start loading screen, the title logo itself serves as the entire loading animation: a 25% translucent watermark base is filled progressively from left-to-right by the full 100% bright logo with a glowing specular shadow as demuxer/buffer telemetry advances, floating cleanly directly over the paused video frame.
 - **Apple TV Hero Starring & Director Section (`DetailView.swift`):** *Status: Completed & Verified.*
   - **Resolution:** Implemented the exact Apple TV design:
     1. Top line: `Starring ` in grey (`Color(white: 0.6)`), followed by comma-separated actor names in white (`.white`).
@@ -16,7 +16,7 @@
 - **Enlarged Cast & Crew and Where to Watch Rails (`DetailView.swift`):** *Status: Completed & Verified.*
   - **Cast & Crew:** Increased `CastCircle` size from 80pt to 104pt (`itemWidth: 124`, `itemHeight: 180`) with high-contrast typography (name in 13pt bold white, role in 11pt secondary).
   - **Where to Watch:** Increased provider logo badges from 60x60pt to 76x76pt (`cornerRadius: 18`, `frame(width: 90)`) with subtle rim stroke.
-- **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and launched on macOS.
+- **Verification:** All 39 unit tests passed (`** TEST SUCCEEDED **`). Live app rebuilt and running on macOS.
 
 ---
 
