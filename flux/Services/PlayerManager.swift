@@ -497,7 +497,8 @@ class PlayerManager: ObservableObject {
         episodeImage: URL? = nil,
         isAutoAdvance: Bool = false,
         fromContinueWatching: Bool = false,
-        forceStreamPicker: Bool = false
+        forceStreamPicker: Bool = false,
+        startFromBeginning: Bool = false
     ) {
         pruneSessionCaches()
         // USER-initiated playback while a PiP session floats: same title =
@@ -505,12 +506,12 @@ class PlayerManager: ObservableObject {
         // floating session down first. Auto-advance skips this — the floating
         // core just switches files and keeps playing.
         var resumePos: Double?
-        if !isAutoAdvance {
+        if !isAutoAdvance && !startFromBeginning {
             resumePos = PiPManager.shared.interceptPlaybackRequest(item: item, season: season, episode: episode)
         }
         
         // Automatic saved watch history resume position calculation (exact seconds)
-        if resumePos == nil {
+        if !startFromBeginning && resumePos == nil {
             let historyItem = UserDataService.shared.getHistoryItem(id: item.id) ?? item
             let isMatchingEpisode: Bool
             if item.category == "TV Show" || season != nil {

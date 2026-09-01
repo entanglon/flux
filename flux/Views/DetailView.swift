@@ -27,6 +27,78 @@ struct DetailView: View {
     // Computed
     var displayItem: MediaItem { fullItem ?? item }
     
+    /// The active history item for this title (if any).
+    private var activeHistoryItem: MediaItem? {
+        userData.getHistoryItem(id: displayItem.id)
+    }
+
+    /// Whether this title is currently in progress in Continue Watching.
+    private var isInContinueWatching: Bool {
+        guard let history = activeHistoryItem,
+              let prog = history.progress,
+              prog > 0.01 && prog < 0.90 else {
+            return false
+        }
+        return true
+    }
+
+    /// Progress value (0.0 .. 1.0) for the hero continue watching button.
+    private var heroProgress: Double {
+        guard let history = activeHistoryItem else { return 0.0 }
+        return history.progress ?? 0.0
+    }
+
+    /// The specific episode to resume for a TV show (from history or first available).
+    private var resumeEpisode: (season: Int, episode: Int, title: String?, image: URL?)? {
+        if displayItem.category == "TV Show" || displayItem.category == "Series" {
+            let seasonNum = activeHistoryItem?.lastSeason ?? 1
+            let epNum = activeHistoryItem?.lastEpisode ?? 1
+            let title = activeHistoryItem?.lastEpisodeTitle
+            let img = activeHistoryItem?.lastEpisodeImage
+            return (seasonNum, epNum, title, img)
+        }
+        return nil
+    }
+
+    /// Formatted runtime / remaining time display for the hero button.
+    private var heroButtonRuntimeText: String {
+        let history = activeHistoryItem
+        
+        // If we have actual position and duration from mpv playback, compute remaining time
+        if let pos = history?.lastPlaybackPosition,
+           let dur = history?.lastPlaybackDuration,
+           dur > pos {
+            let remaining = dur - pos
+            let mins = Int(remaining / 60)
+            if mins >= 60 {
+                let hours = mins / 60
+                let m = mins % 60
+                return "\(hours)h \(m)m"
+            } else if mins > 0 {
+                return "\(mins)m"
+            }
+        }
+        
+        // For TV show, check the matching episode runtime
+        if displayItem.category == "TV Show" || displayItem.category == "Series" {
+            let targetEpNum = activeHistoryItem?.lastEpisode ?? 1
+            let targetSeasonNum = activeHistoryItem?.lastSeason ?? 1
+            if let match = episodes.first(where: { $0.episodeNumber == targetEpNum && $0.seasonNumber == targetSeasonNum }) ?? heroEpisode {
+                if let rt = match.runtime {
+                    return "\(rt)m"
+                }
+            }
+        }
+        
+        // Movie fallback to displayItem.runtime
+        if let rt = displayItem.runtime, !rt.isEmpty {
+            return rt
+        }
+        
+        // Generic fallback
+        return "45m"
+    }
+    
     /// Top-billed cast for the hero "Starring" block. Falls back to the
     /// pre-enrichment item's cast so names can show before TMDB responds.
     var starringCast: [CastMember]? {
@@ -170,44 +242,81 @@ struct DetailView: View {
                             // Action Buttons
                             HStack(spacing: 16) {
                                 if isReleased {
-                                    let progress = getEpisodeProgress(heroEpisode)
-                                    
                                     Button(action: {
-                                        PlayerManager.shared.play(
-                                            displayItem,
-                                            season: heroEpisode?.seasonNumber,
-                                            episode: heroEpisode?.episodeNumber,
-                                            episodeImage: heroEpisode?.stillURL,
-                                            fromContinueWatching: false,
-                                            forceStreamPicker: true
-                                        )
+                                        if isInContinueWatching {
+                                            let resume = resumeEpisode
+                                            let matchingEp = episodes.first(where: { $0.seasonNumber == resume?.season && $0.episodeNumber == resume?.episode }) ?? heroEpisode
+                                            PlayerManager.shared.play(
+                                                displayItem,
+                                                season: resume?.season,
+                                                episode: resume?.episode,
+                                                episodeImage: resume?.image ?? matchingEp?.stillURL,
+                                                fromContinueWatching: true,
+                                                forceStreamPicker: true,
+                                                startFromBeginning: false
+                                            )
+                                        } else if displayItem.category == "TV Show" || displayItem.category == "Series" {
+                                            let firstEp = episodes.first(where: { $0.seasonNumber > 0 }) ?? episodes.first
+                                            PlayerManager.shared.play(
+                                                displayItem,
+                                                season: selectedSeason?.seasonNumber ?? firstEp?.seasonNumber ?? 1,
+                                                episode: firstEp?.episodeNumber ?? 1,
+                                                episodeImage: firstEp?.stillURL,
+                                                fromContinueWatching: false,
+                                                forceStreamPicker: true,
+                                                startFromBeginning: true
+                                            )
+                                        } else {
+                                            PlayerManager.shared.play(
+                                                displayItem,
+                                                season: nil,
+                                                episode: nil,
+                                                episodeImage: nil,
+                                                fromContinueWatching: false,
+                                                forceStreamPicker: true,
+                                                startFromBeginning: true
+                                            )
+                                        }
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
-                                        if progress > 0 && progress < 0.95 {
-                                            HStack(spacing: 12) {
+                                        if isInContinueWatching {
+                                            // Apple TV style: Play icon + Progress Bar + Runtime in single white capsule button
+                                            HStack(spacing: 10) {
                                                 Image(systemName: "play.fill")
-                                                    .font(.headline)
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text("Resume Episode")
-                                                        .font(.subheadline).fontWeight(.bold)
-                                                    ZStack(alignment: .leading) {
-                                                        Capsule().fill(Color.white.opacity(0.3)).frame(width: 100, height: 4)
-                                                        Capsule().fill(Color.white).frame(width: 100 * progress, height: 4)
-                                                    }
+                                                    .font(.system(size: 13, weight: .bold))
+                                                
+                                                ZStack(alignment: .leading) {
+                                                    Capsule()
+                                                        .fill(Color.black.opacity(0.18))
+                                                        .frame(width: 68, height: 4)
+                                                    Capsule()
+                                                        .fill(Color.black)
+                                                        .frame(width: max(4, 68 * min(1.0, max(0.0, heroProgress))), height: 4)
                                                 }
+                                                
+                                                Text(heroButtonRuntimeText)
+                                                    .font(.system(size: 13, weight: .bold))
                                             }
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 24)
-                                            .padding(.vertical, 10)
+                                            .foregroundStyle(.black)
+                                            .padding(.horizontal, 22)
+                                            .padding(.vertical, 14)
+                                            .background(Color.white)
+                                            .clipShape(Capsule())
+                                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
                                         } else {
-                                            Text(displayItem.category == "Movie" ? "Play Movie" : "Play Episode")
-                                                .font(.headline)
-                                                .fontWeight(.bold)
-                                                .foregroundStyle(.black)
-                                                .padding(.horizontal, 40)
-                                                .padding(.vertical, 14)
-                                                .background(Color.white)
-                                                .clipShape(Capsule())
+                                            // Default: Clean "Play" button for both movies and TV shows
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "play.fill")
+                                                    .font(.system(size: 14, weight: .bold))
+                                                Text("Play")
+                                                    .font(.system(size: 15, weight: .bold))
+                                            }
+                                            .foregroundStyle(.black)
+                                            .padding(.horizontal, 36)
+                                            .padding(.vertical, 14)
+                                            .background(Color.white)
+                                            .clipShape(Capsule())
+                                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
                                         }
                                     }
                                     .buttonStyle(.plain)
@@ -512,7 +621,8 @@ struct DetailView: View {
                                             episode: episode.episodeNumber,
                                             episodeImage: episode.stillURL,
                                             fromContinueWatching: false,
-                                            forceStreamPicker: true
+                                            forceStreamPicker: true,
+                                            startFromBeginning: true
                                         )
                                         openWindow(id: "player", value: displayItem.id)
                                     }) {
@@ -831,7 +941,19 @@ struct DetailView: View {
     }
     
     func getEpisodeProgress(_ episode: Episode?) -> Double {
-        return 0.0
+        guard let episode = episode else { return 0.0 }
+        guard let historyItem = userData.getHistoryItem(id: displayItem.id) else { return 0.0 }
+        
+        if displayItem.category == "TV Show" || displayItem.category == "Series" {
+            let matchesSeason = (historyItem.lastSeason == nil && episode.seasonNumber == 1) || (historyItem.lastSeason == episode.seasonNumber)
+            let matchesEpisode = historyItem.lastEpisode == episode.episodeNumber
+            if matchesSeason && matchesEpisode {
+                return historyItem.progress ?? 0.0
+            }
+            return 0.0
+        } else {
+            return historyItem.progress ?? displayItem.progress ?? 0.0
+        }
     }
     
     private func loadDetails() async {
@@ -876,8 +998,17 @@ struct DetailView: View {
             
             if type == "series" {
                 let regularSeasons = merged.seasons?.filter { $0.seasonNumber > 0 && !$0.name.lowercased().contains("special") } ?? []
-                if let first = regularSeasons.first ?? merged.seasons?.first {
-                    selectedSeason = first
+                let targetSeason: Season?
+                if let hist = UserDataService.shared.getHistoryItem(id: displayItem.id),
+                   let lastS = hist.lastSeason,
+                   let matchedSeason = regularSeasons.first(where: { $0.seasonNumber == lastS }) {
+                    targetSeason = matchedSeason
+                } else {
+                    targetSeason = regularSeasons.first ?? merged.seasons?.first
+                }
+                
+                if let seasonToLoad = targetSeason {
+                    selectedSeason = seasonToLoad
                     
                     // Track TMDB ID for sub-enrichment (episodes)
                     if let imdbID = merged.id.starts(with: "tt") ? merged.id : nil {
@@ -886,7 +1017,7 @@ struct DetailView: View {
                         }
                     }
                     
-                    await loadEpisodes(for: first)
+                    await loadEpisodes(for: seasonToLoad)
                 }
             }
             
@@ -929,7 +1060,13 @@ struct DetailView: View {
         // Initial set to show something immediately
         await MainActor.run {
             self.episodes = currentSeasonEpisodes
-            if let first = currentSeasonEpisodes.first { heroEpisode = first }
+            if let hist = UserDataService.shared.getHistoryItem(id: displayItem.id),
+               let lastE = hist.lastEpisode,
+               let matched = currentSeasonEpisodes.first(where: { $0.episodeNumber == lastE }) {
+                self.heroEpisode = matched
+            } else if let first = currentSeasonEpisodes.first {
+                self.heroEpisode = first
+            }
         }
         
         // Background Enrichment: Fetch descriptions automatically
@@ -1038,9 +1175,9 @@ struct LiquidEpisodeCard: View {
                 HStack(spacing: 12) {
                     if progress > 0 && progress < 0.95 {
                         // Progress Bar (Unfinished)
-                         ZStack(alignment: .leading) {
+                        ZStack(alignment: .leading) {
                             Capsule().fill(Color.white.opacity(0.3)).frame(height: 4)
-                            Capsule().fill(Color.white).frame(width: 40 * 2, height: 4) // Restoring proportional width
+                            Capsule().fill(Color.white).frame(width: max(4, 80 * min(1.0, progress)), height: 4)
                         }
                         .frame(width: 80)
                     } else {
