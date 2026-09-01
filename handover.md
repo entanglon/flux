@@ -80,9 +80,9 @@
 
 ### Open Issues / Remaining Work
 
-- **WebStreamrMBG returning no results** — No special handling exists; flows through generic pipeline. Needs debug logging or URL/response verification.
-- **Addon-level sourceMode filtering** — User explicitly wants "http" mode to only fire HTTP addons (skip torrent-only), not just filter streams after fetching. May need addon classification based on URL patterns.
-- **Visual testing** — App builds cleanly; needs live verification of detail popup timing/position and overall stream picker UX.
+- **Stream picker detail panel uses WRONG material** — Used `.ultraThinMaterial.opacity(0.95)` on the hover detail popup instead of `.glassEffect(.regular, in: .rect(cornerRadius: 10))`. User explicitly requested liquid glass (iOS 26 GlassEffect API), not ultraThinMaterial. Fix: replace all `.ultraThinMaterial` in `StreamRowItemView.streamDetailPanel` with `.glassEffect(.regular, in: .rect(cornerRadius: 10))` and remove the manual `.stroke` border (glassEffect handles edge highlights). Also review the entire stream picker (sidebar, rows, top bar) for any remaining non-glass materials.
+- **WebStreamrMBG returning no results** — Needs debug logging or URL/response verification.
+- **Addon-level sourceMode filtering** — User wants "http" mode to only fire HTTP addons, not just filter streams after fetching.
 
 ### Verification
 
@@ -373,4 +373,4 @@ open "$DEBUG_APP"
 - `flux/Components/ContinueWatchingCard.swift` — Apple TV style landscape continue watching cards
 - `flux/Components/GlassCard.swift` — Media card component with hover states
 
-*Last Updated: Sep 2, 2026, 12:55 AM*
+*Last Updated: Sep 2, 2026, 1:10 AM*
