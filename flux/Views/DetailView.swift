@@ -106,8 +106,10 @@ struct DetailView: View {
                             ]), startPoint: .leading, endPoint: .center)
                         }
                         
-                        // Hero Content Overlay
-                        VStack(alignment: .leading, spacing: 16) {
+                        // Hero Content & Starring Overlay
+                        HStack(alignment: .bottom, spacing: 32) {
+                            // Left Side: Title, Badges, Overview, Buttons
+                            VStack(alignment: .leading, spacing: 16) {
                             // 1. Dynamic Eyebrow
                             if !isReleased {
                                 Text(displayItem.upcomingBadgeText)
@@ -394,18 +396,17 @@ struct DetailView: View {
                             }
                             .padding(.top, 10)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 268)
-                        .padding(.bottom, 60)
                         
                         // Starring — bottom-right of the hero
                         if let starring = starringCast, !starring.isEmpty {
                             VStack(alignment: .trailing, spacing: 6) {
-                                Text("Starring")
-                                    .font(.caption)
+                                Text("STARRING")
+                                    .font(.caption2)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
-                                    .foregroundStyle(.white.opacity(0.6))
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .foregroundStyle(.white.opacity(0.5))
                                 
                                 ForEach(starring, id: \.name) { member in
                                     VStack(alignment: .trailing, spacing: 1) {
@@ -421,16 +422,17 @@ struct DetailView: View {
                                                 .lineLimit(1)
                                         }
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
                                 }
                             }
-                            .frame(width: 220, alignment: .trailing)
+                            .frame(minWidth: 160, maxWidth: 280, alignment: .trailing)
                             .padding(.trailing, 60)
-                            .padding(.bottom, 60)
                             .transition(.opacity)
                         }
                     }
-                    .frame(height: geo.size.height * 0.80)
+                    .padding(.bottom, 60)
+                    .frame(width: geo.size.width, height: geo.size.height * 0.80, alignment: .bottom)
+                }
+                .frame(height: geo.size.height * 0.80)
                     
                     VStack(alignment: .leading, spacing: 40) {
                         // Ghost rails while metadata loads
