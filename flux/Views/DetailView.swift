@@ -30,10 +30,16 @@ struct DetailView: View {
     /// The active history item for this title (if any).
     private var activeHistoryItem: MediaItem? {
         userData.getHistoryItem(id: displayItem.id)
+            ?? userData.getHistoryItem(id: item.id)
+            ?? (activeImdbID.flatMap { userData.getHistoryItem(id: $0) })
+            ?? (item.progress != nil ? item : nil)
     }
 
     /// Whether this title is currently in progress in Continue Watching.
     private var isInContinueWatching: Bool {
+        if let prog = item.progress, prog > 0.01 && prog < 0.90 {
+            return true
+        }
         guard let history = activeHistoryItem,
               let prog = history.progress,
               prog > 0.01 && prog < 0.90 else {
@@ -44,17 +50,19 @@ struct DetailView: View {
 
     /// Progress value (0.0 .. 1.0) for the hero continue watching button.
     private var heroProgress: Double {
-        guard let history = activeHistoryItem else { return 0.0 }
-        return history.progress ?? 0.0
+        if let history = activeHistoryItem, let prog = history.progress, prog > 0.0 {
+            return prog
+        }
+        return item.progress ?? 0.0
     }
 
     /// The specific episode to resume for a TV show (from history or first available).
     private var resumeEpisode: (season: Int, episode: Int, title: String?, image: URL?)? {
-        if displayItem.category == "TV Show" || displayItem.category == "Series" {
-            let seasonNum = activeHistoryItem?.lastSeason ?? 1
-            let epNum = activeHistoryItem?.lastEpisode ?? 1
-            let title = activeHistoryItem?.lastEpisodeTitle
-            let img = activeHistoryItem?.lastEpisodeImage
+        if displayItem.category == "TV Show" || displayItem.category == "Series" || item.category == "TV Show" || item.category == "Series" {
+            let seasonNum = activeHistoryItem?.lastSeason ?? item.lastSeason ?? 1
+            let epNum = activeHistoryItem?.lastEpisode ?? item.lastEpisode ?? 1
+            let title = activeHistoryItem?.lastEpisodeTitle ?? item.lastEpisodeTitle
+            let img = activeHistoryItem?.lastEpisodeImage ?? item.lastEpisodeImage
             return (seasonNum, epNum, title, img)
         }
         return nil
@@ -320,6 +328,7 @@ struct DetailView: View {
                                         }
                                     }
                                     .buttonStyle(.plain)
+                                    .animation(.easeOut(duration: 0.15), value: isInContinueWatching)
                                     
                                     Button(action: {
                                         userData.toggleWatchlist(displayItem)

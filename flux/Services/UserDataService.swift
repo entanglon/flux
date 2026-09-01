@@ -297,11 +297,18 @@ class UserDataService: ObservableObject {
     }
 
     func isInHistory(_ item: MediaItem) -> Bool {
-        return history.contains { $0.id == item.id }
+        return getHistoryItem(id: item.id) != nil
     }
 
     func getHistoryItem(id: String) -> MediaItem? {
-        return history.first { $0.id == id }
+        if let direct = history.first(where: { $0.id == id }) {
+            return direct
+        }
+        let stripped = id.replacingOccurrences(of: "tt", with: "")
+        if !stripped.isEmpty {
+            return history.first(where: { $0.id.replacingOccurrences(of: "tt", with: "") == stripped })
+        }
+        return nil
     }
 
     func toggleWatched(_ item: MediaItem, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil) {

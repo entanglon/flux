@@ -568,11 +568,13 @@ class PlayerManager: ObservableObject {
             return
         }
         
-        // 1. Instant Replay / Active Session Reuse Check (ONLY for Continue Watching cards when not forcing picker)
+        // 1. Instant Replay / Active Session Reuse Check (ONLY for Continue Watching cards and Detail View resume when not forcing picker)
         if fromContinueWatching && !forceStreamPicker {
-            let key = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
-            
             let historyItem = UserDataService.shared.getHistoryItem(id: item.id)
+            let matchedId = historyItem?.id ?? item.id
+            let key = item.category == "TV Show" ? "\(matchedId):\(season ?? 1):\(episode ?? 1)" : "\(matchedId)"
+            let fallbackKey = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
+            
             let isMatchingEpisode: Bool
             if item.category == "TV Show" || season != nil {
                 isMatchingEpisode = (historyItem?.lastSeason == season || (season == nil && historyItem?.lastSeason != nil)) &&
@@ -581,7 +583,7 @@ class PlayerManager: ObservableObject {
                 isMatchingEpisode = true
             }
 
-            if let cached = lastPlayedStreams[key] {
+            if let cached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey] {
                 let elapsed = Date().timeIntervalSince(cached.timestamp)
                 
                 // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session

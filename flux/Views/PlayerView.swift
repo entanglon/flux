@@ -14,6 +14,7 @@ struct PlayerView: View {
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
     @State private var lastProgressSaveTime: Date = .distantPast
+    @State private var showManualStreamPicker = false
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -239,6 +240,9 @@ struct PlayerView: View {
             }
             return .handled
         }
+        .contextMenu {
+            playerContextMenu
+        }
         .onAppear {
             mpv.onPlaybackError = {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
@@ -333,11 +337,16 @@ struct PlayerView: View {
             errorView(error: error)
         }
         
-        // Stream Selection UI
-        if !playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.availableStreams.isEmpty {
+        // Stream Selection UI (Initial automatic picker OR manually opened via Right-Click overlay)
+        if showManualStreamPicker || (!playerManager.isLoading && playerManager.currentStreamURL == nil && !playerManager.availableStreams.isEmpty) {
             ZStack {
                 Color.black.opacity(0.65)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showManualStreamPicker = false
+                        }
+                    }
                     .transition(.opacity)
                 
                 streamSelectionView
@@ -453,6 +462,127 @@ struct PlayerView: View {
         return nil
     }
     
+    @ViewBuilder
+    private var playerContextMenu: some View {
+        // Playback controls (Disabled on initial buffer loading)
+        Button {
+            mpv.togglePlayPause()
+        } label: {
+            Label(mpv.isPlaying ? "Pause" : "Play", systemImage: mpv.isPlaying ? "pause.fill" : "play.fill")
+        }
+        .disabled(!hasStartedPlayback && isInitialLoading)
+
+        Button {
+            mpv.seek(relative: -15)
+        } label: {
+            Label("Rewind 15s", systemImage: "gobackward.15")
+        }
+        .disabled(!hasStartedPlayback && isInitialLoading)
+
+        Button {
+            mpv.seek(relative: 15)
+        } label: {
+            Label("Forward 15s", systemImage: "goforward.15")
+        }
+        .disabled(!hasStartedPlayback && isInitialLoading)
+
+        Divider()
+
+        // Audio & Volume controls (Disabled on initial buffer loading)
+        Button {
+            mpv.toggleMute()
+        } label: {
+            Label(mpv.volume <= 0.001 ? "Unmute" : "Mute", systemImage: mpv.volume <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        }
+        .disabled(!hasStartedPlayback && isInitialLoading)
+
+        // Subtitle Selection Submenu
+        if !mpv.subtitleTracks.isEmpty || !playerManager.externalSubtitles.isEmpty {
+            Menu {
+                let isNoneSelected = !mpv.subtitleTracks.contains(where: { $0.isSelected })
+                Button {
+                    mpv.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                } label: {
+                    HStack {
+                        Text("Off")
+                        if isNoneSelected {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+
+                Divider()
+
+                ForEach(mpv.subtitleTracks) { track in
+                    Button {
+                        mpv.selectTrack(track)
+                    } label: {
+                        HStack {
+                            Text(track.displayName)
+                            if track.isSelected {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+
+                if !playerManager.externalSubtitles.isEmpty {
+                    Divider()
+                    ForEach(playerManager.externalSubtitles, id: \.id) { sub in
+                        Button {
+                            mpv.addExternalSubtitle(sub)
+                        } label: {
+                            Text(sub.source != nil ? "\(sub.language) (\(sub.source!))" : sub.language)
+                        }
+                    }
+                }
+            } label: {
+                Label("Subtitles", systemImage: "captions.bubble")
+            }
+            .disabled(!hasStartedPlayback && isInitialLoading)
+        }
+
+        // Audio Track Selection Submenu
+        if mpv.audioTracks.count > 1 {
+            Menu {
+                ForEach(mpv.audioTracks) { track in
+                    Button {
+                        mpv.selectTrack(track)
+                    } label: {
+                        HStack {
+                            Text(track.displayName)
+                            if track.isSelected {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Audio Tracks", systemImage: "waveform")
+            }
+            .disabled(!hasStartedPlayback && isInitialLoading)
+        }
+
+        Divider()
+
+        // Stream Source Selector (Always clickable, even on initial buffer screen!)
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                showManualStreamPicker = true
+            }
+        } label: {
+            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+        }
+
+        // PiP Toggle
+        Button {
+            PiPManager.shared.toggle(mpv: mpv)
+        } label: {
+            Label("Picture in Picture", systemImage: "pip.enter")
+        }
+        .disabled(!hasStartedPlayback && isInitialLoading)
+    }
+
     private var isInitialLoading: Bool {
         return !hasStartedPlayback && !playerManager.isLoading && playerManager.currentStreamURL != nil
     }
@@ -800,8 +930,12 @@ struct PlayerView: View {
                 
                 Button(action: {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        playerManager.close()
-                        dismiss()
+                        if showManualStreamPicker {
+                            showManualStreamPicker = false
+                        } else {
+                            playerManager.close()
+                            dismiss()
+                        }
                     }
                 }) {
                     Image(systemName: "xmark.circle.fill")
@@ -882,6 +1016,7 @@ struct PlayerView: View {
                         ForEach(filteredStreams) { stream in
                             StreamRowItemView(stream: stream) {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                    showManualStreamPicker = false
                                     playerManager.selectStream(stream)
                                 }
                             }
@@ -902,8 +1037,12 @@ struct PlayerView: View {
                 Spacer()
                 Button("Cancel") {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        playerManager.close()
-                        dismiss()
+                        if showManualStreamPicker {
+                            showManualStreamPicker = false
+                        } else {
+                            playerManager.close()
+                            dismiss()
+                        }
                     }
                 }
                 .font(.system(size: 13, weight: .medium))

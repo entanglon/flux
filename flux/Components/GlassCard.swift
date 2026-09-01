@@ -176,8 +176,8 @@ struct GlassCard: View {
                         )
                 )
                 .clipped()
-                .shadow(color: isHovering ? Color.black.opacity(0.5) : Color.black.opacity(0.25), radius: isHovering ? 16 : 6, x: 0, y: isHovering ? 10 : 4)
-                .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.7), value: isHovering)
+                .shadow(color: isHovering ? Color.black.opacity(0.4) : Color.black.opacity(0.2), radius: isHovering ? 10 : 4, x: 0, y: isHovering ? 6 : 2)
+                .drawingGroup()
             
             // Text Content
             if showTitle {
@@ -197,9 +197,11 @@ struct GlassCard: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering in
-            isHovering = hovering
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
         }
-        .task {
+        .task(id: displayItem.id) {
             // Auto-enrich if poster/backdrop is missing (e.g. History items from Trakt)
             if displayItem.posterURL == nil || displayItem.backdropURL == nil {
                 let enriched = await TMDBEnricher.shared.quickEnrich(displayItem)
