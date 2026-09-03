@@ -121,7 +121,12 @@ actor StreamCacheActor {
         self.ttl = ttl
         self.maxEntries = maxEntries
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        self.diskURL = dir?.appendingPathComponent("flux_streams_cache.json")
+        self.diskURL = dir?.appendingPathComponent("flux_streams_cache_v2.json")
+        // v2: drops v1 entries (pre-infoHash, possibly addon-partial) so every
+        // title gets one clean refetch under the new parsing rules.
+        if let dir {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("flux_streams_cache.json"))
+        }
         self.loadFromDisk()
     }
 

@@ -1,6 +1,63 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 2, 2026, 12:50 AM — STREMIO ADDON COMPATIBILITY + UI STREAM PICKER REDESIGN
+## LATEST: Sep 3, 2026 — STREAM PICKER LIQUID GLASS + HTTP-ADDON (PENGUPLAY/WEBSTREAMRMBG) INVESTIGATION
+
+### Liquid Glass Conversion (`PlayerView.swift`) — Completed, builds clean
+- Whole stream picker moved off `Color.white.opacity` fills onto iOS 26 liquid glass:
+  rows `.glassEffect(selected||hovered ? .regular : .clear, in: .rect(12))`, category
+  pills/menus `.clear/.regular.interactive()` capsules, search bar `.clear` rect,
+  close button `.clear.interactive()` circle. Outer container was already
+  `.glassEffect(.regular, in: .rect(20))`. Provider/quality badges + Play CTA stay solid.
+
+### Stream Picker Fixes (`PlayerView.swift`, `StreamManager.swift`) — Completed, builds clean
+1. Picker 860×580 → **980×660**.
+2. Removed dim-backdrop tap-to-dismiss — mid-playback picker closes only via X / row / Escape.
+3. Explicit `contentShape` on rows (rect), pills/menus (capsule), close (circle) so full
+   visuals are clickable, not just text.
+4. New `Stream.isTorrentSourced` (magnet URL **or** captured `infoHash`/`dht:` source):
+   Direct/Torrents tabs + row labels use it. Debrid-cached HTTP links (url+infoHash)
+   now land in Torrents. Playback routing (`isTorrent`, `torrentHash`, engine flow) untouched.
+5. Fetch hardening: tolerant per-stream decode salvage (`StremioResponse.tolerantStreams`),
+   any-2xx accepted, percent-encoding fallback for file-host URLs, timeouts 30s/60s,
+   full error logging. `Stream.infoHash` persisted (optional → disk-cache compatible).
+
+### HTTP Addons Return Zero In-App — Root Causes Found (curl-verified, Sep 3 09:49)
+- Direct curl against the user's real addon URLs (from `StremioConfiguredAddons`):
+  - PenguPlay `…/stream/series/tt26545992:1:1.json` → **200, 21 streams, ~1s**, all with `url`.
+  - WebStreamrMBG same endpoint → **200, 7 streams (3×2160p + 4×1080p), ~11s**.
+  - Same for Dune movie (Pengu 12 streams in ~7s). Manifests both 200 fast.
+  - **Conclusion: addons serve correctly; the app drops the results.**
+- Cause A (proven in code): "Choose Stream Source…" only set `showManualStreamPicker = true`
+  (`PlayerView.swift:707`) — **never refetched**, just revealed the last cached list.
+- Cause B: 24h disk cache with no schema version froze early Torrentio-only results for a day.
+- Fixes applied: `PlayerManager.refreshStreamsForPicker()` (force-refresh + progressive
+  `availableStreams` updates, never touches playback), wired to the context-menu action;
+  header refresh button (bypasses cache on demand); disk cache bumped to
+  `flux_streams_cache_v2.json` (+ deletes v1) for one clean refetch of every title.
+- Side finding: PenguPlay sometimes labels 1080p files "4K" (Dune Vegamovies entry); with
+  1080p-max preference `isWithinMaxResolution` drops those. Possible follow-up: parse quality
+  from `behaviorHints.filename` first (already decoded, currently unused for quality).
+
+### Open / Unverified — PICK UP HERE NEXT
+- **In-app PenguPlay/WebStreamrMBG visibility NOT yet user-verified** (fixes above are the
+  prime suspects; user to retest: open Lanterns picker, watch count climb, check Addons filter).
+- **Screenshot contradiction (Sep 3):** user screenshots showed Torrentio rows under the Direct
+  HTTP tab + active PenguPlay addon filter — impossible under the committed filter logic
+  (`filteredStreams` + `isTorrentSourced`, verified in source; fresh binary fingerprinted via
+  `strings flux.debug.dylib`). Likely tested a pre-relaunch build or missed taps (hover glass
+  mimics selection). If it reproduces on the current build, instrument `streamSelectionView`
+  with a `[Picker]` state print and read `/tmp/flux.log` (app relaunched with stdout captured).
+- Addon-level `sourceMode` filtering (fire only matching addon types) still open.
+- AIOStreams points at unresolvable `http://singularity:3000` (fast DNS fail, harmless, parallel).
+
+### Verification
+- `xcodebuild -scheme flux -configuration Debug` → **BUILD SUCCEEDED** (Sep 3).
+- App relaunched from Debug build; logs captured to `/tmp/flux.log` for per-addon
+  `[Name] Requesting/Found N/Error:` diagnosis without needing Console.app.
+
+---
+
+## Sep 2, 2026, 12:50 AM — STREMIO ADDON COMPATIBILITY + UI STREAM PICKER REDESIGN
 
 ### Current Status & Resolutions:
 
@@ -373,4 +430,4 @@ open "$DEBUG_APP"
 - `flux/Components/ContinueWatchingCard.swift` — Apple TV style landscape continue watching cards
 - `flux/Components/GlassCard.swift` — Media card component with hover states
 
-*Last Updated: Sep 2, 2026, 1:10 AM*
+*Last Updated: Sep 3, 2026, 10:00 AM*

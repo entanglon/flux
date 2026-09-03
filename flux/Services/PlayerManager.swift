@@ -651,6 +651,30 @@ class PlayerManager: ObservableObject {
         }
     }
 
+    /// Manual picker refresh ("Choose Stream Source…", header refresh button):
+    /// re-queries every enabled addon bypassing the 24h cache and streams results
+    /// into `availableStreams` progressively as each addon responds — Stremio-style.
+    /// Slow scraping addons (PenguPlay, WebStreamrMBG) arrive whenever they finish;
+    /// fast ones are never held back. Never touches playback state.
+    func refreshStreamsForPicker() {
+        guard let item = currentItem else { return }
+        let season = currentSeason, episode = currentEpisode
+        isFetchingStreams = true
+        AsyncTask {
+            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode, forceRefresh: true) { updatedStreams in
+                Task { @MainActor in
+                    self.availableStreams = updatedStreams
+                    self.verifyStreamHealth(updatedStreams)
+                }
+            }
+            await MainActor.run {
+                self.availableStreams = streams
+                self.isFetchingStreams = false
+                self.verifyStreamHealth(streams)
+            }
+        }
+    }
+
     private func fetchAndRace(item: MediaItem, season: Int?, episode: Int?, forceStreamPicker: Bool = false) {
         self.isFetchingStreams = true
         self.isLoading = true

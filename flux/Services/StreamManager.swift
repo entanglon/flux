@@ -31,10 +31,20 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
     var fileIdx: Int? = nil
     var isSeasonPack: Bool = false
     var proxyHeaders: [String: String]? = nil
+    /// Torrent identity even when this entry plays over direct HTTP (e.g. debrid
+    /// links that ship both `url` and `infoHash`). Playback transport still follows `url`.
+    var infoHash: String? = nil
 
-    /// True for magnet / torrent-backed sources
+    /// True for magnet / torrent-backed playback URLs
     var isTorrent: Bool {
         url.absoluteString.hasPrefix("magnet:") || url.absoluteString.contains("xt=urn:btih:")
+    }
+
+    /// True when the content originates from a torrent swarm, even if this entry
+    /// plays over direct HTTP (debrid-cached). Used for Torrents/Direct tabs and
+    /// labels only — never for playback routing.
+    var isTorrentSourced: Bool {
+        isTorrent || (infoHash?.isEmpty == false)
     }
 
     /// Stable identity across refetches (UUID changes every snapshot): infoHash + file index.
@@ -100,6 +110,25 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
 
 struct StremioResponse: Codable {
     let streams: [StremioStream]
+
+    init(streams: [StremioStream]) { self.streams = streams }
+
+    /// Salvages individually-decodable stream objects when whole-response decoding
+    /// fails — scraping addons occasionally emit irregular shapes for a single
+    /// entry, which must not wipe out the entire addon response.
+    static func tolerantStreams(from data: Data) -> [StremioStream] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = json["streams"] as? [[String: Any]] else { return [] }
+        var out: [StremioStream] = []
+        out.reserveCapacity(raw.count)
+        let decoder = JSONDecoder()
+        for element in raw {
+            guard let elementData = try? JSONSerialization.data(withJSONObject: element),
+                  let stream = try? decoder.decode(StremioStream.self, from: elementData) else { continue }
+            out.append(stream)
+        }
+        return out
+    }
 }
 
 struct StremioBehaviorHints: Codable {
@@ -139,12 +168,13 @@ class StreamManager {
 
     /// Shared session: connection reuse + bounded timeouts so a hanging addon
     /// never stalls the whole source list (Stremio-style fast failure).
-    /// 20s request timeout accommodates scraping-based addons (PenguPlay etc.)
-    /// that query multiple providers sequentially.
+    /// Generous timeouts accommodate scraping-based addons (PenguPlay etc.)
+    /// that query multiple providers sequentially. Fan-out is parallel and the
+    /// UI updates progressively per addon, so a slow addon never blocks others.
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
         config.httpShouldUsePipelining = true
         return URLSession(configuration: config)
     }()
@@ -513,12 +543,20 @@ class StreamManager {
 
         do {
             let (data, response) = try await self.session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
                 return []
             }
-            
-            let stremioResponse = try JSONDecoder().decode(StremioResponse.self, from: data)
-            let streams = stremioResponse.streams.compactMap { stream -> Stream? in
+
+            // Strict decode first; fall back to per-element salvage so a single
+            // malformed stream object can't wipe out the whole addon response.
+            let decodedStreams: [StremioStream]
+            do {
+                decodedStreams = try JSONDecoder().decode(StremioResponse.self, from: data).streams
+            } catch {
+                print("[\(sourceName)] Strict decode failed (\(error)); salvaging individual streams")
+                decodedStreams = StremioResponse.tolerantStreams(from: data)
+            }
+            let streams = decodedStreams.compactMap { stream -> Stream? in
                 // Protocol-compliant URL resolution: url → ytId → infoHash → externalUrl
                 var targetURLString = stream.url
 
@@ -552,11 +590,33 @@ class StreamManager {
                     }
                 }
 
+                // Torrent identity survives even when a direct `url` wins below
+                // (debrid-cached links ship both). Also harvest dht: entries.
+                var torrentHash: String? = stream.infoHash
+                if torrentHash == nil, let sources = stream.sources {
+                    for entry in sources {
+                        let candidate: String
+                        if entry.lowercased().hasPrefix("dht:") {
+                            candidate = String(entry.dropFirst(4))
+                        } else if entry.count == 40, entry.allSatisfy({ $0.isHexDigit }) {
+                            candidate = entry
+                        } else {
+                            continue
+                        }
+                        if !candidate.isEmpty { torrentHash = candidate; break }
+                    }
+                }
+
                 guard var finalURLStr = targetURLString, finalURLStr != "about:blank" else { return nil }
                 if !finalURLStr.starts(with: "magnet:") && !finalURLStr.starts(with: "https://www.youtube.com") {
                     finalURLStr = normalizeAddonURL(finalURLStr)
                 }
-                guard let streamUrl = URL(string: finalURLStr) else { return nil }
+                // File-host links sometimes contain spaces or unicode — retry percent-encoded.
+                var streamUrl = URL(string: finalURLStr)
+                if streamUrl == nil, let encoded = finalURLStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                    streamUrl = URL(string: encoded)
+                }
+                guard let streamUrl = streamUrl else { return nil }
 
                 // Protocol: description is primary (replaces deprecated title), title is fallback
                 let rawTitle = stream.description ?? stream.title ?? stream.name ?? "Unknown Stream"
@@ -590,13 +650,14 @@ class StreamManager {
                     leechers: leechers,
                     fileIdx: stream.fileIdx,
                     isSeasonPack: detectSeasonPack(name: nameHeader, title: rawTitle),
-                    proxyHeaders: headers
+                    proxyHeaders: headers,
+                    infoHash: torrentHash
                 )
             }
             print("[\(sourceName)] Found \(streams.count) streams")
             return streams
         } catch {
-            print("[\(sourceName)] Error: \(error.localizedDescription)")
+            print("[\(sourceName)] Error: \(error)")
             return []
         }
     }
