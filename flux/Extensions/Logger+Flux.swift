@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 extension Logger {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.kernelmoth.flux"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.heisenbug.flux"
 
     static let auth = Logger(subsystem: subsystem, category: "Auth")
     static let player = Logger(subsystem: subsystem, category: "Player")

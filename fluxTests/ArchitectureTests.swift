@@ -166,5 +166,13 @@ struct ArchitectureTests {
         #expect(manifestStr.catalogs?.count == 1)
         #expect(manifestStr.catalogs?.first?.name == "Top Movies")
     }
+
+    @Test func updateManagerInitializesAndExposesCheckCapability() async {
+        await MainActor.run {
+            let manager = UpdateManager.shared
+            #expect(manager != nil)
+            #expect(manager.canCheckForUpdates == false)
+        }
+    }
 }
 

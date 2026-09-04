@@ -514,24 +514,11 @@ struct PlayerControlsView: View {
             .accessibilityLabel("Volume gauge")
             .accessibilityValue("\(percent) percent")
 
-            // Percentage & Boost Badge
-            HStack(spacing: 3) {
-                Text(isMuted ? "0%" : "\(percent)%")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(isBoosted ? .orange : .white.opacity(0.75))
-                    .frame(minWidth: 32, alignment: .trailing)
-
-                if isBoosted {
-                    Text("BOOST")
-                        .font(.system(size: 7.5, weight: .heavy, design: .rounded))
-                        .tracking(0.5)
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1.5)
-                        .background(Color.orange.opacity(0.2), in: Capsule())
-                        .overlay(Capsule().stroke(Color.orange.opacity(0.5), lineWidth: 0.5))
-                }
-            }
+            // Percentage Label (Orange when boosted)
+            Text(isMuted ? "0%" : "\(percent)%")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(isBoosted ? .orange : .white.opacity(0.75))
+                .frame(minWidth: 32, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)

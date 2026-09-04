@@ -7,7 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F79D5CD62EE34E9E0062A21F /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = F79D5CD52EE34E9E0062A21F /* MPVKit */; };
+		9AEA2F5783AEC90FE26B220A /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 09929C96B944959C7FCCA8B4 /* Sparkle */; };
+		F79D5CD62EE34E9E0062A21F /* MPVKit-GPL in Frameworks */ = {isa = PBXBuildFile; productRef = F79D5CD52EE34E9E0062A21F /* MPVKit-GPL */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,10 +35,10 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		F7D621A12EE1E52000C25561 /* Exceptions for "flux" folder in flux target */ = {
+		F7D621A12EE1E52000C25561 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				MPVKit-Swift,
+				"MPVKit-Swift",
 				implementation_plan.md,
 				SecretsExample.txt,
 			);
@@ -49,7 +50,7 @@
 		F7D621182EE1E52000C25560 /* flux */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				F7D621A12EE1E52000C25561 /* Exceptions for "flux" folder in flux target */,
+				F7D621A12EE1E52000C25561 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			path = flux;
 			sourceTree = "<group>";
@@ -71,7 +72,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F79D5CD62EE34E9E0062A21F /* MPVKit in Frameworks */,
+				F79D5CD62EE34E9E0062A21F /* MPVKit-GPL in Frameworks */,
+				9AEA2F5783AEC90FE26B220A /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,7 +134,8 @@
 			);
 			name = flux;
 			packageProductDependencies = (
-				F79D5CD52EE34E9E0062A21F /* MPVKit */,
+				F79D5CD52EE34E9E0062A21F /* MPVKit-GPL */,
+				09929C96B944959C7FCCA8B4 /* Sparkle */,
 			);
 			productName = flux;
 			productReference = F7D621162EE1E52000C25560 /* flux.app */;
@@ -218,6 +221,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */,
+				C01905544111CA0C9C8738F4 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F7D621172EE1E52000C25560 /* Products */;
@@ -428,15 +432,7 @@
 					"$(inherited)",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleURLTypes = (
-					{
-						CFBundleURLName = "com.kernelmoth.flux.stremio";
-						CFBundleURLSchemes = (
-							stremio,
-							flux,
-						);
-					},
-				);
+				INFOPLIST_FILE = flux/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -473,15 +469,7 @@
 					"$(inherited)",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleURLTypes = (
-					{
-						CFBundleURLName = "com.kernelmoth.flux.stremio";
-						CFBundleURLSchemes = (
-							stremio,
-							flux,
-						);
-					},
-				);
+				INFOPLIST_FILE = flux/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -490,7 +478,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-Wl,-w";
-				PRODUCT_BUNDLE_IDENTIFIER = com.kernelmoth.flux;
+				PRODUCT_BUNDLE_IDENTIFIER = com.heisenbug.flux;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -620,6 +608,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		C01905544111CA0C9C8738F4 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.4;
+			};
+		};
 		F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
@@ -631,10 +627,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		09929C96B944959C7FCCA8B4 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C01905544111CA0C9C8738F4 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		F79D5CD52EE34E9E0062A21F /* MPVKit-GPL */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F79D5CD72EE1E52000C25560 /* XCRemoteSwiftPackageReference "MPVKit" */;
-			productName = MPVKit-GPL;
+			productName = "MPVKit-GPL";
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

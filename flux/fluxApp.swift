@@ -6,8 +6,9 @@ import Darwin
 /// Held for the process lifetime — a second instance fails to lock and exits.
 private var instanceLockFD: Int32 = -1
 private func acquireSingleInstanceLock() -> Bool {
+    let folderName = (Bundle.main.bundleIdentifier == "com.heisenbug.flux") ? "Flux" : "Flux-Debug"
     let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        .appendingPathComponent("Flux")
+        .appendingPathComponent(folderName)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let path = dir.appendingPathComponent(".instance.lock").path
     let fd = open(path, O_CREAT | O_RDWR, 0o644)
@@ -38,6 +39,7 @@ struct fluxApp: App {
     @StateObject private var playerManager = PlayerManager.shared
     @StateObject private var authManager = AuthManager.shared
     @StateObject private var profileManager = ProfileManager.shared
+    @StateObject private var updateManager = UpdateManager.shared
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
@@ -92,6 +94,12 @@ struct fluxApp: App {
         .commands {
             SidebarCommands()
             ToolbarCommands()
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updateManager.checkForUpdates()
+                }
+                .disabled(!updateManager.canCheckForUpdates)
+            }
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
                     Task {

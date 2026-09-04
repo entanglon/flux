@@ -372,6 +372,7 @@ struct AdvancedSettingsView: View {
     @State private var usedBytes: Int64 = 0
     @State private var isClearingImages = false
     @State private var isClearingTorrents = false
+    @ObservedObject private var updateManager = UpdateManager.shared
 
     /// Mirrors Stremio's cache size options (disk LRU — oldest torrents evicted first).
     private let cacheOptions = [1, 2, 5, 10, 20, 50]
@@ -485,6 +486,15 @@ struct AdvancedSettingsView: View {
                     }
 
                     Spacer()
+
+                    Button(action: {
+                        updateManager.checkForUpdates()
+                    }) {
+                        Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!updateManager.canCheckForUpdates)
                 }
                 .padding(.vertical, 2)
             }

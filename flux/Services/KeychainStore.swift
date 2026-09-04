@@ -3,7 +3,7 @@ import Security
 
 /// Minimal Keychain wrapper for session secrets.
 enum KeychainStore {
-    private static let service = "flux.app.cloud"
+    private static let service = (Bundle.main.bundleIdentifier ?? "flux.app.cloud") + ".auth"
 
     static func set(_ value: String, forKey key: String) {
         let data = Data(value.utf8)

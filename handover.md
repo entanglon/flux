@@ -174,6 +174,23 @@
   - Added `isIntentionallySwitchingFile` in `MPVViewController` to suppress spurious `MPV_END_FILE_REASON_ERROR` emissions during intentional track/file transitions.
   - Full test suite passed (62/62 tests).
 
+### 18. Release Preparation: Bundle ID Segregation, Data Isolation, Volume UI Polish & Sparkle 2 Integration (`PlayerControlsView.swift`, `project.pbxproj`, `Info.plist`, `UpdateManager.swift`, `fluxApp.swift`, `SettingsView.swift`, `KeychainStore.swift`, `StremioServerManager.swift`, `ArchitectureTests.swift`) — Completed & Verified
+- **Volume UI Polish**:
+  - Removed the `"BOOST"` textual badge capsule in `PlayerControlsView.swift` which caused the volume bar to expand/shift horizontally.
+  - Retained the smooth color transition (orange accent on gauge, icon, and percentage text when volume is boosted above 100%).
+- **Bundle ID & Data Segregation**:
+  - Configured Release configuration to use `PRODUCT_BUNDLE_IDENTIFIER = com.heisenbug.flux`.
+  - Maintained Debug configuration with `com.kernelmoth.flux`.
+  - Segregated `Application Support` directory into `Application Support/Flux` for Release and `Application Support/Flux-Debug` for Debug (`StremioServerManager.swift` and `fluxApp.swift` single-instance lock).
+  - Dynamically scoped `KeychainStore.service` to `(Bundle.main.bundleIdentifier ?? "flux.app.cloud") + ".auth"`.
+  - Clean Release slate: Verified `AddonManager.swift` only hardcodes stock `OpenSubtitles v3`. All third-party addons, auth tokens, and watch progress reside in domain-isolated `UserDefaults` and `Application Support`. A release build installs into a clean slate with no developer accounts, no test data, and no third-party addons.
+- **Sparkle 2 Framework Integration for Over-the-Air (OTA) Updates**:
+  - Added Sparkle 2.9.6 SPM package dependency linked directly to target `flux`.
+  - Created `flux/Services/UpdateManager.swift` encapsulating `SPUStandardUpdaterController` with `@MainActor` safety, reactive `canCheckForUpdates` publishing, and automated test safety.
+  - Wired `"Check for Updates…"` menu item in `fluxApp.swift` (`CommandGroup(after: .appInfo)`).
+  - Added `"Check for Updates…"` button in `SettingsView.swift` within the "About" section next to version information.
+  - Created `flux/Info.plist` with `SUFeedURL` (`https://raw.githubusercontent.com/heisenbug-dev/flux/main/appcast.xml`), `SUEnableAutomaticChecks = true`, and `CFBundleURLTypes` expanding `$(PRODUCT_BUNDLE_IDENTIFIER).stremio` with `stremio` and `flux` protocol handlers.
+  - Added `updateManagerInitializesAndExposesCheckCapability` in `ArchitectureTests.swift`. All 64 unit tests passed with zero failures.
 
 ---
 
