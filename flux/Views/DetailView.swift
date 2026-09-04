@@ -583,11 +583,14 @@ struct DetailView: View {
                                                 selectedSeason = season
                                                 Task { await loadEpisodes(for: season) }
                                                 // Re-prime the pipeline for the newly selected season (S{n}E1)
-                                                PlayerManager.shared.startDetailPrefetch(
-                                                    item: displayItem,
-                                                    season: season.seasonNumber,
-                                                    episode: 1
-                                                )
+                                                let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+                                                if isFluxEnabled {
+                                                    PlayerManager.shared.startDetailPrefetch(
+                                                        item: displayItem,
+                                                        season: season.seasonNumber,
+                                                        episode: 1
+                                                    )
+                                                }
                                             }
                                             withAnimation(.easeInOut(duration: 0.18)) {
                                                 SeasonDropdownController.shared.toggle()
@@ -976,6 +979,9 @@ struct DetailView: View {
     /// Non-Flux → picker is instant on Play. Flux Mode → best source resolved,
     /// primed and held buffered in a warm mpv core so Play starts instantly.
     private func prefetchPlaybackSources() {
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        guard isFluxEnabled else { return }
+
         if displayItem.isSeries || item.isSeries {
             if let target = smartTargetEpisode {
                 PlayerManager.shared.startDetailPrefetch(

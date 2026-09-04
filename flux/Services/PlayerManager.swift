@@ -90,6 +90,9 @@ class PlayerManager: ObservableObject {
     /// fetch runs — registering a second torrent would compete for the same
     /// Stremio-server bandwidth as the active stream.
     func startDetailPrefetch(item: MediaItem, season: Int? = nil, episode: Int? = nil) {
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        guard isFluxEnabled else { return }
+
         let sessionActive = currentItem != nil || PiPManager.shared.isActive
         let key = prefetchKey(for: item, season: season, episode: episode)
         if inflightPrefetchKey == key { return }
@@ -1487,6 +1490,8 @@ class PlayerManager: ObservableObject {
     }
     
     func preloadNextEpisodeIfNeeded() {
+        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        guard isFluxEnabled else { return }
         guard !hasPreloadedNext, let next = nextEpisodeInfo, let item = currentItem else { return }
         hasPreloadedNext = true
         let nextKey = prefetchKey(for: item, season: next.season, episode: next.episode)

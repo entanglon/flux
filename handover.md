@@ -102,6 +102,16 @@
 - **Verification**:
   - Full automated test suite passed with 0 failures (`StreamManagerTests`, `ArchitectureTests`, `SearchEngineTests`, `UserDataServiceTests`, `TMDBEnricherTests`, `fluxTests`, `fluxUITests`).
 
+### 14. Strict Gating of Detail Prefetch & Next-Episode Preload to Flux Mode Only (`PlayerManager.swift`, `DetailView.swift`) — Completed & Verified
+- **Issue**: In Non-Flux Mode, opening detail pages or changing seasons triggered background stream scraping and prefetch tasks, and reaching >80% in a video triggered next-episode stream preloading. In Non-Flux Mode, all streaming resolution and selection must be explicitly on-demand upon clicking Play or next episode.
+- **Resolution**:
+  - Added `guard isFluxEnabled else { return }` at the entry point of `PlayerManager.startDetailPrefetch`.
+  - Added `guard isFluxEnabled else { return }` at the entry point of `PlayerManager.preloadNextEpisodeIfNeeded`.
+  - Added `guard isFluxEnabled else { return }` in `DetailView.prefetchPlaybackSources()` and `DetailView.SeasonDropdownController.onSelect`.
+- **Verification**:
+  - When Flux Mode is OFF, zero prefetch tasks or background addon scrapes are initiated on detail pages or during video playback.
+  - Full test suite passed (48 tests, 0 failures).
+
 ---
 
 ## Sep 3, 2026 — DYNAMIC STREAM PICKER TABS, ICON-ONLY SELECTORS, CAROUSEL HIT TARGET & DETAIL CLEANUP
