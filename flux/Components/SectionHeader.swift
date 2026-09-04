@@ -420,6 +420,183 @@ struct LiquidGlassMediaToggle: View {
     }
 }
 
+// MARK: - Liquid Glass Filmography 3-Segment Toggle (All / Movies / TV Shows)
+
+struct LiquidGlassFilmographyToggle: View {
+    @Binding var selected: PersonView.FilmographyTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDragging: Bool = false
+    @State private var squishX: CGFloat = 1
+    @State private var lastDragX: CGFloat?
+    @State private var lastDragTime = Date()
+    @State private var velocityX: CGFloat = 0
+
+    private let segmentWidth: CGFloat = 72
+    private let height: CGFloat = 28
+    private let padding: CGFloat = 2
+
+    private var activeIndex: Int {
+        switch selected {
+        case .all: return 0
+        case .movies: return 1
+        case .tv: return 2
+        }
+    }
+
+    private var thumbWidth: CGFloat {
+        segmentWidth - (padding * 2)
+    }
+
+    private var thumbHeight: CGFloat {
+        height - (padding * 2)
+    }
+
+    private var currentThumbOffset: CGFloat {
+        let base = CGFloat(activeIndex) * segmentWidth + padding
+        if isDragging {
+            let proposed = base + dragOffset
+            let minX = padding
+            let maxX = segmentWidth * 2 + padding
+            if proposed < minX {
+                return minX - rubberBand(minX - proposed, dimension: segmentWidth * 3)
+            } else if proposed > maxX {
+                return maxX + rubberBand(proposed - maxX, dimension: segmentWidth * 3)
+            }
+            return proposed
+        }
+        return base
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // 1. Track Socket with permanently positioned labels
+            HStack(spacing: 0) {
+                Text("All")
+                    .font(.system(size: 11, weight: selected == .all ? .bold : .semibold))
+                    .foregroundStyle(selected == .all ? Color.white : Color.white.opacity(0.50))
+                    .frame(width: segmentWidth, height: height)
+
+                Text("Movies")
+                    .font(.system(size: 11, weight: selected == .movies ? .bold : .semibold))
+                    .foregroundStyle(selected == .movies ? Color.white : Color.white.opacity(0.50))
+                    .frame(width: segmentWidth, height: height)
+
+                Text("TV Shows")
+                    .font(.system(size: 11, weight: selected == .tv ? .bold : .semibold))
+                    .foregroundStyle(selected == .tv ? Color.white : Color.white.opacity(0.50))
+                    .frame(width: segmentWidth, height: height)
+            }
+            .frame(width: segmentWidth * 3, height: height)
+            .glassEffect(.regular, in: .capsule)
+
+            // 2. Empty, Zero-Distortion Crystal-Clear Glass Pill
+            Capsule()
+                .fill(Color.white.opacity(isDragging ? 0.12 : 0.08))
+                .overlay(
+                    Capsule()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(isDragging ? 0.75 : 0.38),
+                                    Color.white.opacity(isDragging ? 0.22 : 0.10)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: isDragging ? 1.0 : 0.7
+                        )
+                )
+                .frame(width: thumbWidth, height: thumbHeight)
+                .scaleEffect(
+                    x: reduceMotion ? 1 : (isDragging ? 1.06 * squishX : 1.0),
+                    y: reduceMotion ? 1 : (isDragging ? 1.32 : 1.0),
+                    anchor: .center
+                )
+                .shadow(
+                    color: Color.black.opacity(isDragging ? 0.45 : 0.12),
+                    radius: isDragging ? 16 : 3,
+                    x: 0,
+                    y: isDragging ? 8 : 1
+                )
+                .offset(x: currentThumbOffset)
+                .animation(isDragging ? GlassMotion.drag : (reduceMotion ? GlassMotion.reduced : GlassMotion.settle), value: currentThumbOffset)
+                .animation(reduceMotion ? GlassMotion.reduced : GlassMotion.popOut, value: isDragging)
+        }
+        .frame(width: segmentWidth * 3, height: height)
+        .contentShape(Capsule())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isDragging {
+                        isDragging = true
+                    }
+                    dragOffset = value.translation.width
+                    updateVelocity(currentX: value.location.x)
+
+                    if !reduceMotion {
+                        withAnimation(GlassMotion.squish) {
+                            squishX = squishFactor(for: velocityX)
+                        }
+                    }
+                }
+                .onEnded { value in
+                    let translation = value.translation.width
+                    let currentBase = CGFloat(activeIndex) * segmentWidth + padding
+                    let projectedX = currentBase + translation + velocityX * 0.12
+                    let tapLocation = value.location.x
+
+                    lastDragX = nil
+                    velocityX = 0
+
+                    withAnimation(reduceMotion ? GlassMotion.reduced : GlassMotion.settle) {
+                        squishX = 1
+                        if abs(translation) < 6 {
+                            if tapLocation < segmentWidth {
+                                selected = .all
+                            } else if tapLocation < segmentWidth * 2 {
+                                selected = .movies
+                            } else {
+                                selected = .tv
+                            }
+                        } else {
+                            if projectedX < segmentWidth * 0.7 {
+                                selected = .all
+                            } else if projectedX < segmentWidth * 1.7 {
+                                selected = .movies
+                            } else {
+                                selected = .tv
+                            }
+                        }
+                        dragOffset = 0
+                        isDragging = false
+                    }
+                }
+        )
+    }
+
+    private func updateVelocity(currentX: CGFloat) {
+        let now = Date()
+        if let last = lastDragX {
+            let dt = max(now.timeIntervalSince(lastDragTime), 1.0 / 120.0)
+            velocityX = (currentX - last) / CGFloat(dt)
+        }
+        lastDragX = currentX
+        lastDragTime = now
+    }
+
+    private func squishFactor(for velocity: CGFloat) -> CGFloat {
+        let normalized = max(-1, min(1, velocity / 900))
+        return 1 + normalized * 0.16
+    }
+
+    private func rubberBand(_ overflow: CGFloat, dimension: CGFloat, coefficient: CGFloat = 0.55) -> CGFloat {
+        guard dimension > 0 else { return 0 }
+        return (overflow * coefficient * dimension) / (dimension + coefficient * overflow)
+    }
+}
+
 #Preview {
     ZStack {
         Color.black

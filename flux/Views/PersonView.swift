@@ -23,9 +23,12 @@ struct PersonView: View {
         case .all:
             return credits
         case .movies:
-            return credits.filter { $0.category.lowercased() == "movie" }
+            return credits.filter { $0.category.lowercased().contains("movie") }
         case .tv:
-            return credits.filter { $0.category.lowercased() == "series" || $0.category.lowercased() == "tv" }
+            return credits.filter {
+                let cat = $0.category.lowercased()
+                return cat.contains("tv") || cat.contains("series") || cat.contains("show")
+            }
         }
     }
 
@@ -238,26 +241,8 @@ struct PersonView: View {
 
                 Spacer()
 
-                // Filter Tabs: All / Movies / TV Shows
-                HStack(spacing: 4) {
-                    ForEach(FilmographyTab.allCases, id: \.self) { tab in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                selectedTab = tab
-                            }
-                        } label: {
-                            Text(tab.rawValue)
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(selectedTab == tab ? .black : .white.opacity(0.7))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    Capsule().fill(selectedTab == tab ? Color.white : Color.white.opacity(0.12))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                // Filter Toggle: All / Movies / TV Shows
+                LiquidGlassFilmographyToggle(selected: $selectedTab)
             }
 
             if filteredCredits.isEmpty {
@@ -280,6 +265,7 @@ struct PersonView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .padding(.leading, 268)
         .padding(.trailing, 40)
         .padding(.top, 40)
