@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="flux/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" width="128" height="128" alt="Flux App Icon" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);" />
+
 # Flux
 
 ### The Next-Generation Native Media Center for macOS
