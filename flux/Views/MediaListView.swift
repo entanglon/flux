@@ -37,8 +37,8 @@ struct MediaListView: View {
             case .quickWatches: return "Quick Watches (< 95m)"
             case .trendingTV(let window): return window == "day" ? "Trending Shows Today" : "Trending Shows This Week"
             case .popularTV: return "Popular TV Shows"
-            case .airingTodayTV: return "Airing Today on TV"
-            case .onTheAirTV: return "On The Air / This Week"
+            case .airingTodayTV: return "Airing Today"
+            case .onTheAirTV: return "On TV"
             case .topRatedTV: return "Top Rated TV Shows"
             case .streamingTV: return "Popular on Streaming"
             case .genre(_, let name): return name

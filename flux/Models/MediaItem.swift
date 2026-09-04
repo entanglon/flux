@@ -35,29 +35,113 @@ struct MediaItem: Identifiable, Hashable, Codable {
     // New Fields
     var seasons: [Season]?
     var runtime: String? // e.g. "2h 14m" or "45m"
-    var certification: String? // e.g. "PG-13", "TV-MA"
+    var certification: String? // e.g. "PG-13", "TV-MA", "A"
+    var contentAdvisories: [String]? // e.g. ["Drugs or Drug Use", "Violence", "Language"]
     var genres: [String]?
     var popularity: Double? // For search ranking
     var releaseDate: String? // YYYY-MM-DD
     var originalLanguage: String? // ISO 639-1 code, e.g. "ko", "ja", "en"
     var spokenLanguages: [String]? // e.g. ["English", "Spanish"]
-    var originCountry: String? // ISO 3166-1 code, e.g. "US", "KR", "JP"
+    var availableSubtitles: [String]? // e.g. ["English (SDH)", "French (SDH)"]
+    var audioTracks: [String]? // e.g. ["English (Dolby Atmos, Dolby 5.1)", "French (Dolby 5.1)"]
+    var originCountry: String? // ISO 3166-1 code or full name
     var voteAverage: Double? // e.g. 7.8
     var episodes: [Episode]? // To store all Stremio videos
     var watchProviders: [WatchProvider]?
     
+    // MARK: - Runtime Formatters
+    
+    /// Formats minutes into hours and minutes, supporting both < 60m (e.g. "45m") and >= 60m (e.g. "2h 28m", "2h").
+    public static func formatRuntime(minutes: Int?) -> String? {
+        guard let minutes = minutes, minutes > 0 else { return nil }
+        if minutes < 60 {
+            return "\(minutes)m"
+        } else {
+            let hours = minutes / 60
+            let mins = minutes % 60
+            return mins > 0 ? "\(hours)h \(mins)m" : "\(hours)h"
+        }
+    }
+    
+    /// Parses any string runtime (e.g. "148 min", "45 min", "148", "2h 14m") into standard hours and minutes.
+    public static func formatRuntimeString(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        if (raw.contains("h") || raw.hasSuffix("m")) && !raw.lowercased().contains("min") {
+            return raw
+        }
+        let digits = raw.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        if let minutes = Int(digits), minutes > 0 {
+            return formatRuntime(minutes: minutes)
+        }
+        return raw
+    }
+    
     /// Localized display name for the original language (e.g. "Korean", "Japanese", "English").
+    /// Falls back to country-based language inference when explicit language is missing.
     var displayOriginalLanguage: String? {
-        guard let code = originalLanguage, !code.isEmpty else { return nil }
-        return Locale.current.localizedString(forLanguageCode: code)?.localizedCapitalized
+        if let code = originalLanguage, !code.isEmpty {
+            if let name = Locale.current.localizedString(forLanguageCode: code)?.localizedCapitalized, !name.isEmpty {
+                return name
+            }
+            if code.count > 2 { return code.capitalized }
+        }
+        // Fallback: infer language from country of origin
+        if let country = originCountry?.lowercased() {
+            if country.contains("united states") || country.contains("united kingdom") || country.contains("canada") || country.contains("australia") || country == "us" || country == "gb" || country == "uk" || country == "ca" || country == "au" {
+                return "English"
+            }
+            if country.contains("japan") || country == "jp" { return "Japanese" }
+            if country.contains("korea") || country == "kr" { return "Korean" }
+            if country.contains("france") || country == "fr" { return "French" }
+            if country.contains("germany") || country == "de" { return "German" }
+            if country.contains("italy") || country == "it" { return "Italian" }
+            if country.contains("spain") || country.contains("mexico") || country.contains("argentina") || country == "es" || country == "mx" { return "Spanish" }
+            if country.contains("india") || country == "in" { return "Hindi" }
+            if country.contains("china") || country.contains("taiwan") || country == "cn" || country == "tw" { return "Mandarin" }
+            if country.contains("russia") || country == "ru" { return "Russian" }
+        }
+        return "English"
     }
     
     /// Localized display name for the origin country (e.g. "South Korea", "Japan", "United States").
     var displayOriginCountry: String? {
         guard let code = originCountry, !code.isEmpty else { return nil }
-        // If the code is already a full name (legacy data), return it directly
+        // If the code contains multiple countries or is already a full name, return it cleanly
+        if code.contains(",") {
+            let parts = code.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .compactMap { part -> String? in
+                    if part.count == 2 {
+                        return Locale.current.localizedString(forRegionCode: part) ?? part
+                    }
+                    return part
+                }
+            return parts.joined(separator: ", ")
+        }
         if code.count > 2 { return code }
-        return Locale.current.localizedString(forRegionCode: code)
+        return Locale.current.localizedString(forRegionCode: code) ?? code
+    }
+    
+    /// Dynamic label: "Regions of Origin" if multiple countries are present, otherwise "Region of Origin".
+    var displayOriginCountryTitle: String {
+        guard let country = displayOriginCountry, !country.isEmpty else { return "Region of Origin" }
+        if country.contains(",") || (originCountry?.contains(",") ?? false) {
+            return "Regions of Origin"
+        }
+        return "Region of Origin"
+    }
+
+    public var displayAudioTracks: [String] {
+        if let tracks = audioTracks, !tracks.isEmpty {
+            return tracks
+        }
+        if let spoken = spokenLanguages, !spoken.isEmpty {
+            return spoken
+        }
+        if let orig = displayOriginalLanguage {
+            return [orig]
+        }
+        return ["English"]
     }
     
     /// Formatted release date for display (e.g. "June 15, 2024" or "2024").

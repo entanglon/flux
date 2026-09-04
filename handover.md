@@ -1,6 +1,56 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 4, 2026 — PLAYBACK, STREAM SELECTOR, SETTINGS SYNC, RESUME ACCURACY & LOOKAHEAD PREFETCHER
+## LATEST: Sep 5, 2026 — SEARCH PERFORMANCE, TYPO TOLERANCE, TMDB ISOLATION & TV DISCOVERY RAILS
+
+### 1. High-Speed TMDB Search & Typo Resilience (`SearchEngine.swift`, `TMDBClient.swift`, `PrefixTrie.swift`, `QualityFilter.swift`, `RelevanceScorer.swift`, `SearchViewModel.swift`, `SearchView.swift`) — Completed & Verified
+- **Issue**: Search in release builds was noticeably slower than debug and failed on minor typos or plurals (e.g. searching "avatar the way of waters" missed *Avatar: The Way of Water* in top results, or placed a Japanese anime titled "Avatar" ahead of James Cameron's *Avatar*). Ghost skeleton cards flashed on every keystroke during query refinement.
+- **Resolution**:
+  - **TMDB Fast-Path**: When `TMDBEnricher.shared.hasKey` is active, `SearchEngine` queries TMDB multi-search exclusively, bypassing Cinemeta to eliminate 500–1500ms latency and task group blocking. Search response dropped to ~80–100ms.
+  - **Debounce Optimization**: Reduced search debounce from 200ms to 120ms for responsive typing.
+  - **Ghost Card Elimination**: In `SearchViewModel.swift` and `SearchView.swift`, preserved `searchResults` during typing refinement rather than clearing to `[]`, eliminating skeleton card layout flashes while typing.
+  - **Stemming & Stop-Word Pruning**: Added plural/singular stemming (`waters` $\rightarrow$ `water`) and stop-word trimming (`avatar the way of water` $\rightarrow$ `avatar way water`) in `TMDBClient.swift` when initial queries return empty.
+  - **PrefixTrie Fuzzy Expansion**: Updated `fuzzySuggestions` in `PrefixTrie.swift` to match against both full titles and individual word tokens using Damerau-Levenshtein distance ($\le 2$). Seeded Trie with popular movies and TV shows for instant offline typo correction.
+  - **Relevance Ranking**: Enhanced `RelevanceScorer.swift` to heavily boost flagship franchise matches on short exact stem queries and demote mockbusters.
+
+### 2. Complete Cinemeta Isolation During TMDB Enrichment (`DetailView.swift`, `TMDBEnricher.swift`) — Completed & Verified
+- **Issue**: When TMDB enrichment was active, `DetailView` raced or merged metadata from Cinemeta, causing split-second layout jumps, text shifts, and thumbnail flickers.
+- **Resolution**:
+  - In `loadDetails()`: When `TMDBEnricher.shared.hasKey` is true, calls `TMDBEnricher.shared.fullEnrich(item)` directly and completely bypasses `StremioService.shared.fetchMeta(...)`.
+  - Fixed property preservation during detail enrichment so rich fields (`releaseDate`, `posterURL`, `backdropURL`, `heroURL`, `originalAudio`, `subtitles`, `ratings`, `contentRating`, etc.) are never overwritten by sparse placeholder cards.
+  - Implemented `fetchSeasonEpisodes(tvId:seasonNumber:)` in `TMDBEnricher.swift` and updated `TMDBEpisodeDetail` with `id` and `air_date`.
+  - In `loadEpisodes(for: season)`: Fetches missing season episodes directly from TMDB, caching them onto `fullItem` for instant subsequent navigation.
+
+### 3. Mayday & Headless Metadata Filtering (`TMDBEnricher.swift`, `QualityFilter.swift`) — Completed & Verified
+- **Issue**: *Mayday* (TMDB ID 1137844, Ryan Reynolds movie released Sep 2, 2026) was showing up in discovery rails with an "Oct 7" unreleased badge and a blank thumbnail.
+- **Root Cause**: TMDB has a headless TV show stub `id: 324824` (*Mayday*, first air date `2026-10-07`, `poster_path: null`, `overview: ""`). This empty stub was passing into discovery rails and search because `fetchCatalog` didn't check for null artwork, and `QualityFilter` didn't prune unreleased entries without posters.
+- **Resolution**:
+  - In `TMDBEnricher.fetchCatalog`: Strictly pruned any media item where both `posterPath == nil` and `backdropPath == nil`.
+  - In `QualityFilter.swift`: Strictly enforced `posterPath != nil && !posterPath.isEmpty`. Updated `isEligible` to recognize `isUpcomingRelease = (releaseAgeDays ?? 0) < 0`, allowing real upcoming titles with valid posters and popularity through while rejecting empty headless stubs.
+
+### 4. TV Discovery Rails Renaming (`TVShowsView.swift`, `HomeView.swift`, `MediaListView.swift`, `TMDBEnricherTests.swift`) — Completed & Verified
+- **Issue**: "Airing today on tv" and "On the air / this week" titles were confusing and inaccurate.
+- **Resolution**:
+  - Renamed `"Airing Today on TV"` $\rightarrow$ `"Airing Today"` (representing all shows currently airing across platforms and OTT).
+  - Renamed `"On The Air / This Week"` $\rightarrow$ `"On TV"` (representing shows broadcasting on broadcast television).
+  - Updated `MediaListType.airingTodayTV` and `.onTheAirTV` titles across `TVShowsView`, `HomeView`, `MediaListView`, and test assertions.
+
+### 5. Apple TV-Style Information & Audio/Subtitle Metadata Presentation (`DetailView.swift`, `MediaItem.swift`, `StremioService.swift`) — Completed & Verified
+- **Enhancements**:
+  - **Runtime Formatting**: Displays both minutes-only and hours+minutes formats cleanly (e.g. `"45m"` or `"2h 15m"`).
+  - **Content Advisories / Age Rating**: Information section dynamically surfaces rating tags (TV-MA, PG-13, R, etc.).
+  - **Dynamic Pluralization**: Displays "Region of Origin" when 1 country is present, and "Regions of Origin" when multiple countries are present.
+  - **Languages & Subtitles Popovers**: Styled inline trailing "more..." popovers showing comprehensive lists of all available audio and subtitle tracks without layout wraps.
+  - **No Fake Data**: Accurate extraction of original audio, language codes, and subtitles for both TMDB and non-TMDB modes without artificial codecs or fabricated labels.
+
+### 6. Automated Testing & Packaging — Completed & Verified
+- **Test Suite**: All 30+ unit tests across `SearchEngineTests`, `TMDBEnricherTests`, `StreamManagerTests`, `ArchitectureTests`, and `UserDataServiceTests` pass with 0 failures (`fluxTests` suite passed).
+- **Dual Release Builds**: Built and verified both official DMG packages:
+  - `Flux.dmg` (macOS 26+ Liquid Glass, arm64/x86_64 universal)
+  - `Flux-macOS15.dmg` (macOS 15+ compatible)
+
+---
+
+## Sep 4, 2026 — PLAYBACK, STREAM SELECTOR, SETTINGS SYNC, RESUME ACCURACY & LOOKAHEAD PREFETCHER
 
 ### 1. Bulletproof Audio & Subtitle Auto-Selection (`MPVVideoView.swift`) — Completed & Verified
 - **Issue**: Foreign audio streams (e.g. Korean in *Start-Up*) played without matching English subtitles, or wrong language was selected despite settings preference.

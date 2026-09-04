@@ -483,7 +483,7 @@ struct TMDBMovieDetail: Codable, Identifiable {
             trailerURL: nil,
             cast: nil,
             seasons: nil,
-            runtime: runtime.map { "\($0 / 60)h \($0 % 60)m" },
+            runtime: MediaItem.formatRuntime(minutes: runtime),
             certification: nil, 
             genres: genres?.map { $0.name },
             popularity: nil,

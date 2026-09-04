@@ -18,7 +18,7 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if viewModel.isSearching {
-                        if viewModel.isLoading {
+                        if viewModel.isLoading && viewModel.searchResults.isEmpty {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()

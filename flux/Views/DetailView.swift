@@ -21,6 +21,7 @@ struct DetailView: View {
     @State private var trailerURL: URL? = nil
     @State private var bonusContent: [BonusContentItem] = []
     @State private var trailers: [BonusContentItem] = []
+    @State private var activeLanguageModal: LanguageModalType? = nil
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
@@ -753,198 +754,19 @@ struct DetailView: View {
                         }
                         
                         if let cast = displayItem.cast, !cast.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ListSectionHeader(title: "Cast & Crew", value: CastListNavigation(cast: cast))
-                                    .padding(.leading, 268)
-                                    .padding(.trailing, 60)
-
-                                DetailRail(items: cast, idPath: \.id, itemWidth: 124, itemHeight: 180) { member in
-                                    NavigationLink(value: PersonNavigation(id: member.personID ?? 0, fallbackName: member.name)) {
-                                        VStack(spacing: 10) {
-                                            CastCircle(name: member.name, imageURL: member.imageURL, size: 104)
-
-                                            // Fixed-height text block keeps every
-                                            // circle on the same axis
-                                            VStack(spacing: 2) {
-                                                Text(member.name)
-                                                    .font(.system(size: 13, weight: .semibold))
-                                                    .foregroundStyle(.white)
-                                                    .multilineTextAlignment(.center)
-                                                    .lineLimit(1)
-                                                Text(member.role ?? "")
-                                                    .font(.system(size: 11, weight: .regular))
-                                                    .foregroundStyle(.secondary)
-                                                    .multilineTextAlignment(.center)
-                                                    .lineLimit(1)
-                                            }
-                                            .frame(height: 38)
-                                        }
-                                        .frame(width: 124)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(member.personID == nil)
-                                }
-                            }
+                            castSection(cast: cast)
                         }
 
                         Divider().background(Color.white.opacity(0.1))
 
-                        // Where to Watch (JustWatch Bridge)
-                        if let providers = displayItem.watchProviders, !providers.isEmpty {
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Where to Watch")
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 20) {
-                                        ForEach(providers) { provider in
-                                            VStack(spacing: 10) {
-                                                CachedImage(url: provider.logoURL) { phase in
-                                                    if let image = phase.image {
-                                                        image
-                                                            .resizable()
-                                                            .aspectRatio(contentMode: .fill)
-                                                            .frame(width: 76, height: 76)
-                                                            .cornerRadius(18)
-                                                            .overlay(
-                                                                RoundedRectangle(cornerRadius: 18)
-                                                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
-                                                            )
-                                                    } else {
-                                                        RoundedRectangle(cornerRadius: 18)
-                                                            .fill(Color(white: 0.14))
-                                                            .frame(width: 76, height: 76)
-                                                    }
-                                                }
-                                                
-                                                Text(provider.name)
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundStyle(.white.opacity(0.85))
-                                                    .lineLimit(1)
-                                            }
-                                            .frame(width: 90)
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.leading, 268)
-                            .padding(.trailing, 60)
-                        } else {
-                            // Fallback to Search Link
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Where to Watch")
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                
-                                Link(destination: URL(string: "https://www.justwatch.com/us/search?q=\(displayItem.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!) {
-                                    HStack(spacing: 16) {
-                                        Image(systemName: "magnifyingglass.circle.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundStyle(.blue)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Find on JustWatch")
-                                                .font(.headline)
-                                                .foregroundStyle(.white)
-                                            Text("Check region-specific availability and providers")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "arrow.up.forward.app")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(20)
-                                    .background(Color(white: 0.12))
-                                    .cornerRadius(16)
-                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.leading, 268)
-                            .padding(.trailing, 60)
-                        }
+                        whereToWatchSection
 
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("About")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.white)
-                            
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(displayItem.title)
-                                    .font(.headline)
-                                    .fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                
-                                Text(displayItem.genres?.joined(separator: ", ").uppercased() ?? "DRAMA")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.secondary)
-                                
-                                Text(displayItem.description)
-                                    .font(.body)
-                                    .lineSpacing(4)
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .padding(.top, 4)
-                            }
-                            .padding(24)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(white: 0.12))
-                            .cornerRadius(16)
-                        }
-                        .padding(.leading, 268)
-                        .padding(.trailing, 60)
+                        aboutSection
                         
                         HStack(alignment: .top, spacing: 60) {
-                            VStack(alignment: .leading, spacing: 20) {
-                                Text("Information")
-                                    .font(.headline).fontWeight(.semibold)
-                                    .foregroundStyle(.white)
-                                
-                                VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
-                                    if let director = displayItem.director, !director.isEmpty && director != "N/A" {
-                                        InfoDetailRow(label: "Director", value: director)
-                                    }
-                                    // TV runtimes are per-episode; a single value in the
-                                    // footer would misleadingly show only episode 1's length.
-                                    if displayItem.category != "TV Show" {
-                                        InfoDetailRow(label: "Runtime", value: displayItem.runtime ?? "N/A")
-                                    }
-                                    InfoDetailRow(label: "Region of Origin", value: displayItem.displayOriginCountry ?? "N/A")
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            VStack(alignment: .leading, spacing: 20) {
-                                Text("Languages")
-                                    .font(.headline).fontWeight(.semibold)
-                                    .foregroundStyle(.white)
-                                
-                                VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailRow(label: "Original Audio", value: displayItem.displayOriginalLanguage ?? "N/A")
-                                    InfoDetailRow(label: "Audio", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? displayItem.displayOriginalLanguage ?? "N/A")
-                                    InfoDetailRow(label: "Subtitles", value: displayItem.spokenLanguages?.joined(separator: ", ") ?? displayItem.displayOriginalLanguage ?? "N/A")
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            VStack(alignment: .leading, spacing: 20) {
-                                Text("Accessibility")
-                                    .font(.headline).fontWeight(.semibold)
-                                    .foregroundStyle(.white)
-                                
-                                VStack(alignment: .leading, spacing: 16) {
-                                    InfoDetailBlock(label: "SDH", value: "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information.")
-                                    InfoDetailBlock(label: "AD", value: "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision.")
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            informationSection
+                            languagesSection
+                            accessibilitySection
                         }
                         .padding(.leading, 268)
                         .padding(.trailing, 60)
@@ -971,6 +793,31 @@ struct DetailView: View {
             .padding(.leading, 268)
             .padding(.top, 14)
         }
+        .overlay {
+            if let modalType = activeLanguageModal {
+                ZStack {
+                    Color.black.opacity(0.65)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                activeLanguageModal = nil
+                            }
+                        }
+                    
+                    LanguageTracksModalView(
+                        title: modalType.title,
+                        items: displayItem.displayAudioTracks,
+                        onDismiss: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                activeLanguageModal = nil
+                            }
+                        }
+                    )
+                    .transition(.scale(scale: 0.95).combined(with: .opacity))
+                }
+                .zIndex(100)
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
@@ -993,6 +840,222 @@ struct DetailView: View {
         .onDisappear {
             PlayerManager.shared.cancelDetailPrefetch()
         }
+    }
+
+    // MARK: - Detail Subsections
+
+    @ViewBuilder
+    private func castSection(cast: [CastMember]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ListSectionHeader(title: "Cast & Crew", value: CastListNavigation(cast: cast))
+                .padding(.leading, 268)
+                .padding(.trailing, 60)
+
+            DetailRail(items: cast, idPath: \.id, itemWidth: 124, itemHeight: 180) { member in
+                NavigationLink(value: PersonNavigation(id: member.personID ?? 0, fallbackName: member.name)) {
+                    VStack(spacing: 10) {
+                        CastCircle(name: member.name, imageURL: member.imageURL, size: 104)
+
+                        VStack(spacing: 2) {
+                            Text(member.name)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(1)
+                            Text(member.role ?? "")
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(1)
+                        }
+                        .frame(height: 38)
+                    }
+                    .frame(width: 124)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(member.personID == nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var whereToWatchSection: some View {
+        if let providers = displayItem.watchProviders, !providers.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Where to Watch")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        ForEach(providers) { provider in
+                            VStack(spacing: 10) {
+                                CachedImage(url: provider.logoURL) { phase in
+                                    if let image = phase.image {
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 76, height: 76)
+                                            .cornerRadius(18)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 18)
+                                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
+                                            )
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 18)
+                                            .fill(Color(white: 0.14))
+                                            .frame(width: 76, height: 76)
+                                    }
+                                }
+                                
+                                Text(provider.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 90)
+                        }
+                    }
+                }
+            }
+            .padding(.leading, 268)
+            .padding(.trailing, 60)
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Where to Watch")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+                
+                Link(destination: URL(string: "https://www.justwatch.com/us/search?q=\(displayItem.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")!) {
+                    HStack(spacing: 16) {
+                        Image(systemName: "magnifyingglass.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Find on JustWatch")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Text("Check region-specific availability and providers")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(20)
+                    .background(Color(white: 0.12))
+                    .cornerRadius(16)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, 268)
+            .padding(.trailing, 60)
+        }
+    }
+
+    @ViewBuilder
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("About")
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+            
+            VStack(alignment: .leading, spacing: 12) {
+                Text(displayItem.title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+                
+                Text(displayItem.genres?.joined(separator: ", ").uppercased() ?? "DRAMA")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                
+                Text(displayItem.description)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.top, 4)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(white: 0.12))
+            .cornerRadius(16)
+        }
+        .padding(.leading, 268)
+        .padding(.trailing, 60)
+    }
+
+    @ViewBuilder
+    private var informationSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Information")
+                .font(.headline).fontWeight(.semibold)
+                .foregroundStyle(.white)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
+                if let cert = displayItem.certification, !cert.isEmpty {
+                    InfoDetailRow(label: "Rated", value: cert)
+                }
+                if let adv = displayItem.contentAdvisories, !adv.isEmpty {
+                    InfoDetailRow(label: "Content Advisories", value: adv.joined(separator: ", "))
+                }
+                if let director = displayItem.director, !director.isEmpty && director != "N/A" {
+                    InfoDetailRow(label: "Director", value: director)
+                }
+                if displayItem.category != "TV Show", let runtime = displayItem.runtime, !runtime.isEmpty {
+                    InfoDetailRow(label: "Runtime", value: runtime)
+                }
+                InfoDetailRow(label: displayItem.displayOriginCountryTitle, value: displayItem.displayOriginCountry ?? "N/A")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var languagesSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Languages")
+                .font(.headline).fontWeight(.semibold)
+                .foregroundStyle(.white)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                InfoDetailRow(label: "Original Audio", value: displayItem.displayOriginalLanguage ?? "English")
+                LanguagesExpandableRow(
+                    title: "Audio",
+                    items: displayItem.displayAudioTracks,
+                    onMore: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            activeLanguageModal = .audio
+                        }
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var accessibilitySection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Accessibility")
+                .font(.headline).fontWeight(.semibold)
+                .foregroundStyle(.white)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                InfoDetailBlock(label: "SDH", value: "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information.")
+                InfoDetailBlock(label: "AD", value: "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision.")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func playBonusContent(_ item: BonusContentItem) {
@@ -1063,34 +1126,47 @@ struct DetailView: View {
             var fetchID = item.id
             
             // 1. ID Translation Layer (TMDB -> IMDb)
-            // If the ID is purely numerical, it's a TMDB ID and needs translation for Stremio
-            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
-                if let translatedID = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type) {
+            // If the ID is purely numerical or prefixed with "tmdb-", it's a TMDB ID and needs translation for Stremio
+            let cleanTmdbId = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleanTmdbId)) {
+                if let translatedID = await TMDBEnricher.shared.getImdbID(tmdbID: cleanTmdbId, type: type) {
                     fetchID = translatedID
                 }
             }
             
             self.activeImdbID = fetchID
             
-            // 2. Fetch Enriched Metadata (Internally handles TMDB if available)
-            let detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
+            // 2. Fetch Enriched Metadata
+            // When TMDB enrichment is active, completely bypass Cinemeta to eliminate conflicting metadata
+            // and prevent split-second textual/graphical layout pops.
+            var detailedItem: MediaItem
+            if TMDBEnricher.shared.hasKey {
+                detailedItem = await TMDBEnricher.shared.fullEnrich(item)
+            } else {
+                do {
+                    detailedItem = try await StremioService.shared.fetchMeta(type: type, id: fetchID)
+                } catch {
+                    print("Stremio fetchMeta failed (\(error))")
+                    detailedItem = item
+                }
+            }
             
             var merged = detailedItem
-            if !item.description.isEmpty {
+            if merged.description.isEmpty && !item.description.isEmpty {
                 merged.description = item.description
             }
-            if let genres = item.genres, !genres.isEmpty {
-                merged.genres = genres
+            if (merged.genres == nil || merged.genres?.isEmpty == true) && (item.genres != nil && !item.genres!.isEmpty) {
+                merged.genres = item.genres
             }
-            if let voteAverage = item.voteAverage, voteAverage > 0 {
-                merged.voteAverage = voteAverage
+            if (merged.voteAverage == nil || merged.voteAverage == 0) && (item.voteAverage != nil && item.voteAverage! > 0) {
+                merged.voteAverage = item.voteAverage
             }
-            if let releaseDate = item.releaseDate, !releaseDate.isEmpty {
-                merged.releaseDate = releaseDate
+            if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && (item.releaseDate != nil && !item.releaseDate!.isEmpty) {
+                merged.releaseDate = item.releaseDate
             }
-            if let hero = item.heroURL { merged.heroURL = hero }
-            if let backdrop = item.backdropURL { merged.backdropURL = backdrop }
-            if let poster = item.posterURL { merged.posterURL = poster }
+            if merged.heroURL == nil { merged.heroURL = item.heroURL }
+            if merged.backdropURL == nil { merged.backdropURL = item.backdropURL }
+            if merged.posterURL == nil { merged.posterURL = item.posterURL }
             
             await MainActor.run {
                 self.fullItem = merged
@@ -1114,7 +1190,10 @@ struct DetailView: View {
                     selectedSeason = seasonToLoad
                     
                     // Track TMDB ID for sub-enrichment (episodes)
-                    if let imdbID = merged.id.starts(with: "tt") ? merged.id : nil {
+                    let cleanId = merged.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+                    if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleanId)) && !cleanId.isEmpty {
+                        UserDefaults.standard.set(cleanId, forKey: "activeTMDBID")
+                    } else if let imdbID = merged.id.starts(with: "tt") ? merged.id : nil {
                         if let tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: imdbID, type: "tv") {
                              UserDefaults.standard.set(tmdbID, forKey: "activeTMDBID")
                         }
@@ -1156,9 +1235,39 @@ struct DetailView: View {
     }
     
     private func loadEpisodes(for season: Season) async {
-        guard let allEpisodes = fullItem?.episodes else { return }
-        let currentSeasonEpisodes = allEpisodes.filter { $0.seasonNumber == season.seasonNumber }
+        let allEpisodes = fullItem?.episodes ?? []
+        var currentSeasonEpisodes = allEpisodes.filter { $0.seasonNumber == season.seasonNumber }
             .sorted { $0.episodeNumber < $1.episodeNumber }
+        
+        // If episodes are missing (TMDB enrichment mode where Cinemeta was bypassed), fetch them from TMDB directly
+        if currentSeasonEpisodes.isEmpty {
+            let cleanTmdbId = fullItem?.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "") ?? ""
+            var resolvedTmdbId: String? = nil
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleanTmdbId)) && !cleanTmdbId.isEmpty {
+                resolvedTmdbId = cleanTmdbId
+            } else if let id = fullItem?.id, id.hasPrefix("tt") {
+                resolvedTmdbId = await TMDBEnricher.shared.resolveTmdbID(imdbID: id, type: "tv")
+            }
+            if resolvedTmdbId == nil {
+                resolvedTmdbId = UserDefaults.standard.string(forKey: "activeTMDBID")
+            }
+            
+            if let tvId = resolvedTmdbId {
+                let fetched = await TMDBEnricher.shared.fetchSeasonEpisodes(tvId: tvId, seasonNumber: season.seasonNumber)
+                if !fetched.isEmpty {
+                    currentSeasonEpisodes = fetched
+                    await MainActor.run {
+                        if var updated = self.fullItem {
+                            var existing = updated.episodes ?? []
+                            existing.removeAll { $0.seasonNumber == season.seasonNumber }
+                            existing.append(contentsOf: fetched)
+                            updated.episodes = existing
+                            self.fullItem = updated
+                        }
+                    }
+                }
+            }
+        }
         
         // Initial set to show something immediately
         await MainActor.run {
@@ -1219,6 +1328,110 @@ struct TechBadge: View {
     }
 }
 
+enum LanguageModalType: Identifiable {
+    case audio
+    
+    var id: String { "audio" }
+    var title: String { "Audio" }
+}
+
+struct LanguagesExpandableRow: View {
+    let title: String
+    let items: [String]
+    let onMore: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            let fullText = items.joined(separator: ", ")
+            let isLong = fullText.count > 95 || items.count > 4
+            
+            if !isLong {
+                Text(fullText.isEmpty ? "None" : fullText)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.85))
+            } else {
+                let truncated = truncatedText(fullText, maxLength: 90)
+                Button(action: onMore) {
+                    (Text(truncated + "... ")
+                        .foregroundStyle(.white.opacity(0.85))
+                     + Text("more")
+                        .foregroundStyle(.secondary)
+                        .fontWeight(.medium))
+                    .font(.subheadline)
+                    .lineSpacing(3)
+                    .multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
+        }
+    }
+    
+    private func truncatedText(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let index = text.index(text.startIndex, offsetBy: maxLength)
+        let prefix = String(text[..<index])
+        if let lastComma = prefix.lastIndex(of: ",") {
+            return String(prefix[..<lastComma])
+        }
+        return prefix
+    }
+}
+
+struct LanguageTracksModalView: View {
+    let title: String
+    let items: [String]
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .center, spacing: 20) {
+            Text(title)
+                .font(.headline)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+            
+            ScrollView(.vertical, showsIndicators: true) {
+                Text(items.joined(separator: ", "))
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 280)
+            
+            HStack {
+                Spacer()
+                Button(action: onDismiss) {
+                    Text("Done")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
+        }
+        .padding(28)
+        .frame(width: 460)
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+        )
+        .shadow(color: .black.opacity(0.6), radius: 30, x: 0, y: 15)
+    }
+}
+
 struct InfoDetailRow: View {
     let label: String
     let value: String
@@ -1235,7 +1448,15 @@ struct InfoDetailBlock: View {
     let value: String
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(.headline).foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
+                )
             Text(value).font(.caption).lineSpacing(3).foregroundStyle(.secondary)
         }
     }

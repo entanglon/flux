@@ -20,7 +20,7 @@ actor SearchEngine {
         cinemetaClient: CinemetaClient = CinemetaClient(),
         filter: QualityFilter = QualityFilter(),
         scorer: RelevanceScorer = RelevanceScorer(),
-        debounceMilliseconds: Int = 200
+        debounceMilliseconds: Int = 120
     ) {
         self.trie = trie
         self.tmdbClient = tmdbClient
@@ -63,13 +63,20 @@ actor SearchEngine {
 
         // Determine if local fuzzy found a high-confidence correction to rewrite the remote query
         let remoteQueryTarget: String = {
-            if let bestLocal = localResults.first, trimmed.count >= 4 {
-                let dist = DamerauLevenshtein.distance(
-                    trimmed.normalizedForSearch.articleStripped,
-                    bestLocal.title.normalizedForSearch.articleStripped
-                )
-                if dist == 1 {
-                    return bestLocal.title
+            if trimmed.count >= 4 {
+                let normTrimmed = trimmed.normalizedForSearch.articleStripped
+                for hit in localResults.prefix(3) {
+                    let hitNorm = hit.title.normalizedForSearch.articleStripped
+                    let dist = DamerauLevenshtein.distance(normTrimmed, hitNorm)
+                    if dist <= (normTrimmed.count >= 6 ? 2 : 1) {
+                        return hit.title
+                    }
+                    let words = hitNorm.split(separator: " ").map(String.init)
+                    for w in words {
+                        if abs(w.count - normTrimmed.count) <= 1 && DamerauLevenshtein.distance(normTrimmed, w) <= 1 {
+                            return hit.title
+                        }
+                    }
                 }
             }
             return trimmed
@@ -91,22 +98,20 @@ actor SearchEngine {
     ) async {
         guard !Task.isCancelled else { return }
 
-        let candidates = await withTaskGroup(of: [MediaCandidate].self) { group -> [MediaCandidate] in
-            // TMDB Client (Enrichment source - gracefully returns [] if key is missing)
-            group.addTask { [tmdbClient] in
-                (try? await tmdbClient.multiSearch(query: query)) ?? []
-            }
-            
-            // Cinemeta Client (Always available catalog source)
-            group.addTask { [cinemetaClient] in
-                (try? await cinemetaClient.search(query: query)) ?? []
-            }
+        let hasTMDB = TMDBEnricher.shared.hasKey
+        let candidates: [MediaCandidate]
 
-            var merged: [MediaCandidate] = []
-            for await batch in group {
-                merged.append(contentsOf: batch)
+        if hasTMDB {
+            // TMDB enrichment mode: Query TMDB directly and exclusively.
+            // Eliminates 500-1500ms Cinemeta latency and prevents conflicting Cinemeta metadata from polluting results.
+            var hits = (try? await tmdbClient.multiSearch(query: query)) ?? []
+            if hits.isEmpty && query != originalQuery {
+                hits = (try? await tmdbClient.multiSearch(query: originalQuery)) ?? []
             }
-            return merged
+            candidates = hits
+        } else {
+            // Non-TMDB mode: Query Cinemeta catalog
+            candidates = (try? await cinemetaClient.search(query: query)) ?? []
         }
 
         // Dual-Layer Cancellation Check: guarantees no stale responses overwrite newer queries
@@ -140,14 +145,16 @@ actor SearchEngine {
                 await trie.insertMediaItem(item, category: .trending)
             }
         }
-        if let popularMovies = try? await TMDBEnricher.shared.fetchPopularMovies(page: 1) {
-            for item in popularMovies {
-                await trie.insertMediaItem(item, category: .trending)
+        for page in 1...2 {
+            if let popularMovies = try? await TMDBEnricher.shared.fetchPopularMovies(page: page) {
+                for item in popularMovies {
+                    await trie.insertMediaItem(item, category: .trending)
+                }
             }
-        }
-        if let popularTV = try? await TMDBEnricher.shared.fetchPopularTV(page: 1) {
-            for item in popularTV {
-                await trie.insertMediaItem(item, category: .trending)
+            if let popularTV = try? await TMDBEnricher.shared.fetchPopularTV(page: page) {
+                for item in popularTV {
+                    await trie.insertMediaItem(item, category: .trending)
+                }
             }
         }
     }

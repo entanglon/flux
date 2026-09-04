@@ -19,6 +19,48 @@ actor TMDBClient {
     }
 
     func multiSearch(query: String) async throws -> [MediaCandidate] {
+        let initialResults = try await performMultiSearch(query: query)
+        if !initialResults.isEmpty {
+            return initialResults
+        }
+
+        // Typo & Variation Recovery Layer
+        // 1. Plural / Suffix stemming (e.g. "avatar the way of waters" -> "avatar the way of water")
+        let tokens = query.split(separator: " ").map(String.init)
+        if tokens.contains(where: { $0.count > 3 && ($0.hasSuffix("s") || $0.hasSuffix("es")) }) {
+            let singularTokens = tokens.map { word -> String in
+                if word.count > 4 && word.hasSuffix("es") {
+                    return String(word.dropLast(2))
+                } else if word.count > 3 && word.hasSuffix("s") && !word.hasSuffix("ss") {
+                    return String(word.dropLast())
+                }
+                return word
+            }
+            let singularQuery = singularTokens.joined(separator: " ")
+            if singularQuery != query {
+                let singularResults = try await performMultiSearch(query: singularQuery)
+                if !singularResults.isEmpty {
+                    return singularResults
+                }
+            }
+        }
+
+        // 2. Stop-word stripping for multi-word queries (e.g. "avatar the way of water" -> "avatar way water")
+        if tokens.count >= 3 {
+            let stopWords: Set<String> = ["the", "a", "an", "of", "in", "on", "at", "to", "for", "and"]
+            let stripped = tokens.filter { !stopWords.contains($0.lowercased()) }.joined(separator: " ")
+            if !stripped.isEmpty && stripped != query {
+                let strippedResults = try await performMultiSearch(query: stripped)
+                if !strippedResults.isEmpty {
+                    return strippedResults
+                }
+            }
+        }
+
+        return []
+    }
+
+    private func performMultiSearch(query: String) async throws -> [MediaCandidate] {
         let key = apiKeyProvider()
         guard !key.isEmpty else { return [] }
         

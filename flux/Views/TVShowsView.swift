@@ -68,14 +68,14 @@ struct TVShowsView: View {
                         .transition(.opacity)
                 }
 
-                // 4. Airing Today on TV
+                // 4. Airing Today
                 if !airingTodayShows.isEmpty {
-                    renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayShows)
+                    renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayShows)
                 }
 
-                // 5. On The Air / This Week on TV
+                // 5. On TV
                 if !onTheAirShows.isEmpty {
-                    renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirShows)
+                    renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirShows)
                 }
 
                 // 6. Popular on Streaming
@@ -160,14 +160,14 @@ struct TVShowsView: View {
                 }
             }
 
-            // 4. Airing Today on TV
+            // 4. Airing Today
             group.addTask {
                 if let items = try? await TMDBEnricher.shared.fetchAiringTodayTV(), !items.isEmpty {
                     await MainActor.run { self.airingTodayShows = items }
                 }
             }
 
-            // 5. On The Air / This Week on TV
+            // 5. On TV
             group.addTask {
                 if let items = try? await TMDBEnricher.shared.fetchOnTheAirTV(), !items.isEmpty {
                     await MainActor.run { self.onTheAirShows = items }

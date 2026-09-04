@@ -31,7 +31,9 @@ actor CinemetaClient {
         }
 
         let decoded = try JSONDecoder().decode(CinemetaCatalogResponse.self, from: data)
-        return decoded.metas.map { $0.asMediaCandidate }
+        return decoded.metas.enumerated().map { index, meta in
+            meta.asMediaCandidate(index: index)
+        }
     }
 }
 
@@ -51,14 +53,20 @@ struct CinemetaMeta: Decodable, Sendable {
     let genres: [String]?
 
     var asMediaCandidate: MediaCandidate {
+        asMediaCandidate(index: 0)
+    }
+
+    func asMediaCandidate(index: Int = 0) -> MediaCandidate {
+        let rankPopularity = max(200.0 - Double(index) * 5.0, 10.0)
+        let rankVoteCount = max(2000 - index * 50, 50)
         let syntheticVoteCount: Int
         let syntheticPopularity: Double
-        if let rating = Double(imdbRating ?? "") {
-            syntheticVoteCount = max(Int(rating * 10), 50)
-            syntheticPopularity = rating * 10.0
+        if let rating = Double(imdbRating ?? ""), rating > 0 {
+            syntheticVoteCount = max(Int(rating * 20), rankVoteCount)
+            syntheticPopularity = max(rating * 15.0, rankPopularity)
         } else {
-            syntheticVoteCount = 30
-            syntheticPopularity = 30.0
+            syntheticVoteCount = rankVoteCount
+            syntheticPopularity = rankPopularity
         }
 
         let sharpPoster: String? = {

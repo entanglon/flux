@@ -31,6 +31,8 @@ struct StremioVideo: Codable {
     let season: Int?
     let episode: Int?
     let thumbnail: String?
+    let overview: String?
+    let description: String?
 }
 
 struct StremioMetaDetail: Codable {
@@ -244,6 +246,41 @@ class StremioService {
         // Fetch from the same primary genre
         return try await fetchCatalog(type: type, id: "top", genre: primaryGenre)
     }
+
+    // MARK: - Subtitles Discovery
+    
+    /// Queries the stock OpenSubtitles v3 addon for all officially available subtitle tracks for an IMDb title.
+    func fetchAvailableSubtitles(type: String, id: String) async -> [String] {
+        let cleanType = type.lowercased().contains("tv") || type.lowercased().contains("series") ? "series" : "movie"
+        let imdbID = id.starts(with: "tt") ? id : nil
+        guard let fetchID = imdbID else { return [] }
+        
+        let urlString = "https://opensubtitles-v3.strem.io/subtitles/\(cleanType)/\(fetchID).json"
+        guard let url = URL(string: urlString),
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subs = json["subtitles"] as? [[String: Any]] else {
+            return []
+        }
+        
+        var languageSet = Set<String>()
+        for sub in subs {
+            if let langCode = sub["lang"] as? String, !langCode.isEmpty {
+                if langCode == "pob" {
+                    languageSet.insert("Portuguese (Brazil) (SDH)")
+                } else if langCode == "zho" || langCode == "chi" {
+                    languageSet.insert("Chinese (SDH)")
+                } else if let name = Locale.current.localizedString(forLanguageCode: langCode)?.capitalized {
+                    languageSet.insert("\(name) (SDH)")
+                } else {
+                    languageSet.insert("\(langCode.uppercased()) (SDH)")
+                }
+            }
+        }
+        
+        return languageSet.sorted()
+    }
 }
 
 // MARK: - Extensions to Convert to MediaItem
@@ -309,7 +346,7 @@ extension StremioMetaDetail {
                 return Episode(
                     id: Int(epId.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? epId.hashValue,
                     name: vid.name ?? vid.title ?? "Episode \(en)",
-                    overview: "", // Cinemeta doesn't provide episode descriptions in 'videos' array
+                    overview: vid.overview ?? vid.description ?? "",
                     stillURL: vid.thumbnail != nil ? URL(string: vid.thumbnail!) : nil,
                     heroURL: nil,
                     episodeNumber: en,
@@ -352,7 +389,7 @@ extension StremioMetaDetail {
             cast: finalCast,
             director: self.director?.joined(separator: ", "),
             seasons: seasonsArray,
-            runtime: self.runtime,
+            runtime: MediaItem.formatRuntimeString(self.runtime),
             genres: self.genres,
             popularity: self.popularity ?? ((Double(self.imdbRating ?? "0") ?? 0) * 10),
             releaseDate: self.releaseInfo,

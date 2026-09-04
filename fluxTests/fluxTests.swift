@@ -59,4 +59,47 @@ struct fluxTests {
         }
     }
 
+    // MARK: - MediaItem Metadata & Formatting Tests
+
+    @Test func runtimeFormattingBothMinutesAndHours() {
+        #expect(MediaItem.formatRuntime(minutes: 45) == "45m")
+        #expect(MediaItem.formatRuntime(minutes: 59) == "59m")
+        #expect(MediaItem.formatRuntime(minutes: 60) == "1h")
+        #expect(MediaItem.formatRuntime(minutes: 120) == "2h")
+        #expect(MediaItem.formatRuntime(minutes: 148) == "2h 28m")
+        #expect(MediaItem.formatRuntime(minutes: 0) == nil)
+        #expect(MediaItem.formatRuntime(minutes: nil) == nil)
+
+        #expect(MediaItem.formatRuntimeString("45 min") == "45m")
+        #expect(MediaItem.formatRuntimeString("148 min") == "2h 28m")
+        #expect(MediaItem.formatRuntimeString("2h 28m") == "2h 28m")
+        #expect(MediaItem.formatRuntimeString("51m") == "51m")
+    }
+
+    @Test func regionOfOriginDynamicPluralization() {
+        var itemSingle = MediaItem(seed: "tt1", title: "Single Origin", category: "movie")
+        itemSingle.originCountry = "United States"
+        #expect(itemSingle.displayOriginCountryTitle == "Region of Origin")
+
+        var itemMultiple = MediaItem(seed: "tt2", title: "Multiple Origin", category: "movie")
+        itemMultiple.originCountry = "United Kingdom, United States, Canada"
+        #expect(itemMultiple.displayOriginCountryTitle == "Regions of Origin")
+    }
+
+    @Test func originalLanguageCountryFallback() {
+        var itemUS = MediaItem(seed: "tt1", title: "US Movie", category: "movie")
+        itemUS.originCountry = "US"
+        #expect(itemUS.displayOriginalLanguage == "English")
+
+        var itemFR = MediaItem(seed: "tt2", title: "French Movie", category: "movie")
+        itemFR.originCountry = "FR"
+        #expect(itemFR.displayOriginalLanguage == "French")
+
+        var itemWithLang = MediaItem(seed: "tt3", title: "Korean Movie", category: "movie")
+        itemWithLang.originalLanguage = "ko"
+        itemWithLang.originCountry = "KR"
+        #expect(itemWithLang.displayOriginalLanguage == "Korean")
+    }
+
 }
+

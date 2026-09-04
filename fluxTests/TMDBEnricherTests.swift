@@ -89,7 +89,8 @@ struct TMDBEnricherTests {
         #expect(MediaListView.ListType.trendingAllWeek.title == "Trending This Week")
         #expect(MediaListView.ListType.popularMovies.title == "Popular Movies")
         #expect(MediaListView.ListType.nowPlayingMovies.title == "Now Playing in Theatres")
-        #expect(MediaListView.ListType.airingTodayTV.title == "Airing Today on TV")
+        #expect(MediaListView.ListType.airingTodayTV.title == "Airing Today")
+        #expect(MediaListView.ListType.onTheAirTV.title == "On TV")
         #expect(MediaListView.ListType.topRatedTV.title == "Top Rated TV Shows")
     }
 
@@ -138,6 +139,20 @@ struct TMDBEnricherTests {
         #expect(bonusFeaturette.isStreamableEpisode == false)
         #expect(bonusFeaturette.videoKey == "abcd1234")
         #expect(bonusFeaturette.youtubeURL?.absoluteString == "https://www.youtube.com/watch?v=abcd1234")
+    }
+
+    @Test func mediaItemAudioTracksAreTruthfulWithoutFakeCodecs() {
+        var item = MediaItem(id: "tt123", title: "Test Title", description: "Desc", imageURL: nil, posterURL: nil, backdropURL: nil, heroURL: nil, streamURL: nil, category: "Movie")
+        item.spokenLanguages = ["Korean", "English"]
+        item.audioTracks = ["Korean", "English"]
+
+        let tracks = item.displayAudioTracks
+        #expect(tracks == ["Korean", "English"])
+        for track in tracks {
+            #expect(!track.contains("Dolby Atmos"))
+            #expect(!track.contains("Dolby 5.1"))
+            #expect(!track.contains("AAC"))
+        }
     }
 }
 

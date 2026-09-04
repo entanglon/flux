@@ -216,9 +216,16 @@ actor PrefixTrie {
         for entry in pool {
             guard seen.insert(entry.id).inserted else { continue }
             let entryNorm = entry.title.normalizedForSearch.articleStripped
-            let dist = DamerauLevenshtein.distance(normalized, entryNorm)
-            if dist <= maxDist {
-                matches.append((entry, dist))
+            var bestDist = DamerauLevenshtein.distance(normalized, entryNorm)
+            let words = entryNorm.split(separator: " ").map(String.init)
+            for w in words {
+                if abs(w.count - normalized.count) <= maxDist {
+                    let wDist = DamerauLevenshtein.distance(normalized, w)
+                    if wDist < bestDist { bestDist = wDist }
+                }
+            }
+            if bestDist <= maxDist {
+                matches.append((entry, bestDist))
             }
         }
         

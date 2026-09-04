@@ -16,6 +16,27 @@ struct RelevanceScorer: Sendable {
         static let knockoffPenalty: Double = 9_000
     }
 
+    private static let stopWords: Set<String> = [
+        "the", "a", "an", "of", "and", "in", "on", "at", "to", "for", "with", "by", "from"
+    ]
+
+    private static func tokenMatches(q: String, t: String) -> Bool {
+        if q == t { return true }
+        // Plural / singular matching (e.g. "waters" vs "water", "heroes" vs "hero")
+        if q.hasSuffix("s") && String(q.dropLast()) == t { return true }
+        if t.hasSuffix("s") && String(t.dropLast()) == q { return true }
+        if q.hasSuffix("es") && String(q.dropLast(2)) == t { return true }
+        if t.hasSuffix("es") && String(t.dropLast(2)) == q { return true }
+        
+        // Minor typo tolerance for longer words (length >= 4)
+        if q.count >= 4 && t.count >= 4 && abs(q.count - t.count) <= 1 {
+            if DamerauLevenshtein.distance(q, t) <= 1 {
+                return true
+            }
+        }
+        return false
+    }
+
     init() {}
 
     /// `batchContext` is the full, already-quality-filtered result set for this query.
@@ -49,18 +70,40 @@ struct RelevanceScorer: Sendable {
             score += Weight.prefixMatch
             matched = true
         }
-        // TIER 4: All Query Tokens Match
+        // TIER 4: All Query Tokens Match (Exact, Plural, or Minor Typo Tolerant)
         else {
-            let queryTokens = Set(query.searchTokens)
-            let titleTokens = Set(candidate.title.searchTokens)
+            let qTokens = query.searchTokens.map(String.init)
+            let tTokens = candidate.title.searchTokens.map(String.init)
+            let nonStopQTokens = qTokens.filter { !Self.stopWords.contains($0) }
 
-            if !queryTokens.isEmpty, queryTokens.isSubset(of: titleTokens) {
+            let matchedQTokens = qTokens.filter { q in
+                tTokens.contains(where: { Self.tokenMatches(q: q, t: $0) })
+            }
+            let matchedNonStopQTokens = nonStopQTokens.filter { q in
+                tTokens.contains(where: { Self.tokenMatches(q: q, t: $0) })
+            }
+
+            let allTokensMatched = !qTokens.isEmpty && (
+                matchedQTokens.count == qTokens.count ||
+                (!nonStopQTokens.isEmpty && matchedNonStopQTokens.count == nonStopQTokens.count)
+            )
+
+            if allTokensMatched {
                 score += Weight.allTokensMatch
                 matched = true
             }
-            // TIER 5: Partial Token Match
-            else if !queryTokens.isDisjoint(with: titleTokens) {
-                score += Weight.partialTokenMatch
+            // TIER 5: Importance-Weighted Partial Token Match
+            else if !matchedQTokens.isEmpty {
+                let totalQueryWeight = qTokens.reduce(0.0) { $0 + (Self.stopWords.contains($1) ? 0.2 : 1.0) }
+                let matchedQueryWeight = matchedQTokens.reduce(0.0) { $0 + (Self.stopWords.contains($1) ? 0.2 : 1.0) }
+                let queryCoverage = totalQueryWeight > 0 ? (matchedQueryWeight / totalQueryWeight) : 0
+                
+                let matchedTTokensCount = tTokens.filter { t in qTokens.contains(where: { Self.tokenMatches(q: $0, t: t) }) }.count
+                let titleDensity = tTokens.isEmpty ? 0 : Double(matchedTTokensCount) / Double(tTokens.count)
+
+                // Scale partialTokenMatch by query coverage and title density
+                let partialScore = Weight.partialTokenMatch * (0.6 * queryCoverage + 0.4 * titleDensity)
+                score += partialScore
                 matched = true
             }
             // TIER 6: Substring Match
@@ -108,7 +151,18 @@ struct RelevanceScorer: Sendable {
         candidates
             .map { ($0, score(candidate: $0, query: query, batchContext: candidates)) }
             .filter { $0.1 > -.infinity }
-            .sorted { $0.1 > $1.1 }
+            .sorted { a, b in
+                if abs(a.1 - b.1) > 0.001 {
+                    return a.1 > b.1
+                }
+                if a.0.popularity != b.0.popularity {
+                    return a.0.popularity > b.0.popularity
+                }
+                if a.0.voteCount != b.0.voteCount {
+                    return a.0.voteCount > b.0.voteCount
+                }
+                return (a.0.releaseDate ?? Date.distantPast) > (b.0.releaseDate ?? Date.distantPast)
+            }
             .map(\.0)
     }
 }

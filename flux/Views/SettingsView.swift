@@ -24,7 +24,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
-    @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
+    @AppStorage("enrichHomeWithTMDB") private var enrichHomeWithTMDB = true
     @AppStorage("tmdbApiKey") private var tmdbApiKey = ""   // the saved (validated) key
     @State private var draftKey = ""                        // what the user is typing
     @State private var isEditingKey = false
@@ -81,13 +81,6 @@ struct GeneralSettingsView: View {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
                 }
-            }
-
-            Section(header: Text("Discovery")) {
-                Toggle("Enable Flux Home Catalogue", isOn: $enableFluxCatalogue)
-                Text("Show Popular and New Release sections (powered by Cinemeta, Stremio's free catalogue) at the top of Home.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section(header: Text("Metadata (Optional)")) {
@@ -214,6 +207,19 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
+
+                if !tmdbApiKey.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    Toggle("Enrich Home & Discovery with TMDB", isOn: $enrichHomeWithTMDB)
+                        .onChange(of: enrichHomeWithTMDB) { _, _ in
+                            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+                        }
+                    Text("When enabled, Home discovery rails (trending, popular, top rated) and OTT streaming rows are enriched using TMDB. When disabled, Home uses pure native Cinemeta / Stremio catalogs while media details, cast, and search still use TMDB.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

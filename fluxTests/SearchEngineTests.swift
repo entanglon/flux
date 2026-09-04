@@ -427,5 +427,190 @@ struct SearchEngineTests {
         #expect(item?.description == "An insomniac office worker.")
         #expect(item?.voteAverage == 8.4)
     }
+
+    @Test func cinemetaCatalogRankPreservesCameronAvatarAboveJapaneseAvatar() {
+        let metaCameron = CinemetaMeta(
+            id: "tt0499549",
+            type: "movie",
+            name: "Avatar",
+            poster: nil,
+            background: nil,
+            description: "A paraplegic Marine dispatched to the moon Pandora.",
+            releaseInfo: "2009",
+            imdbRating: nil,
+            genres: ["Action", "Adventure", "Fantasy"]
+        )
+
+        let metaJapanese = CinemetaMeta(
+            id: "tt1878848",
+            type: "movie",
+            name: "Avatar",
+            poster: nil,
+            background: nil,
+            description: "A Japanese thriller.",
+            releaseInfo: "2011",
+            imdbRating: nil,
+            genres: ["Thriller"]
+        )
+
+        // Cameron's Avatar is returned at index 0 by Cinemeta, Japanese Avatar at index 10
+        let cameron = metaCameron.asMediaCandidate(index: 0)
+        let japanese = metaJapanese.asMediaCandidate(index: 10)
+
+        #expect(cameron.popularity > japanese.popularity)
+
+        let scorer = RelevanceScorer()
+        let ranked = scorer.rank(candidates: [japanese, cameron], query: "avatar")
+        #expect(ranked.first?.imdbID == "tt0499549")
+    }
+
+    @Test func pluralTokenMatchingRanksAvatarWayOfWaterFirst() {
+        let scorer = RelevanceScorer()
+
+        let wayOfWater = MediaCandidate(
+            id: "tt1630029",
+            title: "Avatar: The Way of Water",
+            mediaType: .movie,
+            popularity: 180.0,
+            voteCount: 15000,
+            voteAverage: 7.6,
+            posterPath: "/avatar2.jpg",
+            backdropPath: nil,
+            overview: "Jake Sully lives with his newfound family formed on the extrasolar moon Pandora.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt1630029",
+            genres: ["Action", "Sci-Fi"],
+            source: .cinemeta
+        )
+
+        let theWayOfTheGun = MediaCandidate(
+            id: "tt0202677",
+            title: "The Way of the Gun",
+            mediaType: .movie,
+            popularity: 60.0,
+            voteCount: 2000,
+            voteAverage: 6.6,
+            posterPath: "/gun.jpg",
+            backdropPath: nil,
+            overview: "Two criminal drifters get in over their heads.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0202677",
+            genres: ["Action", "Crime"],
+            source: .cinemeta
+        )
+
+        let avatar1 = MediaCandidate(
+            id: "tt0499549",
+            title: "Avatar",
+            mediaType: .movie,
+            popularity: 200.0,
+            voteCount: 30000,
+            voteAverage: 7.9,
+            posterPath: "/avatar1.jpg",
+            backdropPath: nil,
+            overview: "A paraplegic Marine dispatched to Pandora.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0499549",
+            genres: ["Action", "Sci-Fi"],
+            source: .cinemeta
+        )
+
+        // Search with plural typo "waters" instead of "water"
+        let ranked = scorer.rank(candidates: [theWayOfTheGun, avatar1, wayOfWater], query: "avatar the way of waters")
+        #expect(ranked.first?.title == "Avatar: The Way of Water")
+    }
+
+    @Test func headlessStubWithoutPosterIsPrunedByQualityFilter() {
+        let filter = QualityFilter()
+
+        let emptyMaydayStub = MediaCandidate(
+            id: "tmdb-324824",
+            title: "Mayday",
+            mediaType: .tvSeries,
+            popularity: 0.8,
+            voteCount: 0,
+            voteAverage: 0,
+            posterPath: nil, // Headless stub
+            backdropPath: nil,
+            overview: "",
+            releaseDate: Date().addingTimeInterval(86400 * 30),
+            isAdult: false,
+            imdbID: nil,
+            source: .tmdb
+        )
+
+        let realMaydayMovie = MediaCandidate(
+            id: "tmdb-1137844",
+            title: "Mayday",
+            mediaType: .movie,
+            popularity: 15.3,
+            voteCount: 12,
+            voteAverage: 7.2,
+            posterPath: "/hVXjX1jLZ1ljFSNGXpjJfbTUOa7.jpg",
+            backdropPath: "/4gyx49ibwQslyrwuUS1c58PJEEd.jpg",
+            overview: "A U.S. Navy pilot during the Cold War...",
+            releaseDate: Date().addingTimeInterval(-86400 * 3),
+            isAdult: false,
+            imdbID: "tt28014327",
+            source: .tmdb
+        )
+
+        let filtered = filter.filter([emptyMaydayStub, realMaydayMovie])
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.id == "tmdb-1137844")
+    }
+
+    @Test func upcomingReleaseWithValidPosterPassesQualityFilter() {
+        let filter = QualityFilter()
+
+        let upcomingMovie = MediaCandidate(
+            id: "tmdb-999999",
+            title: "Future Blockbuster",
+            mediaType: .movie,
+            popularity: 25.0,
+            voteCount: 0, // Unreleased movies have 0 votes
+            voteAverage: 0,
+            posterPath: "/future_poster.jpg",
+            backdropPath: "/future_backdrop.jpg",
+            overview: "Coming next month to theatres.",
+            releaseDate: Date().addingTimeInterval(86400 * 20), // 20 days in future
+            isAdult: false,
+            imdbID: nil,
+            source: .tmdb
+        )
+
+        let filtered = filter.filter([upcomingMovie])
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.title == "Future Blockbuster")
+    }
+
+    @Test func searchEngineFuzzyRewritingCorrectsTypoInTrie() async {
+        let trie = PrefixTrie()
+        let movie = MediaCandidate(
+            id: "tt0499549",
+            title: "Avatar",
+            mediaType: .movie,
+            popularity: 200.0,
+            voteCount: 30000,
+            voteAverage: 7.9,
+            posterPath: "/avatar.jpg",
+            backdropPath: nil,
+            overview: "Pandora sci-fi adventure.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0499549",
+            source: .localCache
+        )
+        await trie.insert(movie, category: .trending)
+
+        // Fuzzy suggestions for misspelled "avatr" should recover "Avatar"
+        let suggestions = await trie.fuzzySuggestions(for: "avatr")
+        #expect(!suggestions.isEmpty)
+        #expect(suggestions.first?.title == "Avatar")
+    }
 }
+
 

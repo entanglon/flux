@@ -54,6 +54,22 @@
 
 ---
 
+## 🧩 Stremio Addon Compatibility
+
+Flux features full compatibility with the Stremio Addon ecosystem. Any community or official Stremio addon can be installed directly into Flux:
+
+- **Catalogs & Metadata**: Browse custom catalogues, anime indexes, YouTube channels, and niche movie lists.
+- **Streams & Debrid**: Connect your favorite streaming providers and debrid services for autonomous stream racing and instant playback.
+- **Subtitles**: Add multilingual subtitle providers (e.g., OpenSubtitles v3, SubScene).
+- **Live TV & IPTV**: Stream live sports, news, and M3U-based TV channels right from the Flux sidebar.
+
+### How to Install Addons
+1. **One-Click Deep Links**: Clicking any `stremio://` addon link in your browser will automatically launch Flux and prompt you to install it with one click.
+2. **Settings Menu**: Navigate to **Settings** (`Cmd + ,`) → **Addons**, paste any addon manifest URL (`manifest.json`), and click **Install**.
+3. **Stremio Account Sync**: Sign in with your Stremio credentials in Settings to instantly sync your entire existing addon collection.
+
+---
+
 ## 🛠️ Architecture & Tech Stack
 
 - **UI Framework**: SwiftUI (macOS 14.0+)

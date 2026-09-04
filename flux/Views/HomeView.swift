@@ -38,8 +38,6 @@ struct HomeView: View {
     @State private var becauseWasLoved: Bool = false
     @State private var trendingWindow: String = "day"
     
-    @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
-
     @State private var isLoading = true
 
     var body: some View {
@@ -137,17 +135,17 @@ struct HomeView: View {
                         renderRail(title: "Now Playing in Theatres", listType: .nowPlayingMovies, items: nowPlayingMovies)
                     }
 
-                    // 6. Airing Today on TV
+                    // 6. Airing Today
                     if !airingTodayTV.isEmpty {
-                        renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayTV)
+                        renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayTV)
                     }
 
                     // Explore OTT Platforms
                     exploreOTTRow
 
-                    // 7. On The Air / This Week on TV
+                    // 7. On TV
                     if !onTheAirTV.isEmpty {
-                        renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirTV)
+                        renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirTV)
                     }
 
                     // 8. Top Rated Movies
@@ -272,24 +270,22 @@ struct HomeView: View {
     }
     
     @ViewBuilder private var exploreOTTRow: some View {
-        if enableFluxCatalogue {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Explore")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .padding(.leading, 268)
-                    .padding(.trailing, 40)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Explore")
+                .font(.title2)
+                .fontWeight(.bold)
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
 
-                CarouselView(items: OTTPlatform.all, spacing: 16, itemWidth: 200) { platform in
-                    NavigationLink(value: MediaListView.ListType.ott(id: platform.id, name: platform.name)) {
-                        OTTCard(platform: platform)
-                            .frame(width: 200)
-                    }
-                    .buttonStyle(.plain)
+            CarouselView(items: OTTPlatform.all, spacing: 16, itemWidth: 200) { platform in
+                NavigationLink(value: MediaListView.ListType.ott(id: platform.id, name: platform.name)) {
+                    OTTCard(platform: platform)
+                        .frame(width: 200)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.bottom, 16)
         }
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder private var addonRows: some View {
@@ -438,14 +434,14 @@ extension HomeView {
                 }
             }
 
-            // 6. Airing Today on TV
+            // 6. Airing Today
             group.addTask {
                 if let items = try? await TMDBEnricher.shared.fetchAiringTodayTV(), !items.isEmpty {
                     await MainActor.run { self.airingTodayTV = items }
                 }
             }
 
-            // 7. On The Air / This Week on TV
+            // 7. On TV
             group.addTask {
                 if let items = try? await TMDBEnricher.shared.fetchOnTheAirTV(), !items.isEmpty {
                     await MainActor.run { self.onTheAirTV = items }

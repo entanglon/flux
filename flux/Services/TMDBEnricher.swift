@@ -38,6 +38,16 @@ class TMDBEnricher {
     /// absent, enrichment is skipped and Cinemeta data is used as-is.
     var hasKey: Bool { !apiKey.isEmpty }
 
+    /// Whether TMDB should be used to enrich Home, Movies, and TV Shows discovery rails.
+    /// Controlled by the "Enrich Home with TMDB" setting (defaults to true when a key exists).
+    var hasKeyForHome: Bool {
+        guard hasKey else { return false }
+        if UserDefaults.standard.object(forKey: "enrichHomeWithTMDB") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "enrichHomeWithTMDB")
+    }
+
     /// Validates a candidate API key against TMDB's lightweight /configuration
     /// endpoint. Returns true only on a 200 (valid key); 401/other = invalid.
     /// Used by Settings so a key is saved only after it's confirmed to work.
@@ -113,7 +123,8 @@ class TMDBEnricher {
         let type = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") ? "tv" : "movie"
         
         // 1. Resolve TMDB ID
-        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        let cleanID = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : cleanID
         guard let id = tmdbIDString else { return item }
         
         // 2. Fetch basic metadata + images (logos)
@@ -200,7 +211,8 @@ class TMDBEnricher {
         
         let type = enriched.category.lowercased().contains("tv") || enriched.category.lowercased().contains("series") ? "tv" : "movie"
         
-        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        let cleanID = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+        let tmdbIDString = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : cleanID
         guard let id = tmdbIDString else { return enriched }
         
         let currentBaseURL = self.baseURL
@@ -233,7 +245,7 @@ class TMDBEnricher {
                                 enriched.releaseDate = releaseDate
                             }
                             if let runtime = detail.runtime {
-                                enriched.runtime = "\(runtime / 60)h \(runtime % 60)m"
+                                enriched.runtime = MediaItem.formatRuntime(minutes: runtime)
                             }
                             if let originalLanguage = detail.originalLanguage, !originalLanguage.isEmpty {
                                 enriched.originalLanguage = originalLanguage
@@ -243,6 +255,7 @@ class TMDBEnricher {
                             }
                             if let spoken = detail.spokenLanguages?.map({ $0.english_name }).filter({ !$0.isEmpty }), !spoken.isEmpty {
                                 enriched.spokenLanguages = spoken
+                                enriched.audioTracks = spoken
                             }
                         }
                     } else if type == "tv", let detail = try? JSONDecoder().decode(TMDBTVShowDetail.self, from: data) {
@@ -266,6 +279,9 @@ class TMDBEnricher {
                             if let releaseDate = detail.firstAirDate, !releaseDate.isEmpty {
                                 enriched.releaseDate = releaseDate
                             }
+                            if let seasons = detail.seasons?.map({ $0.toSeason() }), !seasons.isEmpty {
+                                enriched.seasons = seasons
+                            }
                             if let originalLanguage = detail.originalLanguage, !originalLanguage.isEmpty {
                                 enriched.originalLanguage = originalLanguage
                             }
@@ -274,6 +290,7 @@ class TMDBEnricher {
                             }
                             if let spoken = detail.spokenLanguages?.map({ $0.english_name }).filter({ !$0.isEmpty }), !spoken.isEmpty {
                                 enriched.spokenLanguages = spoken
+                                enriched.audioTracks = spoken
                             }
                         }
                     }
@@ -307,10 +324,103 @@ class TMDBEnricher {
                     }
                 }
             }
+
+            // Certification (Rated) & Content Advisories
+            group.addTask {
+                let (cert, advisories) = await self.fetchCertification(id: id, type: type)
+                await MainActor.run {
+                    if let c = cert, !c.isEmpty { enriched.certification = c }
+                    if let adv = advisories, !adv.isEmpty { enriched.contentAdvisories = adv }
+                }
+            }
         }
         
         await memoryCache.storeItem(enriched, for: item.id)
         return enriched
+    }
+
+    // MARK: - Certification & Content Advisories
+    
+    /// Fetches official age ratings (e.g. "PG-13", "TV-MA", "A") and content advisory descriptors.
+    func fetchCertification(id: String, type: String) async -> (certification: String?, advisories: [String]?) {
+        guard hasKey else { return (nil, nil) }
+        let endpoint = type == "tv" ? "tv/\(id)/content_ratings" : "movie/\(id)/release_dates"
+        let urlString = "\(baseURL)/\(endpoint)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["results"] as? [[String: Any]] else {
+            return (nil, nil)
+        }
+        
+        let userRegion = Locale.current.region?.identifier ?? "US"
+        var foundCert: String? = nil
+        var descriptorsList: [String] = []
+        
+        if type == "tv" {
+            // Find user's region or US
+            let match = results.first(where: { ($0["iso_3166_1"] as? String) == userRegion })
+                ?? results.first(where: { ($0["iso_3166_1"] as? String) == "US" })
+                ?? results.first
+            if let match = match, let rating = match["rating"] as? String, !rating.isEmpty {
+                foundCert = rating
+                if let descriptors = match["descriptors"] as? [String], !descriptors.isEmpty {
+                    descriptorsList = descriptors
+                }
+            }
+        } else {
+            // Movies release_dates
+            let match = results.first(where: { ($0["iso_3166_1"] as? String) == userRegion })
+                ?? results.first(where: { ($0["iso_3166_1"] as? String) == "US" })
+                ?? results.first
+            if let match = match, let dates = match["release_dates"] as? [[String: Any]] {
+                for d in dates {
+                    if let cert = d["certification"] as? String, !cert.isEmpty {
+                        foundCert = cert
+                        if let descriptors = d["descriptors"] as? [String], !descriptors.isEmpty {
+                            descriptorsList = descriptors
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        
+        // If descriptors list is empty, query keywords for content advisory signals
+        if descriptorsList.isEmpty {
+            if let keywords = await fetchKeywords(id: id, type: type) {
+                let lowerKeywords = keywords.map { $0.lowercased() }
+                var detected: [String] = []
+                if lowerKeywords.contains(where: { $0.contains("drug") || $0.contains("substance") || $0.contains("alcohol") || $0.contains("smoking") }) {
+                    detected.append("Drugs or Drug Use")
+                }
+                if lowerKeywords.contains(where: { $0.contains("violence") || $0.contains("murder") || $0.contains("gore") || $0.contains("battle") || $0.contains("fight") }) {
+                    detected.append("Violence")
+                }
+                if lowerKeywords.contains(where: { $0.contains("nudity") || $0.contains("sex") || $0.contains("erotic") }) {
+                    detected.append("Sexual Content")
+                }
+                if lowerKeywords.contains(where: { $0.contains("profanity") || $0.contains("curse") || $0.contains("language") }) {
+                    detected.append("Language")
+                }
+                if !detected.isEmpty {
+                    descriptorsList = detected
+                }
+            }
+        }
+        
+        return (foundCert, descriptorsList.isEmpty ? nil : descriptorsList)
+    }
+
+    private func fetchKeywords(id: String, type: String) async -> [String]? {
+        let urlString = "\(baseURL)/\(type)/\(id)/keywords?api_key=\(apiKey)"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let list = (json["keywords"] as? [[String: Any]]) ?? (json["results"] as? [[String: Any]])
+        return list?.compactMap { $0["name"] as? String }
     }
 
     // MARK: - Specific Asset Fetching
@@ -392,6 +502,28 @@ class TMDBEnricher {
         return enrichments.mapValues { $0.overview }
     }
     
+    func fetchSeasonEpisodes(tvId: String, seasonNumber: Int) async -> [Episode] {
+        let urlString = "\(baseURL)/tv/\(tvId)/season/\(seasonNumber)?api_key=\(apiKey)"
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let response = try? JSONDecoder().decode(TMDBSeasonResponse.self, from: data) else { return [] }
+        
+        return response.episodes.map { ep in
+            let still = ep.still_path != nil ? URL(string: "https://image.tmdb.org/t/p/w780\(ep.still_path!)") : nil
+            return Episode(
+                id: ep.id ?? (seasonNumber * 1000 + ep.episode_number),
+                name: ep.name.isEmpty ? "Episode \(ep.episode_number)" : ep.name,
+                overview: ep.overview,
+                stillURL: still,
+                heroURL: still,
+                episodeNumber: ep.episode_number,
+                seasonNumber: seasonNumber,
+                airDate: ep.air_date,
+                runtime: ep.runtime
+            )
+        }
+    }
+    
     // MARK: - Regional & Locale Helpers
     var currentRegion: String {
         Locale.current.region?.identifier ?? "US"
@@ -404,7 +536,7 @@ class TMDBEnricher {
     // MARK: - Catalog Fetching (Flux Discovery Layer with TTL-Aware Caching)
     
     func fetchTrendingAll(window: String = "day") async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             let movies = (try? await StremioService.shared.fetchTrendingMovies()) ?? []
             let series = (try? await StremioService.shared.fetchTrendingTVShows()) ?? []
             var interleaved: [MediaItem] = []
@@ -441,7 +573,7 @@ class TMDBEnricher {
     }
 
     func fetchTrendingMovies(window: String = "day") async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             return try await StremioService.shared.fetchTrendingMovies()
         }
         
@@ -455,7 +587,7 @@ class TMDBEnricher {
     }
 
     func fetchTrendingTV(window: String = "day") async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             return try await StremioService.shared.fetchTrendingTVShows()
         }
         
@@ -469,7 +601,7 @@ class TMDBEnricher {
     }
 
     func fetchPopularMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "movie", id: "top", skip: skip, preserveOrder: true)
         }
@@ -484,7 +616,7 @@ class TMDBEnricher {
     }
 
     func fetchNowPlayingMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:now_playing:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -496,7 +628,7 @@ class TMDBEnricher {
     }
 
     func fetchUpcomingMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:upcoming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -508,7 +640,7 @@ class TMDBEnricher {
     }
 
     func fetchTopRatedMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "movie", id: "imdbRating", skip: skip, preserveOrder: true)
         }
@@ -523,7 +655,7 @@ class TMDBEnricher {
     }
 
     func fetchStreamingMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -535,7 +667,7 @@ class TMDBEnricher {
     }
 
     func fetchQuickWatchMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:quick:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -547,7 +679,7 @@ class TMDBEnricher {
     }
 
     func fetchPopularTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "series", id: "top", skip: skip, preserveOrder: true)
         }
@@ -562,7 +694,7 @@ class TMDBEnricher {
     }
 
     func fetchAiringTodayTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:airing_today:\(currentTimeZone):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -574,7 +706,7 @@ class TMDBEnricher {
     }
 
     func fetchOnTheAirTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:on_the_air:\(currentTimeZone):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -586,7 +718,7 @@ class TMDBEnricher {
     }
 
     func fetchTopRatedTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else {
+        guard hasKeyForHome else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "series", id: "imdbRating", skip: skip, preserveOrder: true)
         }
@@ -601,7 +733,7 @@ class TMDBEnricher {
     }
 
     func fetchStreamingTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKey else { return [] }
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -619,11 +751,15 @@ class TMDBEnricher {
         
         if mediaType == "movie" {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBMovie>.self, from: data)
-            let items = response.results.map { $0.toMediaItem() }
+            let items = response.results.compactMap { movie -> MediaItem? in
+                guard movie.posterPath != nil || movie.backdropPath != nil else { return nil }
+                return movie.toMediaItem()
+            }
             return allowUnreleased ? items : items.filter { $0.isReleased }
         } else {
             let response = try JSONDecoder().decode(TMDBResponse<TMDBTVShow>.self, from: data)
             let filtered = response.results.filter { show in
+                guard show.posterPath != nil || show.backdropPath != nil else { return false }
                 if let genres = show.genreIds {
                     if genres.contains(10763) || genres.contains(10767) { return false }
                 }
@@ -742,7 +878,7 @@ class TMDBEnricher {
     ]
 
     func fetchWatchProviderCatalog(platformID: String, type: String, page: Int = 1) async -> [MediaItem] {
-        guard hasKey, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
+        guard hasKeyForHome, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
         let mediaType = type == "series" ? "tv" : "movie"
         let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
         return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
@@ -1052,9 +1188,11 @@ struct TMDBSeasonResponse: Codable {
 }
 
 struct TMDBEpisodeDetail: Codable {
+    let id: Int?
     let episode_number: Int
     let name: String
     let overview: String
     let still_path: String?
     let runtime: Int?
+    let air_date: String?
 }

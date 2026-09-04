@@ -37,8 +37,9 @@ struct QualityFilter: Sendable {
     nonisolated func isEligible(_ candidate: MediaCandidate, now: Date = Date()) -> Bool {
         guard !candidate.isAdult else { return false }
 
-        if config.requirePoster, candidate.posterPath == nil || candidate.posterPath?.isEmpty == true {
-            return false
+        // Require valid poster artwork across all sources
+        if config.requirePoster {
+            guard let poster = candidate.posterPath, !poster.isEmpty else { return false }
         }
         
         // Cinemeta search results do not bundle an overview/synopsis in the search index;
@@ -53,9 +54,10 @@ struct QualityFilter: Sendable {
         let releaseAgeDays = candidate.releaseDate.map { now.timeIntervalSince($0) / 86_400 }
         let isFreshRelease = (releaseAgeDays ?? .infinity) <= Double(config.recentReleaseGraceDays)
             && (releaseAgeDays ?? -1) >= 0
+        let isUpcomingRelease = (releaseAgeDays ?? 0) < 0
 
-        if isFreshRelease || candidate.source == .cinemeta {
-            // New releases and verified Cinemeta catalog items are exempt from the vote-count/popularity floor
+        if isFreshRelease || isUpcomingRelease || candidate.source == .cinemeta {
+            // New releases, upcoming releases, and verified Cinemeta catalog items are exempt from the vote-count/popularity floor
             return true
         }
 
