@@ -122,6 +122,10 @@ struct FeaturedCarousel: View {
                                     Text(year)
                                         .fontWeight(.bold)
                                 }
+                                if let country = item.displayOriginCountry {
+                                    Text("•")
+                                    Text(country)
+                                }
                                 if let genres = item.genres?.prefix(2).map({ $0 }) {
                                     Text("•")
                                     Text(genres.joined(separator: ", "))

@@ -19,6 +19,8 @@ struct StremioMetaPreview: Codable {
     let releaseInfo: String?
     let imdbRating: String?
     let genres: [String]?
+    let country: String?
+    let popularity: Double?
 }
 
 struct StremioVideo: Codable {
@@ -43,6 +45,9 @@ struct StremioMetaDetail: Codable {
     let runtime: String?
     let cast: [String]?
     let director: [String]?
+    let writer: [String]?
+    let country: String?
+    let popularity: Double?
     let genres: [String]?
     let videos: [StremioVideo]?
 }
@@ -75,7 +80,7 @@ class StremioService {
     private init() {}
     
     // MARK: - Catalogs Fetching
-    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0, preserveOrder: Bool = false) async throws -> [MediaItem] {
+    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0, preserveOrder: Bool = true) async throws -> [MediaItem] {
         let base = baseURL ?? cinemetaURL
         var urlString = "\(base)/catalog/\(type)/\(id)"
         
@@ -114,7 +119,7 @@ class StremioService {
             }
         }
         
-        // Sorting by popularity after enrichment (unless it's a specific catalog that needs order)
+        // Preserve catalog order from Cinemeta unless explicitly disabled
         if preserveOrder {
             // TaskGroup shuffles order — rebuild using original positions by matching IDs
             guard !enrichedItems.isEmpty else { return enrichedItems }
@@ -151,16 +156,22 @@ class StremioService {
     
     // Legacy API Maps (Translating old TMDB calls to Cinemeta catalogs)
     func fetchTrendingMovies() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "movie", id: "top")
+        return try await fetchCatalog(type: "movie", id: "top", preserveOrder: true)
     }
     func fetchPopularMovies() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "movie", id: "top", skip: 20) // Simulated offset
+        return try await fetchCatalog(type: "movie", id: "top", preserveOrder: true)
+    }
+    func fetchTopRatedMovies() async throws -> [MediaItem] {
+        return try await fetchCatalog(type: "movie", id: "imdbRating", preserveOrder: true)
     }
     func fetchTrendingTVShows() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "series", id: "top")
+        return try await fetchCatalog(type: "series", id: "top", preserveOrder: true)
     }
     func fetchPopularTVShows() async throws -> [MediaItem] {
-         return try await fetchCatalog(type: "series", id: "top", skip: 20)
+        return try await fetchCatalog(type: "series", id: "top", preserveOrder: true)
+    }
+    func fetchTopRatedTVShows() async throws -> [MediaItem] {
+        return try await fetchCatalog(type: "series", id: "imdbRating", preserveOrder: true)
     }
     func searchMulti(query: String) async throws -> (movies: [MediaItem], tvShows: [MediaItem]) {
         let addons = AddonManager.shared.enabledAddons
@@ -272,8 +283,9 @@ extension StremioMetaPreview {
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             genres: self.genres,
-            popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
+            popularity: self.popularity ?? ((Double(self.imdbRating ?? "0") ?? 0) * 10),
             releaseDate: self.releaseInfo,
+            originCountry: self.country,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil
         )
     }
@@ -342,8 +354,9 @@ extension StremioMetaDetail {
             seasons: seasonsArray,
             runtime: self.runtime,
             genres: self.genres,
-            popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
+            popularity: self.popularity ?? ((Double(self.imdbRating ?? "0") ?? 0) * 10),
             releaseDate: self.releaseInfo,
+            originCountry: self.country,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil,
             episodes: episodesArray
         )

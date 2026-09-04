@@ -1,8 +1,14 @@
 import SwiftUI
 
 struct TrendingView: View {
-    @State private var trendingItems: [MediaItem] = []
+    @State private var selectedType: String = "movie" // "movie" or "tv"
+    @State private var movies: [MediaItem] = []
+    @State private var tvShows: [MediaItem] = []
     @State private var isLoading = true
+    
+    private var currentItems: [MediaItem] {
+        selectedType == "movie" ? movies : tvShows
+    }
     
     let columns = [
         GridItem(.adaptive(minimum: 160), spacing: 24)
@@ -11,27 +17,31 @@ struct TrendingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
-                if isLoading {
+                if isLoading && currentItems.isEmpty {
                     VStack(alignment: .leading, spacing: 40) {
                         GhostHero()
                         GhostGrid()
                     }
                     .transition(.opacity)
                 } else {
-                    // 1. Full-Bleed Hero Carousel for Top Trending Titles
-                    if !trendingItems.isEmpty {
-                        FeaturedCarousel(items: Array(trendingItems.prefix(5)))
+                    // 1. Full-Bleed Hero Carousel for Top Trending Titles of Active Category
+                    if !currentItems.isEmpty {
+                        FeaturedCarousel(items: Array(currentItems.prefix(5)))
+                            .id("trending-hero-\(selectedType)")
+                            .transition(.opacity)
                     }
                     
                     // 2. Main Trending Catalog Section
                     VStack(alignment: .leading, spacing: 24) {
-                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        HStack(alignment: .center, spacing: 16) {
                             Text("Trending Now")
                                 .font(.system(size: 32, weight: .heavy))
                                 .foregroundStyle(.white)
                             
-                            if !trendingItems.isEmpty {
-                                Text("\(trendingItems.count) TITLES")
+                            LiquidGlassMediaToggle(selected: $selectedType)
+                            
+                            if !currentItems.isEmpty {
+                                Text("\(currentItems.count) TITLES")
                                     .font(.system(size: 11, weight: .bold))
                                     .tracking(1.5)
                                     .foregroundStyle(.white.opacity(0.8))
@@ -45,13 +55,14 @@ struct TrendingView: View {
                         
                         // 3. Grid of Trending Glass Cards
                         LazyVGrid(columns: columns, spacing: 32) {
-                            ForEach(trendingItems) { item in
+                            ForEach(currentItems) { item in
                                 NavigationLink(value: item) {
                                     GlassCard(item: item, aspectRatio: .portrait, showTitle: true)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        .id("trending-grid-\(selectedType)")
                     }
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
@@ -59,7 +70,6 @@ struct TrendingView: View {
             }
             .padding(.bottom, 80)
         }
-
         .ignoresSafeArea(edges: .top)
         .task {
             await loadTrendingData()
@@ -72,20 +82,27 @@ struct TrendingView: View {
     }
     
     private func loadTrendingData() async {
-        do {
-            let items = try await StremioService.shared.fetchTrendingMovies()
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.trendingItems = items.filter { $0.isReleased }
-                    self.isLoading = false
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingMovies(window: "day") {
+                    await MainActor.run {
+                        self.movies = items.filter { $0.isReleased }
+                    }
                 }
             }
-        } catch {
-            print("Error loading trending data: \(error)")
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    self.isLoading = false
+            
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchTrendingTV(window: "day") {
+                    await MainActor.run {
+                        self.tvShows = items.filter { $0.isReleased }
+                    }
                 }
+            }
+        }
+        
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
             }
         }
     }

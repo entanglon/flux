@@ -5,6 +5,29 @@
         <link>https://raw.githubusercontent.com/entanglon/flux/main/appcast.xml</link>
         <description>Over-the-air updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
-        <!-- Releases will be appended here when new versions are tagged -->
+        <!-- Flagship: macOS 26+ (Native Apple Liquid Glass) -->
+        <item>
+            <title>Flux 1.0 (macOS 26+ Liquid Glass)</title>
+            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <pubDate>Fri, 04 Sep 2026 12:00:00 +0000</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux.dmg"
+                       length="44384334"
+                       sparkle:version="1"
+                       sparkle:shortVersionString="1.0"
+                       type="application/octet-stream" />
+        </item>
+        <!-- Legacy: macOS 15+ (Translucent Vibrancy Material Fallback) -->
+        <item>
+            <title>Flux 1.0 (macOS 15 Legacy)</title>
+            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <pubDate>Fri, 04 Sep 2026 12:00:00 +0000</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux-macOS15.dmg"
+                       length="44528422"
+                       sparkle:version="1"
+                       sparkle:shortVersionString="1.0"
+                       type="application/octet-stream" />
+        </item>
     </channel>
 </rss>

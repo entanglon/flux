@@ -89,6 +89,9 @@ scratch/
 # Build artifacts & local extras
 #
 Flux.dmg
+Flux-macOS15.dmg
+*.dmg
+build_artifacts/
 build_release/
 default.profraw
 *.profraw

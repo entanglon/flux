@@ -138,14 +138,7 @@ struct TVShowsView: View {
                 if let weekList = weekItems, !weekList.isEmpty {
                     let heroCandidates = weekList.filter { item in
                         let hasBackdrop = item.backdropURL != nil || item.heroURL != nil
-                        let hasOverview = !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        let hasGoodRating = (item.voteAverage ?? 6.5) >= 6.0
-                        return hasBackdrop && hasOverview && item.isReleased && hasGoodRating
-                    }
-                    .sorted { a, b in
-                        let scoreA = (a.voteAverage ?? 6.0) * 15.0 + (a.popularity ?? 0) * 0.1
-                        let scoreB = (b.voteAverage ?? 6.0) * 15.0 + (b.popularity ?? 0) * 0.1
-                        return scoreA > scoreB
+                        return hasBackdrop && item.isReleased
                     }
                     let finalHero = Array((heroCandidates.isEmpty ? weekList : heroCandidates).prefix(7))
                     await MainActor.run {

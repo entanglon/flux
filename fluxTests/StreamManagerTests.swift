@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import flux
 
+@Suite(.serialized)
 struct StreamManagerTests {
 
     @Test func qualityScoringRanksResolutionsCorrectly() {

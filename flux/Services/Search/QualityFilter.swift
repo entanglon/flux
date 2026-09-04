@@ -40,18 +40,22 @@ struct QualityFilter: Sendable {
         if config.requirePoster, candidate.posterPath == nil || candidate.posterPath?.isEmpty == true {
             return false
         }
-        if config.requireOverview,
-           (candidate.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-            return false
+        
+        // Cinemeta search results do not bundle an overview/synopsis in the search index;
+        // do not reject them if source is cinemeta.
+        if candidate.source != .cinemeta {
+            if config.requireOverview,
+               (candidate.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+                return false
+            }
         }
 
         let releaseAgeDays = candidate.releaseDate.map { now.timeIntervalSince($0) / 86_400 }
         let isFreshRelease = (releaseAgeDays ?? .infinity) <= Double(config.recentReleaseGraceDays)
             && (releaseAgeDays ?? -1) >= 0
 
-        if isFreshRelease {
-            // New releases are exempt from the vote-count/popularity floor
-            // (a brand-new movie released 3 days ago won't have 1,000 votes yet)
+        if isFreshRelease || candidate.source == .cinemeta {
+            // New releases and verified Cinemeta catalog items are exempt from the vote-count/popularity floor
             return true
         }
 

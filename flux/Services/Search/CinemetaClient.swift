@@ -11,9 +11,9 @@ actor CinemetaClient {
     }
 
     func search(query: String) async throws -> [MediaCandidate] {
-        async let movies = fetch(type: "movie", query: query)
-        async let series = fetch(type: "series", query: query)
-        let (movieResults, seriesResults) = try await (movies, series)
+        async let movies = (try? fetch(type: "movie", query: query)) ?? []
+        async let series = (try? fetch(type: "series", query: query)) ?? []
+        let (movieResults, seriesResults) = await (movies, series)
         return movieResults + seriesResults
     }
 
@@ -54,11 +54,11 @@ struct CinemetaMeta: Decodable, Sendable {
         let syntheticVoteCount: Int
         let syntheticPopularity: Double
         if let rating = Double(imdbRating ?? "") {
-            syntheticVoteCount = 50
-            syntheticPopularity = rating * 2
+            syntheticVoteCount = max(Int(rating * 10), 50)
+            syntheticPopularity = rating * 10.0
         } else {
-            syntheticVoteCount = 0
-            syntheticPopularity = 0
+            syntheticVoteCount = 30
+            syntheticPopularity = 30.0
         }
 
         let sharpPoster: String? = {
