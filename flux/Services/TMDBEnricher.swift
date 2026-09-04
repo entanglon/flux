@@ -582,26 +582,96 @@ class TMDBEnricher {
         }
     }
 
+    /// Translates movie genre ID to its corresponding TV genre ID on TMDB when querying TV shows.
+    private func resolvedGenreID(for genreID: Int, mediaType: String) -> Int {
+        guard mediaType == "tv" else { return genreID }
+        switch genreID {
+        case 28: return 10759   // Action -> Action & Adventure
+        case 12: return 10759   // Adventure -> Action & Adventure
+        case 14: return 10765   // Fantasy -> Sci-Fi & Fantasy
+        case 878: return 10765  // Sci-Fi -> Sci-Fi & Fantasy
+        case 27: return 9648    // Horror -> Mystery (closest TV match)
+        case 53: return 9648    // Thriller -> Mystery
+        case 10749: return 18   // Romance -> Drama
+        case 10752: return 10768 // War -> War & Politics
+        default: return genreID
+        }
+    }
+
     /// TMDB discover by genre — real genre-accurate titles, page-based pagination
-    /// (pages 1..500). Used by the genre pages for endless scroll.
-    func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie") async -> [MediaItem] {
+    /// (pages 1..500). Used by the genre pages for endless scroll and rails.
+    func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie", category: String = "popular") async -> [MediaItem] {
         let type = mediaType.lowercased().contains("tv") || mediaType.lowercased().contains("series") ? "tv" : "movie"
-        let urlString: String
+        let baseFilter: String
         switch tmdbGenreID {
         case 10001: // Anime
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_genres=16&with_original_language=ja&page=\(page)&sort_by=popularity.desc&include_adult=false"
+            baseFilter = "with_genres=16&with_original_language=ja"
         case 10002: // Bollywood
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_original_language=hi&page=\(page)&sort_by=popularity.desc&include_adult=false"
+            baseFilter = "with_original_language=hi"
         case 10003: // Classics
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&primary_release_date.lte=1980-01-01&page=\(page)&sort_by=popularity.desc&include_adult=false"
+            let dateParam = type == "tv" ? "first_air_date.lte=1980-01-01" : "primary_release_date.lte=1980-01-01"
+            baseFilter = dateParam
         case 10004: // K-Drama
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_original_language=ko&page=\(page)&sort_by=popularity.desc&include_adult=false"
+            baseFilter = "with_original_language=ko"
         case 10005: // Short Films
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_runtime.lte=40&page=\(page)&sort_by=popularity.desc&include_adult=false"
+            baseFilter = "with_runtime.lte=40"
         default:
-            urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&with_genres=\(tmdbGenreID)&page=\(page)&sort_by=popularity.desc&include_adult=false&vote_count.gte=50"
+            let resolvedID = resolvedGenreID(for: tmdbGenreID, mediaType: type)
+            baseFilter = "with_genres=\(resolvedID)"
         }
+
+        let sortAndVoteParams: String
+        let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        switch category {
+        case "top_rated":
+            let minVotes = type == "tv" ? 40 : 150
+            sortAndVoteParams = "sort_by=vote_average.desc&vote_count.gte=\(minVotes)"
+        case "new_releases":
+            let dateField = type == "tv" ? "first_air_date" : "primary_release_date"
+            sortAndVoteParams = "sort_by=\(dateField).desc&vote_count.gte=5&\(dateField).lte=\(today)"
+        case "trending":
+            let calendar = Calendar.current
+            let twoYearsAgo = calendar.date(byAdding: .year, value: -2, to: Date()) ?? Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let dateStr = formatter.string(from: twoYearsAgo)
+            let dateField = type == "tv" ? "first_air_date.gte" : "primary_release_date.gte"
+            sortAndVoteParams = "sort_by=popularity.desc&vote_count.gte=20&\(dateField)=\(dateStr)"
+        default: // "popular"
+            let minVotes = type == "tv" ? 10 : 30
+            sortAndVoteParams = "sort_by=popularity.desc&vote_count.gte=\(minVotes)"
+        }
+
+        let urlString = "\(baseURL)/discover/\(type)?api_key=\(apiKey)&\(baseFilter)&\(sortAndVoteParams)&page=\(page)&include_adult=false"
         return (try? await fetchCatalog(from: urlString, type: type)) ?? []
+    }
+
+    struct GenreRailsData {
+        var trending: [MediaItem] = []
+        var topRated: [MediaItem] = []
+        var popular: [MediaItem] = []
+        var newReleases: [MediaItem] = []
+        
+        var isEmpty: Bool {
+            trending.isEmpty && topRated.isEmpty && popular.isEmpty && newReleases.isEmpty
+        }
+    }
+
+    /// Fetches 4 curated discovery rails in parallel for a genre page
+    func fetchGenreRails(tmdbGenreID: Int, mediaType: String = "movie") async -> GenreRailsData {
+        let type = mediaType.lowercased().contains("tv") || mediaType.lowercased().contains("series") ? "tv" : "movie"
+        async let tr = fetchGenrePage(tmdbGenreID: tmdbGenreID, page: 1, mediaType: type, category: "trending")
+        async let top = fetchGenrePage(tmdbGenreID: tmdbGenreID, page: 1, mediaType: type, category: "top_rated")
+        async let pop = fetchGenrePage(tmdbGenreID: tmdbGenreID, page: 1, mediaType: type, category: "popular")
+        async let nr = fetchGenrePage(tmdbGenreID: tmdbGenreID, page: 1, mediaType: type, category: "new_releases")
+
+        let (trendingItems, topRatedItems, popularItems, newReleaseItems) = await (tr, top, pop, nr)
+        return GenreRailsData(
+            trending: trendingItems,
+            topRated: topRatedItems,
+            popular: popularItems,
+            newReleases: newReleaseItems
+        )
     }
 
     /// OTT platform catalogs via TMDB watch providers

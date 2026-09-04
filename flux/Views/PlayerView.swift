@@ -10,7 +10,6 @@ struct PlayerView: View {
     @State private var showExitWarning = false
     @State private var isControlsVisible = true
     @State private var animatedProgress: Double = 0.0
-    @State private var pulseScale: CGFloat = 0.96
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
@@ -972,6 +971,20 @@ struct PlayerView: View {
         }
     }
     
+    private struct PulsingLogoContainer<Content: View>: View {
+        @ViewBuilder let content: () -> Content
+        @State private var isPulsing = false
+
+        var body: some View {
+            content()
+                .scaleEffect(isPulsing ? 1.03 : 0.96)
+                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: isPulsing)
+                .onAppear {
+                    isPulsing = true
+                }
+        }
+    }
+    
     private var midPlaybackLogoBufferingView: some View {
         ZStack {
             // Subtle dark vignette over the paused video frame
@@ -984,25 +997,46 @@ struct PlayerView: View {
             if let media = item {
                 let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
                 
-                ZStack {
-                    if let lURL = logoURL {
-                        // Base translucent watermark logo
-                        AsyncImage(url: lURL) { img in
-                            img.resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 100)
-                                .opacity(0.25)
-                                .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                        } placeholder: {
-                            EmptyView()
-                        }
-                        
-                        // Real progress fill logo (left-to-right fill)
-                        AsyncImage(url: lURL) { img in
-                            img.resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 100)
-                                .opacity(1.0)
+                PulsingLogoContainer {
+                    ZStack {
+                        if let lURL = logoURL {
+                            // Base translucent watermark logo
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 100)
+                                    .opacity(0.25)
+                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                            
+                            // Real progress fill logo (left-to-right fill)
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 100)
+                                    .opacity(1.0)
+                                    .mask(
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .frame(width: max(0, geo.size.width * realProgress))
+                                                .animation(.linear(duration: 0.25), value: realProgress)
+                                        }
+                                    )
+                                    .shadow(color: .white.opacity(0.5), radius: 12, x: 0, y: 2)
+                            } placeholder: {
+                                EmptyView()
+                            }
+                        } else {
+                            // Text fallback for media with no logo image
+                            Text(media.title.uppercased())
+                                .font(.system(size: 36, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.25))
+                            
+                            Text(media.title.uppercased())
+                                .font(.system(size: 36, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white)
                                 .mask(
                                     GeometryReader { geo in
                                         Rectangle()
@@ -1010,29 +1044,9 @@ struct PlayerView: View {
                                             .animation(.linear(duration: 0.25), value: realProgress)
                                     }
                                 )
-                                .shadow(color: .white.opacity(0.5), radius: 12, x: 0, y: 2)
-                        } placeholder: {
-                            EmptyView()
                         }
-                    } else {
-                        // Text fallback for media with no logo image
-                        Text(media.title.uppercased())
-                            .font(.system(size: 36, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.25))
-                        
-                        Text(media.title.uppercased())
-                            .font(.system(size: 36, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.white)
-                            .mask(
-                                GeometryReader { geo in
-                                    Rectangle()
-                                        .frame(width: max(0, geo.size.width * realProgress))
-                                        .animation(.linear(duration: 0.25), value: realProgress)
-                                }
-                            )
                     }
                 }
-                .scaleEffect(pulseScale)
                 .padding(.horizontal, 40)
             }
         }
@@ -1069,25 +1083,46 @@ struct PlayerView: View {
                 if let media = item {
                     let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
                     
-                    ZStack {
-                        if let lURL = logoURL {
-                            // Base translucent watermark logo
-                            AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 140)
-                                    .opacity(0.25)
-                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                            } placeholder: {
-                                EmptyView()
-                            }
-                            
-                            // Real progress fill logo (left-to-right fill)
-                            AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 140)
-                                    .opacity(1.0)
+                    PulsingLogoContainer {
+                        ZStack {
+                            if let lURL = logoURL {
+                                // Base translucent watermark logo
+                                AsyncImage(url: lURL) { img in
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 140)
+                                        .opacity(0.25)
+                                        .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+                                } placeholder: {
+                                    EmptyView()
+                                }
+                                
+                                // Real progress fill logo (left-to-right fill)
+                                AsyncImage(url: lURL) { img in
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 140)
+                                        .opacity(1.0)
+                                        .mask(
+                                            GeometryReader { geo in
+                                                Rectangle()
+                                                    .frame(width: max(0, geo.size.width * realProgress))
+                                                    .animation(.linear(duration: 0.25), value: realProgress)
+                                            }
+                                        )
+                                        .shadow(color: .white.opacity(0.4), radius: 12, x: 0, y: 2)
+                                } placeholder: {
+                                    EmptyView()
+                                }
+                            } else {
+                                // Text fallback for media with no logo image
+                                Text(media.title.uppercased())
+                                    .font(.system(size: 48, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.white.opacity(0.25))
+                                
+                                Text(media.title.uppercased())
+                                    .font(.system(size: 48, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.white)
                                     .mask(
                                         GeometryReader { geo in
                                             Rectangle()
@@ -1095,29 +1130,9 @@ struct PlayerView: View {
                                                 .animation(.linear(duration: 0.25), value: realProgress)
                                         }
                                     )
-                                    .shadow(color: .white.opacity(0.4), radius: 12, x: 0, y: 2)
-                            } placeholder: {
-                                EmptyView()
                             }
-                        } else {
-                            // Text fallback for media with no logo image
-                            Text(media.title.uppercased())
-                                .font(.system(size: 48, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.25))
-                            
-                            Text(media.title.uppercased())
-                                .font(.system(size: 48, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white)
-                                .mask(
-                                    GeometryReader { geo in
-                                        Rectangle()
-                                            .frame(width: max(0, geo.size.width * realProgress))
-                                            .animation(.linear(duration: 0.25), value: realProgress)
-                                    }
-                                )
                         }
                     }
-                    .scaleEffect(pulseScale)
                     .padding(.horizontal, 40)
                 }
             }
@@ -1144,9 +1159,7 @@ struct PlayerView: View {
                     ? Double(playerManager.loadedAddonsCount) / Double(playerManager.totalAddonsCount)
                     : 0.0
                 let phase1 = min(0.35, discoveryRatio * 0.35)
-                withAnimation(.linear(duration: 0.25)) {
-                    self.animatedProgress = max(self.animatedProgress, phase1)
-                }
+                self.animatedProgress = max(self.animatedProgress, phase1)
                 return
             }
 
@@ -1157,14 +1170,7 @@ struct PlayerView: View {
             let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 4.0))
             let phase2 = min(0.95, 0.35 + (mpvBuf * 0.60))
 
-            withAnimation(.linear(duration: 0.25)) {
-                self.animatedProgress = max(self.animatedProgress, phase2)
-            }
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                self.pulseScale = 1.03
-            }
+            self.animatedProgress = max(self.animatedProgress, phase2)
         }
     }
 

@@ -5,11 +5,29 @@ struct PersonView: View {
     let personID: Int
     let fallbackName: String
 
+    enum FilmographyTab: String, CaseIterable {
+        case all = "All"
+        case movies = "Movies"
+        case tv = "TV Shows"
+    }
+
     @State private var details: TMDBPersonDetail?
     @State private var credits: [MediaItem] = []
+    @State private var selectedTab: FilmographyTab = .all
     @State private var isLoading = true
     @State private var bioExpanded = false
     @Environment(\.dismiss) private var dismiss
+
+    private var filteredCredits: [MediaItem] {
+        switch selectedTab {
+        case .all:
+            return credits
+        case .movies:
+            return credits.filter { $0.category.lowercased() == "movie" }
+        case .tv:
+            return credits.filter { $0.category.lowercased() == "series" || $0.category.lowercased() == "tv" }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -111,18 +129,18 @@ struct PersonView: View {
                             .aspectRatio(contentMode: .fill)
                     } else {
                         ZStack {
-                            Rectangle().fill(Color.white.opacity(0.08))
+                            Circle().fill(Color.white.opacity(0.08))
                             Text(String(displayName.prefix(1)))
                                 .font(.system(size: 44, weight: .bold))
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                     }
                 }
-                .frame(width: 190, height: 260)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(width: 180, height: 180)
+                .clipShape(Circle())
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    Circle()
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1.5)
                 )
                 .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
 
@@ -199,36 +217,61 @@ struct PersonView: View {
 
     @ViewBuilder
     private var filmographySection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("Movies & Shows")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center) {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    Text("Filmography")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
 
-                if !credits.isEmpty {
-                    Text("\(credits.count) CREDITS")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.5)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .glassEffect(.clear, in: .capsule)
+                    if !filteredCredits.isEmpty {
+                        Text("\(filteredCredits.count) CREDITS")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .glassEffect(.clear, in: .capsule)
+                    }
+                }
+
+                Spacer()
+
+                // Filter Tabs: All / Movies / TV Shows
+                HStack(spacing: 4) {
+                    ForEach(FilmographyTab.allCases, id: \.self) { tab in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedTab = tab
+                            }
+                        } label: {
+                            Text(tab.rawValue)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(selectedTab == tab ? .black : .white.opacity(0.7))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule().fill(selectedTab == tab ? Color.white : Color.white.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
-            if credits.isEmpty {
+            if filteredCredits.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "film.stack")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary)
-                    Text("No credits found")
+                    Text("No \(selectedTab.rawValue.lowercased()) found")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 160)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
-                    ForEach(credits) { item in
+                    ForEach(filteredCredits) { item in
                         NavigationLink(value: item) {
                             GlassCard(item: item, aspectRatio: .portrait, showTitle: true)
                         }

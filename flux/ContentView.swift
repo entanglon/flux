@@ -46,7 +46,7 @@ struct ContentView: View {
                     CollectionDetailView(collectionID: nav.id)
                 }
                 .navigationDestination(for: GenreNavigation.self) { genreNav in
-                    MediaListView(title: genreNav.name, type: .genre(id: genreNav.id, name: genreNav.name))
+                    GenreDetailView(genre: genreNav)
                 }
                 .navigationDestination(for: MediaListView.ListType.self) { type in
                     MediaListView(type: type)

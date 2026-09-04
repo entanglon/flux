@@ -19,6 +19,7 @@ struct MediaListView: View {
         case topRatedTV
         case streamingTV
         case genre(id: Int, name: String) // TMDB genre — real ID + display name
+        case genreCategory(id: Int, name: String, category: String, categoryTitle: String)
         case ott(id: String, name: String) // OTT platform — catalog code + display name
         case fixed(title: String, items: [MediaItem])
 
@@ -41,6 +42,7 @@ struct MediaListView: View {
             case .topRatedTV: return "Top Rated TV Shows"
             case .streamingTV: return "Popular on Streaming"
             case .genre(_, let name): return name
+            case .genreCategory(_, let name, _, let categoryTitle): return "\(name): \(categoryTitle)"
             case .ott(_, let name): return name
             case .fixed(let title, _): return title
             }
@@ -78,6 +80,8 @@ struct MediaListView: View {
                         .foregroundStyle(.white)
 
                     if case .genre = type {
+                        mediaTypeToggle
+                    } else if case .genreCategory = type {
                         mediaTypeToggle
                     } else if case .ott = type {
                         mediaTypeToggle
@@ -285,7 +289,9 @@ struct MediaListView: View {
             case .streamingTV:
                 newItems = (try? await TMDBEnricher.shared.fetchStreamingTV(page: page)) ?? []
             case .genre(let id, _):
-                newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType)
+                newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType, category: "popular")
+            case .genreCategory(let id, _, let category, _):
+                newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType, category: category)
             case .ott(let platformID, _):
                 let ottType = genreMediaType == "tv" ? "series" : "movie"
                 newItems = (try? await StremioService.shared.fetchOTTCatalog(platformID: platformID, type: ottType, page: page)) ?? []
