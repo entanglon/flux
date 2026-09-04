@@ -468,7 +468,7 @@ class StreamManager {
     }
     
     /// Health score within a quality tier: Torrent health (seeders/leechers) + size sanity; HTTP reliability.
-    func computeStreamHealthScore(_ stream: Stream) -> Double {
+    func computeStreamHealthScore(_ stream: Stream, originalLanguage: String? = nil, enableLanguageFilter: Bool? = nil) -> Double {
         var score: Double = 0.0
 
         if stream.isTorrent {
@@ -483,12 +483,15 @@ class StreamManager {
         }
 
         // Language preference:
-        let defaultLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
-        if matchesPreferredLanguage(stream, preferred: defaultLang) {
-            score += 3000.0 // Major priority boost for matching the user's preferred audio language
-        } else {
-            // Demote releases that lack the preferred language
-            score *= 0.40
+        let isFilterActive = enableLanguageFilter ?? UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
+        if isFilterActive {
+            let defaultLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            if matchesPreferredLanguage(stream, preferred: defaultLang, originalLanguage: originalLanguage, enableLanguageFilter: true) {
+                score += 3000.0 // Major priority boost for matching the user's preferred audio language
+            } else {
+                // Demote releases that lack the preferred language
+                score *= 0.40
+            }
         }
 
         // Size efficiency bonus for reasonable file sizes
@@ -506,26 +509,63 @@ class StreamManager {
         return score
     }
 
-    /// Checks if a stream contains or matches the user's preferred audio language
-    func matchesPreferredLanguage(_ stream: Stream, preferred: String) -> Bool {
+    /// Checks if a stream contains or matches the user's preferred audio language,
+    /// intelligently taking into account the title's original release language.
+    func matchesPreferredLanguage(
+        _ stream: Stream,
+        preferred: String,
+        originalLanguage: String? = nil,
+        enableLanguageFilter: Bool = true
+    ) -> Bool {
+        // If the language filter toggle is disabled, accept all streams unconditionally
+        guard enableLanguageFilter else { return true }
+
         let pref = preferred.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if pref.isEmpty || pref == "ENGLISH" {
-            let lang = stream.language?.uppercased() ?? ""
-            // Explicitly English or no language tag (assumed English for HTTP streams)
-            if lang.contains("EN") || lang.isEmpty {
+        let combined = "\(stream.title) \(stream.cleanTitle) \(stream.language ?? "")".uppercased()
+
+        // Check if stream is multi-audio / dual-audio (contains original audio + regional track)
+        let isMultiOrDual = (stream.language?.uppercased().contains("MULTI") == true) ||
+                            combined.contains("MULTI") ||
+                            combined.contains("DUAL") ||
+                            combined.contains("MVO") ||
+                            combined.contains("DVO")
+
+        // Helper to check if original language of the media matches English
+        let isOriginalEnglish: Bool = {
+            guard let orig = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !orig.isEmpty else {
+                // If originalLanguage is unspecified or nil, assume English for standard Hollywood/Western catalog releases
                 return true
             }
-            // Has a non-English language tag — check if it's a foreign dub
-            if isForeignDub(lang, title: stream.title) {
-                return false
+            return orig == "en" || orig == "eng" || orig == "english"
+        }()
+
+        if pref.isEmpty || pref == "ENGLISH" {
+            // Case 1: The title itself was originally released in English
+            if isOriginalEnglish {
+                // Hard foreign dubs without original English audio are disqualified
+                if isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage) {
+                    return false
+                }
+                // Standard untagged releases, explicit EN tags, and Dual/Multi-audio releases all have English!
+                return true
             }
-            // Has some other language — not a match for English preference
+
+            // Case 2: The title was originally foreign (e.g. Korean 'ko', Japanese 'ja', Spanish 'es')
+            // Match if an English dub track, dual-audio, or multi-audio is advertised
+            if let lang = stream.language?.uppercased() {
+                if lang.contains("EN") || isMultiOrDual {
+                    return true
+                }
+            }
+            if combined.contains("ENGLISH") || combined.contains("ENG") || isMultiOrDual {
+                return true
+            }
+            // Title is foreign and no English audio track is advertised
             return false
         }
 
-        let combined = "\(stream.title) \(stream.cleanTitle) \(stream.language ?? "")".uppercased()
+        // Other preferred languages (e.g. Hindi, French, Spanish, German, etc.)
         let langKeywords: [String: [String]] = [
-            "ENGLISH": ["ENGLISH", "EN", "ENG"],
             "HINDI": ["HINDI", "HIN", "BOLLYWOOD"],
             "TAMIL": ["TAMIL", "TAM"],
             "TELUGU": ["TELUGU", "TEL"],
@@ -549,25 +589,28 @@ class StreamManager {
         }
 
         // Multi-audio / Dual audio usually carries multiple regional/dub tracks
-        if combined.contains("MULTI") || combined.contains("DUAL") {
+        if isMultiOrDual {
             return true
         }
 
         return false
     }
 
-    /// True when the release is a hard foreign DUB (no original English audio
-    /// advertised). Multi-audio releases that include English are not penalized.
-    private func isForeignDub(_ lang: String, title: String) -> Bool {
-        if lang.contains("ENGLISH") || lang.contains("ORIGINAL") || lang.contains("MULTI") {
-            return false
-        }
+    /// True when the release is a hard foreign DUB (no original audio advertised).
+    /// Multi-audio releases that include original audio are not penalized.
+    private func isForeignDub(_ lang: String, title: String, originalLanguage: String? = nil) -> Bool {
         let upperTitle = title.uppercased()
-        // Multi-audio markers: original track included alongside the dub
-        if upperTitle.contains("DUAL") || upperTitle.contains("MULTI AUDIO") || upperTitle.contains("ORIG AUD") {
+        let upperLang = lang.uppercased()
+
+        // If explicitly tagged English, Original Audio, Multi, or Dual, it is not a hard dub
+        if upperLang.contains("EN") || upperLang.contains("ENGLISH") || upperLang.contains("ORIGINAL") || upperLang.contains("MULTI") {
             return false
         }
-        let dubMarkers = ["DUBBED", "DUBBING", "DUB"]
+        if upperTitle.contains("DUAL") || upperTitle.contains("MULTI") || upperTitle.contains("ORIG AUD") {
+            return false
+        }
+
+        let dubMarkers = ["DUBBED", "DUBBING", "TRUEFRENCH", "VOSTFR", "VFF"]
         return dubMarkers.contains { upperTitle.contains($0) }
     }
     
@@ -732,6 +775,8 @@ class StreamManager {
         sourceMode: String,
         preferredQuality: String,
         preferredLang: String,
+        originalLanguage: String? = nil,
+        enableLanguageFilter: Bool = false,
         probeStatus: [String: StreamProbeResult] = [:]
     ) -> (primary: Stream?, fallbacks: [Stream]) {
         let healthy = streams.filter { stream in
@@ -758,8 +803,20 @@ class StreamManager {
 
         // 3. Composite score calculation
         let ranked = candidates.sorted { s1, s2 in
-            let score1 = computeCompositeRank(s1, preferredLang: preferredLang, probeStatus: probeStatus)
-            let score2 = computeCompositeRank(s2, preferredLang: preferredLang, probeStatus: probeStatus)
+            let score1 = computeCompositeRank(
+                s1,
+                preferredLang: preferredLang,
+                originalLanguage: originalLanguage,
+                enableLanguageFilter: enableLanguageFilter,
+                probeStatus: probeStatus
+            )
+            let score2 = computeCompositeRank(
+                s2,
+                preferredLang: preferredLang,
+                originalLanguage: originalLanguage,
+                enableLanguageFilter: enableLanguageFilter,
+                probeStatus: probeStatus
+            )
             if score1 != score2 {
                 return score1 > score2
             }
@@ -771,14 +828,22 @@ class StreamManager {
         return (primary, fallbacks)
     }
 
-    private func computeCompositeRank(_ stream: Stream, preferredLang: String, probeStatus: [String: StreamProbeResult]) -> Double {
+    private func computeCompositeRank(
+        _ stream: Stream,
+        preferredLang: String,
+        originalLanguage: String? = nil,
+        enableLanguageFilter: Bool = false,
+        probeStatus: [String: StreamProbeResult]
+    ) -> Double {
         var score = 0.0
 
-        // Preferred Audio Language bonus
-        if matchesPreferredLanguage(stream, preferred: preferredLang) {
-            score += 4000.0
-        } else if isForeignDub(stream.language ?? "", title: stream.title) {
-            score -= 2500.0
+        // Preferred Audio Language bonus / Foreign Dub penalty (only if language filter is enabled)
+        if enableLanguageFilter {
+            if matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true) {
+                score += 4000.0
+            } else if isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage) {
+                score -= 2500.0
+            }
         }
 
         // Direct HTTP instant bonus
@@ -1098,8 +1163,12 @@ class StreamManager {
         if hasLang(["IT", "ITA"], full: "ITALIAN") { languages.append("IT") }
         if hasLang(["ZH", "CHI", "ZHO"], full: "CHINESE") { languages.append("ZH") }
         
-        if (audioPart.contains("MULTI") || audioPart.contains("DUAL AUDIO") || audioPart.contains("MVO") || audioPart.contains("DVO")) && languages.isEmpty {
-            languages.append("MULTI")
+        if audioPart.contains("MULTI") || tokens.contains("MULTI") ||
+           audioPart.contains("DUAL") || tokens.contains("DUAL") ||
+           audioPart.contains("MVO") || audioPart.contains("DVO") {
+            if !languages.contains("MULTI") {
+                languages.append("MULTI")
+            }
         }
         
         return languages.isEmpty ? nil : languages.joined(separator: ", ")

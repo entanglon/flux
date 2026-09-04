@@ -896,12 +896,15 @@ class PlayerManager: ObservableObject {
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
         let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
         let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
         let (primary, fallbacks) = StreamManager.shared.selectFastStartCandidate(
             from: healthy,
             sourceMode: sourceMode,
             preferredQuality: preferredQuality,
             preferredLang: preferredLang,
+            originalLanguage: currentItem?.originalLanguage,
+            enableLanguageFilter: enableLanguageFilter,
             probeStatus: self.probeStatus
         )
 
@@ -1458,12 +1461,15 @@ class PlayerManager: ObservableObject {
             let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
             let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
             let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
             let (bestNext, _) = StreamManager.shared.selectFastStartCandidate(
                 from: streams,
                 sourceMode: sourceMode,
                 preferredQuality: preferredQuality,
                 preferredLang: preferredLang,
+                originalLanguage: item.originalLanguage,
+                enableLanguageFilter: enableLanguageFilter,
                 probeStatus: await MainActor.run { self.probeStatus }
             )
 

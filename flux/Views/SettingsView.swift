@@ -267,6 +267,7 @@ struct StreamingSettingsView: View {
     @AppStorage("enableFluxMode") private var enableFluxMode = true
     @AppStorage("preferredQuality") private var preferredQuality = "4K"
     @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
+    @AppStorage("enableFluxLanguageFilter") private var enableFluxLanguageFilter = false
     
     var body: some View {
         Form {
@@ -297,12 +298,18 @@ struct StreamingSettingsView: View {
                     Text("480p").tag("480p")
                 }
                 .pickerStyle(.menu)
+
+                Toggle("Language Filter in Flux Mode", isOn: $enableFluxLanguageFilter)
+                Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .onChange(of: streamingSourceMode) { _, _ in persistSettings() }
         .onChange(of: enableFluxMode) { _, _ in persistSettings() }
         .onChange(of: preferredQuality) { _, _ in persistSettings() }
+        .onChange(of: enableFluxLanguageFilter) { _, _ in persistSettings() }
     }
 
     private func persistSettings() {

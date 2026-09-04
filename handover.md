@@ -71,8 +71,15 @@
   - Implemented `ImagePrefetcher` with ImageIO downsampling, deduplication, utility priority, and a 256 MB LRU memory limit.
   - Added lookahead prefetching for the next 2–3 cards in `CarouselView` and `DetailRail`.
 
-### 12. Next Up: Smart Language Filtering in Flux Mode — Saved to Implementation Plan
-- **Plan**: Couple preferred language with title's `originalLanguage` (from TMDB/Cinemeta), support Dual/Multi-audio releases, and add a user-configurable toggle `enableFluxLanguageFilter` in Settings > Streaming > Flux Mode.
+### 12. Smart Language Filtering & Flux Mode Toggle (`StreamManager.swift`, `PlayerManager.swift`, `SettingsView.swift`, `ProfileManager.swift`) — Completed & Verified
+- **Issue**: Standard English releases for English titles lacked explicit language tags, causing Flux Mode to demote or skip them. Dual-Audio and Multi-Audio releases were penalized. Foreign dubs without original English audio weren't reliably separated from native releases.
+- **Resolution**:
+  - **Coupled with `originalLanguage`**: In `StreamManager.matchesPreferredLanguage`, if `originalLanguage == "en"` (or unspecified for standard Western titles), untagged scene releases and dual/multi-audio streams match positively. Only hard foreign dubs that stripped original audio are rejected. For foreign titles (e.g. Korean 'ko'), only streams with English dub or Dual/Multi-audio match an English preference.
+  - **Multi & Dual Audio Detection**: Enhanced `parseLanguage(from:)` to detect `DUAL`, `MULTI`, `MVO`, and `DVO` across dot, hyphen, and spaced tokens. Dual-audio releases are recognized as carrying original audio.
+  - **Flux Mode User Toggle**: Added `@AppStorage("enableFluxLanguageFilter") private var enableFluxLanguageFilter = false` in `StreamingSettingsView` (Settings > Streaming > Flux Mode). Defaults to `false`, allowing uninhibited speed and quality racing unless the user explicitly wants language gating.
+  - **Fast Start Candidate Gating**: `selectFastStartCandidate` and `computeCompositeRank` only apply language bonuses (+4000) or penalties (-2500) when `enableLanguageFilter` is enabled.
+  - **Profile Sync**: Included `"enableFluxLanguageFilter"` in `ProfileManager.playbackSettingKeys` so it snapshots into profile settings and syncs to the cloud DB.
+  - **Test Suite**: Added comprehensive unit tests in `StreamManagerTests.swift` covering original language coupling, dual audio, filter bypass, and candidate selection with filter toggle. All 48 tests passed.
 
 ---
 

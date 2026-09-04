@@ -506,5 +506,128 @@ struct StreamManagerTests {
         #expect(StreamManager.isP2PSource("AIOStreams", url: "magnet:?xt=urn:btih:abc123def456") == true)
         #expect(StreamManager.isHttpSource("AIOStreams", url: "magnet:?xt=urn:btih:abc123def456") == false)
     }
+
+    @Test func matchesPreferredLanguageCoupledWithOriginalLanguage() {
+        let manager = StreamManager.shared
+
+        let untaggedEnglishStream = Stream(
+            title: "Oppenheimer.2023.1080p.BluRay.x264-SPARKS",
+            cleanTitle: "Oppenheimer",
+            url: URL(string: "https://stream.server/oppenheimer.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+        let frenchDubStream = Stream(
+            title: "Oppenheimer.2023.1080p.FRENCH.DUBBED.x264",
+            cleanTitle: "Oppenheimer",
+            url: URL(string: "https://stream.server/oppenheimer_fr.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+        let dualAudioStream = Stream(
+            title: "Oppenheimer.2023.1080p.Dual.Audio.x264",
+            cleanTitle: "Oppenheimer",
+            url: URL(string: "https://stream.server/oppenheimer_dual.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+
+        // For originally English title:
+        // 1. Untagged release matches English
+        #expect(manager.matchesPreferredLanguage(untaggedEnglishStream, preferred: "English", originalLanguage: "en", enableLanguageFilter: true) == true)
+        // 2. Dual Audio matches English
+        #expect(manager.matchesPreferredLanguage(dualAudioStream, preferred: "English", originalLanguage: "en", enableLanguageFilter: true) == true)
+        // 3. Foreign dub without original English audio is rejected
+        #expect(manager.matchesPreferredLanguage(frenchDubStream, preferred: "English", originalLanguage: "en", enableLanguageFilter: true) == false)
+
+        // For originally foreign title (Korean 'ko'):
+        let koreanStream = Stream(
+            title: "Start-Up.S01E01.1080p.WEB-DL",
+            cleanTitle: "Start-Up",
+            url: URL(string: "https://stream.server/startup.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+        let koreanWithEngDub = Stream(
+            title: "Start-Up.S01E01.1080p.English.Dub.x264",
+            cleanTitle: "Start-Up",
+            url: URL(string: "https://stream.server/startup_eng.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+        let koreanDualAudio = Stream(
+            title: "Start-Up.S01E01.1080p.Dual-Audio.x264",
+            cleanTitle: "Start-Up",
+            url: URL(string: "https://stream.server/startup_dual.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+
+        // Native Korean without English audio does NOT match English preference
+        #expect(manager.matchesPreferredLanguage(koreanStream, preferred: "English", originalLanguage: "ko", enableLanguageFilter: true) == false)
+        // English dub or Dual-Audio on Korean title DOES match English preference
+        #expect(manager.matchesPreferredLanguage(koreanWithEngDub, preferred: "English", originalLanguage: "ko", enableLanguageFilter: true) == true)
+        #expect(manager.matchesPreferredLanguage(koreanDualAudio, preferred: "English", originalLanguage: "ko", enableLanguageFilter: true) == true)
+    }
+
+    @Test func languageFilterToggleBypassesFilterWhenDisabled() {
+        let manager = StreamManager.shared
+
+        let frenchDubStream = Stream(
+            title: "Oppenheimer.2023.1080p.FRENCH.DUBBED.x264",
+            cleanTitle: "Oppenheimer",
+            url: URL(string: "https://stream.server/oppenheimer_fr.mp4")!,
+            source: "AIOStreams",
+            quality: "1080p"
+        )
+
+        // When enableLanguageFilter is false, stream is accepted unconditionally
+        #expect(manager.matchesPreferredLanguage(frenchDubStream, preferred: "English", originalLanguage: "en", enableLanguageFilter: false) == true)
+    }
+
+    @Test func selectFastStartCandidateRespectsLanguageFilterToggle() {
+        let manager = StreamManager.shared
+
+        let fastForeignStream = Stream(
+            title: "Movie.1080p.FRENCH.DUBBED",
+            cleanTitle: "Movie",
+            url: URL(string: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "2.0 GB",
+            seeders: 200
+        )
+        let moderateEnglishStream = Stream(
+            title: "Movie.1080p.WEBRip.x264",
+            cleanTitle: "Movie",
+            url: URL(string: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "2.5 GB",
+            seeders: 60
+        )
+
+        // 1. With language filter ON: English stream wins over French dubbed stream
+        let (winnerWithFilter, _) = manager.selectFastStartCandidate(
+            from: [fastForeignStream, moderateEnglishStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            originalLanguage: "en",
+            enableLanguageFilter: true
+        )
+        #expect(winnerWithFilter?.id == moderateEnglishStream.id)
+
+        // 2. With language filter OFF: Highest seed/speed candidate wins without language penalty
+        let (winnerWithoutFilter, _) = manager.selectFastStartCandidate(
+            from: [fastForeignStream, moderateEnglishStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            originalLanguage: "en",
+            enableLanguageFilter: false
+        )
+        #expect(winnerWithoutFilter?.id == fastForeignStream.id)
+    }
 }
 

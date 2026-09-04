@@ -69,7 +69,7 @@ final class ProfileManager: ObservableObject {
     var playbackSettingKeys: [String] {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
-         "streamingSourceMode", "enableFluxMode", "enableFluxCatalogue", "stremioCacheGB"]
+         "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB"]
     }
 
     /// Persists current UserDefaults into the active profile's settings snapshot.
