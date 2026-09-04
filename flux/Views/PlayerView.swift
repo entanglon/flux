@@ -15,6 +15,7 @@ struct PlayerView: View {
     @State private var hasStartedPlayback = false
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
+    @State private var showAboutStreamSource = false
     @State private var hostWindow: NSWindow?
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
@@ -25,6 +26,27 @@ struct PlayerView: View {
         // Idempotent: re-inits (any PlayerManager @Published change rebuilds the
         // root) always hand back the SAME session controller.
         _mpv = ObservedObject(wrappedValue: PlayerManager.shared.beginSession())
+    }
+
+    private var isFluxEnabled: Bool {
+        UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+    }
+
+    private var isPickerVisible: Bool {
+        showManualStreamPicker ||
+        playerManager.forceStreamPicker ||
+        playerManager.isStreamPickerPresented ||
+        (!isFluxEnabled && playerManager.currentStreamURL == nil)
+    }
+
+    private func dismissStreamPicker() {
+        showManualStreamPicker = false
+        playerManager.forceStreamPicker = false
+        playerManager.isStreamPickerPresented = false
+        if playerManager.currentStreamURL == nil {
+            playerManager.close()
+            dismiss()
+        }
     }
 
     private let loadingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
@@ -39,8 +61,7 @@ struct PlayerView: View {
             
             // 2. Initial Buffer Loading Screen: in Flux Mode, display IMMEDIATELY on click
             // without waiting for stream resolution, preventing any blank screen or picker flashes.
-            let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-            if isInitialLoading && (playerManager.currentStreamURL != nil || (isFluxEnabled && !playerManager.isManualSelection && !showManualStreamPicker)) {
+            if isInitialLoading && playerManager.errorMessage == nil && !isPickerVisible && (playerManager.currentStreamURL != nil || (isFluxEnabled && !playerManager.isManualSelection)) {
                 logoBufferingView
                     .transition(.opacity)
                     .zIndex(10)
@@ -81,9 +102,15 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.escape) {
-            if showManualStreamPicker {
+            if showAboutStreamSource {
                 withAnimation(.easeOut(duration: 0.2)) {
-                    showManualStreamPicker = false
+                    showAboutStreamSource = false
+                }
+                return .handled
+            }
+            if isPickerVisible {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    dismissStreamPicker()
                 }
                 return .handled
             }
@@ -204,6 +231,11 @@ struct PlayerView: View {
                  playerManager.preloadNextEpisodeIfNeeded()
              }
         }
+        .onChange(of: isPickerVisible) { _, visible in
+            if visible {
+                autoPlayCancelled = true
+            }
+        }
         .overlay {
             overlayContent
         }
@@ -227,6 +259,15 @@ struct PlayerView: View {
             if mpv.isPlaying {
                 SleepAssertionManager.shared.enableSleepPrevention()
             }
+        }
+        // If playback is actively running, clear any stale or erroneous errorMessage
+        if hasStartedPlayback && mpv.isPlaying && playerManager.errorMessage != nil {
+            print("[PlayerView] Video is actively playing, clearing stale error message.")
+            playerManager.errorMessage = nil
+        }
+        // Confirm positive playback for caching once we hit 1.0s of genuine playback
+        if t >= 1.0 && mpv.isPlaying {
+            playerManager.confirmPlaybackSuccess()
         }
         // Continuous autosave during playback
         if hasStartedPlayback && mpv.duration > 0 && Date().timeIntervalSince(lastProgressSaveTime) >= 5.0 {
@@ -416,16 +457,13 @@ struct PlayerView: View {
     
     @ViewBuilder
     private var overlayContent: some View {
-        let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-        let shouldShowPicker = showManualStreamPicker ||
-            (!isFluxEnabled && playerManager.currentStreamURL == nil)
-
         if let error = playerManager.errorMessage {
             errorView(error: error)
+                .zIndex(30)
         }
         
         // Stream Selection UI (Initial automatic picker OR manually opened via Right-Click overlay)
-        if shouldShowPicker {
+        if isPickerVisible {
             ZStack {
                 // Dim backdrop — no tap-to-dismiss: mid-playback the picker must
                 // only close via the X button, a row selection, or Escape.
@@ -440,6 +478,27 @@ struct PlayerView: View {
                     ))
             }
             .zIndex(20)
+        }
+
+        // About Stream Source Modal
+        if showAboutStreamSource {
+            ZStack {
+                Color.black.opacity(0.65)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showAboutStreamSource = false
+                        }
+                    }
+                    .transition(.opacity)
+
+                aboutStreamSourceModal
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.95).combined(with: .opacity),
+                        removal: .scale(scale: 0.98).combined(with: .opacity)
+                    ))
+            }
+            .zIndex(25)
         }
     }
 
@@ -745,7 +804,7 @@ struct PlayerView: View {
         contextMenuMonitor?.stop()
         let monitor = PlayerContextMenuMonitor()
         monitor.start(for: window) { [self] in
-            if self.showManualStreamPicker {
+            if self.isPickerVisible || self.showAboutStreamSource {
                 return NSMenu()
             }
             return self.buildNativeContextMenu()
@@ -932,6 +991,19 @@ struct PlayerView: View {
                 DispatchQueue.main.async {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(link, forType: .string)
+                }
+            }
+        })
+
+        // 9. About Stream Source…
+        menu.addItem(ClosureMenuItem(
+            title: "About Stream Source…",
+            systemImage: "info.circle",
+            isEnabled: isPlaybackEnabled || playerManager.currentStreamURL != nil
+        ) {
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    self.showAboutStreamSource = true
                 }
             }
         })
@@ -1145,7 +1217,7 @@ struct PlayerView: View {
                 }
 
                 // Auto-play next episode at the very end (countdown UI shows from 10s)
-                if autoPlayNextEnabled, !autoPlayCancelled,
+                if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
                    playerManager.nextEpisodeInfo != nil,
                    mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
                     playerManager.playNextEpisode()
@@ -1153,46 +1225,311 @@ struct PlayerView: View {
                 return
             }
 
+            // Real telemetry only: while stream URL is resolving, progress stays strictly at 0.0
             if playerManager.currentStreamURL == nil {
-                // Phase 1: Addon discovery (0% -> 35%)
-                let discoveryRatio = playerManager.totalAddonsCount > 0
-                    ? Double(playerManager.loadedAddonsCount) / Double(playerManager.totalAddonsCount)
-                    : 0.0
-                let phase1 = min(0.35, discoveryRatio * 0.35)
-                self.animatedProgress = max(self.animatedProgress, phase1)
+                self.animatedProgress = 0.0
                 return
             }
 
-            // Phase 2: Stream chosen, connecting & buffering (35% -> 95%)
+            // Genuine demuxer buffer telemetry from mpv (no artificial base jumps)
             let cacheTime = mpv.demuxerCacheTime
             playerManager.reportTelemetryProgress(cacheTime: cacheTime)
 
             let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 4.0))
-            let phase2 = min(0.95, 0.35 + (mpvBuf * 0.60))
-
-            self.animatedProgress = max(self.animatedProgress, phase2)
+            self.animatedProgress = max(self.animatedProgress, mpvBuf)
         }
     }
 
     private func errorView(error: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.yellow)
-            Text(error)
-                .font(.headline)
-                .foregroundColor(.white)
-            Button("Close") {
-                // Clear error + current URL to reveal the stream picker,
-                // but keep availableStreams so the user can pick another source.
-                playerManager.errorMessage = nil
-                playerManager.currentStreamURL = nil
-                playerManager.isLoading = false
+        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+        let hasStreams = !playerManager.availableStreams.isEmpty
+
+        return ZStack {
+            Color.black.opacity(0.65)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .fill(Color.yellow.opacity(0.15))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundColor(.yellow)
+                }
+
+                VStack(spacing: 8) {
+                    Text(hasStreams ? "Playback Issue" : "No Streams Available")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Text(error)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
+
+                HStack(spacing: 12) {
+                    if !hasStreams && sourceMode == "http" {
+                        Button {
+                            UserDefaults.standard.set("both", forKey: UserDefaults.Key.streamingSourceMode)
+                            playerManager.errorMessage = nil
+                            playerManager.refreshStreamsForPicker()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Enable Torrents & Retry")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor, in: Capsule())
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if !hasStreams {
+                        Button {
+                            playerManager.errorMessage = nil
+                            playerManager.refreshStreamsForPicker()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Retry")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.15), in: Capsule())
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            playerManager.errorMessage = nil
+                            playerManager.currentStreamURL = nil
+                            playerManager.forceStreamPicker = true
+                            playerManager.isStreamPickerPresented = true
+                            showManualStreamPicker = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "list.bullet.rectangle")
+                                Text("Choose Another Source")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.white, in: Capsule())
+                            .foregroundColor(.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        playerManager.close()
+                        dismiss()
+                    } label: {
+                        Text("Close")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.12), in: Capsule())
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 4)
             }
-            .buttonStyle(.borderedProminent)
+            .padding(32)
+            .frame(width: 480)
+            .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
         }
-        .padding()
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+    }
+
+    // MARK: - About Stream Source Inspector Modal
+
+    @ViewBuilder
+    private var aboutStreamSourceModal: some View {
+        let stream = playerManager.currentSelectedStream
+        let mediaInfo = mpv.getMediaInfo()
+        let isTorrent = stream?.isTorrent == true
+        let title = stream?.title ?? (playerManager.currentItem?.title ?? "Unknown")
+        let sourceName = stream?.source ?? "Direct Link"
+        let resolution = mediaInfo.resolution ?? (stream?.quality.isEmpty == false ? stream!.quality : "Unknown")
+        let vCodec = mediaInfo.videoCodec?.uppercased() ?? (stream?.codec?.uppercased() ?? "Auto")
+        let aCodec = mediaInfo.audioCodec?.uppercased() ?? "Stereo"
+        let hwdec = mediaInfo.hwdec?.uppercased() ?? (UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "Active" : "Disabled")
+        let transport = isTorrent ? "BitTorrent Swarm (P2P)" : "Direct HTTP Stream"
+        let size = stream?.size ?? "—"
+        let demuxerCache = String(format: "%.1f sec", mpv.demuxerCacheTime)
+        let link = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
+
+        VStack(alignment: .leading, spacing: 18) {
+            // Header
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.cyan)
+                    Text("About Stream Source")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showAboutStreamSource = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Provider & Transport badges
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "cube.box.fill")
+                        .font(.system(size: 10))
+                    Text(sourceName)
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.12), in: Capsule())
+                .foregroundColor(.white)
+
+                HStack(spacing: 5) {
+                    Image(systemName: isTorrent ? "point.3.filled.connected.trianglepath.dotted" : "globe")
+                        .font(.system(size: 10))
+                    Text(transport)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background((isTorrent ? Color.purple : Color.cyan).opacity(0.2), in: Capsule())
+                .foregroundColor(isTorrent ? Color.purple.opacity(0.9) : Color.cyan)
+
+                if isTorrent, let seeders = stream?.seeders {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 10))
+                        Text("\(seeders) seeds")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.18), in: Capsule())
+                    .foregroundColor(.green)
+                }
+            }
+
+            // Full Release Title
+            VStack(alignment: .leading, spacing: 6) {
+                Text("RELEASE TITLE")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .tracking(0.8)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            // Specs Grid
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 10) {
+                GridRow {
+                    specField(title: "Resolution", value: resolution)
+                    specField(title: "Video Codec", value: vCodec)
+                }
+                GridRow {
+                    specField(title: "Audio Codec", value: aCodec)
+                    specField(title: "Hardware Dec", value: hwdec)
+                }
+                GridRow {
+                    specField(title: "File Size", value: size)
+                    specField(title: "Demuxer Buffer", value: demuxerCache)
+                }
+            }
+
+            Divider()
+                .background(Color.white.opacity(0.12))
+
+            // Action Buttons
+            HStack {
+                if !link.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(link, forType: .string)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.on.doc")
+                            Text("Copy Stream Link")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showAboutStreamSource = false
+                    }
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(Color.white, in: Capsule())
+                        .foregroundColor(.black)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+        )
+        .shadow(color: Color.black.opacity(0.6), radius: 35, x: 0, y: 15)
+    }
+
+    private func specField(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.6)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+        }
     }
     
     // MARK: - Stream Picker State & Category
@@ -1432,12 +1769,7 @@ struct PlayerView: View {
                 // Close Button
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) {
-                        if showManualStreamPicker {
-                            showManualStreamPicker = false
-                        } else {
-                            playerManager.close()
-                            dismiss()
-                        }
+                        dismissStreamPicker()
                     }
                 } label: {
                     Image(systemName: "xmark")
@@ -1652,6 +1984,8 @@ struct PlayerView: View {
                                     onSelect: {
                                         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                                             showManualStreamPicker = false
+                                            playerManager.forceStreamPicker = false
+                                            playerManager.isStreamPickerPresented = false
                                             playerManager.selectStream(stream)
                                         }
                                     }
@@ -1697,14 +2031,15 @@ struct PlayerView: View {
         .onKeyPress(.return) {
             if let idx = focusedStreamIndex, idx < filteredStreams.count {
                 showManualStreamPicker = false
+                playerManager.forceStreamPicker = false
+                playerManager.isStreamPickerPresented = false
                 playerManager.selectStream(filteredStreams[idx])
             }
             return .handled
         }
         .onKeyPress(.escape) {
             withAnimation(.easeOut(duration: 0.15)) {
-                if showManualStreamPicker { showManualStreamPicker = false }
-                else { playerManager.close(); dismiss() }
+                dismissStreamPicker()
             }
             return .handled
         }

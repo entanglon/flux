@@ -372,6 +372,35 @@ struct DetailView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .animation(.easeOut(duration: 0.15), value: isInContinueWatching)
+                                    .contextMenu {
+                                        Button {
+                                            if let target = smartTargetEpisode {
+                                                let matchingEp = episodes.first(where: { $0.seasonNumber == target.season && $0.episodeNumber == target.episode }) ?? heroEpisode
+                                                PlayerManager.shared.play(
+                                                    displayItem,
+                                                    season: target.season,
+                                                    episode: target.episode,
+                                                    episodeImage: target.image ?? matchingEp?.stillURL,
+                                                    fromContinueWatching: false,
+                                                    forceStreamPicker: true,
+                                                    startFromBeginning: false
+                                                )
+                                            } else {
+                                                PlayerManager.shared.play(
+                                                    displayItem,
+                                                    season: nil,
+                                                    episode: nil,
+                                                    episodeImage: nil,
+                                                    fromContinueWatching: false,
+                                                    forceStreamPicker: true,
+                                                    startFromBeginning: false
+                                                )
+                                            }
+                                            openWindow(id: "player", value: displayItem.id)
+                                        } label: {
+                                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+                                        }
+                                    }
                                     
                                     Button(action: {
                                         userData.toggleWatchlist(displayItem)

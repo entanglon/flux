@@ -278,6 +278,18 @@ class MPVController: ObservableObject {
             }
         }
     }
+
+    /// Live media format inspection for "About Stream Source"
+    func getMediaInfo() -> (videoCodec: String?, audioCodec: String?, resolution: String?, hwdec: String?) {
+        let backend = playerView?.playerView
+        let vCodec = backend?.getPropertyString("video-codec") ?? backend?.getPropertyString("video-format")
+        let aCodec = backend?.getPropertyString("audio-codec")
+        let w = backend?.getPropertyInt("video-params/w")
+        let h = backend?.getPropertyInt("video-params/h")
+        let res = (w != nil && h != nil && w! > 0 && h! > 0) ? "\(w!)×\(h!)" : nil
+        let hwdec = backend?.getPropertyString("hwdec-current")
+        return (vCodec, aCodec, res, hwdec)
+    }
     
     func fetchTracks() {
         guard let tracks = playerView?.getTracks() else { return }
@@ -879,8 +891,11 @@ final class MPVLayerView: NSView {
         }
     }
     
+    private var isIntentionallySwitchingFile = false
+
     func loadFile(_ url: URL) {
         print("[MPV] loadFile called: \(url.absoluteString)")
+        isIntentionallySwitchingFile = true
         if mpvGL == nil {
             print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent)")
             pendingURL = url
@@ -888,6 +903,9 @@ final class MPVLayerView: NSView {
             pendingURL = nil
             print("[MPV] Executing loadfile command for: \(url.lastPathComponent)")
             command("loadfile", url.absoluteString)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.isIntentionallySwitchingFile = false
         }
     }
     
@@ -979,14 +997,14 @@ final class MPVLayerView: NSView {
     }
     
     // Helpers
-    private func getPropertyDouble(_ name: String) -> Double? {
+    func getPropertyDouble(_ name: String) -> Double? {
         guard mpv != nil else { return nil }
         var value: Double = 0
         if mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &value) >= 0 { return value }
         return nil
     }
     
-    private func getPropertyString(_ name: String) -> String? {
+    func getPropertyString(_ name: String) -> String? {
         guard mpv != nil else { return nil }
         guard let cString = mpv_get_property_string(mpv, name) else { return nil }
         let str = String(cString: cString)
@@ -994,14 +1012,14 @@ final class MPVLayerView: NSView {
         return str
     }
     
-    private func getPropertyInt(_ name: String) -> Int? {
+    func getPropertyInt(_ name: String) -> Int? {
         guard mpv != nil else { return nil }
         var value: Int64 = 0
         if mpv_get_property(mpv, name, MPV_FORMAT_INT64, &value) >= 0 { return Int(value) }
         return nil
     }
     
-    private func getPropertyBool(_ name: String) -> Bool? {
+    func getPropertyBool(_ name: String) -> Bool? {
         guard mpv != nil else { return nil }
         var value: Int32 = 0
         if mpv_get_property(mpv, name, MPV_FORMAT_FLAG, &value) >= 0 { return value != 0 }
@@ -1038,7 +1056,7 @@ final class MPVLayerView: NSView {
                     let reason = endFile.pointee.reason
                     let error = endFile.pointee.error
                     print("[MPV EVENT] END_FILE reason:\(reason) error:\(error)")
-                    if reason == MPV_END_FILE_REASON_ERROR {
+                    if reason == MPV_END_FILE_REASON_ERROR && !self.isIntentionallySwitchingFile {
                         print("[MPV] Error: End File Reason ERROR (code: \(error))")
                         DispatchQueue.main.async { self.onPlaybackError?() }
                     }

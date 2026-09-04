@@ -22,6 +22,9 @@ class PlayerManager: ObservableObject {
     @Published var pendingAddonNames: [String] = []
     @Published var currentStreamURL: URL?
     @Published var currentMagnetURL: String?
+    @Published var currentSelectedStream: Stream? = nil
+    @Published var forceStreamPicker: Bool = false
+    @Published var isStreamPickerPresented: Bool = false
     @Published var externalSubtitles: [StremioSubtitleTrack] = []
     /// Human-readable progress during source resolution ("Resolving source…", "Trying next (2/8)…")
     @Published var statusText: String? = nil
@@ -414,6 +417,54 @@ class PlayerManager: ObservableObject {
         }
     }
 
+    private var hasConfirmedPlaybackSuccess = false
+
+    /// Confirms that a stream has successfully delivered frames and played for at least 1.0s.
+    /// Only positively-verified streams are cached or written into persistent watch history.
+    func confirmPlaybackSuccess() {
+        guard !hasConfirmedPlaybackSuccess else { return }
+        guard let item = currentItem, let url = currentStreamURL else { return }
+        hasConfirmedPlaybackSuccess = true
+
+        let isLocal = (url.host == "127.0.0.1" || url.host == "localhost")
+        let isRemoteHttp = !isLocal && (url.scheme == "http" || url.scheme == "https")
+        let hasQueryToken = (url.query?.contains("token") == true || url.query?.contains("expires") == true || url.query?.contains("exp=") == true || url.query?.contains("sig=") == true)
+
+        let isEpisodic = item.isSeries || currentSeason != nil || currentEpisode != nil
+        let key = isEpisodic ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
+
+        // In-memory cache for instant replay during active session (avoid caching ephemeral expired HTTP tokens)
+        if !hasQueryToken {
+            lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date())
+            print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
+        }
+
+        let hash = currentSelectedStream?.isTorrent == true ? torrentHash(currentSelectedStream!) : nil
+        var historyItem = item
+        historyItem.lastStreamURL = (isRemoteHttp && hasQueryToken) ? nil : url
+        historyItem.lastTorrentInfoHash = hash
+        historyItem.lastFileIndex = currentSelectedStream?.fileIdx
+
+        UserDataService.shared.addToHistory(
+            historyItem,
+            season: self.currentSeason,
+            episode: self.currentEpisode,
+            episodeImage: self.currentEpisodeImage,
+            streamURL: (isRemoteHttp && hasQueryToken) ? nil : url,
+            torrentInfoHash: hash,
+            fileIndex: currentSelectedStream?.fileIdx
+        )
+    }
+
+    /// Purges cached stream when playback fails or when the source cannot be loaded.
+    func invalidateCachedStream(for item: MediaItem?, season: Int?, episode: Int?) {
+        guard let item = item else { return }
+        let isEpisodic = item.isSeries || season != nil || episode != nil
+        let key = isEpisodic ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
+        lastPlayedStreams.removeValue(forKey: key)
+        print("[PlayerManager] 🗑️ Invalidation: removed cached stream for \(key)")
+    }
+
     // MARK: - Client firewall (engine perimeter defense)
     //
     // Magnet URIs originate from community addons — arbitrary third-party
@@ -567,6 +618,17 @@ class PlayerManager: ObservableObject {
         self.currentEpisode = episode
         self.currentEpisodeImage = episodeImage
         self.errorMessage = nil
+        self.currentSelectedStream = nil
+        self.hasConfirmedPlaybackSuccess = false
+        if forceStreamPicker {
+            self.forceStreamPicker = true
+            self.isManualSelection = true
+            self.isStreamPickerPresented = true
+        } else {
+            self.forceStreamPicker = false
+            self.isManualSelection = false
+            self.isStreamPickerPresented = false
+        }
         let playbackKey = prefetchKey(for: item, season: season, episode: episode)
 
         // Only clear streams if we don't already have pre-fetched streams for this playback key
@@ -576,7 +638,6 @@ class PlayerManager: ObservableObject {
         }
         self.statusText = nil
         self.consecutiveFallbacks = 0
-        self.isManualSelection = false
         self.probeStatus = [:]
         self.resetPreloadState()
         self.fetchAndRaceTask?.cancel()
@@ -895,6 +956,25 @@ class PlayerManager: ObservableObject {
                 await MainActor.run {
                     self.isLoading = false
                     self.currentStreamURL = nil
+                    self.isStreamPickerPresented = true
+                }
+                return
+            }
+
+            // If no streams were discovered at all
+            if streams.isEmpty {
+                await MainActor.run {
+                    self.availableStreams = []
+                    self.isLoading = false
+                    self.currentStreamURL = nil
+                    let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+                    if sourceMode == "http" {
+                        self.errorMessage = "No direct HTTP streams found for this title. Try enabling torrents in Settings > Streaming or check installed addons."
+                    } else if sourceMode == "torrent" {
+                        self.errorMessage = "No torrent streams found for this title. Try enabling HTTP streams in Settings > Streaming or verify installed addons."
+                    } else {
+                        self.errorMessage = "No streams found for this title. Please check your installed addons in Settings."
+                    }
                 }
                 return
             }
@@ -920,6 +1000,7 @@ class PlayerManager: ObservableObject {
             await MainActor.run {
                 self.availableStreams = streams
                 self.isLoading = false
+                self.isStreamPickerPresented = true
             }
         }
     }
@@ -1129,13 +1210,18 @@ class PlayerManager: ObservableObject {
     
     func selectStream(_ stream: Stream) {
         print("Selected stream: \(stream.title) from \(stream.source)")
-        isManualSelection = true
+        self.currentSelectedStream = stream
+        self.isManualSelection = true
+        self.forceStreamPicker = false
+        self.isStreamPickerPresented = false
+        self.hasConfirmedPlaybackSuccess = false
         attemptStream(stream)
     }
 
     /// Two-phase playback (Stremio-style): torrents are resolved by the Stremio server,
     /// then the URL is handed to mpv. Dead sources fail and fall through to next candidate.
     private func attemptStream(_ stream: Stream) {
+        self.currentSelectedStream = stream
         let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
 
         // Cancel any existing startup watchdog
@@ -1303,23 +1389,6 @@ class PlayerManager: ObservableObject {
         self.isLoading = false
         self.errorMessage = nil
 
-        self.saveLastPlayedStream(url: targetURL)
-
-        if var item = self.currentItem {
-            item.lastStreamURL = targetURL
-            item.lastTorrentInfoHash = hash
-            item.lastFileIndex = stream.fileIdx
-            UserDataService.shared.addToHistory(
-                item,
-                season: self.currentSeason,
-                episode: self.currentEpisode,
-                episodeImage: self.currentEpisodeImage,
-                streamURL: targetURL,
-                torrentInfoHash: hash,
-                fileIndex: stream.fileIdx
-            )
-        }
-
         UserDefaults.standard.set(stream.source, forKey: UserDefaults.Key.lastUsedSource)
     }
 
@@ -1328,6 +1397,7 @@ class PlayerManager: ObservableObject {
     /// stream picker instead of cascading silently for minutes.
     /// Never auto-advance when the user explicitly picked a source (manual mode).
     private func advancePast(_ failed: Stream) {
+        invalidateCachedStream(for: currentItem, season: currentSeason, episode: currentEpisode)
         guard !isManualSelection else {
             // Manual pick failed — surface error, don't silently swap sources.
             errorMessage = "Couldn't load this source — the swarm looks too weak right now. Pick another one."
@@ -1363,14 +1433,6 @@ class PlayerManager: ObservableObject {
             isLoading = false
             currentStreamURL = nil
         }
-    }
-    
-    private func saveLastPlayedStream(url: URL) {
-        guard let item = currentItem else { return }
-        let isEpisodic = item.isSeries || currentSeason != nil || currentEpisode != nil
-        let key = isEpisodic ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
-        lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date())
-        print("[PlayerManager] Saved Instant Replay URL for \(key)")
     }
     
     // HEAD request validation
@@ -1446,6 +1508,11 @@ class PlayerManager: ObservableObject {
             self.currentItem = nil
             // Don't clear lastPlayedStreams, it persists for the session
             self.currentStreamURL = nil
+            self.currentMagnetURL = nil
+            self.currentSelectedStream = nil
+            self.forceStreamPicker = false
+            self.isStreamPickerPresented = false
+            self.hasConfirmedPlaybackSuccess = false
             self.availableStreams = []
             self.probeStatus = [:]
             self.externalSubtitles = []
@@ -1614,6 +1681,7 @@ class PlayerManager: ObservableObject {
     // MARK: - Fallback Logic
 
     func tryNextStream() {
+        invalidateCachedStream(for: currentItem, season: currentSeason, episode: currentEpisode)
         // MANUAL MODE: show error but keep currentStreamURL so the buffering
         // overlay stays visible. The error view renders on top. When the user
         // dismisses the error, we clear the URL to reveal the picker.
