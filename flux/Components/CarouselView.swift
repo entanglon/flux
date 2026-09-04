@@ -33,6 +33,9 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         content(item, index)
                             .id(index)
+                            .onAppear {
+                                prefetchAhead(from: index)
+                            }
                     }
                 }
                 .padding(.leading, 268)
@@ -93,6 +96,28 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
             proxy.scrollTo(scrollTargetIndex, anchor: .leading)
         }
+    }
+
+    private func prefetchAhead(from index: Int) {
+        guard !items.isEmpty else { return }
+        let nextStart = index + 1
+        let nextEnd = min(index + 3, items.count - 1)
+        guard nextStart <= nextEnd else { return }
+
+        var urls: [URL?] = []
+        for i in nextStart...nextEnd {
+            let candidate = items[i]
+            if let media = candidate as? MediaItem {
+                urls.append(media.posterURL ?? media.imageURL ?? media.backdropURL)
+            } else if let mirror = Mirror(reflecting: candidate).descendant("posterURL") as? URL? {
+                urls.append(mirror)
+            } else if let mirror = Mirror(reflecting: candidate).descendant("imageURL") as? URL? {
+                urls.append(mirror)
+            } else if let mirror = Mirror(reflecting: candidate).descendant("stillURL") as? URL? {
+                urls.append(mirror)
+            }
+        }
+        ImagePrefetcher.shared.prefetch(urls: urls, maxDimension: itemWidth * 1.5)
     }
 }
 

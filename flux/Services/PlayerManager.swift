@@ -17,6 +17,9 @@ class PlayerManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var availableStreams: [Stream] = []
     @Published var isFetchingStreams = false
+    @Published var totalAddonsCount: Int = 0
+    @Published var loadedAddonsCount: Int = 0
+    @Published var pendingAddonNames: [String] = []
     @Published var currentStreamURL: URL?
     @Published var currentMagnetURL: String?
     @Published var externalSubtitles: [StremioSubtitleTrack] = []
@@ -64,9 +67,19 @@ class PlayerManager: ObservableObject {
     private var prefetchedAt: Date?
     private var warmCore: WarmPlaybackCore?
     private var warmCoreDiscardTask: AsyncTask<Void, Never>?
+    @Published var standbyFallbacks: [Stream] = []
+    @Published var hasPlaybackStarted: Bool = false
+    private var startupWatchdogTask: Task<Void, Never>?
+
+    // Next-Episode preloading state (AIOStreams style)
+    private var prefetchedNextKey: String?
+    private var prefetchedNextStream: Stream?
+    private var prefetchedNextSubtitles: [StremioSubtitleTrack]?
+    private var prefetchedNextAt: Date?
 
     func prefetchKey(for item: MediaItem, season: Int?, episode: Int?) -> String {
-        item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : item.id
+        let isEpisodic = item.isSeries || season != nil || episode != nil
+        return isEpisodic ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : item.id
     }
 
     /// DetailView .task hook — safe to call repeatedly; deduped per title.
@@ -360,7 +373,7 @@ class PlayerManager: ObservableObject {
     private var consecutiveFallbacks = 0
     /// MANUAL MODE CONTRACT: when the user explicitly picks a source, NOTHING may
     /// switch away from it — no racing, no auto-fallback. Failures surface to the user.
-    private var isManualSelection = false
+    var isManualSelection = false
     
     // Track current episode
     var currentSeason: Int?
@@ -513,20 +526,29 @@ class PlayerManager: ObservableObject {
         
         // Automatic saved watch history resume position calculation (exact seconds)
         if !startFromBeginning && resumePos == nil {
-            let historyItem = UserDataService.shared.getHistoryItem(for: item) ?? item
-            let isMatchingEpisode: Bool
-            if item.category == "TV Show" || season != nil {
-                isMatchingEpisode = (historyItem.lastSeason == season || (season == nil && historyItem.lastSeason != nil)) &&
-                                    (historyItem.lastEpisode == episode || (episode == nil && historyItem.lastEpisode != nil))
-            } else {
-                isMatchingEpisode = true
+            if let s = season, let e = episode,
+               let epProg = UserDataService.shared.getEpisodeProgress(for: item.id, season: s, episode: e) {
+                if epProg.position > 5.0 && (epProg.duration <= 0 || epProg.position / epProg.duration < 0.92) {
+                    resumePos = epProg.position
+                }
             }
 
-            if isMatchingEpisode {
-                if let pos = historyItem.lastPlaybackPosition, pos > 5.0, (historyItem.progress ?? 0) < 0.92 {
-                    resumePos = pos
-                } else if let p = historyItem.progress ?? item.progress, p > 0.01 && p < 0.92, let dur = historyItem.lastPlaybackDuration, dur > 10 {
-                    resumePos = p * dur
+            if resumePos == nil {
+                let historyItem = UserDataService.shared.getHistoryItem(for: item) ?? item
+                let isMatchingEpisode: Bool
+                if item.isSeries || season != nil {
+                    isMatchingEpisode = (historyItem.lastSeason == season || (season == nil && historyItem.lastSeason != nil)) &&
+                                        (historyItem.lastEpisode == episode || (episode == nil && historyItem.lastEpisode != nil))
+                } else {
+                    isMatchingEpisode = true
+                }
+
+                if isMatchingEpisode {
+                    if let pos = historyItem.lastPlaybackPosition, pos > 5.0, (historyItem.progress ?? 0) < 0.92 {
+                        resumePos = pos
+                    } else if let p = historyItem.progress ?? item.progress, p > 0.01 && p < 0.92, let dur = historyItem.lastPlaybackDuration, dur > 10 {
+                        resumePos = p * dur
+                    }
                 }
             }
         }
@@ -537,19 +559,22 @@ class PlayerManager: ObservableObject {
         self.currentEpisode = episode
         self.currentEpisodeImage = episodeImage
         self.errorMessage = nil
-        self.availableStreams = []
-        self.currentStreamURL = nil
+        let playbackKey = prefetchKey(for: item, season: season, episode: episode)
+
+        // Only clear streams if we don't already have pre-fetched streams for this playback key
+        if prefetchedKey != playbackKey && prefetchedNextKey != playbackKey {
+            self.availableStreams = []
+            self.currentStreamURL = nil
+        }
         self.statusText = nil
         self.consecutiveFallbacks = 0
         self.isManualSelection = false
         self.probeStatus = [:]
         self.resetPreloadState()
 
-        // Cancel any in-flight prefetch and remove its torrent to prevent a
-        // competing `/create`. A completed warm core for this exact item is
-        // intentionally retained and adopted by PlayerView below.
-        let playbackKey = prefetchKey(for: item, season: season, episode: episode)
-        if warmCore?.key != playbackKey {
+        // Cancel in-flight prefetch only if targeting a different title,
+        // allowing in-flight queries for this title to finish seamlessly.
+        if warmCore?.key != playbackKey && inflightPrefetchKey != playbackKey && prefetchedKey != playbackKey {
             cancelDetailPrefetch()
         }
         
@@ -573,11 +598,12 @@ class PlayerManager: ObservableObject {
         if fromContinueWatching && !forceStreamPicker {
             let historyItem = UserDataService.shared.getHistoryItem(for: item)
             let matchedId = historyItem?.id ?? item.id
-            let key = item.category == "TV Show" ? "\(matchedId):\(season ?? 1):\(episode ?? 1)" : "\(matchedId)"
-            let fallbackKey = item.category == "TV Show" ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
+            let isEpisodic = item.isSeries || season != nil || episode != nil
+            let key = isEpisodic ? "\(matchedId):\(season ?? 1):\(episode ?? 1)" : "\(matchedId)"
+            let fallbackKey = isEpisodic ? "\(item.id):\(season ?? 1):\(episode ?? 1)" : "\(item.id)"
             
             let isMatchingEpisode: Bool
-            if item.category == "TV Show" || season != nil {
+            if isEpisodic {
                 isMatchingEpisode = (historyItem?.lastSeason == season || (season == nil && historyItem?.lastSeason != nil)) &&
                                     (historyItem?.lastEpisode == episode || (episode == nil && historyItem?.lastEpisode != nil))
             } else {
@@ -601,33 +627,83 @@ class PlayerManager: ObservableObject {
                isSavedURLCompatible(cached.url, hash: activeTorrentHash) {
                 let elapsed = Date().timeIntervalSince(cached.timestamp)
                 
-                // If Fresh (< 24 hours), Play Immediately reusing existing engine torrent session
+                // If Fresh (< 24 hours), verify health and play or fall back
                 if elapsed < 86400 {
-                    print("[PlayerManager] Active Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
-                    self.currentStreamURL = cached.url
-                    self.isLoading = false
-                    if let hash = activeTorrentHash {
-                        AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                    let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+                    let isHttp = cached.url.scheme == "http" || cached.url.scheme == "https"
+                    let isLocal = cached.url.host == "127.0.0.1" || cached.url.host == "localhost"
+
+                    if isHttp && !isLocal {
+                        AsyncTask {
+                            let isHealthy = await self.verifyStreamURLHealth(cached.url)
+                            await MainActor.run {
+                                if isHealthy {
+                                    print("[PlayerManager] Active Stream Session Healthy: Resuming stream session immediately.")
+                                    self.currentStreamURL = cached.url
+                                    self.isLoading = false
+                                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                                } else {
+                                    print("[PlayerManager] Cached stream expired/broken. Purging and falling back...")
+                                    self.lastPlayedStreams.removeValue(forKey: key)
+                                    self.lastPlayedStreams.removeValue(forKey: fallbackKey)
+                                    self.fetchAndRace(item: item, season: season, episode: episode, forceStreamPicker: !isFlux)
+                                }
+                            }
+                        }
+                        return
+                    } else {
+                        print("[PlayerManager] Active Torrent Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
+                        self.currentStreamURL = cached.url
+                        self.isLoading = false
+                        if let hash = activeTorrentHash {
+                            AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                        }
+                        self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                        return
                     }
-                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                    return
                 } else {
                     self.lastPlayedStreams.removeValue(forKey: key)
+                    self.lastPlayedStreams.removeValue(forKey: fallbackKey)
                 }
             } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL,
                       isSavedURLCompatible(savedURL, hash: historyItem?.lastTorrentInfoHash) {
                 let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
                 if elapsed < 86400 {
-                    print("[PlayerManager] Persisted History Stream Available (Across Restarts): Playing \(savedURL)")
-                    self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
-                    self.currentStreamURL = savedURL
-                    self.isLoading = false
-                    if let hash = historyItem?.lastTorrentInfoHash {
-                        self.activeTorrentHash = hash
-                        AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                    let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+                    let isHttp = savedURL.scheme == "http" || savedURL.scheme == "https"
+                    let isLocal = savedURL.host == "127.0.0.1" || savedURL.host == "localhost"
+
+                    if isHttp && !isLocal {
+                        AsyncTask {
+                            let isHealthy = await self.verifyStreamURLHealth(savedURL)
+                            await MainActor.run {
+                                if isHealthy {
+                                    print("[PlayerManager] Persisted Stream Healthy: Playing \(savedURL)")
+                                    self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
+                                    self.currentStreamURL = savedURL
+                                    self.isLoading = false
+                                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                                } else {
+                                    print("[PlayerManager] Persisted stream expired/broken. Purging and falling back...")
+                                    self.lastPlayedStreams.removeValue(forKey: key)
+                                    self.lastPlayedStreams.removeValue(forKey: fallbackKey)
+                                    self.fetchAndRace(item: item, season: season, episode: episode, forceStreamPicker: !isFlux)
+                                }
+                            }
+                        }
+                        return
+                    } else {
+                        print("[PlayerManager] Persisted History Stream Available (Across Restarts): Playing \(savedURL)")
+                        self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date())
+                        self.currentStreamURL = savedURL
+                        self.isLoading = false
+                        if let hash = historyItem?.lastTorrentInfoHash {
+                            self.activeTorrentHash = hash
+                            AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
+                        }
+                        self.populateStreamsInBackground(item: item, season: season, episode: episode)
+                        return
                     }
-                    self.populateStreamsInBackground(item: item, season: season, episode: episode)
-                    return
                 }
             } else {
                 print("[PlayerManager] Saved session is incompatible with current stream filter '\(sourceMode)' or missing. Fetching fresh streams...")
@@ -636,6 +712,26 @@ class PlayerManager: ObservableObject {
         
         // 2. Normal Flow (Fetch and race, or show stream picker if forceStreamPicker / from detail view)
         fetchAndRace(item: item, season: season, episode: episode, forceStreamPicker: forceStreamPicker)
+    }
+
+    private func verifyStreamURLHealth(_ url: URL) async -> Bool {
+        if url.host == "127.0.0.1" || url.host == "localhost" {
+            return true
+        }
+        guard url.scheme == "http" || url.scheme == "https" else { return true }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 1.8
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                return (200...399).contains(http.statusCode) || http.statusCode == 405
+            }
+            return false
+        } catch {
+            print("[PlayerManager] Cached stream health probe failed for \(url.host ?? ""): \(error.localizedDescription)")
+            return false
+        }
     }
     
     private func populateStreamsInBackground(item: MediaItem, season: Int?, episode: Int?) {
@@ -661,7 +757,19 @@ class PlayerManager: ObservableObject {
         let season = currentSeason, episode = currentEpisode
         isFetchingStreams = true
         AsyncTask {
-            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode, forceRefresh: true) { updatedStreams in
+            let streams = await StreamManager.shared.fetchStreamsRealtime(
+                for: item,
+                season: season,
+                episode: episode,
+                forceRefresh: true,
+                onProgress: { loaded, total, pending in
+                    Task { @MainActor in
+                        self.loadedAddonsCount = loaded
+                        self.totalAddonsCount = total
+                        self.pendingAddonNames = pending
+                    }
+                }
+            ) { updatedStreams in
                 Task { @MainActor in
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)
@@ -670,6 +778,8 @@ class PlayerManager: ObservableObject {
             await MainActor.run {
                 self.availableStreams = streams
                 self.isFetchingStreams = false
+                self.loadedAddonsCount = self.totalAddonsCount
+                self.pendingAddonNames = []
                 self.verifyStreamHealth(streams)
             }
         }
@@ -683,19 +793,23 @@ class PlayerManager: ObservableObject {
             // ⚡ ADVANCED LOADING fast-path (Flux Mode): if not forcing stream picker
             let key = self.prefetchKey(for: item, season: season, episode: episode)
             let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-            if !forceStreamPicker, isFluxEnabled,
-               self.prefetchedKey == key,
-               let pf = self.prefetchedStream,
-               let at = self.prefetchedAt,
-               Date().timeIntervalSince(at) < 600 {
-                print("[PlayerManager] ⚡ Prefetch HIT — instant start: \(pf.cleanTitle)")
+            
+            let isDetailHit = (self.prefetchedKey == key && self.prefetchedStream != nil)
+            let isNextHit = (self.prefetchedNextKey == key && self.prefetchedNextStream != nil)
+            
+            if !forceStreamPicker, isFluxEnabled, (isDetailHit || isNextHit) {
+                let pf = isDetailHit ? self.prefetchedStream! : self.prefetchedNextStream!
+                let subs = (isDetailHit ? self.prefetchedSubtitles : self.prefetchedNextSubtitles) ?? []
+                print("[PlayerManager] ⚡ Prefetch / Next-Episode HIT — instant start: \(pf.cleanTitle)")
                 let cached = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
                 await MainActor.run {
                     self.availableStreams = cached
                     self.verifyStreamHealth(cached)
-                    self.externalSubtitles = self.prefetchedSubtitles ?? []
+                    self.externalSubtitles = subs
                     self.isLoading = false
                     self.isFetchingStreams = false
+                    self.loadedAddonsCount = self.totalAddonsCount
+                    self.pendingAddonNames = []
                     self.finishSelect(pf)
                 }
                 return
@@ -710,20 +824,37 @@ class PlayerManager: ObservableObject {
 
             async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
             
-            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode, forceRefresh: forceStreamPicker) { updatedStreams in
+            let streams = await StreamManager.shared.fetchStreamsRealtime(
+                for: item,
+                season: season,
+                episode: episode,
+                forceRefresh: forceStreamPicker,
+                onProgress: { loaded, total, pending in
+                    Task { @MainActor in
+                        self.loadedAddonsCount = loaded
+                        self.totalAddonsCount = total
+                        self.pendingAddonNames = pending
+                    }
+                }
+            ) { updatedStreams in
                 Task { @MainActor in
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)
                 }
             }
             
-            let extraSubs = await subsTask
-            
             await MainActor.run {
                 self.availableStreams = streams
-                self.externalSubtitles = extraSubs
                 self.isFetchingStreams = false
+                self.loadedAddonsCount = self.totalAddonsCount
+                self.pendingAddonNames = []
                 self.verifyStreamHealth(streams)
+            }
+
+            let extraSubs = await subsTask
+
+            await MainActor.run {
+                self.externalSubtitles = extraSubs
             }
             
             // If user or caller requested the Stream Selector UI:
@@ -741,7 +872,7 @@ class PlayerManager: ObservableObject {
                 if let winner = await self.raceBestStream(from: streams) {
                     print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
                     await MainActor.run {
-                        self.finishSelect(winner)
+                        self.attemptStream(winner)
                     }
                     return
                 }
@@ -755,82 +886,101 @@ class PlayerManager: ObservableObject {
         }
     }
     
-    // Flux Mode source pick — respects the Settings stream filter:
-    //   "both"    → top-ranked candidate (HTTP instant head-checked, or top torrent)
-    //   "torrent" → torrents only
-    //   "http"    → parallel HEAD race over HTTP candidates
+    // Flux Mode source pick:
+    // Leverages selectFastStartCandidate with quality cap, language match, and speed scoring.
+    // Stashes standby fallbacks and warms HTTP candidates in the background.
     private func raceBestStream(from streams: [Stream]) async -> Stream? {
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
 
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+        let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
+        let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
 
-        if sourceMode == "torrent" {
-            if let topTorrent = healthy.first(where: { $0.isTorrent }) {
-                print("[PlayerManager] Flux Mode: top-ranked torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
-                return topTorrent
-            }
-            print("[PlayerManager] Flux Mode: torrent-only filter, no healthy torrent found")
-            return nil
-        }
+        let (primary, fallbacks) = StreamManager.shared.selectFastStartCandidate(
+            from: healthy,
+            sourceMode: sourceMode,
+            preferredQuality: preferredQuality,
+            preferredLang: preferredLang,
+            probeStatus: self.probeStatus
+        )
 
-        if sourceMode == "http" {
-            let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(5))
-            print("[PlayerManager] Flux Mode: racing \(httpCandidates.count) HTTP candidates in parallel...")
-            return await raceHTTPCandidates(httpCandidates)
-        }
+        guard let winnerCandidate = primary else { return nil }
 
-        // Mode: "both"
-        // Evaluates sorted list: if top stream is an HTTP stream, race it; if it succeeds, play immediately.
-        // If top stream is a torrent or HTTP race fails, fallback to top torrent.
-        if let topStream = healthy.first {
-            if !topStream.isTorrent {
-                let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(3))
-                if let winner = await raceHTTPCandidates(httpCandidates) {
-                    return winner
+        // If in HTTP mode or candidate is HTTP, concurrently probe top candidates
+        // to find the first alive (200-399) HTTP stream and discard dead ones (404/timeouts).
+        if sourceMode == "http" || !winnerCandidate.isTorrent {
+            let allHttp = ([winnerCandidate] + fallbacks).filter { !$0.isTorrent }
+            if !allHttp.isEmpty {
+                let (verifiedWinner, verifiedFallbacks) = await raceAndVerifyHTTPCandidates(Array(allHttp.prefix(6)))
+                if let verified = verifiedWinner {
+                    await MainActor.run {
+                        self.standbyFallbacks = verifiedFallbacks + fallbacks.filter { $0.isTorrent }
+                    }
+                    print("[PlayerManager] ⚡ Flux Mode verified alive HTTP stream: \(verified.cleanTitle) (\(verified.quality))")
+                    return verified
+                } else if sourceMode == "http" {
+                    print("[PlayerManager] All candidate HTTP streams failed HEAD verification (404/expired/timeout).")
+                    return nil
                 }
             }
-            
-            if let topTorrent = healthy.first(where: { $0.isTorrent }) {
-                print("[PlayerManager] Flux Mode: selected top torrent \(topTorrent.cleanTitle) (\(topTorrent.source))")
-                return topTorrent
-            }
-
-            let httpCandidates = Array(healthy.filter { !$0.isTorrent }.prefix(5))
-            return await raceHTTPCandidates(httpCandidates)
         }
 
-        return nil
+        await MainActor.run {
+            self.standbyFallbacks = fallbacks
+        }
+
+        // Background probe HTTP fallbacks so their socket and TLS are hot
+        let httpFallbacks = fallbacks.filter { !$0.isTorrent }
+        if !httpFallbacks.isEmpty {
+            AsyncTask {
+                _ = await self.raceAndVerifyHTTPCandidates(Array(httpFallbacks.prefix(3)))
+            }
+        }
+
+        return winnerCandidate
     }
 
-    private func raceHTTPCandidates(_ candidates: [Stream]) async -> Stream? {
-        guard !candidates.isEmpty else { return nil }
-        return await withTaskGroup(of: Stream?.self) { group in
+    /// Races HTTP candidates in parallel via HEAD requests with a 2.5s timeout.
+    /// Returns the verified working winner AND an ordered list of verified working fallbacks.
+    private func raceAndVerifyHTTPCandidates(_ candidates: [Stream]) async -> (winner: Stream?, verifiedFallbacks: [Stream]) {
+        guard !candidates.isEmpty else { return (nil, []) }
+
+        return await withTaskGroup(of: (Stream, Bool).self) { group in
             for stream in candidates {
+                let playableURL = self.getPlayableURL(for: stream)
                 group.addTask {
-                    var request = URLRequest(url: self.getPlayableURL(for: stream))
+                    var request = URLRequest(url: playableURL)
                     request.httpMethod = "HEAD"
-                    request.timeoutInterval = 3
+                    request.timeoutInterval = 2.5
                     do {
                         let (_, response) = try await URLSession.shared.data(for: request)
                         if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                            return stream
+                            return (stream, true)
                         }
-                        return nil
+                        return (stream, false)
                     } catch {
-                        return nil
+                        return (stream, false)
                     }
                 }
             }
 
-            for await result in group {
-                if let winner = result {
-                    print("[PlayerManager] HTTP Race winner: \(winner.cleanTitle) (\(winner.source))")
-                    group.cancelAll()
-                    return winner
+            var verified: [Stream] = []
+            for await (stream, ok) in group {
+                if ok {
+                    verified.append(stream)
+                } else {
+                    await MainActor.run {
+                        self.probeStatus[stream.stableKey] = StreamProbeResult(ok: false, latency: 99)
+                    }
                 }
             }
-            return candidates.first
+
+            guard let winner = verified.first else {
+                return (nil, [])
+            }
+            let verifiedFallbacks = Array(verified.dropFirst())
+            return (winner, verifiedFallbacks)
         }
     }
     
@@ -943,6 +1093,29 @@ class PlayerManager: ObservableObject {
     private func attemptStream(_ stream: Stream) {
         let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
 
+        // Cancel any existing startup watchdog
+        startupWatchdogTask?.cancel()
+        startupWatchdogTask = nil
+
+        // Set up smart startup watchdog in Flux Mode
+        if isFluxEnabled && !isManualSelection {
+            let budget = StreamManager.shared.estimatedStartupBudget(for: stream)
+            print("[PlayerManager] ⏱️ Armed startup watchdog for \(stream.cleanTitle) (\(stream.quality)): \(budget)s")
+            startupWatchdogTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard let self = self else { return }
+                        if self.isLoading || !self.hasPlaybackStarted {
+                            print("[PlayerManager] ⏱️ Stream startup budget (\(budget)s) expired for \(stream.cleanTitle). Auto-advancing to standby fallback...")
+                            self.advanceToStandbyFallback()
+                        }
+                    }
+                } catch {}
+            }
+        }
+
         // Skip recently-dead hashes for AUTO selection only — an explicit user
         // click must always be attempted (the dead mark may be stale).
         if isFluxEnabled && !isManualSelection && isHashRecentlyDead(stream) && stream.isTorrent {
@@ -1001,6 +1174,42 @@ class PlayerManager: ObservableObject {
         }
     }
 
+    func markPlaybackStarted() {
+        hasPlaybackStarted = true
+        startupWatchdogTask?.cancel()
+        startupWatchdogTask = nil
+    }
+
+    func cancelStartupWatchdog() {
+        startupWatchdogTask?.cancel()
+        startupWatchdogTask = nil
+    }
+
+    func advanceToStandbyFallback() {
+        guard !isManualSelection else { return }
+        startupWatchdogTask?.cancel()
+        startupWatchdogTask = nil
+
+        guard !standbyFallbacks.isEmpty else {
+            print("[PlayerManager] No standby fallbacks remaining — falling back to standard next stream.")
+            tryNextStream()
+            return
+        }
+
+        let fallback = standbyFallbacks.removeFirst()
+        print("[PlayerManager] ⚡ Seamlessly advancing to standby fallback: \(fallback.cleanTitle) (\(fallback.source))")
+
+        // If the old stream was a torrent that stalled, clean it up and mark dead
+        if let currentURL = currentStreamURL, let oldStream = availableStreams.first(where: { getPlayableURL(for: $0) == currentURL }) {
+            if oldStream.isTorrent, let oldHash = torrentHash(oldStream) {
+                markHashDead(oldStream)
+                StremioServerManager.shared.removeTorrent(infoHash: oldHash)
+            }
+        }
+
+        attemptStream(fallback)
+    }
+
     private func finishSelect(_ stream: Stream) {
         let targetURL = getPlayableURL(for: stream)
         self.currentStreamURL = targetURL
@@ -1044,6 +1253,11 @@ class PlayerManager: ObservableObject {
             return
         }
 
+        if !standbyFallbacks.isEmpty {
+            advanceToStandbyFallback()
+            return
+        }
+
         consecutiveFallbacks += 1
         guard consecutiveFallbacks <= maxAutoFallbacks else {
             print("[PlayerManager] \(consecutiveFallbacks - 1) sources failed — stopping auto-fallback, showing picker.")
@@ -1061,7 +1275,7 @@ class PlayerManager: ObservableObject {
         if next < availableStreams.count {
             statusText = "Source unavailable — trying next (\(next + 1)/\(availableStreams.count))"
             let nextStream = availableStreams[next]
-            selectStream(nextStream)
+            attemptStream(nextStream)
         } else {
             errorMessage = "All top sources failed to stream. Please pick another stream manually."
             statusText = nil
@@ -1072,7 +1286,8 @@ class PlayerManager: ObservableObject {
     
     private func saveLastPlayedStream(url: URL) {
         guard let item = currentItem else { return }
-        let key = item.category == "TV Show" ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
+        let isEpisodic = item.isSeries || currentSeason != nil || currentEpisode != nil
+        let key = isEpisodic ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
         lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date())
         print("[PlayerManager] Saved Instant Replay URL for \(key)")
     }
@@ -1222,16 +1437,60 @@ class PlayerManager: ObservableObject {
     
     func resetPreloadState() {
         hasPreloadedNext = false
+        prefetchedNextKey = nil
+        prefetchedNextStream = nil
+        prefetchedNextSubtitles = nil
+        prefetchedNextAt = nil
     }
     
     func preloadNextEpisodeIfNeeded() {
         guard !hasPreloadedNext, let next = nextEpisodeInfo, let item = currentItem else { return }
-        
         hasPreloadedNext = true
-        print("[PlayerManager] Smart Preloading Next Episode: S\(next.season):E\(next.episode)")
+        let nextKey = prefetchKey(for: item, season: next.season, episode: next.episode)
+        print("[PlayerManager] ⚡ AIO Smart Preloading Next Episode: S\(next.season):E\(next.episode)")
         
-        AsyncTask {
-            await StreamManager.shared.preloadStreams(for: item, season: next.season, episode: next.episode)
+        AsyncTask { [weak self] in
+            guard let self = self else { return }
+            async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: next.season, episode: next.episode)
+            let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: next.season, episode: next.episode) { _ in }
+            guard !streams.isEmpty else { return }
+
+            let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+            let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
+            let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+
+            let (bestNext, _) = StreamManager.shared.selectFastStartCandidate(
+                from: streams,
+                sourceMode: sourceMode,
+                preferredQuality: preferredQuality,
+                preferredLang: preferredLang,
+                probeStatus: await MainActor.run { self.probeStatus }
+            )
+
+            guard let winner = bestNext else { return }
+
+            // Pre-warm the next episode source (AIOStreams style)
+            if winner.isTorrent {
+                if let hash = self.torrentHash(winner) {
+                    StremioServerManager.shared.trackCreate(
+                        infoHash: hash,
+                        magnetURL: winner.url.absoluteString,
+                        fileIdx: winner.fileIdx ?? 0
+                    )
+                    _ = await self.resolveTorrentStream(winner)
+                }
+            } else {
+                Self.warmHTTP(url: self.getPlayableURL(for: winner))
+            }
+
+            let subs = await subsTask
+            await MainActor.run {
+                self.prefetchedNextStream = winner
+                self.prefetchedNextSubtitles = subs
+                self.prefetchedNextKey = nextKey
+                self.prefetchedNextAt = Date()
+                print("[PlayerManager] ⚡ Next Episode pre-warmed and ready: \(winner.cleanTitle) (\(winner.source))")
+            }
         }
     }
     
@@ -1247,11 +1506,29 @@ class PlayerManager: ObservableObject {
             return
         }
 
-        guard !availableStreams.isEmpty else { return }
+        if !standbyFallbacks.isEmpty {
+            advanceToStandbyFallback()
+            return
+        }
+
+        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+        let filteredStreams: [Stream]
+        if sourceMode == "http" {
+            filteredStreams = availableStreams.filter { !$0.isTorrent }
+        } else if sourceMode == "torrent" {
+            filteredStreams = availableStreams.filter { $0.isTorrent }
+        } else {
+            filteredStreams = availableStreams
+        }
+
+        guard !filteredStreams.isEmpty else {
+            errorMessage = "No playable \(sourceMode) sources available."
+            return
+        }
 
         let currentIndex: Int?
         if let currentURL = currentStreamURL {
-            currentIndex = availableStreams.firstIndex(where: { s in
+            currentIndex = filteredStreams.firstIndex(where: { s in
                 if s.url == currentURL { return true }
                 let playable = getPlayableURL(for: s)
                 return playable == currentURL || playable.absoluteString == currentURL.absoluteString
@@ -1261,13 +1538,13 @@ class PlayerManager: ObservableObject {
         }
 
         let nextIndex = currentIndex.map { $0 + 1 } ?? 0
-        if nextIndex < availableStreams.count {
-            let nextStream = availableStreams[nextIndex]
-            print("[PlayerManager] Current stream failed. Trying next (\(nextIndex + 1)/\(availableStreams.count)): \(nextStream.cleanTitle)")
+        if nextIndex < filteredStreams.count {
+            let nextStream = filteredStreams[nextIndex]
+            print("[PlayerManager] Current stream failed. Trying next (\(nextIndex + 1)/\(filteredStreams.count)): \(nextStream.cleanTitle)")
             attemptStream(nextStream)
         } else {
-            print("[PlayerManager] All streams exhausted.")
-            errorMessage = "Unable to play video. Please try another source."
+            print("[PlayerManager] All \(sourceMode) streams exhausted.")
+            errorMessage = "All top sources failed to stream. Please pick another source manually."
         }
     }
 }

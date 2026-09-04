@@ -31,12 +31,13 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
     let popularity: Double         // TMDB-scale popularity (roughly 0...500+)
     let voteCount: Int
     let voteAverage: Double
-    let posterPath: String?
-    let backdropPath: String?
-    let overview: String?
-    let releaseDate: Date?
+    var posterPath: String?
+    var backdropPath: String?
+    var overview: String?
+    var releaseDate: Date?
     let isAdult: Bool
     var imdbID: String?
+    var genres: [String]?
     let source: CatalogSource
     
     // Derived precomputed fields for fast zero-cost matching
@@ -59,6 +60,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
         releaseDate: Date?,
         isAdult: Bool,
         imdbID: String?,
+        genres: [String]? = nil,
         source: CatalogSource
     ) {
         self.id = id
@@ -73,6 +75,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
         self.releaseDate = releaseDate
         self.isAdult = isAdult
         self.imdbID = imdbID
+        self.genres = genres
         self.source = source
         
         let norm = title.normalizedForSearch
@@ -105,7 +108,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
         if path.hasPrefix("http") {
             return URL(string: path)
         }
-        return URL(string: "https://image.tmdb.org/t/p/w1280\(path)")
+        return URL(string: "https://image.tmdb.org/t/p/original\(path)")
     }
     
     /// Converts this search candidate into Flux's primary `MediaItem`
@@ -131,7 +134,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
             seasons: nil,
             runtime: nil,
             certification: nil,
-            genres: nil,
+            genres: genres,
             popularity: popularity,
             releaseDate: releaseDateString,
             originalLanguage: nil,
@@ -179,6 +182,7 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
             releaseDate: parsedDate,
             isAdult: false,
             imdbID: mediaItem.id.starts(with: "tt") ? mediaItem.id : nil,
+            genres: mediaItem.genres,
             source: .localCache
         )
     }

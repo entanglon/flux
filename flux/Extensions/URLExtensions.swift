@@ -11,7 +11,7 @@ extension URL {
             let sizes = ["/w300/", "/w500/", "/w780/", "/w1280/"]
             for size in sizes {
                 if urlString.contains(size) {
-                    urlString = urlString.replacingOccurrences(of: size, with: "/w1280/")
+                    urlString = urlString.replacingOccurrences(of: size, with: "/original/")
                     break
                 }
             }

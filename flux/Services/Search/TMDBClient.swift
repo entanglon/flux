@@ -70,6 +70,7 @@ struct TMDBResult: Decodable, Sendable {
     let releaseDate: String?
     let firstAirDate: String?
     let adult: Bool?
+    let genreIds: [Int]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, name, popularity, adult, overview
@@ -80,6 +81,7 @@ struct TMDBResult: Decodable, Sendable {
         case backdropPath = "backdrop_path"
         case releaseDate = "release_date"
         case firstAirDate = "first_air_date"
+        case genreIds = "genre_ids"
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -112,6 +114,7 @@ struct TMDBResult: Decodable, Sendable {
             releaseDate: parsedDate,
             isAdult: adult ?? false,
             imdbID: nil,
+            genres: TMDBGenreMapper.names(for: genreIds),
             source: .tmdb
         )
     }

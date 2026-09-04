@@ -35,6 +35,7 @@ struct HomeView: View {
     @State private var genres: [Genre] = Genre.allGenres
     @State private var forYouItems: [MediaItem] = []
     @State private var becauseTitle: String? = nil
+    @State private var becauseWasLoved: Bool = false
     @State private var trendingWindow: String = "day"
     
     @AppStorage("enableFluxCatalogue") private var enableFluxCatalogue = true
@@ -61,13 +62,14 @@ struct HomeView: View {
                     }
                     
                     // Continue Watching (Real Data with Episode Stills)
-                    if !userData.history.isEmpty {
+                    let itemsToDisplay = continueWatchingItems
+                    if !itemsToDisplay.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             ListSectionHeader(title: "Continue Watching", value: MediaListView.ListType.continueWatching)
                                 .padding(.leading, 268)
                                 .padding(.trailing, 40)
                             
-                            CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
+                            CarouselView(items: itemsToDisplay, spacing: 16, itemWidth: 290) { item in
                                 Button(action: {
                                     PlayerManager.shared.play(
                                         item,
@@ -82,27 +84,6 @@ struct HomeView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .focusEffectDisabled()
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-
-                    // For You (taste-based recommendations, below Continue Watching)
-                    if !forYouItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(
-                                title: becauseTitle != nil ? "Because you watched \(becauseTitle!)" : "For You",
-                                value: MediaListView.ListType.fixed(title: "For You", items: forYouItems)
-                            )
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
-
-                            CarouselView(items: forYouItems) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.bottom, 16)
@@ -180,8 +161,37 @@ struct HomeView: View {
                         renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
                     }
 
-                    // Addon Sections & Other Rows
+                    // Addon Sections
                     addonRows
+
+                    // For You / Taste Recommendations (placed at the bottom, just above Watchlist)
+                    if !forYouItems.isEmpty {
+                        let forYouTitle: String = {
+                            if let title = becauseTitle {
+                                return becauseWasLoved ? "Because you liked \(title)" : "Because you watched \(title)"
+                            }
+                            return "For You"
+                        }()
+                        
+                        VStack(alignment: .leading, spacing: 16) {
+                            ListSectionHeader(
+                                title: forYouTitle,
+                                value: MediaListView.ListType.fixed(title: forYouTitle, items: forYouItems)
+                            )
+                            .padding(.leading, 268)
+                            .padding(.trailing, 40)
+
+                            CarouselView(items: forYouItems) { item in
+                                NavigationLink(value: item) {
+                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                        .frame(width: 180)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 16)
+                    }
+
                     watchlistRow
                     genreRow
                     historyRow
@@ -220,12 +230,18 @@ struct HomeView: View {
         guard TasteProfileManager.shared.hasEnoughSignal else {
             forYouItems = []
             becauseTitle = nil
+            becauseWasLoved = false
             return
         }
         let (recs, because) = await TasteProfileManager.shared.forYouRecommendations()
         if !Task.isCancelled {
             forYouItems = recs
             becauseTitle = because?.title
+            if let b = because {
+                becauseWasLoved = TasteProfileManager.shared.lovedItems.contains(where: { $0.id == b.id })
+            } else {
+                becauseWasLoved = false
+            }
         }
     }
     
@@ -357,26 +373,47 @@ extension HomeView {
     private func loadData() async {
         // Parallel non-blocking streaming load for all discovery rails
         await withTaskGroup(of: Void.self) { group in
-            // 1. Hero Content & Trending Today
+            // 1. Trending Today, Trending This Week & Curated Hero Billboard
             group.addTask {
-                if let items = try? await TMDBEnricher.shared.fetchTrendingAll(window: "day"), !items.isEmpty {
+                async let dayTask = try? TMDBEnricher.shared.fetchTrendingAll(window: "day")
+                async let weekTask = try? TMDBEnricher.shared.fetchTrendingAll(window: "week")
+                
+                let (dayItems, weekItems) = await (dayTask, weekTask)
+                
+                if let dayList = dayItems, !dayList.isEmpty {
                     await MainActor.run {
-                        self.trendingTodayItems = items
-                        self.heroContent = Array(items.prefix(10))
+                        self.trendingTodayItems = dayList
+                    }
+                }
+                
+                if let weekList = weekItems, !weekList.isEmpty {
+                    // Curate Flagship Hero Titles from Weekly Trends:
+                    // Must have high-res backdrop, be released, have meaningful overview,
+                    // and prioritize prestige/popular cinema & top shows.
+                    let heroCandidates = weekList.filter { item in
+                        let hasBackdrop = item.backdropURL != nil || item.heroURL != nil
+                        let hasOverview = !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        let hasGoodRating = (item.voteAverage ?? 6.5) >= 6.0
+                        return hasBackdrop && hasOverview && item.isReleased && hasGoodRating
+                    }
+                    .sorted { a, b in
+                        let scoreA = (a.voteAverage ?? 6.0) * 15.0 + (a.popularity ?? 0) * 0.1
+                        let scoreB = (b.voteAverage ?? 6.0) * 15.0 + (b.popularity ?? 0) * 0.1
+                        return scoreA > scoreB
+                    }
+                    
+                    let finalHero = Array((heroCandidates.isEmpty ? weekList : heroCandidates).prefix(7))
+                    await MainActor.run {
+                        self.trendingWeekItems = weekList
+                        self.heroContent = finalHero
                         withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
                     }
                 } else if let items = try? await StremioService.shared.fetchTrendingMovies(), !items.isEmpty {
+                    let filtered = items.filter { $0.backdropURL != nil || $0.heroURL != nil }
                     await MainActor.run {
-                        self.heroContent = Array(items.prefix(10))
+                        self.heroContent = Array((filtered.isEmpty ? items : filtered).prefix(7))
                         withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
                     }
-                }
-            }
-            
-            // 2. Trending This Week
-            group.addTask {
-                if let items = try? await TMDBEnricher.shared.fetchTrendingAll(window: "week"), !items.isEmpty {
-                    await MainActor.run { self.trendingWeekItems = items }
                 }
             }
             
@@ -513,7 +550,26 @@ extension HomeView {
         }
     }
     
-
+    private var continueWatchingItems: [MediaItem] {
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+        for item in userData.history {
+            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
+            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            let idKey = "id:\(item.id)"
+            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
+            
+            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
+                result.append(item)
+                seen.insert(idKey)
+                seen.insert(numKey)
+                if !item.title.isEmpty && item.title != "Unknown" {
+                    seen.insert(titleKey)
+                }
+            }
+        }
+        return result
+    }
 }
 
 #Preview {

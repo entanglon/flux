@@ -6,6 +6,8 @@ struct BonusContentItem: Identifiable, Hashable {
     let subtitle: String?
     let categoryType: String // e.g. "Behind the Scenes", "Featurette", "Bloopers", "Trailer", "Teaser", "Special", "Clip"
     let thumbnailURL: URL?
+    var fallbackThumbnailURL: URL? = nil // e.g. 16:9 mqdefault.jpg if maxresdefault 404s
+    var fallbackArtURL: URL? = nil // Non-repeating title still/backdrop fallback
     let videoKey: String? // YouTube key for video extras
     let episode: Episode? // If playable via native player stream (Season 0 Specials)
     

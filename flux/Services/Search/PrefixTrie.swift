@@ -13,6 +13,37 @@ actor PrefixTrie {
         let backdropPath: String?
         /// Precomputed so lookups never have to re-rank; higher sorts first.
         let sortWeight: Double
+        let overview: String?
+        let voteAverage: Double?
+        let genres: [String]?
+        let releaseDate: String?
+        let imdbID: String?
+        
+        init(
+            id: String,
+            title: String,
+            mediaType: SearchMediaType,
+            posterPath: String?,
+            backdropPath: String?,
+            sortWeight: Double,
+            overview: String? = nil,
+            voteAverage: Double? = nil,
+            genres: [String]? = nil,
+            releaseDate: String? = nil,
+            imdbID: String? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.mediaType = mediaType
+            self.posterPath = posterPath
+            self.backdropPath = backdropPath
+            self.sortWeight = sortWeight
+            self.overview = overview
+            self.voteAverage = voteAverage
+            self.genres = genres
+            self.releaseDate = releaseDate
+            self.imdbID = imdbID
+        }
         
         var posterURL: URL? {
             guard let path = posterPath, !path.isEmpty else { return nil }
@@ -20,17 +51,23 @@ actor PrefixTrie {
             return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
         }
         
+        var backdropURL: URL? {
+            guard let path = backdropPath, !path.isEmpty else { return nil }
+            if path.hasPrefix("http") { return URL(string: path) }
+            return URL(string: "https://image.tmdb.org/t/p/original\(path)")
+        }
+        
         func toMediaItem() -> MediaItem {
             let cleanId = id.replacingOccurrences(of: "tmdb-", with: "")
                             .replacingOccurrences(of: "cinemeta-", with: "")
             return MediaItem(
-                id: cleanId,
+                id: imdbID ?? cleanId,
                 title: title,
-                description: "",
+                description: overview ?? "",
                 imageURL: posterURL,
                 posterURL: posterURL,
-                backdropURL: nil,
-                heroURL: nil,
+                backdropURL: backdropURL,
+                heroURL: backdropURL,
                 logoURL: nil,
                 streamURL: nil,
                 category: mediaType == .movie ? "Movie" : "TV Show",
@@ -41,13 +78,13 @@ actor PrefixTrie {
                 seasons: nil,
                 runtime: nil,
                 certification: nil,
-                genres: nil,
+                genres: genres,
                 popularity: nil,
-                releaseDate: nil,
+                releaseDate: releaseDate,
                 originalLanguage: nil,
                 spokenLanguages: nil,
                 originCountry: nil,
-                voteAverage: nil,
+                voteAverage: voteAverage,
                 episodes: nil,
                 watchProviders: nil
             )
@@ -87,7 +124,12 @@ actor PrefixTrie {
             mediaType: candidate.mediaType,
             posterPath: candidate.posterPath,
             backdropPath: candidate.backdropPath,
-            sortWeight: category.boost + log10(candidate.popularity + 1) * 100
+            sortWeight: category.boost + log10(candidate.popularity + 1) * 100,
+            overview: candidate.overview,
+            voteAverage: candidate.voteAverage,
+            genres: candidate.genres,
+            releaseDate: candidate.releaseDateString,
+            imdbID: candidate.imdbID
         )
 
         for key in indexableKeys(for: candidate.title) {

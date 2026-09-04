@@ -82,95 +82,103 @@ struct FeaturedCarousel: View {
                 .ignoresSafeArea()
                 
                 // 3. Content
-                NavigationLink(value: item) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        // Category Eyebrow / Upcoming Badge
-                        if !item.isReleased {
-                            Text(item.upcomingBadgeText)
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(Color.white.opacity(0.2)))
-                                .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                                .shadow(color: .black.opacity(0.5), radius: 4)
-                        } else {
-                            Text(item.category.uppercased())
-                                .font(.system(size: 12, weight: .bold))
-                                .tracking(2.0)
-                                .foregroundStyle(.white.opacity(0.75))
-                                .shadow(color: .black.opacity(0.5), radius: 4)
-                        }
-                        
-                        // Title (Logo styling)
-                        Text(item.title)
-                            .font(.system(size: 56, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        
-                        // Metadata Row with Tech Badges
-                        HStack(spacing: 10) {
-                            if let year = item.releaseDateYear {
-                                Text(year)
-                                    .fontWeight(.bold)
-                            }
-                            if let genres = item.genres?.prefix(2).map({ $0 }) {
-                                Text("•")
-                                Text(genres.joined(separator: ", "))
-                            }
-                            if let vote = item.voteAverage, vote > 0 {
-                                Text("•")
-                                HStack(spacing: 3) {
-                                    Image(systemName: "star.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.yellow)
-                                    Text(String(format: "%.1f", vote))
-                                }
+                VStack(alignment: .leading, spacing: 14) {
+                    NavigationLink(value: item) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            // Category Eyebrow / Upcoming Badge
+                            if !item.isReleased {
+                                Text(item.upcomingBadgeText)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(Color.white.opacity(0.2)))
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                                    .shadow(color: .black.opacity(0.5), radius: 4)
+                            } else {
+                                Text(item.category.uppercased())
+                                    .font(.system(size: 12, weight: .bold))
+                                    .tracking(2.0)
+                                    .foregroundStyle(.white.opacity(0.75))
+                                    .shadow(color: .black.opacity(0.5), radius: 4)
                             }
                             
-                            TechBadge(text: "4K")
-                            TechBadge(text: "HDR")
-                            TechBadge(text: "ATMOS")
-                        }
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white.opacity(0.9))
-                        
-                        // Description
-                        Text(item.description)
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(3)
-                            .lineSpacing(3)
-                            .frame(maxWidth: 620, alignment: .leading)
-                            .padding(.top, 2)
-                            .shadow(color: .black.opacity(0.4), radius: 4)
-                        
-                        // Action Buttons (Apple TV Master Layout)
-                        HStack(spacing: 14) {
-                            if !item.isReleased {
-                                // Primary Add to Watchlist Button
-                                Button(action: {
-                                    userData.toggleWatchlist(item)
-                                }) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
-                                            .font(.system(size: 14, weight: .bold))
-                                        Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
-                                            .font(.system(size: 14, weight: .bold))
-                                    }
-                                    .foregroundStyle(.black)
-                                    .padding(.horizontal, 28)
-                                    .padding(.vertical, 10)
-                                    .background(Color.white)
-                                    .clipShape(Capsule())
-                                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            // Title (Logo styling)
+                            Text(item.title)
+                                .font(.system(size: 56, weight: .heavy))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            
+                            // Metadata Row with Tech Badges
+                            HStack(spacing: 10) {
+                                if let year = item.releaseDateYear {
+                                    Text(year)
+                                        .fontWeight(.bold)
                                 }
-                                .buttonStyle(.plain)
-                            } else {
-                                // Primary Play Button
+                                if let genres = item.genres?.prefix(2).map({ $0 }) {
+                                    Text("•")
+                                    Text(genres.joined(separator: ", "))
+                                }
+                                if let vote = item.voteAverage, vote > 0 {
+                                    Text("•")
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "star.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.yellow)
+                                        Text(String(format: "%.1f", vote))
+                                    }
+                                }
+                                
+                                TechBadge(text: "4K")
+                                TechBadge(text: "HDR")
+                                TechBadge(text: "ATMOS")
+                            }
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white.opacity(0.9))
+                            
+                            // Description
+                            Text(item.description)
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(3)
+                                .lineSpacing(3)
+                                .frame(maxWidth: 620, alignment: .leading)
+                                .padding(.top, 2)
+                                .shadow(color: .black.opacity(0.4), radius: 4)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Action Buttons (Apple TV Master Layout)
+                    HStack(spacing: 14) {
+                        if !item.isReleased {
+                            // Primary Add to Watchlist Button
+                            Button(action: {
+                                userData.toggleWatchlist(item)
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
+                                        .font(.system(size: 14, weight: .bold))
+                                    Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
+                                        .font(.system(size: 14, weight: .bold))
+                                }
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 28)
+                                .padding(.vertical, 10)
+                                .background(Color.white)
+                                .clipShape(Capsule())
+                                .contentShape(Capsule())
+                                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Capsule())
+                        } else {
+                            // Primary Play Button
+                            NavigationLink(value: item) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "play.fill")
                                         .font(.system(size: 14, weight: .bold))
@@ -182,25 +190,30 @@ struct FeaturedCarousel: View {
                                 .padding(.vertical, 10)
                                 .background(Color.white)
                                 .clipShape(Capsule())
+                                .contentShape(Capsule())
                                 .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                                
-                                // Secondary Watchlist Button (Circular Glass + Button)
-                                Button(action: {
-                                    userData.toggleWatchlist(item)
-                                }) {
-                                    Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 36, height: 36)
-                                        .glassEffect(.regular.interactive(), in: .circle)
-                                }
-                                .buttonStyle(.plain)
                             }
+                            .buttonStyle(.plain)
+                            .contentShape(Capsule())
+                            
+                            // Secondary Watchlist Button (Circular Glass + Button)
+                            Button(action: {
+                                userData.toggleWatchlist(item)
+                            }) {
+                                Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Circle())
+                                    .glassEffect(.regular.interactive(), in: .circle)
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Circle())
+                            .help(userData.isInWatchlist(item) ? "Remove from Watchlist" : "Add to Watchlist")
                         }
-                        .padding(.top, 12)
                     }
+                    .padding(.top, 12)
                 }
-                .buttonStyle(.plain)
                 .padding(.leading, 268)
                 .padding(.trailing, 48)
                 .padding(.bottom, 40)

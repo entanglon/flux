@@ -165,7 +165,8 @@ struct MediaListView: View {
     @ViewBuilder
     private var content: some View {
         if type == .continueWatching {
-            if userData.history.isEmpty {
+            let continueItems = continueWatchingItems
+            if continueItems.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 48))
@@ -180,7 +181,7 @@ struct MediaListView: View {
                 .frame(maxWidth: .infinity, minHeight: 300)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 24)], spacing: 32) {
-                    ForEach(userData.history) { item in
+                    ForEach(continueItems) { item in
                         Button(action: {
                             PlayerManager.shared.play(
                                 item,
@@ -309,5 +310,26 @@ struct MediaListView: View {
             print("Error loading list: \(error)")
             await MainActor.run { isLoading = false }
         }
+    }
+    
+    private var continueWatchingItems: [MediaItem] {
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+        for item in userData.history {
+            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
+            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            let idKey = "id:\(item.id)"
+            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
+            
+            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
+                result.append(item)
+                seen.insert(idKey)
+                seen.insert(numKey)
+                if !item.title.isEmpty && item.title != "Unknown" {
+                    seen.insert(titleKey)
+                }
+            }
+        }
+        return result
     }
 }

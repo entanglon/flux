@@ -1,12 +1,38 @@
 import SwiftUI
 import ImageIO
 
-struct CachedImage<Content: View>: View {
-    private struct DecodedImage {
-        let image: NSImage
-        let cost: Int
-    }
+struct DecodedImage: @unchecked Sendable {
+    let image: NSImage
+    let cost: Int
+}
 
+enum CachedImageDownsampler {
+    static func downsample(data: Data, maxDimension: CGFloat) async -> DecodedImage? {
+        await Task.detached(priority: .userInitiated) { () -> DecodedImage? in
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDimension
+            ]
+
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+                return nil
+            }
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            
+            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+            return DecodedImage(
+                image: nsImage,
+                cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
+            )
+        }.value
+    }
+}
+
+struct CachedImage<Content: View>: View {
     let url: URL?
     var fallbacks: [URL?] = []
     let transaction: Transaction
@@ -38,45 +64,40 @@ struct CachedImage<Content: View>: View {
 
     var body: some View {
         content(phase)
-            .task(id: resolvedCandidates) {
-                await load()
+            .task(id: url) {
+                await loadImage()
             }
     }
 
-    /// Re-computed when url/fallbacks change so .task re-runs.
-    private var resolvedCandidates: [URL] {
-        ([url] + fallbacks).compactMap { $0 }
-    }
-
-    private func load() async {
-        let candidates = resolvedCandidates
+    private func loadImage() async {
+        // Fast path: synchronous in-memory cache check (zero task latency on scroll)
+        let candidates = ([url] + fallbacks).compactMap { $0 }
         guard !candidates.isEmpty else {
-            if case .empty = phase { } else { phase = .empty }
+            phase = .empty
             return
         }
 
         let roundedDim = Int(maxDimension.rounded())
 
-        // Quick check: if already showing an image from our candidates, verify it's valid
+        // 1. Immediate in-memory cache hit
         for candidate in candidates {
-            let cacheKey = "\(candidate.absoluteString)#\(roundedDim)" as NSString
-            if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: cacheKey) {
-                if case .success = phase {
-                    return
-                }
-                phase = .success(Image(nsImage: cachedNSImage))
+            let key = "\(candidate.absoluteString)#\(roundedDim)" as NSString
+            if let cached = ImageInMemoryCache.shared.object(forKey: key) {
+                phase = .success(Image(nsImage: cached))
                 return
             }
         }
 
-        // Walk the ladder: first candidate that produces a decoded image wins.
+        // 2. Fetch and decode (disk cache -> network -> downsample)
         for candidate in candidates {
             if Task.isCancelled { return }
             let cacheKey = "\(candidate.absoluteString)#\(roundedDim)" as NSString
 
-            // 1. In-memory NSCache (instant)
-            if let cachedNSImage = ImageInMemoryCache.shared.object(forKey: cacheKey) {
-                phase = .success(Image(nsImage: cachedNSImage))
+            // Re-check memory cache (another task may have decoded it)
+            if let cached = ImageInMemoryCache.shared.object(forKey: cacheKey) {
+                withTransaction(transaction) {
+                    phase = .success(Image(nsImage: cached))
+                }
                 return
             }
 
@@ -85,7 +106,7 @@ struct CachedImage<Content: View>: View {
 
             // 2. Session's own disk cache
             if let cachedResponse = session.configuration.urlCache?.cachedResponse(for: request),
-               let downsampled = await downsample(data: cachedResponse.data, maxDimension: maxDimension) {
+               let downsampled = await CachedImageDownsampler.downsample(data: cachedResponse.data, maxDimension: maxDimension) {
                 ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
                 if Task.isCancelled { return }
                 withTransaction(transaction) {
@@ -101,7 +122,7 @@ struct CachedImage<Content: View>: View {
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                     continue // dead URL — try next candidate
                 }
-                guard let downsampled = await downsample(data: data, maxDimension: maxDimension) else {
+                guard let downsampled = await CachedImageDownsampler.downsample(data: data, maxDimension: maxDimension) else {
                     continue // undecodable — try next candidate
                 }
                 ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
@@ -120,30 +141,70 @@ struct CachedImage<Content: View>: View {
             phase = .failure(URLError(.cannotFindHost))
         }
     }
+}
 
-    // Efficient Downsampling using ImageIO on a detached cooperative task
-    private func downsample(data: Data, maxDimension: CGFloat) async -> DecodedImage? {
-        await Task.detached(priority: .userInitiated) {
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxDimension
-            ]
+/// Lightweight lookahead prefetcher for horizontal rails.
+/// Warms the next 2-3 card thumbnails into ImageInMemoryCache ahead of the scroll position.
+final class ImagePrefetcher: @unchecked Sendable {
+    static let shared = ImagePrefetcher()
 
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-                return nil
+    private var inFlight = Set<String>()
+    private let lock = NSLock()
+
+    private init() {}
+
+    func prefetch(urls: [URL?], maxDimension: CGFloat = 300) {
+        let validURLs = urls.compactMap { $0 }
+        guard !validURLs.isEmpty else { return }
+
+        let roundedDim = Int(maxDimension.rounded())
+        var toFetch: [URL] = []
+
+        lock.lock()
+        for url in validURLs {
+            let cacheKey = "\(url.absoluteString)#\(roundedDim)"
+            if ImageInMemoryCache.shared.object(forKey: cacheKey as NSString) != nil {
+                continue
             }
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return nil
+            if inFlight.contains(cacheKey) {
+                continue
             }
-            
-            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
-            return DecodedImage(
-                image: nsImage,
-                cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
-            )
-        }.value
+            inFlight.insert(cacheKey)
+            toFetch.append(url)
+        }
+        lock.unlock()
+
+        guard !toFetch.isEmpty else { return }
+
+        Task(priority: .utility) {
+            for url in toFetch {
+                let cacheKey = "\(url.absoluteString)#\(roundedDim)"
+                defer {
+                    self.lock.lock()
+                    self.inFlight.remove(cacheKey)
+                    self.lock.unlock()
+                }
+
+                let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+                // 1. Session disk cache
+                if let cachedResponse = ImageSession.shared.configuration.urlCache?.cachedResponse(for: request),
+                   let downsampled = await CachedImageDownsampler.downsample(data: cachedResponse.data, maxDimension: maxDimension) {
+                    ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey as NSString, cost: downsampled.cost)
+                    continue
+                }
+
+                // 2. Network fetch
+                do {
+                    let (data, response) = try await ImageSession.shared.data(for: request)
+                    if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                       let downsampled = await CachedImageDownsampler.downsample(data: data, maxDimension: maxDimension) {
+                        ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey as NSString, cost: downsampled.cost)
+                    }
+                } catch {
+                    // Ignore prefetch network errors
+                }
+            }
+        }
     }
 }
 

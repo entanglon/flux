@@ -50,13 +50,14 @@ struct GhostRect: View {
 struct GhostPoster: View {
     var width: CGFloat = 180
     var ratio: CGFloat = 2/3
+    var cornerRadius: CGFloat = 12
 
     var body: some View {
         Color.clear
             .aspectRatio(ratio, contentMode: .fit)
             .frame(width: width)
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Color.white.opacity(0.06))
             }
             .shimmer()
@@ -109,6 +110,7 @@ struct GhostHero: View {
 struct GhostRail: View {
     var posterWidth: CGFloat = 180
     var ratio: CGFloat = 2/3
+    var cornerRadius: CGFloat = 12
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -119,11 +121,13 @@ struct GhostRail: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 24) {
                     ForEach(0..<7, id: \.self) { _ in
-                        GhostPoster(width: posterWidth, ratio: ratio)
+                        GhostPoster(width: posterWidth, ratio: ratio, cornerRadius: cornerRadius)
                     }
                 }
                 .padding(.leading, 268)
-                .padding(.trailing, 40)
+                .padding(.trailing, 60)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
             }
         }
     }

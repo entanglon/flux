@@ -352,8 +352,10 @@ struct TMDBVideo: Codable, Identifiable, Hashable {
         case publishedAt = "published_at"
     }
     
-    var thumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/hqdefault.jpg") }
+    var thumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/maxresdefault.jpg") }
+    var fallbackThumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/mqdefault.jpg") }
     var maxResThumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/maxresdefault.jpg") }
+    var hqThumbnailURL: URL? { URL(string: "https://img.youtube.com/vi/\(key)/hqdefault.jpg") }
     var youtubeURL: URL? { URL(string: "https://www.youtube.com/watch?v=\(key)") }
     var embedURL: URL? { URL(string: "https://www.youtube-nocookie.com/embed/\(key)?autoplay=1&rel=0&modestbranding=1&playsinline=1") }
 }
@@ -625,7 +627,7 @@ struct TMDBEpisode: Codable, Identifiable {
             name: name,
             overview: overview,
             stillURL: stillPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(stillPath!)") : nil, // Thumbnail
-            heroURL: stillPath != nil ? URL(string: "https://image.tmdb.org/t/p/w1280\(stillPath!)") : nil, // Hero Quality
+            heroURL: stillPath != nil ? URL(string: "https://image.tmdb.org/t/p/original\(stillPath!)") : nil, // Hero Quality
             episodeNumber: episodeNumber,
             seasonNumber: seasonNumber,
             airDate: airDate,
@@ -644,7 +646,7 @@ extension TMDBMovie {
             imageURL: backdropURL ?? posterURL,
             posterURL: posterURL,
             backdropURL: backdropURL,
-            heroURL: backdropPath != nil ? URL(string: "https://image.tmdb.org/t/p/w1280\(backdropPath!)") : nil,
+            heroURL: backdropPath != nil ? URL(string: "https://image.tmdb.org/t/p/original\(backdropPath!)") : nil,
             streamURL: nil,
             category: "Movie",
             progress: nil,
@@ -673,7 +675,7 @@ extension TMDBTVShow {
             imageURL: backdropURL ?? posterURL,
             posterURL: posterURL,
             backdropURL: backdropURL,
-            heroURL: backdropPath != nil ? URL(string: "https://image.tmdb.org/t/p/w1280\(backdropPath!)") : nil,
+            heroURL: backdropPath != nil ? URL(string: "https://image.tmdb.org/t/p/original\(backdropPath!)") : nil,
             streamURL: nil,
             category: "TV Show",
             progress: nil,

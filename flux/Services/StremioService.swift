@@ -18,6 +18,7 @@ struct StremioMetaPreview: Codable {
     let description: String?
     let releaseInfo: String?
     let imdbRating: String?
+    let genres: [String]?
 }
 
 struct StremioVideo: Codable {
@@ -270,6 +271,7 @@ extension StremioMetaPreview {
             heroURL: sharpBackdropURL(self.background),
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
+            genres: self.genres,
             popularity: (Double(self.imdbRating ?? "0") ?? 0) * 10,
             releaseDate: self.releaseInfo,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil

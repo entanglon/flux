@@ -23,18 +23,7 @@ class TMDBEnricher {
         let size: String
         switch quality {
         case .poster: size = "w780"
-        case .backdrop: size = "w1280"
-        case .original: size = "original"
-        case .automatic:
-            #if os(macOS)
-            let screen = NSScreen.main
-            let scale = screen?.backingScaleFactor ?? 1.0
-            let physicalWidth = (screen?.frame.width ?? 1920) * scale
-            // If physical width is > 2000, we prioritize Original/4K quality
-            size = physicalWidth > 2000 ? "original" : "w1280"
-            #else
-            size = "w1280"
-            #endif
+        case .backdrop, .original, .automatic: size = "original"
         }
         return URL(string: "https://image.tmdb.org/t/p/\(size)\(path)")
     }
@@ -372,17 +361,35 @@ class TMDBEnricher {
         }
     }
     
-    func fetchSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: String] {
+    struct TMDBEpisodeEnrichment {
+        let name: String
+        let overview: String
+        let stillURL: URL?
+        let runtime: Int?
+    }
+
+    func fetchFullSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: TMDBEpisodeEnrichment] {
         let urlString = "\(baseURL)/tv/\(tvId)/season/\(seasonNumber)?api_key=\(apiKey)"
         guard let url = URL(string: urlString),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(TMDBSeasonResponse.self, from: data) else { return [:] }
         
-        var overviews: [Int: String] = [:]
+        var result: [Int: TMDBEpisodeEnrichment] = [:]
         for episode in response.episodes {
-            overviews[episode.episode_number] = episode.overview
+            let still = episode.still_path != nil ? URL(string: "https://image.tmdb.org/t/p/w780\(episode.still_path!)") : nil
+            result[episode.episode_number] = TMDBEpisodeEnrichment(
+                name: episode.name,
+                overview: episode.overview,
+                stillURL: still,
+                runtime: episode.runtime
+            )
         }
-        return overviews
+        return result
+    }
+
+    func fetchSeasonEnrichment(tvId: String, seasonNumber: Int) async -> [Int: String] {
+        let enrichments = await fetchFullSeasonEnrichment(tvId: tvId, seasonNumber: seasonNumber)
+        return enrichments.mapValues { $0.overview }
     }
     
     // MARK: - Regional & Locale Helpers
@@ -670,11 +677,39 @@ class TMDBEnricher {
         return 6
     }
 
+    /// Fetches up to 15 distinct backdrops from TMDB for a title, useful for unique trailer art fallbacks.
+    func fetchBackdrops(item: MediaItem) async -> [URL] {
+        guard hasKey else { return [] }
+        let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
+        let tmdbID = item.id.starts(with: "tt") ? await resolveTmdbID(imdbID: item.id, type: type) : item.id
+        guard let id = tmdbID else { return [] }
+
+        let imagesURL = "\(baseURL)/\(type)/\(id)/images?api_key=\(apiKey)"
+        guard let url = URL(string: imagesURL),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let backdrops = json["backdrops"] as? [[String: Any]], !backdrops.isEmpty else {
+            return []
+        }
+
+        let primaryPath = item.backdropURL?.lastPathComponent
+        var urls: [URL] = []
+        for dict in backdrops {
+            guard let path = dict["file_path"] as? String else { continue }
+            if let primary = primaryPath, !primary.isEmpty, path.contains(primary) { continue }
+            if let u = URL(string: "https://image.tmdb.org/t/p/w780\(path)") {
+                urls.append(u)
+            }
+        }
+        return urls
+    }
+
     /// Returns curated bonus content items: High-res TMDB-enriched Season 0 Specials
     /// (streamable directly in Flux's native player) and strictly Official Trailers/Teasers.
     func fetchBonusContent(item: MediaItem, fullItem: MediaItem? = nil) async -> [BonusContentItem] {
         var items: [BonusContentItem] = []
         let type = item.category == "TV Show" || item.category == "Series" ? "tv" : "movie"
+        var availableBackdrops = await fetchBackdrops(item: item)
         
         // 1. Season 0 Specials (from Series metadata - streamable in Flux's native player)
         if type == "tv" {
@@ -699,7 +734,8 @@ class TMDBEnricher {
             for ep in seasonZeroEpisodes {
                 let tmdbData = tmdbStills[ep.episodeNumber]
                 let epName = (!ep.name.isEmpty && ep.name != "Episode \(ep.episodeNumber)") ? ep.name : (tmdbData?.name ?? "Special \(ep.episodeNumber)")
-                let epStill = ep.stillURL ?? tmdbData?.stillURL ?? item.backdropURL ?? item.heroURL
+                let epStill = ep.stillURL ?? tmdbData?.stillURL
+                let fallbackArt = availableBackdrops.isEmpty ? nil : availableBackdrops.removeFirst()
                 
                 let subtitle: String
                 if let runtime = ep.runtime {
@@ -728,6 +764,7 @@ class TMDBEnricher {
                     subtitle: subtitle,
                     categoryType: "Special",
                     thumbnailURL: epStill,
+                    fallbackArtURL: fallbackArt,
                     videoKey: nil,
                     episode: enrichedEp
                 ))
@@ -744,12 +781,18 @@ class TMDBEnricher {
         
         for vid in officialTrailers {
             let catType = vid.type == "Teaser" ? "Teaser" : "Trailer"
+            // Use 16:9 maxresdefault.jpg as primary thumbnail, with 16:9 mqdefault.jpg fallback
+            let thumb = vid.thumbnailURL
+            let fallbackThumb = vid.fallbackThumbnailURL
+            let fallbackArt = availableBackdrops.isEmpty ? nil : availableBackdrops.removeFirst()
             items.append(BonusContentItem(
                 id: "tmdb-trailer-\(vid.id)",
                 title: vid.name,
                 subtitle: "Official \(catType)",
                 categoryType: catType,
-                thumbnailURL: vid.maxResThumbnailURL ?? vid.thumbnailURL ?? item.backdropURL,
+                thumbnailURL: thumb,
+                fallbackThumbnailURL: fallbackThumb,
+                fallbackArtURL: fallbackArt,
                 videoKey: vid.key,
                 episode: nil
             ))

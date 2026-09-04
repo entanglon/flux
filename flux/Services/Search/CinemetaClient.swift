@@ -48,6 +48,7 @@ struct CinemetaMeta: Decodable, Sendable {
     let description: String?
     let releaseInfo: String?
     let imdbRating: String?
+    let genres: [String]?
 
     var asMediaCandidate: MediaCandidate {
         let syntheticVoteCount: Int
@@ -60,6 +61,17 @@ struct CinemetaMeta: Decodable, Sendable {
             syntheticPopularity = 0
         }
 
+        let sharpPoster: String? = {
+            if id.hasPrefix("tt") {
+                return "https://images.metahub.space/poster/large/\(id)/img"
+            }
+            return poster?.replacingOccurrences(of: "/poster/small/", with: "/poster/large/")
+        }()
+
+        let sharpBackdrop: String? = background?
+            .replacingOccurrences(of: "/background/small/", with: "/background/large/")
+            .replacingOccurrences(of: "/background/medium/", with: "/background/large/")
+
         return MediaCandidate(
             id: "cinemeta-\(id)",
             title: name,
@@ -67,12 +79,13 @@ struct CinemetaMeta: Decodable, Sendable {
             popularity: syntheticPopularity,
             voteCount: syntheticVoteCount,
             voteAverage: Double(imdbRating ?? "") ?? 0,
-            posterPath: poster,
-            backdropPath: background,
+            posterPath: sharpPoster ?? poster,
+            backdropPath: sharpBackdrop ?? background,
             overview: description,
             releaseDate: Self.parseYear(from: releaseInfo),
             isAdult: false,
             imdbID: id,
+            genres: genres,
             source: .cinemeta
         )
     }

@@ -82,6 +82,18 @@ struct MediaItem: Identifiable, Hashable, Codable {
         return String(date.prefix(4))
     }
     
+    /// True if the item represents an episodic series / TV show (Stremio "series", TMDB "tv", or populated episodes/seasons).
+    var isSeries: Bool {
+        let lower = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower == "tv show" || lower == "tv" || lower == "series" || lower.contains("series") || lower.contains("tv") {
+            return true
+        }
+        if (seasons?.count ?? 0) > 0 || (episodes?.count ?? 0) > 0 {
+            return true
+        }
+        return false
+    }
+    
     var isReleased: Bool {
         guard let dateStr = releaseDate, !dateStr.isEmpty else { return true }
         let formatter = DateFormatter()

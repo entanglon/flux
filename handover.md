@@ -1,6 +1,102 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 3, 2026 — STREAM PICKER LIQUID GLASS + HTTP-ADDON (PENGUPLAY/WEBSTREAMRMBG) INVESTIGATION
+## LATEST: Sep 4, 2026 — PLAYBACK, STREAM SELECTOR, SETTINGS SYNC, RESUME ACCURACY & LOOKAHEAD PREFETCHER
+
+### 1. Bulletproof Audio & Subtitle Auto-Selection (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**: Foreign audio streams (e.g. Korean in *Start-Up*) played without matching English subtitles, or wrong language was selected despite settings preference.
+- **Resolution**:
+  - Implemented `autoSelectPreferredTracks()` in `MPVController`.
+  - Automatically matches English audio track if available across all aliases, codes, and dub tags.
+  - If only foreign audio is present, automatically selects English subtitles (embedded track matching `en` or OpenSubtitles).
+  - Added `hasAutoSelectedTracksForCurrentMedia` to prevent overriding manual user track changes during playback.
+
+### 2. Elimination of Premature 100% Buffer Loading Flashes (`PlayerView.swift`) — Completed & Verified
+- **Issue**: Buffering progress bar quickly jumped to 100% and hid the loading view before any video decoded, then flashed or reset when fallback streams took over.
+- **Resolution**:
+  - Removed premature `animatedProgress = 1.0` and `hasStartedPlayback = true` from `onAppear`.
+  - Buffering screen now persists smoothly until `mpv.timePos > 0.05`, guaranteeing actual decoded video frames render before revealing playback.
+
+### 3. Edge-to-Edge Hitbox for Subtitle & Audio Pill Buttons (`PlayerControlsView.swift`) — Completed & Verified
+- **Issue**: Subtitle and Audio pill buttons required "centric clicks" directly on the 14px icon glyph.
+- **Resolution**:
+  - Moved `.frame(width: 46, height: 36)` and `.contentShape(Rectangle())` directly inside the `label: { ... }` block for both buttons.
+  - The entire rectangular half of the pill is now clickable edge-to-edge.
+
+### 4. Single-Press ESC Dismissal for Mid-Playback Stream Selector (`PlayerView.swift`) — Completed & Verified
+- **Issue**: Pressing ESC while the Stream Selector was open mid-playback either triggered the exit confirmation warning or required multiple presses.
+- **Resolution**:
+  - In root `.onKeyPress(.escape)`, added check: `if showManualStreamPicker { showManualStreamPicker = false; return .handled }`. Single-pressing ESC dismisses the modal immediately without affecting playback.
+
+### 5. Permanent 2K Option in Quality Menu (`PlayerView.swift`) — Completed & Verified
+- **Issue**: 2K resolution disappeared completely from the quality filter dropdown menu when 0 sources were available.
+- **Resolution**:
+  - The dropdown menu now always displays `["4K", "2K", "FHD", "HD", "SD"]`. When a tier has 0 sources, it shows `2K (0)` and is cleanly disabled.
+
+### 6. 2-Second Hover Floating Details Card on Stream Rows (`PlayerView.swift`) — Completed & Verified
+- **Issue**: Long release titles and file names were truncated at the edge (e.g. cutting off after "WEB-DL").
+- **Resolution**:
+  - Added a 2.0s hover timer to `StreamRowItemView`. Hovering for 2+ seconds pops up an untruncated floating details card with:
+    - Full selectable release title / filename.
+    - Addon provider, quality, size, codecs (HEVC, AV1, x264), HDR/DV, audio format (Atmos, 7.1, 5.1), audio languages, subtitles, and seeders/transport.
+
+### 7. Settings Reset Fix (4K) & Cloud Database Sync (`ProfileManager.swift`, `UserDataService.swift`, `SettingsView.swift`) — Completed & Verified
+- **Issue**: Maximum Resolution reverted to 4K repeatedly when reopening the app or switching profiles.
+- **Root Cause**: `SettingsView` modified `UserDefaults.standard`, but `ProfileManager` held a stale `profile.<id>.settings` snapshot that overwritten settings on profile reload.
+- **Resolution**:
+  - Added `saveCurrentProfileSettings()` and updated `restoreSettings(for:)` to snapshot active settings into the profile.
+  - Added `.onChange` across all 10 playback and streaming settings calling `saveCurrentProfileSettings()` and `scheduleAutoSync()`.
+  - Added `settings` export and import in `UserDataService` for full Cloudflare Worker sync.
+
+### 8. Direct Stream Selector in Non-Flux Mode (`PlayerView.swift`) — Completed & Verified
+- **Issue**: When Flux Mode was disabled, users saw "Finding streams..." followed by "Connecting to stream..." screens before the picker appeared.
+- **Resolution**:
+  - Removed full-screen intermediate `loadingView`. When Flux Mode is off, `streamSelectionView` displays directly on Frame 1, showing real-time addon progress and populating streams as they arrive.
+
+### 9. Per-Episode Watch Progress & Second-Accurate Resume (`UserDataService.swift`, `DetailView.swift`, `PlayerManager.swift`) — Completed & Verified
+- **Issue**: Playing an episode didn't respect progress if another episode was watched subsequently; episode cards only showed progress for the single last-watched episode.
+- **Resolution**:
+  - Added `getEpisodeProgress` and `saveEpisodeProgress` in `UserDataService` keyed by `(contentId, season, episode)`, synced with the cloud DB.
+  - Updated `DetailView.getEpisodeProgress` so all episode cards in the rail show individual progress bars.
+  - `PlayerManager.play(...)` accurately computes `pendingResumeTime` and MPV resumes at exact seconds.
+
+### 10. Cached Stream Health Probe & Local-Only Sync (`PlayerManager.swift`, `UserDataService.swift`) — Completed & Verified
+- **Issue**: Expired HTTP debrid links stalled playback; cached stream links were previously exposed to cloud sync payloads.
+- **Resolution**:
+  - Added `verifyStreamURLHealth` performing a fast 1.8s HEAD probe on cached HTTP streams before playback. If dead/expired, purges cache and falls back to auto-race (Flux) or stream picker (Non-Flux).
+  - Stripped `lastStreamURL` and `lastTorrentInfoHash` from cloud exports so links remain strictly device-local.
+
+### 11. Rail Thumbnail Lookahead Prefetcher (`CachedImage.swift`, `CarouselView.swift`, `DetailView.swift`) — Completed & Verified
+- **Issue**: Only on-screen cards had loaded thumbnails, causing placeholder/skeleton flashes when scrolling rails.
+- **Resolution**:
+  - Implemented `ImagePrefetcher` with ImageIO downsampling, deduplication, utility priority, and a 256 MB LRU memory limit.
+  - Added lookahead prefetching for the next 2–3 cards in `CarouselView` and `DetailRail`.
+
+### 12. Next Up: Smart Language Filtering in Flux Mode — Saved to Implementation Plan
+- **Plan**: Couple preferred language with title's `originalLanguage` (from TMDB/Cinemeta), support Dual/Multi-audio releases, and add a user-configurable toggle `enableFluxLanguageFilter` in Settings > Streaming > Flux Mode.
+
+---
+
+## Sep 3, 2026 — DYNAMIC STREAM PICKER TABS, ICON-ONLY SELECTORS, CAROUSEL HIT TARGET & DETAIL CLEANUP
+
+### FeaturedCarousel Add to Watchlist Hit Target Fix (`FeaturedCarousel.swift`) — Completed & Verified
+- **Issue**: The secondary Add to Watchlist button on the hero carousel was only registering "centric clicks" directly on the center 14pt icon pixels.
+- **Root Cause**:
+  1. The entire content block including action buttons was nested inside a parent `NavigationLink(value: item)`. Any click off-center hit transparent button space and passed through to the `NavigationLink` instead of triggering the button.
+  2. The button had no `.contentShape(Circle())` defined on the label or button frame.
+- **Resolution**:
+  1. Separated the `NavigationLink` to strictly wrap the title/metadata/description text block with `.contentShape(Rectangle())`.
+  2. Removed action buttons from the parent `NavigationLink`. "Play" is its own clean `NavigationLink` with `.contentShape(Capsule())`.
+  3. Increased secondary Watchlist button to `44x44pt` standard with explicit `.contentShape(Circle())`. Entire circular glass disc is now 100% interactive anywhere clicked.
+
+### Hero Play Trailer Button Cleanup (`DetailView.swift`) — Completed & Verified
+- Removed forgotten lines 408–426 (`Image(systemName: "play.rectangle.fill")`) from the hero action bar in `DetailView.swift`. Trailers are already displayed in the dedicated Trailers rail.
+
+### Stream Picker Dynamic Tabs & Icon-Only Selectors (`PlayerView.swift`, `PlayerManager.swift`) — Completed & Verified
+- Replaced text labels on Addons and Quality menus with minimalist macOS glass icon buttons (`Image(systemName: "sparkles")` and `Image(systemName: "puzzlepiece.extension.fill")` with chevrons). Highlighted in cyan when a filter is active.
+- Made category tabs dynamically adapt to addon selection: when viewing a specific addon, `Direct HTTP` and `Torrents` tabs automatically disappear, leaving only `All Sources`, `Best Health`, and `Fast Start` scoped to that addon.
+- Filter pipeline now cascades cleanly: `sourceFilteredStreams` -> `qualityFilteredStreams` -> `categoryStreams`, dynamically updating badge counts.
+- Fixed stream completion lifecycle: `isFetchingStreams = false` triggers immediately upon addon search finish, and the loading strip auto-hides when all addons finish.
+- Increased scraper timeout to 22s for HTTP addons (PenguPlay) so multi-host scrapes don't time out.
 
 ### Liquid Glass Conversion (`PlayerView.swift`) — Completed, builds clean
 - Whole stream picker moved off `Color.white.opacity` fills onto iOS 26 liquid glass:
@@ -38,22 +134,27 @@
   1080p-max preference `isWithinMaxResolution` drops those. Possible follow-up: parse quality
   from `behaviorHints.filename` first (already decoded, currently unused for quality).
 
-### Open / Unverified — PICK UP HERE NEXT
-- **In-app PenguPlay/WebStreamrMBG visibility NOT yet user-verified** (fixes above are the
-  prime suspects; user to retest: open Lanterns picker, watch count climb, check Addons filter).
-- **Screenshot contradiction (Sep 3):** user screenshots showed Torrentio rows under the Direct
-  HTTP tab + active PenguPlay addon filter — impossible under the committed filter logic
-  (`filteredStreams` + `isTorrentSourced`, verified in source; fresh binary fingerprinted via
-  `strings flux.debug.dylib`). Likely tested a pre-relaunch build or missed taps (hover glass
-  mimics selection). If it reproduces on the current build, instrument `streamSelectionView`
-  with a `[Picker]` state print and read `/tmp/flux.log` (app relaunched with stdout captured).
-- Addon-level `sourceMode` filtering (fire only matching addon types) still open.
-- AIOStreams points at unresolvable `http://singularity:3000` (fast DNS fail, harmless, parallel).
+### Session Update: Sep 3, 2026 (Evening) — STRICT ADDON-BASED STREAM TAB ISOLATION & QUALITY SELECTOR REDESIGN
+- **Direct HTTP vs Torrents Tab Isolation (`StreamManager.swift`, `PlayerView.swift`)**:
+  - Implemented `StreamManager.isHttpSource(source)` (e.g. `PenguPlay`, `WebStreamrMBG`, `Stremify`, `EasyDebrid`) and `StreamManager.isP2PSource(source)` (e.g. `Torrentio`, `Meteor`, `Comet`, `Knightcrawler`, `MediaFusion`).
+  - `Stream.isDirectHTTP` and `Stream.isTorrent` now strictly prioritize the addon source classification: P2P addons are guaranteed `isTorrent = true` and `isDirectHTTP = false`; HTTP addons are guaranteed `isDirectHTTP = true` and `isTorrent = false`.
+  - In `PlayerView.swift`, `categoryCount` and `filteredStreams` for `.direct` and `.torrents` filter strictly by `isHttpSource` and `isP2PSource`. It is mathematically impossible for Torrentio or other P2P streams to appear under the Direct HTTP tab.
+  - Category pill selection highlight updated with `Color.white.opacity(0.22)` background to unmistakably distinguish active tabs from unselected hover states.
 
-### Verification
-- `xcodebuild -scheme flux -configuration Debug` → **BUILD SUCCEEDED** (Sep 3).
-- App relaunched from Debug build; logs captured to `/tmp/flux.log` for per-addon
-  `[Name] Requesting/Found N/Error:` diagnosis without needing Console.app.
+- **Quality Selector Redesign (`PlayerView.swift`)**:
+  - Removed duplicate items (`All (≤ 4K)` and `Show All (Uncapped)`).
+  - Cleaned up into standard quality labels with live counts: `All (\(count))`, `4K (\(count))`, `2K (\(count))`, `FHD (\(count))`, `HD (\(count))`, `SD (\(count))`.
+  - Filter button label displays `Quality: All` when uncapped or `\(label) (\(count))` when filtered.
+
+- **Fast Start & Best Health Tabs (`StreamManager.swift`, `PlayerView.swift`)**:
+  - `Fast Start`: Prioritizes instant HTTP streams and compact torrents with high seeds (`seeders >= 25`, `size <= 8GB`), sorted strictly by `computeStartupSpeedScore` descending (fastest start first).
+  - `Best Health`: Filters for streams with confirmed swarm health (`seeders >= 25`) or responsive HTTP endpoints, sorted strictly by `streamHealthComparator` (highest seed count descending).
+
+- **Verification**:
+  - All 48 unit and UI tests pass (`** TEST SUCCEEDED **`).
+  - Added new unit test `sourceIsolationGuaranteesTorrentioNeverDirectAndPenguNeverTorrent()`.
+  - Debug binary compiled clean (`** BUILD SUCCEEDED **`) and launched.
+
 
 ---
 

@@ -8,25 +8,10 @@ struct BonusContentCard: View {
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // 1. Full-Bleed 16:9 Vibrant Artwork Thumbnail (Zero Artificial Dimming)
-            Group {
-                if let url = item.thumbnailURL {
-                    CachedImage(url: url, maxDimension: 600) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(16/9, contentMode: .fill)
-                        default:
-                            fallbackView
-                        }
-                    }
-                } else {
-                    fallbackView
-                }
-            }
-            .frame(width: 300, height: 169)
-            .clipped()
+            // 1. Full-Bleed 16:9 Vibrant Artwork Thumbnail (Zero Artificial Dimming, zero distortion)
+            thumbnailArtwork
+                .frame(width: 300, height: 169)
+                .clipped()
             
             // 2. Subtle Bottom Text Shadow Gradient (Rest of image is 100% undimmed)
             LinearGradient(
@@ -90,19 +75,101 @@ struct BonusContentCard: View {
     }
     
     @ViewBuilder
-    private var fallbackView: some View {
-        if let fallback = fallbackBackdropURL {
-            CachedImage(url: fallback, maxDimension: 600) { phase in
-                if let image = phase.image {
+    private var thumbnailArtwork: some View {
+        if let url = item.thumbnailURL {
+            CachedImage(url: url, maxDimension: 800) { phase in
+                switch phase {
+                case .success(let image):
                     image
                         .resizable()
-                        .aspectRatio(16/9, contentMode: .fill)
-                } else {
-                    Rectangle().fill(.ultraThinMaterial)
+                        .scaledToFill()
+                        .frame(width: 300, height: 169)
+                        .clipped()
+                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                case .failure:
+                    secondaryFallbackArtwork
+                case .empty:
+                    skeletonLoadingView
                 }
             }
         } else {
-            Rectangle().fill(.ultraThinMaterial)
+            secondaryFallbackArtwork
         }
+    }
+
+    @ViewBuilder
+    private var secondaryFallbackArtwork: some View {
+        if let fallbackThumb = item.fallbackThumbnailURL {
+            CachedImage(url: fallbackThumb, maxDimension: 600) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 300, height: 169)
+                        .clipped()
+                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                case .failure:
+                    backdropFallbackArtwork
+                case .empty:
+                    skeletonLoadingView
+                }
+            }
+        } else {
+            backdropFallbackArtwork
+        }
+    }
+
+    @ViewBuilder
+    private var backdropFallbackArtwork: some View {
+        let artURL = item.fallbackArtURL ?? fallbackBackdropURL
+        if let art = artURL {
+            CachedImage(url: art, maxDimension: 600) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 300, height: 169)
+                        .clipped()
+                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                case .failure:
+                    fallbackView
+                case .empty:
+                    skeletonLoadingView
+                }
+            }
+        } else {
+            fallbackView
+        }
+    }
+    
+    @ViewBuilder
+    private var fallbackView: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(red: 0.12, green: 0.12, blue: 0.14))
+            
+            LinearGradient(
+                colors: [Color.white.opacity(0.05), Color.white.opacity(0.01)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            Image(systemName: item.categoryType == "Trailer" || item.categoryType == "Teaser" ? "play.rectangle.fill" : "sparkles.tv")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.white.opacity(0.20))
+        }
+    }
+    
+    @ViewBuilder
+    private var skeletonLoadingView: some View {
+        Rectangle()
+            .fill(Color(red: 0.12, green: 0.12, blue: 0.14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.04))
+            )
+            .shimmer()
     }
 }

@@ -142,6 +142,7 @@ class MPVController: ObservableObject {
     
     var onPlaybackError: (() -> Void)?
     weak var playerView: MPVViewController?
+    private var hasAutoSelectedTracksForCurrentMedia = false
     
     func play(url: URL) {
         // Same media already loading/loaded on this controller (warm-core
@@ -153,6 +154,7 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = true
         self.loadedURL = url
+        self.hasAutoSelectedTracksForCurrentMedia = false
         playerView?.play(url)
     }
 
@@ -283,6 +285,104 @@ class MPVController: ObservableObject {
         DispatchQueue.main.async {
             self.audioTracks = tracks.filter { $0.type == "audio" }
             self.subtitleTracks = tracks.filter { $0.type == "sub" }
+            self.autoSelectPreferredTracks()
+        }
+    }
+
+    private func trackMatchesLanguage(track: Track, targetLang: String) -> Bool {
+        let cleanTarget = targetLang.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let aliases: [String] = {
+            switch cleanTarget {
+            case "english", "en", "eng":
+                return ["en", "eng", "english", "enus", "en-us"]
+            case "spanish", "es", "spa":
+                return ["es", "spa", "spanish", "español", "espanol"]
+            case "french", "fr", "fra", "fre":
+                return ["fr", "fra", "fre", "french", "français", "francais"]
+            case "german", "de", "deu", "ger":
+                return ["de", "deu", "ger", "german", "deutsch"]
+            case "japanese", "ja", "jpn":
+                return ["ja", "jpn", "japanese", "nihongo"]
+            case "korean", "ko", "kor":
+                return ["ko", "kor", "korean", "hangul"]
+            case "hindi", "hi", "hin":
+                return ["hi", "hin", "hindi"]
+            default:
+                return [cleanTarget]
+            }
+        }()
+
+        let trackLang = track.lang.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trackTitle = track.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trackDisplay = track.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        // Direct language code match
+        if !trackLang.isEmpty && trackLang != "und" && aliases.contains(trackLang) {
+            return true
+        }
+
+        // Title or display name match
+        for alias in aliases {
+            if trackTitle.contains(alias) || trackDisplay.contains(alias) {
+                return true
+            }
+        }
+
+        // If target is English, detect dub tracks that aren't other languages
+        if cleanTarget.hasPrefix("eng") && (trackTitle.contains("dub") || trackDisplay.contains("dub")) {
+            let foreignWords = ["spanish", "french", "german", "japanese", "korean", "hindi", "italian", "russian"]
+            if !foreignWords.contains(where: { trackTitle.contains($0) || trackDisplay.contains($0) }) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func autoSelectPreferredTracks() {
+        guard !hasAutoSelectedTracksForCurrentMedia else { return }
+        guard !audioTracks.isEmpty else { return }
+        hasAutoSelectedTracksForCurrentMedia = true
+
+        let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        let preferredSub = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
+
+        // 1. Audio Track Selection
+        let activeAudio = audioTracks.first(where: { $0.isSelected })
+        let isAudioPreferred = activeAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
+
+        if !isAudioPreferred {
+            if let matchedAudio = audioTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }) {
+                print("[MPV] Auto-selecting preferred audio track: \(matchedAudio.displayName) (id: \(matchedAudio.id))")
+                playerView?.selectTrack(matchedAudio)
+            }
+        }
+
+        let currentOrNewAudio = audioTracks.first(where: {
+            if !isAudioPreferred, let matched = audioTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }) {
+                return $0.id == matched.id
+            }
+            return $0.isSelected
+        })
+        let resultingAudioMatches = currentOrNewAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
+
+        // 2. Subtitle Track Selection
+        // If the audio track is foreign/non-preferred (e.g. only Korean audio available and user wanted English),
+        // we MUST automatically turn on preferred subtitles!
+        let activeSub = subtitleTracks.first(where: { $0.isSelected })
+        let isSubPreferred = activeSub.map { trackMatchesLanguage(track: $0, targetLang: preferredSub) } ?? false
+
+        if !resultingAudioMatches && !isSubPreferred {
+            if let matchedSub = subtitleTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredSub) }) {
+                print("[MPV] Foreign audio detected without subtitles — auto-selecting embedded subtitle: \(matchedSub.displayName) (id: \(matchedSub.id))")
+                playerView?.selectTrack(matchedSub)
+            } else if let extSub = PlayerManager.shared.externalSubtitles.first(where: { sub in
+                let lang = sub.language.lowercased()
+                return lang.contains("en") || lang.contains("eng") || lang.contains("english")
+            }) {
+                print("[MPV] Foreign audio detected — auto-attaching external subtitle: \(extSub.language)")
+                addExternalSubtitle(extSub)
+            }
         }
     }
     

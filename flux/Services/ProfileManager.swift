@@ -66,14 +66,30 @@ final class ProfileManager: ObservableObject {
 
     // MARK: - Per-profile settings snapshot
 
-    private var playbackSettingKeys: [String] {
+    var playbackSettingKeys: [String] {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
          "streamingSourceMode", "enableFluxMode", "enableFluxCatalogue", "stremioCacheGB"]
     }
 
-    private func snapshotSettings(for profileID: UUID) {
+    /// Persists current UserDefaults into the active profile's settings snapshot.
+    func saveCurrentProfileSettings() {
+        guard let current = currentProfile else { return }
+        snapshotSettings(for: current.id)
+    }
+
+    func exportGlobalSettings() -> [String: Any] {
         var snap: [String: Any] = [:]
+        for key in playbackSettingKeys {
+            if let v = UserDefaults.standard.object(forKey: key) {
+                snap[key] = v
+            }
+        }
+        return snap
+    }
+
+    func snapshotSettings(for profileID: UUID) {
+        var snap: [String: Any] = UserDefaults.standard.dictionary(forKey: "profile.\(profileID.uuidString).settings") ?? [:]
         for key in playbackSettingKeys {
             if let v = UserDefaults.standard.object(forKey: key) {
                 snap[key] = v
@@ -89,6 +105,9 @@ final class ProfileManager: ObservableObject {
             for (key, value) in snap {
                 UserDefaults.standard.set(value, forKey: key)
             }
+        } else {
+            // First time loading this profile: snapshot current settings so active preferences persist
+            snapshotSettings(for: profileID)
         }
     }
 
@@ -137,12 +156,16 @@ final class ProfileManager: ObservableObject {
 
     func exportProfilesData() -> [[String: Any]] {
         return profiles.map { p in
-            [
+            var dict: [String: Any] = [
                 "id": p.id.uuidString,
                 "name": p.name,
                 "avatarID": p.avatarID,
                 "createdAt": p.createdAt.timeIntervalSince1970
             ]
+            if let snap = UserDefaults.standard.dictionary(forKey: "profile.\(p.id.uuidString).settings") {
+                dict["settings"] = snap
+            }
+            return dict
         }
     }
 
@@ -156,6 +179,9 @@ final class ProfileManager: ObservableObject {
                   let avatarID = dict["avatarID"] as? String else { continue }
             let created = (dict["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
             imported.append(UserProfile(id: id, name: name, avatarID: avatarID, createdAt: created))
+            if let remoteSettings = dict["settings"] as? [String: Any] {
+                UserDefaults.standard.set(remoteSettings, forKey: "profile.\(id.uuidString).settings")
+            }
         }
         guard !imported.isEmpty else { return }
         DispatchQueue.main.async {

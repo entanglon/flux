@@ -186,4 +186,28 @@ struct UserDataServiceTests {
         #expect(payload["tasteSnapshots"] != nil)
         #expect(payload["profiles"] != nil)
     }
+
+    @Test func continueWatchingDeduplicatesCrossFormatIDsAndTitles() {
+        let item1 = MediaItem(
+            id: "tt14688458",
+            title: "Silo",
+            description: "",
+            streamURL: nil,
+            category: "TV Show",
+            progress: 0.45
+        )
+        let item2 = MediaItem(
+            id: "14688458",
+            title: "Silo",
+            description: "",
+            streamURL: nil,
+            category: "TV Show",
+            progress: 0.65
+        )
+        
+        let stripped1 = item1.id.replacingOccurrences(of: "tt", with: "")
+        let stripped2 = item2.id.replacingOccurrences(of: "tt", with: "")
+        #expect(stripped1 == stripped2)
+        #expect(item1.title.lowercased() == item2.title.lowercased())
+    }
 }

@@ -220,13 +220,22 @@ class UserDataService: ObservableObject {
         }.map { $0.element }
         
         var uniqueItems: [MediaItem] = []
-        var seenIDs: Set<String> = []
+        var seenKeys: Set<String> = []
         
         for entry in sorted {
-            let id = entry.item.id
-            if !seenIDs.contains(id) {
-                uniqueItems.append(entry.item)
-                seenIDs.insert(id)
+            let item = entry.item
+            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
+            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            let idKey = "id:\(item.id)"
+            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
+            
+            if !seenKeys.contains(idKey) && !seenKeys.contains(numKey) && !seenKeys.contains(titleKey) {
+                uniqueItems.append(item)
+                seenKeys.insert(idKey)
+                seenKeys.insert(numKey)
+                if !item.title.isEmpty && item.title != "Unknown" {
+                    seenKeys.insert(titleKey)
+                }
             }
         }
         
@@ -276,8 +285,21 @@ class UserDataService: ObservableObject {
         if let fi = fileIndex ?? item.lastFileIndex { finalItem["lastFileIndex"] = fi }
         
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
-        // Remove existing item if present
-        currentData.removeAll { ($0["id"] as? String) == item.id }
+        // Remove existing item if present (handles exact ID, stripped 'tt' IMDb/TMDB cross-format, and normalized title+type)
+        let cleanNewTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let strippedNewID = item.id.replacingOccurrences(of: "tt", with: "")
+        currentData.removeAll { existing in
+            guard let existingID = existing["id"] as? String else { return false }
+            if existingID == item.id { return true }
+            let strippedExistingID = existingID.replacingOccurrences(of: "tt", with: "")
+            if !strippedExistingID.isEmpty && strippedExistingID == strippedNewID { return true }
+            let existingTitle = (existing["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let existingType = existing["type"] as? String ?? ""
+            if !cleanNewTitle.isEmpty && cleanNewTitle != "unknown" && existingTitle == cleanNewTitle && existingType == typeString {
+                return true
+            }
+            return false
+        }
         currentData.append(finalItem)
         UserDefaults.standard.set(currentData, forKey: key)
         UserDefaults.standard.synchronize()
@@ -345,7 +367,42 @@ class UserDataService: ObservableObject {
         }
     }
 
+    var episodeProgressKey: String {
+        if let profile = ProfileManager.shared.currentProfile {
+            return "profile.\(profile.id.uuidString).episodeProgress"
+        }
+        return "globalEpisodeProgress"
+    }
+
+    func getEpisodeProgress(for itemID: String, season: Int, episode: Int) -> (progress: Double, position: Double, duration: Double)? {
+        let key = "\(itemID)_s\(season)e\(episode)"
+        let allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
+        guard let dict = allProgress[key] else { return nil }
+        let progress = dict["progress"] as? Double ?? 0.0
+        let position = dict["position"] as? Double ?? 0.0
+        let duration = dict["duration"] as? Double ?? 0.0
+        return (progress, position, duration)
+    }
+
+    func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double) {
+        guard duration > 0 else { return }
+        let key = "\(itemID)_s\(season)e\(episode)"
+        var allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
+        let prog = min(1.0, max(0.0, position / duration))
+        allProgress[key] = [
+            "position": position,
+            "duration": duration,
+            "progress": prog,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        UserDefaults.standard.set(allProgress, forKey: episodeProgressKey)
+        UserDefaults.standard.synchronize()
+    }
+
     func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil) {
+        if let s = season, let e = episode, let pos = playbackPosition, let dur = playbackDuration {
+            saveEpisodeProgress(for: item.id, season: s, episode: e, position: pos, duration: dur)
+        }
         addToList(
             key: historyKey,
             item: item,
@@ -369,7 +426,19 @@ class UserDataService: ObservableObject {
     
     private func removeFromList(key: String, item: MediaItem, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
-        currentData.removeAll { ($0["id"] as? String) == item.id }
+        let cleanNewTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let strippedNewID = item.id.replacingOccurrences(of: "tt", with: "")
+        currentData.removeAll { existing in
+            guard let existingID = existing["id"] as? String else { return false }
+            if existingID == item.id { return true }
+            let strippedExistingID = existingID.replacingOccurrences(of: "tt", with: "")
+            if !strippedExistingID.isEmpty && strippedExistingID == strippedNewID { return true }
+            let existingTitle = (existing["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !cleanNewTitle.isEmpty && cleanNewTitle != "unknown" && existingTitle == cleanNewTitle {
+                return true
+            }
+            return false
+        }
         UserDefaults.standard.set(currentData, forKey: key)
         UserDefaults.standard.synchronize()
         
@@ -513,10 +582,27 @@ class UserDataService: ObservableObject {
             ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
             ?? []
 
+        // Ephemeral stream URLs and torrent hashes are kept strictly device-local
+        let sanitizedWatchlist = watchlistData.map { dict -> [String: Any] in
+            var copy = dict
+            copy.removeValue(forKey: "lastStreamURL")
+            copy.removeValue(forKey: "lastTorrentInfoHash")
+            return copy
+        }
+        let sanitizedHistory = historyData.map { dict -> [String: Any] in
+            var copy = dict
+            copy.removeValue(forKey: "lastStreamURL")
+            copy.removeValue(forKey: "lastTorrentInfoHash")
+            return copy
+        }
+        let epProgress = (UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]]) ?? [:]
+
         return [
             "version": 2,
-            "watchlist": watchlistData,
-            "history": historyData,
+            "watchlist": sanitizedWatchlist,
+            "history": sanitizedHistory,
+            "settings": ProfileManager.shared.exportGlobalSettings(),
+            "episodeProgress": epProgress,
             "collections": collections.map { c in
                 let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
                 return [
@@ -539,28 +625,44 @@ class UserDataService: ObservableObject {
 
     // MARK: - Smart Cloud Merge Helpers
     
+    private func canonicalIdentityKey(for dict: [String: Any]) -> String {
+        let id = dict["id"] as? String ?? ""
+        let stripped = id.replacingOccurrences(of: "tt", with: "")
+        if !stripped.isEmpty && CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: stripped)) {
+            return "num:\(stripped)"
+        }
+        let title = (dict["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let type = dict["type"] as? String ?? ""
+        if !title.isEmpty && title != "unknown" {
+            return "title:\(type):\(title)"
+        }
+        return "id:\(id)"
+    }
+
     private func mergeHistoryData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
         var map: [String: [String: Any]] = [:]
         for item in local {
-            guard let id = item["id"] as? String else { continue }
-            map[id] = item
+            guard let _ = item["id"] as? String else { continue }
+            let key = canonicalIdentityKey(for: item)
+            map[key] = item
         }
         for item in remote {
-            guard let id = item["id"] as? String else { continue }
-            if let localItem = map[id] {
+            guard let _ = item["id"] as? String else { continue }
+            let key = canonicalIdentityKey(for: item)
+            if let localItem = map[key] {
                 let localTime = localItem["timestamp"] as? Double ?? 0
                 let remoteTime = item["timestamp"] as? Double ?? 0
                 if remoteTime > localTime {
-                    map[id] = item
+                    map[key] = item
                 } else if remoteTime == localTime {
                     let localProg = localItem["progress"] as? Double ?? 0
                     let remoteProg = item["progress"] as? Double ?? 0
                     if remoteProg > localProg {
-                        map[id] = item
+                        map[key] = item
                     }
                 }
             } else {
-                map[id] = item
+                map[key] = item
             }
         }
         return Array(map.values).sorted {
@@ -572,15 +674,17 @@ class UserDataService: ObservableObject {
         var map: [String: [String: Any]] = [:]
         var order: [String] = []
         for item in local {
-            guard let id = item["id"] as? String else { continue }
-            map[id] = item
-            order.append(id)
+            guard let _ = item["id"] as? String else { continue }
+            let key = canonicalIdentityKey(for: item)
+            map[key] = item
+            order.append(key)
         }
         for item in remote {
-            guard let id = item["id"] as? String else { continue }
-            if map[id] == nil {
-                map[id] = item
-                order.append(id)
+            guard let _ = item["id"] as? String else { continue }
+            let key = canonicalIdentityKey(for: item)
+            if map[key] == nil {
+                map[key] = item
+                order.append(key)
             }
         }
         return order.compactMap { map[$0] }
@@ -657,6 +761,8 @@ class UserDataService: ObservableObject {
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
         let profilesData = payload["profiles"] as? [[String: Any]]
         let addonsData = payload["addons"] as? [[String: Any]]
+        let remoteSettings = payload["settings"] as? [String: Any]
+        let remoteEpProgress = payload["episodeProgress"] as? [String: [String: Any]]
 
         DispatchQueue.main.async {
             // Persist first so disk matches memory.
@@ -673,6 +779,24 @@ class UserDataService: ObservableObject {
             ProfileManager.shared.applyCloudProfilesData(profilesData)
             if let addonsData {
                 AddonManager.shared.syncWithCloudAddons(addonsData)
+            }
+            if let remoteSettings {
+                for (key, val) in remoteSettings {
+                    if UserDefaults.standard.object(forKey: key) == nil {
+                        UserDefaults.standard.set(val, forKey: key)
+                    }
+                }
+            }
+            if let remoteEpProgress {
+                var localEpProgress = UserDefaults.standard.dictionary(forKey: self.episodeProgressKey) as? [String: [String: Any]] ?? [:]
+                for (k, v) in remoteEpProgress {
+                    let localTime = (localEpProgress[k]?["timestamp"] as? Double) ?? 0
+                    let remoteTime = (v["timestamp"] as? Double) ?? 0
+                    if remoteTime >= localTime {
+                        localEpProgress[k] = v
+                    }
+                }
+                UserDefaults.standard.set(localEpProgress, forKey: self.episodeProgressKey)
             }
             print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
         }

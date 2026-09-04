@@ -188,9 +188,9 @@ struct PlayerControlsView: View {
                                     Image(systemName: "captions.bubble.fill")
                                         .font(.system(size: 14))
                                         .foregroundColor(.white.opacity(0.9))
+                                        .frame(width: 46, height: 36)
+                                        .contentShape(Rectangle())
                                 }
-                                .frame(width: 44, height: 36)
-                                .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Subtitles menu")
                                 .popover(isPresented: $showSubtitlePopover, arrowEdge: .bottom) {
@@ -218,18 +218,19 @@ struct PlayerControlsView: View {
                                                     } else {
                                                         Image(systemName: "globe")
                                                             .font(.system(size: 12, weight: .semibold))
+                                                        Text("Search Online Subtitles")
+                                                            .font(.system(size: 12, weight: .medium))
                                                     }
-                                                    Text(onlineSubtitles.isEmpty ? "Search Online Subtitles" : "More Online Subtitles")
-                                                        .font(.system(size: 13, weight: .semibold))
                                                 }
-                                                .frame(maxWidth: .infinity)
-                                                .contentShape(Rectangle())
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(Color.white.opacity(0.12))
+                                                .cornerRadius(6)
                                             }
                                             .buttonStyle(.plain)
                                             .disabled(isSearchingSubtitles)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 6)
-
+                                            
                                             ForEach(onlineSubtitles) { sub in
                                                 Button {
                                                     onSelectExternalSub(sub)
@@ -295,9 +296,9 @@ struct PlayerControlsView: View {
                                     Image(systemName: "waveform")
                                         .font(.system(size: 14))
                                         .foregroundColor(.white.opacity(0.9))
+                                        .frame(width: 46, height: 36)
+                                        .contentShape(Rectangle())
                                 }
-                                .frame(width: 44, height: 36)
-                                .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Audio tracks menu")
                                 .popover(isPresented: $showAudioPopover, arrowEdge: .bottom) {

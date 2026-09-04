@@ -152,23 +152,119 @@ actor SearchEngine {
         }
     }
 
-    /// Prefers TMDB's richer metadata when both providers return the same title
-    private static func deduplicate(_ candidates: [MediaCandidate]) -> [MediaCandidate] {
-        var bestByKey: [String: MediaCandidate] = [:]
-        var order: [String] = []
-
+    /// Deduplicates multi-provider search results by merging candidates for the same title.
+    /// Prefers TMDB's richer metadata (artwork, vote counts, synopsis, genres) while
+    /// inheriting Cinemeta's IMDb ID (`tt...`) so detail views and streaming require zero ID translation.
+    static func deduplicate(_ candidates: [MediaCandidate]) -> [MediaCandidate] {
+        var mergedCandidates: [MediaCandidate] = []
+        
         for candidate in candidates {
-            let key = candidate.imdbID ?? candidate.id
-            if let existing = bestByKey[key] {
-                if existing.source != .tmdb && candidate.source == .tmdb {
-                    bestByKey[key] = candidate
-                }
+            if let index = mergedCandidates.firstIndex(where: { isMatch($0, candidate) }) {
+                let existing = mergedCandidates[index]
+                mergedCandidates[index] = merge(existing: existing, incoming: candidate)
             } else {
-                bestByKey[key] = candidate
-                order.append(key)
+                mergedCandidates.append(candidate)
             }
         }
+        
+        return mergedCandidates
+    }
 
-        return order.compactMap { bestByKey[$0] }
+    /// Evaluates if two candidates represent the exact same media item.
+    static func isMatch(_ a: MediaCandidate, _ b: MediaCandidate) -> Bool {
+        // 1. Direct ID match
+        if a.id == b.id { return true }
+        
+        // 2. Direct IMDb ID match
+        if let imdbA = a.imdbID, let imdbB = b.imdbID, !imdbA.isEmpty, !imdbB.isEmpty {
+            if imdbA == imdbB { return true }
+        }
+        
+        // 3. Semantic Title + MediaType + Year match
+        guard a.mediaType == b.mediaType else { return false }
+        
+        let titleMatch = (a.normalizedTitle == b.normalizedTitle) ||
+                         (!a.articleStrippedTitle.isEmpty && a.articleStrippedTitle == b.articleStrippedTitle)
+        
+        guard titleMatch else { return false }
+        
+        // Compare release years if both candidates specify one
+        let cal = Calendar(identifier: .gregorian)
+        let yearA = a.releaseDate.map { cal.component(.year, from: $0) }
+        let yearB = b.releaseDate.map { cal.component(.year, from: $0) }
+        
+        if let yA = yearA, let yB = yearB {
+            // Allow ±1 year tolerance for international release date discrepancies (e.g. late Dec vs Jan)
+            return abs(yA - yB) <= 1
+        }
+        
+        // If one or both lack a release year, matching titles + same mediaType is considered a match
+        return true
+    }
+
+    /// Merges two matching candidates into a single canonical candidate.
+    static func merge(existing: MediaCandidate, incoming: MediaCandidate) -> MediaCandidate {
+        let primary: MediaCandidate
+        let secondary: MediaCandidate
+        
+        if existing.source == .tmdb && incoming.source != .tmdb {
+            primary = existing
+            secondary = incoming
+        } else if incoming.source == .tmdb && existing.source != .tmdb {
+            primary = incoming
+            secondary = existing
+        } else {
+            if incoming.popularity > existing.popularity || incoming.voteCount > existing.voteCount {
+                primary = incoming
+                secondary = existing
+            } else {
+                primary = existing
+                secondary = incoming
+            }
+        }
+        
+        var merged = primary
+        
+        // Inherit Cinemeta's IMDb ID if primary (TMDB) candidate lacks it
+        if merged.imdbID == nil || merged.imdbID?.isEmpty == true {
+            merged.imdbID = secondary.imdbID
+        }
+        
+        // Inherit any missing fields from secondary
+        if merged.genres == nil || merged.genres?.isEmpty == true {
+            merged.genres = secondary.genres
+        }
+        if merged.overview == nil || merged.overview?.isEmpty == true {
+            merged.overview = secondary.overview
+        }
+        if merged.posterPath == nil || merged.posterPath?.isEmpty == true {
+            merged.posterPath = secondary.posterPath
+        }
+        if merged.backdropPath == nil || merged.backdropPath?.isEmpty == true {
+            merged.backdropPath = secondary.backdropPath
+        }
+        if merged.releaseDate == nil {
+            merged.releaseDate = secondary.releaseDate
+        }
+        if merged.voteAverage <= 0 && secondary.voteAverage > 0 {
+            merged = MediaCandidate(
+                id: merged.id,
+                title: merged.title,
+                mediaType: merged.mediaType,
+                popularity: merged.popularity,
+                voteCount: max(merged.voteCount, secondary.voteCount),
+                voteAverage: secondary.voteAverage,
+                posterPath: merged.posterPath,
+                backdropPath: merged.backdropPath,
+                overview: merged.overview,
+                releaseDate: merged.releaseDate,
+                isAdult: merged.isAdult,
+                imdbID: merged.imdbID,
+                genres: merged.genres,
+                source: merged.source
+            )
+        }
+        
+        return merged
     }
 }

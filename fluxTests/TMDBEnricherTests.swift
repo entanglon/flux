@@ -10,7 +10,7 @@ struct TMDBEnricherTests {
         let backdropURL = enricher.adaptiveURL(path: "/sampleBackdrop.jpg", quality: .backdrop)
 
         #expect(posterURL?.absoluteString.contains("https://image.tmdb.org/t/p/w780/samplePoster.jpg") == true)
-        #expect(backdropURL?.absoluteString.contains("https://image.tmdb.org/t/p/w1280/sampleBackdrop.jpg") == true)
+        #expect(backdropURL?.absoluteString.contains("https://image.tmdb.org/t/p/original/sampleBackdrop.jpg") == true)
     }
 
     @Test func genreModelContainsAllSupportedGenres() {
@@ -106,7 +106,9 @@ struct TMDBEnricherTests {
         
         #expect(video.youtubeURL?.absoluteString == "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         #expect(video.embedURL?.absoluteString.contains("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ") == true)
-        #expect(video.thumbnailURL?.absoluteString.contains("hqdefault.jpg") == true)
+        #expect(video.thumbnailURL?.absoluteString.contains("maxresdefault.jpg") == true)
+        #expect(video.fallbackThumbnailURL?.absoluteString.contains("mqdefault.jpg") == true)
+        #expect(video.hqThumbnailURL?.absoluteString.contains("hqdefault.jpg") == true)
         #expect(video.maxResThumbnailURL?.absoluteString.contains("maxresdefault.jpg") == true)
     }
 

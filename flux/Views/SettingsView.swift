@@ -291,6 +291,7 @@ struct StreamingSettingsView: View {
                 
                 Picker("Maximum Resolution", selection: $preferredQuality) {
                     Text("4K (2160p)").tag("4K")
+                    Text("2K (1440p)").tag("2K")
                     Text("1080p").tag("1080p")
                     Text("720p").tag("720p")
                     Text("480p").tag("480p")
@@ -299,6 +300,14 @@ struct StreamingSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: streamingSourceMode) { _, _ in persistSettings() }
+        .onChange(of: enableFluxMode) { _, _ in persistSettings() }
+        .onChange(of: preferredQuality) { _, _ in persistSettings() }
+    }
+
+    private func persistSettings() {
+        ProfileManager.shared.saveCurrentProfileSettings()
+        AuthManager.shared.scheduleAutoSync()
     }
 }
 
@@ -336,6 +345,16 @@ struct PlaybackSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: useHardwareAcceleration) { _, _ in persistSettings() }
+        .onChange(of: autoPlayNextEnabled) { _, _ in persistSettings() }
+        .onChange(of: enableAudioPassthrough) { _, _ in persistSettings() }
+        .onChange(of: defaultAudioLang) { _, _ in persistSettings() }
+        .onChange(of: defaultSubLang) { _, _ in persistSettings() }
+    }
+
+    private func persistSettings() {
+        ProfileManager.shared.saveCurrentProfileSettings()
+        AuthManager.shared.scheduleAutoSync()
     }
 }
 
@@ -369,6 +388,8 @@ struct AdvancedSettingsView: View {
                 }
                 .pickerStyle(.menu)
                 .onChange(of: stremioCacheGB) { _, newValue in
+                    ProfileManager.shared.saveCurrentProfileSettings()
+                    AuthManager.shared.scheduleAutoSync()
                     Task {
                         await StremioServerManager.shared.setCacheSize(gigabytes: newValue)
                         await StremioServerManager.shared.evictCacheIfNeeded()

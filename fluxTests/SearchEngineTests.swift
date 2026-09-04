@@ -278,4 +278,154 @@ struct SearchEngineTests {
         #expect("Avengers: Infinity War".decomposedFranchise.stem == "avengers")
         #expect("Avengers: Infinity War".decomposedFranchise.hasSubtitle == true)
     }
+
+    @Test func deduplicationMergesTMDBAndCinemetaForSameTitleAndYear() {
+        let cal = Calendar(identifier: .gregorian)
+        var comp2020 = DateComponents()
+        comp2020.year = 2020
+        comp2020.month = 10
+        comp2020.day = 17
+        let tmdbDate = cal.date(from: comp2020)
+
+        var compCinemeta = DateComponents()
+        compCinemeta.year = 2020
+        compCinemeta.month = 1
+        compCinemeta.day = 1
+        let cinemetaDate = cal.date(from: compCinemeta)
+
+        let tmdbCandidate = MediaCandidate(
+            id: "tmdb-110356",
+            title: "Start-Up",
+            mediaType: .tvSeries,
+            popularity: 85.0,
+            voteCount: 450,
+            voteAverage: 8.1,
+            posterPath: "/startup_tmdb.jpg",
+            backdropPath: "/startup_backdrop.jpg",
+            overview: "Young entrepreneurs aspiring to launch virtual dreams into reality.",
+            releaseDate: tmdbDate,
+            isAdult: false,
+            imdbID: nil,
+            genres: ["Drama", "Comedy"],
+            source: .tmdb
+        )
+
+        let cinemetaCandidate = MediaCandidate(
+            id: "cinemeta-tt12920708",
+            title: "Start-Up",
+            mediaType: .tvSeries,
+            popularity: 16.0,
+            voteCount: 50,
+            voteAverage: 8.0,
+            posterPath: "https://images.metahub.space/poster/large/tt12920708/img",
+            backdropPath: "https://images.metahub.space/background/large/tt12920708/img",
+            overview: "Young entrepreneurs in South Korea's Sandbox.",
+            releaseDate: cinemetaDate,
+            isAdult: false,
+            imdbID: "tt12920708",
+            genres: ["Drama"],
+            source: .cinemeta
+        )
+
+        let deduped = SearchEngine.deduplicate([tmdbCandidate, cinemetaCandidate])
+        #expect(deduped.count == 1)
+
+        let canonical = deduped[0]
+        #expect(canonical.id == "tmdb-110356")
+        #expect(canonical.imdbID == "tt12920708") // Inherited from Cinemeta!
+        #expect(canonical.genres == ["Drama", "Comedy"])
+        #expect(canonical.voteAverage == 8.1)
+        #expect(canonical.posterPath == "/startup_tmdb.jpg")
+
+        // Converted MediaItem should have IMDb ID and genres ready
+        let item = canonical.toMediaItem()
+        #expect(item.id == "tt12920708")
+        #expect(item.genres == ["Drama", "Comedy"])
+    }
+
+    @Test func deduplicationPreservesDistinctRemakesWithDifferentYears() {
+        let cal = Calendar(identifier: .gregorian)
+        var comp1984 = DateComponents()
+        comp1984.year = 1984
+        let date1984 = cal.date(from: comp1984)
+
+        var comp2021 = DateComponents()
+        comp2021.year = 2021
+        let date2021 = cal.date(from: comp2021)
+
+        let duneOriginal = MediaCandidate(
+            id: "tmdb-841",
+            title: "Dune",
+            mediaType: .movie,
+            popularity: 45.0,
+            voteCount: 3000,
+            voteAverage: 6.5,
+            posterPath: "/dune1984.jpg",
+            backdropPath: nil,
+            overview: "A Duke's son leads desert warriors.",
+            releaseDate: date1984,
+            isAdult: false,
+            imdbID: "tt0087175",
+            genres: ["Sci-Fi", "Adventure"],
+            source: .tmdb
+        )
+
+        let duneRemake = MediaCandidate(
+            id: "tmdb-438631",
+            title: "Dune",
+            mediaType: .movie,
+            popularity: 120.0,
+            voteCount: 11000,
+            voteAverage: 7.9,
+            posterPath: "/dune2021.jpg",
+            backdropPath: nil,
+            overview: "Paul Atreides arrives on Arrakis.",
+            releaseDate: date2021,
+            isAdult: false,
+            imdbID: "tt1160419",
+            genres: ["Sci-Fi", "Adventure"],
+            source: .tmdb
+        )
+
+        let deduped = SearchEngine.deduplicate([duneOriginal, duneRemake])
+        #expect(deduped.count == 2) // Both versions must be kept!
+    }
+
+    @Test func genresAndMetadataPreservedInTrieAndToMediaItem() async {
+        let trie = PrefixTrie()
+
+        let candidate = MediaCandidate(
+            id: "tmdb-550",
+            title: "Fight Club",
+            mediaType: .movie,
+            popularity: 75.0,
+            voteCount: 26000,
+            voteAverage: 8.4,
+            posterPath: "/fightclub.jpg",
+            backdropPath: "/fightclub_hero.jpg",
+            overview: "An insomniac office worker.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt0137523",
+            genres: ["Drama", "Thriller"],
+            source: .tmdb
+        )
+
+        await trie.insert(candidate, category: .trending)
+
+        let results = await trie.suggestions(forPrefix: "fight")
+        #expect(results.count >= 1)
+
+        let entry = results.first
+        #expect(entry?.title == "Fight Club")
+        #expect(entry?.genres == ["Drama", "Thriller"])
+        #expect(entry?.imdbID == "tt0137523")
+
+        let item = entry?.toMediaItem()
+        #expect(item?.id == "tt0137523")
+        #expect(item?.genres == ["Drama", "Thriller"])
+        #expect(item?.description == "An insomniac office worker.")
+        #expect(item?.voteAverage == 8.4)
+    }
 }
+

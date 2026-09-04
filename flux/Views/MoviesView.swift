@@ -130,21 +130,33 @@ struct MoviesView: View {
     
     private func loadData() async {
         await withTaskGroup(of: Void.self) { group in
-            // 1. Trending Today & Hero
+            // 1. Trending Today, Trending Week & Curated Hero Billboard
             group.addTask {
-                if let items = try? await TMDBEnricher.shared.fetchTrendingMovies(window: "day"), !items.isEmpty {
+                async let dayTask = try? TMDBEnricher.shared.fetchTrendingMovies(window: "day")
+                async let weekTask = try? TMDBEnricher.shared.fetchTrendingMovies(window: "week")
+                let (dayItems, weekItems) = await (dayTask, weekTask)
+                
+                if let dayList = dayItems, !dayList.isEmpty {
+                    await MainActor.run { self.trendingTodayMovies = dayList }
+                }
+                if let weekList = weekItems, !weekList.isEmpty {
+                    let heroCandidates = weekList.filter { item in
+                        let hasBackdrop = item.backdropURL != nil || item.heroURL != nil
+                        let hasOverview = !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        let hasGoodRating = (item.voteAverage ?? 6.5) >= 6.0
+                        return hasBackdrop && hasOverview && item.isReleased && hasGoodRating
+                    }
+                    .sorted { a, b in
+                        let scoreA = (a.voteAverage ?? 6.0) * 15.0 + (a.popularity ?? 0) * 0.1
+                        let scoreB = (b.voteAverage ?? 6.0) * 15.0 + (b.popularity ?? 0) * 0.1
+                        return scoreA > scoreB
+                    }
+                    let finalHero = Array((heroCandidates.isEmpty ? weekList : heroCandidates).prefix(7))
                     await MainActor.run {
-                        self.trendingTodayMovies = items
-                        self.heroMovies = Array(items.prefix(10))
+                        self.trendingWeekMovies = weekList
+                        self.heroMovies = finalHero
                         withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
                     }
-                }
-            }
-            
-            // 2. Trending This Week
-            group.addTask {
-                if let items = try? await TMDBEnricher.shared.fetchTrendingMovies(window: "week"), !items.isEmpty {
-                    await MainActor.run { self.trendingWeekMovies = items }
                 }
             }
             

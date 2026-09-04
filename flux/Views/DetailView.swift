@@ -56,14 +56,65 @@ struct DetailView: View {
         return item.progress ?? 0.0
     }
 
+    /// Resolves the smart target episode to play or prefetch for this TV show:
+    /// 1. If currently in-progress (progress > 0.01 && < 0.90): resumes the in-progress episode.
+    /// 2. If the last episode was finished (progress >= 0.90): advances to the next unwatched episode.
+    /// 3. If never watched: defaults to Season 1 Episode 1.
+    private var smartTargetEpisode: (season: Int, episode: Int, title: String?, image: URL?, isResume: Bool)? {
+        guard displayItem.isSeries || item.isSeries else { return nil }
+        
+        let history = activeHistoryItem
+        if let hist = history, let lastS = hist.lastSeason, let lastE = hist.lastEpisode {
+            let prog = hist.progress ?? 0.0
+            
+            // In-progress: resume this exact episode
+            if prog > 0.01 && prog < 0.90 {
+                let match = episodes.first(where: { $0.seasonNumber == lastS && $0.episodeNumber == lastE }) ?? heroEpisode
+                return (lastS, lastE, hist.lastEpisodeTitle ?? match?.name, hist.lastEpisodeImage ?? match?.stillURL, true)
+            }
+            
+            // Completed (or marked watched): calculate next unwatched episode
+            if prog >= 0.90 {
+                let allEps = fullItem?.episodes ?? episodes
+                // 1. Try next episode in the same season
+                if let nextInSeason = allEps.first(where: { $0.seasonNumber == lastS && $0.episodeNumber == lastE + 1 }) {
+                    return (lastS, lastE + 1, nextInSeason.name, nextInSeason.stillURL, false)
+                }
+                
+                // If season has episodeCount metadata
+                if let currentSeasonObj = (fullItem?.seasons ?? item.seasons)?.first(where: { $0.seasonNumber == lastS }) {
+                    if lastE < currentSeasonObj.episodeCount {
+                        return (lastS, lastE + 1, nil, nil, false)
+                    }
+                }
+                
+                // 2. Try first episode of next season
+                let nextSeasonNum = lastS + 1
+                if let nextSeasonFirst = allEps.first(where: { $0.seasonNumber == nextSeasonNum && $0.episodeNumber == 1 }) {
+                    return (nextSeasonNum, 1, nextSeasonFirst.name, nextSeasonFirst.stillURL, false)
+                }
+                
+                let nextSeasonExists = (fullItem?.seasons ?? item.seasons)?.contains(where: { $0.seasonNumber == nextSeasonNum }) ?? false
+                if nextSeasonExists {
+                    return (nextSeasonNum, 1, nil, nil, false)
+                }
+                
+                // If reached the end of the entire show, stay on the last episode
+                return (lastS, lastE, hist.lastEpisodeTitle, hist.lastEpisodeImage, false)
+            }
+        }
+        
+        // No history or unwatched: first available episode
+        let firstEp = episodes.first(where: { $0.seasonNumber > 0 }) ?? episodes.first
+        let sNum = selectedSeason?.seasonNumber ?? firstEp?.seasonNumber ?? 1
+        let eNum = firstEp?.episodeNumber ?? 1
+        return (sNum, eNum, firstEp?.name, firstEp?.stillURL, false)
+    }
+
     /// The specific episode to resume for a TV show (from history or first available).
     private var resumeEpisode: (season: Int, episode: Int, title: String?, image: URL?)? {
-        if displayItem.category == "TV Show" || displayItem.category == "Series" || item.category == "TV Show" || item.category == "Series" {
-            let seasonNum = activeHistoryItem?.lastSeason ?? item.lastSeason ?? 1
-            let epNum = activeHistoryItem?.lastEpisode ?? item.lastEpisode ?? 1
-            let title = activeHistoryItem?.lastEpisodeTitle ?? item.lastEpisodeTitle
-            let img = activeHistoryItem?.lastEpisodeImage ?? item.lastEpisodeImage
-            return (seasonNum, epNum, title, img)
+        if let target = smartTargetEpisode {
+            return (target.season, target.episode, target.title, target.image)
         }
         return nil
     }
@@ -184,8 +235,19 @@ struct DetailView: View {
                                     .padding(.vertical, 6)
                                     .background(Capsule().fill(Color.white.opacity(0.18)))
                                     .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                            } else if let genre = displayItem.genres?.first, !genre.isEmpty {
+                                Text(genre.uppercased())
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .tracking(1.5)
+                                    .foregroundStyle(.white.opacity(0.7))
+                            } else if isLoadingDetails {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(width: 80, height: 14)
+                                    .shimmer()
                             } else {
-                                Text(displayItem.genres?.first?.uppercased() ?? displayItem.category.uppercased())
+                                Text(displayItem.category.uppercased())
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
@@ -206,6 +268,12 @@ struct DetailView: View {
                                 if let genres = displayItem.genres, !genres.isEmpty {
                                     Text("•")
                                     Text(genres.prefix(2).joined(separator: ", "))
+                                } else if isLoadingDetails {
+                                    Text("•")
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .fill(Color.white.opacity(0.08))
+                                        .frame(width: 80, height: 12)
+                                        .shimmer()
                                 }
                                 if let voteAvg = displayItem.voteAverage, voteAvg > 0 {
                                     Text("•")
@@ -236,29 +304,17 @@ struct DetailView: View {
                             HStack(spacing: 16) {
                                 if isReleased {
                                     Button(action: {
-                                        if isInContinueWatching {
-                                            let resume = resumeEpisode
-                                            let matchingEp = episodes.first(where: { $0.seasonNumber == resume?.season && $0.episodeNumber == resume?.episode }) ?? heroEpisode
-                                            PlayerManager.shared.play(
-                                                displayItem,
-                                                season: resume?.season,
-                                                episode: resume?.episode,
-                                                episodeImage: resume?.image ?? matchingEp?.stillURL,
-                                                fromContinueWatching: true,
-                                                forceStreamPicker: false,
-                                                startFromBeginning: false
-                                            )
-                                        } else if displayItem.category == "TV Show" || displayItem.category == "Series" {
-                                            let firstEp = episodes.first(where: { $0.seasonNumber > 0 }) ?? episodes.first
+                                        if let target = smartTargetEpisode {
                                             let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+                                            let matchingEp = episodes.first(where: { $0.seasonNumber == target.season && $0.episodeNumber == target.episode }) ?? heroEpisode
                                             PlayerManager.shared.play(
                                                 displayItem,
-                                                season: selectedSeason?.seasonNumber ?? firstEp?.seasonNumber ?? 1,
-                                                episode: firstEp?.episodeNumber ?? 1,
-                                                episodeImage: firstEp?.stillURL,
-                                                fromContinueWatching: false,
+                                                season: target.season,
+                                                episode: target.episode,
+                                                episodeImage: target.image ?? matchingEp?.stillURL,
+                                                fromContinueWatching: target.isResume,
                                                 forceStreamPicker: !isFlux,
-                                                startFromBeginning: true
+                                                startFromBeginning: !target.isResume
                                             )
                                         } else {
                                             let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
@@ -267,9 +323,9 @@ struct DetailView: View {
                                                 season: nil,
                                                 episode: nil,
                                                 episodeImage: nil,
-                                                fromContinueWatching: false,
+                                                fromContinueWatching: isInContinueWatching,
                                                 forceStreamPicker: !isFlux,
-                                                startFromBeginning: true
+                                                startFromBeginning: !isInContinueWatching
                                             )
                                         }
                                         openWindow(id: "player", value: displayItem.id)
@@ -404,26 +460,6 @@ struct DetailView: View {
                                     .buttonStyle(.plain)
                                     .disabled(isDownloading)
                                     .help("Download best stream for offline")
-
-                                    // Play Trailer in Flux Native Player
-                                    if !trailers.isEmpty || !bonusContent.isEmpty || trailerURL != nil {
-                                        Button {
-                                            if let firstTrailer = trailers.first ?? bonusContent.first {
-                                                playBonusContent(firstTrailer)
-                                            } else if let trailer = trailerURL {
-                                                NSWorkspace.shared.open(trailer)
-                                            }
-                                        } label: {
-                                            Image(systemName: "play.rectangle.fill")
-                                                .font(.title3)
-                                                .foregroundStyle(.white)
-                                                .padding(14)
-                                                .glassEffect(.regular.interactive(), in: .circle)
-                                                .contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help("Play trailer in Flux")
-                                    }
                                 } else {
                                     // UPCOMING CONTENT MASTER LAYOUT (Apple TV style)
                                     Button(action: {
@@ -526,9 +562,9 @@ struct DetailView: View {
                         if isLoadingDetails {
                             VStack(alignment: .leading, spacing: 44) {
                                 if item.category == "TV Show" {
-                                    GhostRail(posterWidth: 380, ratio: 16/9)
+                                    GhostRail(posterWidth: 380, ratio: 16/9, cornerRadius: 16)
                                 }
-                                GhostRail(posterWidth: 300, ratio: 16/9)
+                                GhostRail(posterWidth: 300, ratio: 16/9, cornerRadius: 16)
                                 GhostRail()
                                 GhostGrid()
                             }
@@ -591,25 +627,39 @@ struct DetailView: View {
                                     }
                                 }
                                 
-                                DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
-                                    Button(action: {
-                                        let prog = getEpisodeProgress(episode)
-                                        let hasProgress = prog > 0.01 && prog < 0.90
-                                        let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-                                        PlayerManager.shared.play(
-                                            displayItem,
-                                            season: selectedSeason?.seasonNumber,
-                                            episode: episode.episodeNumber,
-                                            episodeImage: episode.stillURL,
-                                            fromContinueWatching: hasProgress,
-                                            forceStreamPicker: !isFlux,
-                                            startFromBeginning: !hasProgress
-                                        )
-                                        openWindow(id: "player", value: displayItem.id)
-                                    }) {
-                                        LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode), item: displayItem)
+                                if !episodes.isEmpty {
+                                    DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
+                                        Button(action: {
+                                            let prog = getEpisodeProgress(episode)
+                                            let hasProgress = prog > 0.01 && prog < 0.90
+                                            let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+                                            PlayerManager.shared.play(
+                                                displayItem,
+                                                season: selectedSeason?.seasonNumber ?? episode.seasonNumber,
+                                                episode: episode.episodeNumber,
+                                                episodeImage: episode.stillURL,
+                                                fromContinueWatching: hasProgress,
+                                                forceStreamPicker: !isFlux,
+                                                startFromBeginning: !hasProgress
+                                            )
+                                            openWindow(id: "player", value: displayItem.id)
+                                        }) {
+                                            LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode), item: displayItem)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
+                                } else {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 24) {
+                                            ForEach(0..<4, id: \.self) { _ in
+                                                SkeletonEpisodeCard()
+                                            }
+                                        }
+                                        .padding(.leading, 268)
+                                        .padding(.trailing, 60)
+                                        .padding(.top, 10)
+                                        .padding(.bottom, 24)
+                                    }
                                 }
                             }
                         }
@@ -926,17 +976,37 @@ struct DetailView: View {
     /// Non-Flux → picker is instant on Play. Flux Mode → best source resolved,
     /// primed and held buffered in a warm mpv core so Play starts instantly.
     private func prefetchPlaybackSources() {
-        let seasonNumber = selectedSeason?.seasonNumber ?? heroEpisode?.seasonNumber
-        let episodeNumber = heroEpisode?.episodeNumber ?? (seasonNumber != nil ? 1 : nil)
-        PlayerManager.shared.startDetailPrefetch(
-            item: displayItem,
-            season: seasonNumber,
-            episode: episodeNumber
-        )
+        if displayItem.isSeries || item.isSeries {
+            if let target = smartTargetEpisode {
+                PlayerManager.shared.startDetailPrefetch(
+                    item: displayItem,
+                    season: target.season,
+                    episode: target.episode
+                )
+            } else {
+                let seasonNumber = selectedSeason?.seasonNumber ?? heroEpisode?.seasonNumber ?? 1
+                let episodeNumber = heroEpisode?.episodeNumber ?? 1
+                PlayerManager.shared.startDetailPrefetch(
+                    item: displayItem,
+                    season: seasonNumber,
+                    episode: episodeNumber
+                )
+            }
+        } else {
+            PlayerManager.shared.startDetailPrefetch(
+                item: displayItem,
+                season: nil,
+                episode: nil
+            )
+        }
     }
     
     func getEpisodeProgress(_ episode: Episode?) -> Double {
         guard let episode = episode else { return 0.0 }
+        if let epProg = UserDataService.shared.getEpisodeProgress(for: displayItem.id, season: episode.seasonNumber, episode: episode.episodeNumber),
+           epProg.duration > 0 {
+            return epProg.position / epProg.duration
+        }
         guard let historyItem = activeHistoryItem else { return 0.0 }
         
         if displayItem.category == "TV Show" || displayItem.category == "Series" {
@@ -983,9 +1053,9 @@ struct DetailView: View {
             if let releaseDate = item.releaseDate, !releaseDate.isEmpty {
                 merged.releaseDate = releaseDate
             }
-            if item.heroURL != nil { merged.heroURL = item.heroURL }
-            if item.backdropURL != nil { merged.backdropURL = item.backdropURL }
-            if item.posterURL != nil { merged.posterURL = item.posterURL }
+            if let hero = item.heroURL { merged.heroURL = hero }
+            if let backdrop = item.backdropURL { merged.backdropURL = backdrop }
+            if let poster = item.posterURL { merged.posterURL = poster }
             
             await MainActor.run {
                 self.fullItem = merged
@@ -994,7 +1064,10 @@ struct DetailView: View {
             if type == "series" {
                 let regularSeasons = merged.seasons?.filter { $0.seasonNumber > 0 && !$0.name.lowercased().contains("special") } ?? []
                 let targetSeason: Season?
-                if let hist = activeHistoryItem,
+                if let target = self.smartTargetEpisode,
+                   let matchedSeason = regularSeasons.first(where: { $0.seasonNumber == target.season }) {
+                    targetSeason = matchedSeason
+                } else if let hist = activeHistoryItem,
                    let lastS = hist.lastSeason,
                    let matchedSeason = regularSeasons.first(where: { $0.seasonNumber == lastS }) {
                     targetSeason = matchedSeason
@@ -1055,7 +1128,10 @@ struct DetailView: View {
         // Initial set to show something immediately
         await MainActor.run {
             self.episodes = currentSeasonEpisodes
-            if let hist = activeHistoryItem,
+            if let target = self.smartTargetEpisode,
+               let matched = currentSeasonEpisodes.first(where: { $0.seasonNumber == target.season && $0.episodeNumber == target.episode }) {
+                self.heroEpisode = matched
+            } else if let hist = activeHistoryItem,
                let lastE = hist.lastEpisode,
                let matched = currentSeasonEpisodes.first(where: { $0.episodeNumber == lastE }) {
                 self.heroEpisode = matched
@@ -1064,18 +1140,29 @@ struct DetailView: View {
             }
         }
         
-        // Background Enrichment: Fetch descriptions automatically
+        // Background Enrichment: Fetch descriptions, stills, names, and runtimes automatically
         if let id = fullItem?.id, id.hasPrefix("tt"),
            let tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: id, type: "tv") {
             
-            let enrichedOverviews = await TMDBEnricher.shared.fetchSeasonEnrichment(tvId: tmdbID, seasonNumber: season.seasonNumber)
+            let enrichedMap = await TMDBEnricher.shared.fetchFullSeasonEnrichment(tvId: tmdbID, seasonNumber: season.seasonNumber)
             
-            if !enrichedOverviews.isEmpty {
+            if !enrichedMap.isEmpty {
                 await MainActor.run {
                     self.episodes = currentSeasonEpisodes.map { episode in
                         var enriched = episode
-                        if let overview = enrichedOverviews[episode.episodeNumber], !overview.isEmpty {
-                            enriched.overview = overview
+                        if let tmdbData = enrichedMap[episode.episodeNumber] {
+                            if !tmdbData.overview.isEmpty {
+                                enriched.overview = tmdbData.overview
+                            }
+                            if let still = tmdbData.stillURL {
+                                enriched.stillURL = still
+                            }
+                            if let rt = tmdbData.runtime {
+                                enriched.runtime = rt
+                            }
+                            if !tmdbData.name.isEmpty && (episode.name.hasPrefix("Episode ") || episode.name.isEmpty) {
+                                enriched.name = tmdbData.name
+                            }
                         }
                         return enriched
                     }
@@ -1130,21 +1217,23 @@ struct LiquidEpisodeCard: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             // 1. Background Image
-            AsyncImage(url: episode.stillURL) { img in
-                img.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        LinearGradient(
-                            colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+            if let url = episode.stillURL {
+                CachedImage(url: url, maxDimension: 760) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                    default:
+                        skeletonPlaceholder
+                    }
+                }
+                .frame(width: 380, height: 214)
+                .clipped()
+            } else {
+                skeletonPlaceholder
+                    .frame(width: 380, height: 214)
             }
-            .frame(width: 380, height: 214)
-            .clipped()
             
             // 2. Liquid Glass Overlay
             LinearGradient(colors: [
@@ -1249,11 +1338,12 @@ struct LiquidEpisodeCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
         )
+        // Specular Rim Highlight on Hover
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: isHovering
+                        colors: isHovering 
                             ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
                             : [Color.white.opacity(0.14), Color.white.opacity(0.03)],
                         startPoint: .topLeading,
@@ -1262,9 +1352,86 @@ struct LiquidEpisodeCard: View {
                     lineWidth: isHovering ? 1.5 : 0.75
                 )
         )
-        .shadow(color: Color.black.opacity(isHovering ? 0.40 : 0.15), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
-        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: isHovering)
-        .onHover { isHovering = $0 }
+        .shadow(color: Color.black.opacity(isHovering ? 0.40 : 0.16), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isHovering)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+
+    private var skeletonPlaceholder: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(red: 0.11, green: 0.11, blue: 0.13))
+            LinearGradient(
+                colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+}
+
+struct SkeletonEpisodeCard: View {
+    @State private var phase: CGFloat = 0
+    
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(red: 0.11, green: 0.11, blue: 0.13))
+            
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: max(0, phase - 0.35)),
+                    .init(color: Color.white.opacity(0.07), location: phase),
+                    .init(color: .clear, location: min(1, phase + 0.35))
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            
+            VStack(alignment: .leading, spacing: 10) {
+                Spacer()
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 75, height: 11)
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.white.opacity(0.20))
+                    .frame(width: 210, height: 20)
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 320, height: 12)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 240, height: 12)
+                }
+                .frame(height: 40, alignment: .topLeading)
+                
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: 14, height: 14)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.white.opacity(0.12))
+                        .frame(width: 35, height: 12)
+                    Spacer()
+                }
+            }
+            .padding(20)
+        }
+        .frame(width: 380, height: 214)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .onAppear {
+            withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                phase = 1.0
+            }
+        }
     }
 }
 
@@ -1286,6 +1453,9 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
                     ForEach(Array(items.enumerated()), id: \.offset) { enumeration in
                         content(enumeration.element)
                             .id(enumeration.offset)
+                            .onAppear {
+                                prefetchAhead(from: enumeration.offset)
+                            }
                     }
                 }
                 .padding(.leading, 268)
@@ -1337,6 +1507,29 @@ struct DetailRail<Data: RandomAccessCollection, Content: View, ID: Hashable>: Vi
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
             proxy.scrollTo(scrollTargetIndex, anchor: .leading)
         }
+    }
+
+    private func prefetchAhead(from index: Int) {
+        let array = Array(items)
+        guard !array.isEmpty else { return }
+        let nextStart = index + 1
+        let nextEnd = min(index + 3, array.count - 1)
+        guard nextStart <= nextEnd else { return }
+
+        var urls: [URL?] = []
+        for i in nextStart...nextEnd {
+            let candidate = array[i]
+            if let ep = candidate as? Episode {
+                urls.append(ep.stillURL)
+            } else if let media = candidate as? MediaItem {
+                urls.append(media.posterURL ?? media.imageURL ?? media.backdropURL)
+            } else if let mirror = Mirror(reflecting: candidate).descendant("stillURL") as? URL? {
+                urls.append(mirror)
+            } else if let mirror = Mirror(reflecting: candidate).descendant("posterURL") as? URL? {
+                urls.append(mirror)
+            }
+        }
+        ImagePrefetcher.shared.prefetch(urls: urls, maxDimension: itemWidth * 1.5)
     }
 }
 

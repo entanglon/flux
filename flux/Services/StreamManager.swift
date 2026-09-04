@@ -35,14 +35,33 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
     /// links that ship both `url` and `infoHash`). Playback transport still follows `url`.
     var infoHash: String? = nil
 
-    /// True for magnet / torrent-backed playback URLs
+    /// True for magnet or torrent-swarm backed releases
     var isTorrent: Bool {
-        url.absoluteString.hasPrefix("magnet:") || url.absoluteString.contains("xt=urn:btih:")
+        let urlStr = url.absoluteString
+        if StreamManager.isP2PSource(source, url: urlStr) { return true }
+        if StreamManager.isHttpSource(source, url: urlStr) { return false }
+        if urlStr.hasPrefix("magnet:") || urlStr.contains("xt=urn:btih:") {
+            return true
+        }
+        if (seeders ?? 0) > 0 {
+            return true
+        }
+        return false
+    }
+
+    /// True for direct web-scraped HTTP hosters, CDNs, or debrid-resolved streams
+    var isDirectHTTP: Bool {
+        let urlStr = url.absoluteString
+        if StreamManager.isP2PSource(source, url: urlStr) { return false }
+        if StreamManager.isHttpSource(source, url: urlStr) { return true }
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return false
+        }
+        return !isTorrent
     }
 
     /// True when the content originates from a torrent swarm, even if this entry
-    /// plays over direct HTTP (debrid-cached). Used for Torrents/Direct tabs and
-    /// labels only — never for playback routing.
+    /// plays over direct HTTP (debrid-cached). Used for labels and origin indicators.
     var isTorrentSourced: Bool {
         isTorrent || (infoHash?.isEmpty == false)
     }
@@ -136,7 +155,7 @@ struct StremioBehaviorHints: Codable {
     let notWebReady: Bool?
     let bingeGroup: String?
     let filename: String?
-    let videoSize: Int?
+    let videoSize: Int64?
 
     enum CodingKeys: String, CodingKey {
         case proxyHeaders
@@ -200,7 +219,14 @@ class StreamManager {
         return await fetchStreamsRealtime(for: item, season: season, episode: episode, onStreamsUpdated: { _ in })
     }
     
-    func fetchStreamsRealtime(for item: MediaItem, season: Int? = nil, episode: Int? = nil, forceRefresh: Bool = false, onStreamsUpdated: @escaping ([Stream]) -> Void) async -> [Stream] {
+    func fetchStreamsRealtime(
+        for item: MediaItem,
+        season: Int? = nil,
+        episode: Int? = nil,
+        forceRefresh: Bool = false,
+        onProgress: ((_ loaded: Int, _ total: Int, _ pendingNames: [String]) -> Void)? = nil,
+        onStreamsUpdated: @escaping ([Stream]) -> Void
+    ) async -> [Stream] {
         let s = season ?? 1
         let e = episode ?? 1
         let isSeries = item.category == "TV Show" || item.category == "Series"
@@ -215,37 +241,41 @@ class StreamManager {
                 if sourceMode == "torrent" { return s.isTorrent }
                 return true
             }
+            onProgress?(1, 1, [])
             onStreamsUpdated(filtered)
             return filtered
         }
         
         // Resolve IMDb ID (Stremio addons expect tt... IDs)
-        var resolvedImdbID: String? = nil
-        if item.id.starts(with: "tt") {
-            resolvedImdbID = item.id
-        } else {
-            resolvedImdbID = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type)
-        }
+        let resolvedImdbID = await resolveImdbID(for: item, type: type)
         
         var allStreams: [Stream] = []
 
-        await withTaskGroup(of: [Stream].self) { group in
-            // Fan out to all enabled addons. The Stremio protocol returns an empty
-            // array or 404 for unsupported resources, so there's no harm including
-            // addons that might only provide catalogs — they just won't return streams.
-            let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled }
+        let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled && self.shouldQueryAddon($0, sourceMode: sourceMode) }
+        var pendingNames = enabledAddons.map { $0.name }
+        let totalCount = enabledAddons.count
+        var loadedCount = 0
 
+        onProgress?(loadedCount, totalCount, pendingNames)
+
+        await withTaskGroup(of: (String, [Stream]).self) { group in
             for addon in enabledAddons {
                 let cleanBaseURL = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
+                let name = addon.name
 
                 group.addTask {
                     let baseID = resolvedImdbID ?? item.id
                     let targetID = isSeries ? "\(baseID):\(s):\(e)" : baseID
-                    return await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: addon.name)
+                    let streams = await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: name)
+                    return (name, streams)
                 }
             }
 
-            for await result in group {
+            for await (name, result) in group {
+                loadedCount += 1
+                pendingNames.removeAll { $0 == name }
+                onProgress?(loadedCount, totalCount, pendingNames)
+
                 if !result.isEmpty {
                     allStreams.append(contentsOf: result)
                     let currentDeduped = self.deduped(allStreams)
@@ -260,11 +290,10 @@ class StreamManager {
             }
         }
         
-        let resolutionFiltered = deduped(allStreams).filter { s in
-            self.isWithinMaxResolution(s)
-        }
-
-        let sortedStreams = resolutionFiltered.sorted { s1, s2 in
+        // Preserve all discovered streams across all resolutions (4K, 1080p, 720p, SD).
+        // Resolution preferences are applied dynamically in Flux Mode auto-play,
+        // while the Stream Picker and cache retain all options for user choice.
+        let sortedStreams = deduped(allStreams).sorted { s1, s2 in
             streamSortComparator(s1, s2)
         }
 
@@ -279,6 +308,123 @@ class StreamManager {
             return true
         }
         return modeFiltered
+    }
+
+    /// Identifies whether a provider name or URL represents a known HTTP scraper / CDN addon
+    static func isHttpSource(_ source: String, url: String? = nil) -> Bool {
+        let s = "\(source) \(url ?? "")".lowercased()
+        // AIOStreams serves both HTTP and torrent streams through the same addon.
+        // Classification depends on the individual stream URL, not the addon config.
+        if s.contains("aiostreams") {
+            // If we have an actual stream URL, classify by whether it's a magnet link
+            if let u = url?.lowercased() {
+                if u.hasPrefix("magnet:") || u.contains("xt=urn:btih:") { return false }
+                if u.hasPrefix("http://") || u.hasPrefix("https://") { return true }
+            }
+            // Addon-level classification: check the config path
+            return s.contains("http-only") || s.contains("http")
+        }
+        if isP2PSource(source, url: url) {
+            return false
+        }
+        return s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") || s.contains("http") || s.contains("direct")
+    }
+
+    /// Identifies whether a provider name or URL represents a known torrent/P2P addon
+    static func isP2PSource(_ source: String, url: String? = nil) -> Bool {
+        let s = "\(source) \(url ?? "")".lowercased()
+        if s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") {
+            return false
+        }
+        // AIOStreams: classify by the individual stream URL
+        if s.contains("aiostreams") {
+            if let u = url?.lowercased() {
+                if u.hasPrefix("magnet:") || u.contains("xt=urn:btih:") { return true }
+                if u.hasPrefix("http://") || u.hasPrefix("https://") { return false }
+            }
+            // Addon-level: torrent unless explicitly http-only
+            return !s.contains("http-only")
+        }
+        return s.contains("torrentio") || s.contains("meteor") || s.contains("comet") || s.contains("knightcrawler") || s.contains("mediafusion") || s.contains("annatar") || s.contains("jackett") || s.contains("p2p") || s.contains("torrent")
+    }
+
+    /// Identifies whether a provider name represents a known torrent/P2P addon
+    static func isKnownTorrentAddon(_ source: String, url: URL? = nil) -> Bool {
+        return isP2PSource(source, url: url?.absoluteString)
+    }
+
+    /// Resolves an IMDb tt... ID for Stremio addons.
+    /// Tries TMDB external IDs first, then falls back to Cinemeta search.
+    func resolveImdbID(for item: MediaItem, type: String) async -> String? {
+        if item.id.starts(with: "tt") {
+            return item.id
+        }
+
+        // 1. Try TMDB external_ids
+        if let tmdbImdb = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type), !tmdbImdb.isEmpty {
+            return tmdbImdb
+        }
+
+        // 2. Fallback: Query Cinemeta catalog search by title
+        let cleanTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty,
+              let encoded = cleanTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchURL = URL(string: "https://v3-cinemeta.strem.io/catalog/\(type)/top/search=\(encoded).json") else {
+            return nil
+        }
+
+        do {
+            let (data, response) = try await self.session.data(from: searchURL)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let metas = json["metas"] as? [[String: Any]] else {
+                return nil
+            }
+
+            for meta in metas {
+                if let imdbID = meta["imdb_id"] as? String, imdbID.starts(with: "tt") {
+                    print("[StreamManager] Resolved IMDb ID via Cinemeta: \(cleanTitle) -> \(imdbID)")
+                    return imdbID
+                }
+                if let id = meta["id"] as? String, id.starts(with: "tt") {
+                    print("[StreamManager] Resolved IMDb ID via Cinemeta: \(cleanTitle) -> \(id)")
+                    return id
+                }
+            }
+        } catch {
+            print("[StreamManager] Cinemeta IMDb resolution error: \(error)")
+        }
+
+        return nil
+    }
+
+    /// Determines whether an addon should be queried under the active sourceMode filter.
+    /// In HTTP-only mode, P2P torrent addons are strictly bypassed.
+    /// In Torrent-only mode, HTTP scraper addons are strictly bypassed.
+    func shouldQueryAddon(_ addon: StremioAddon, sourceMode: String) -> Bool {
+        if sourceMode == "both" { return true }
+        let name = addon.name
+        let url = addon.url
+
+        // AIOStreams is a hybrid addon that serves both HTTP and torrent streams
+        // through the same endpoint — always query it; stream-level filtering handles the rest.
+        if name.lowercased().contains("aiostreams") || url.lowercased().contains("aiostreams") {
+            return true
+        }
+
+        let isHttp = Self.isHttpSource(name, url: url)
+        let isTorrent = Self.isP2PSource(name, url: url)
+
+        if sourceMode == "http" {
+            // Strictly disable all P2P torrent addons
+            if isTorrent { return false }
+            return isHttp || !isTorrent
+        } else if sourceMode == "torrent" {
+            // Strictly disable all HTTP scraper addons
+            if isHttp { return false }
+            return isTorrent || !isHttp
+        }
+        return true
     }
 
     /// Collapses duplicate entries for the same underlying source (same torrent from
@@ -303,7 +449,8 @@ class StreamManager {
     
     func qualityScore(_ quality: String) -> Int {
         switch quality.uppercased() {
-        case "4K", "2160P", "UHD": return 4
+        case "4K", "2160P", "UHD": return 5
+        case "2K", "1440P", "QHD": return 4
         case "1080P", "FHD": return 3
         case "720P", "HD": return 2
         case "480P", "SD": return 1
@@ -496,28 +643,165 @@ class StreamManager {
 
     /// Evaluates if a stream qualifies for the "Fast Start" tab (< 3.5s estimated startup)
     func isFastStartStream(_ stream: Stream) -> Bool {
-        if !stream.isTorrent { return true }
-        guard let seeders = stream.seeders, seeders >= 35 else { return false }
+        if stream.isDirectHTTP { return true }
+        guard let seeders = stream.seeders, seeders >= 25 else { return false }
         let sizeGB = stream.parsedSizeInGB ?? 2.5
-        // Exclude massive 8GB+ remuxes from Fast Start tab
-        if sizeGB > 8.0 { return false }
-        return computeStartupSpeedScore(stream) >= 18.0
+        // Exclude massive 10GB+ remuxes from Fast Start tab
+        if sizeGB > 10.0 { return false }
+        return computeStartupSpeedScore(stream) >= 12.0
     }
 
     /// Categorizes stream into speed tier
     func speedTier(for stream: Stream) -> StartupSpeedTier {
-        if !stream.isTorrent { return .instant }
-        guard let seeders = stream.seeders, seeders >= 35 else { return .standard }
+        if stream.isDirectHTTP { return .instant }
+        guard let seeders = stream.seeders, seeders >= 25 else { return .standard }
         
         let score = computeStartupSpeedScore(stream)
         let sizeGB = stream.parsedSizeInGB ?? 2.5
-        if seeders >= 80 && sizeGB <= 4.0 && score >= 50.0 {
+        if seeders >= 60 && sizeGB <= 4.0 && score >= 35.0 {
             return .instant
-        } else if seeders >= 35 && sizeGB <= 8.0 && score >= 18.0 {
+        } else if seeders >= 25 && sizeGB <= 10.0 && score >= 12.0 {
             return .fast
         } else {
             return .standard
         }
+    }
+
+    /// Computes a health score for the "Best Health" tab.
+    /// Direct verified HTTP streams receive top tier, while torrents are scored
+    /// by swarm seed count and health ratio.
+    func healthScore(for stream: Stream, probeOk: Bool? = nil) -> Double {
+        if stream.isDirectHTTP {
+            if probeOk == true {
+                return 10000.0 // Verified responsive direct stream
+            }
+            return 3000.0 // General direct HTTP
+        }
+        
+        let seeds = Double(stream.seeders ?? 0)
+        let leechers = Double(stream.leechers ?? 1)
+        let ratio = seeds / max(1.0, leechers)
+        let ratioMultiplier = min(2.0, max(0.8, ratio))
+        return seeds * ratioMultiplier
+    }
+
+    /// Health comparator: prioritizes swarm health (seeds / responsive CDN) over raw resolution.
+    func streamHealthComparator(_ s1: Stream, _ s2: Stream, probeStatus: [String: StreamProbeResult] = [:]) -> Bool {
+        let h1 = healthScore(for: s1, probeOk: probeStatus[s1.stableKey]?.ok)
+        let h2 = healthScore(for: s2, probeOk: probeStatus[s2.stableKey]?.ok)
+        if h1 != h2 {
+            return h1 > h2
+        }
+        let seeds1 = s1.seeders ?? 0
+        let seeds2 = s2.seeders ?? 0
+        if seeds1 != seeds2 {
+            return seeds1 > seeds2
+        }
+        return qualityScore(s1.quality) > qualityScore(s2.quality)
+    }
+
+    /// Estimates expected seconds until playback starts for a given stream.
+    /// Calibrated for broadband connections down to ~20 Mbps (2.5 MB/s) to ensure
+    /// healthy initial piece buffering without prematurely abandoning valid swarms.
+    func estimatedStartupBudget(for stream: Stream) -> TimeInterval {
+        if !stream.isTorrent {
+            return 8.0 // Direct HTTP / Debrid streams (proxy handshake, redirect, and initial demuxer cache)
+        }
+        let score = qualityScore(stream.quality)
+        let seedCount = stream.seeders ?? 0
+        switch score {
+        case 5: // 4K / 2160p (8MB-16MB piece + tracker announce)
+            return seedCount >= 100 ? 13.0 : 16.0
+        case 4: // 2K / 1440p (4MB-8MB piece)
+            return seedCount >= 75 ? 10.0 : 13.0
+        case 3: // 1080p (2MB-4MB piece)
+            return seedCount >= 50 ? 8.5 : 11.0
+        case 2: // 720p (1MB-2MB piece)
+            return seedCount >= 50 ? 6.5 : 8.5
+        default: // SD / 480p
+            return 6.0
+        }
+    }
+
+    /// Flux Mode Fast Start candidate selection:
+    /// Ranks streams balancing user's preferred resolution cap, preferred audio language,
+    /// startup speed score, and swarm health.
+    /// Returns the optimal primary stream and an ordered list of standby fallbacks.
+    func selectFastStartCandidate(
+        from streams: [Stream],
+        sourceMode: String,
+        preferredQuality: String,
+        preferredLang: String,
+        probeStatus: [String: StreamProbeResult] = [:]
+    ) -> (primary: Stream?, fallbacks: [Stream]) {
+        let healthy = streams.filter { stream in
+            if probeStatus[stream.stableKey]?.ok == false { return false }
+            return true
+        }
+        guard !healthy.isEmpty else { return (nil, []) }
+
+        // 1. Source mode filter
+        let modeFiltered: [Stream]
+        if sourceMode == "http" {
+            modeFiltered = healthy.filter { !$0.isTorrent }
+        } else if sourceMode == "torrent" {
+            modeFiltered = healthy.filter { $0.isTorrent }
+        } else {
+            modeFiltered = healthy
+        }
+        guard !modeFiltered.isEmpty else { return (nil, []) }
+
+        // 2. Resolution cap
+        let maxAllowed = qualityScore(preferredQuality)
+        let qualityCapped = modeFiltered.filter { qualityScore($0.quality) <= maxAllowed }
+        let candidates = qualityCapped.isEmpty ? modeFiltered : qualityCapped
+
+        // 3. Composite score calculation
+        let ranked = candidates.sorted { s1, s2 in
+            let score1 = computeCompositeRank(s1, preferredLang: preferredLang, probeStatus: probeStatus)
+            let score2 = computeCompositeRank(s2, preferredLang: preferredLang, probeStatus: probeStatus)
+            if score1 != score2 {
+                return score1 > score2
+            }
+            return computeStartupSpeedScore(s1) > computeStartupSpeedScore(s2)
+        }
+
+        let primary = ranked.first
+        let fallbacks = Array(ranked.dropFirst().prefix(4))
+        return (primary, fallbacks)
+    }
+
+    private func computeCompositeRank(_ stream: Stream, preferredLang: String, probeStatus: [String: StreamProbeResult]) -> Double {
+        var score = 0.0
+
+        // Preferred Audio Language bonus
+        if matchesPreferredLanguage(stream, preferred: preferredLang) {
+            score += 4000.0
+        } else if isForeignDub(stream.language ?? "", title: stream.title) {
+            score -= 2500.0
+        }
+
+        // Direct HTTP instant bonus
+        if !stream.isTorrent {
+            score += 2500.0
+            if probeStatus[stream.stableKey]?.ok == true {
+                score += 1000.0
+            }
+        }
+
+        // Startup speed score contribution
+        let sss = computeStartupSpeedScore(stream)
+        score += min(sss, 5000.0)
+
+        // Quality tier bonus (higher quality within allowed cap gets strong weighting)
+        score += Double(qualityScore(stream.quality)) * 500.0
+
+        // Seed health bonus
+        if let seeders = stream.seeders {
+            score += Double(min(seeders, 300)) * 4.0
+        }
+
+        return score
     }
     
     private func normalizeAddonURL(_ rawUrl: String) -> String {
@@ -539,7 +823,8 @@ class StreamManager {
         print("[\(sourceName)] Requesting: \(urlString)")
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        request.timeoutInterval = StreamManager.isHttpSource(sourceName) ? 22 : 12
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await self.session.data(for: request)
@@ -618,12 +903,19 @@ class StreamManager {
                 }
                 guard let streamUrl = streamUrl else { return nil }
 
-                // Protocol: description is primary (replaces deprecated title), title is fallback
                 let rawTitle = stream.description ?? stream.title ?? stream.name ?? "Unknown Stream"
                 let nameHeader = stream.name ?? ""
                 let combinedTitle = "\(nameHeader) \(rawTitle)"
-                let quality = parseQuality(from: combinedTitle)
-                let size = parseSize(from: rawTitle)
+                let lowerCheck = "\(combinedTitle) \(finalURLStr)".lowercased()
+                if lowerCheck.contains("sign in") || lowerCheck.contains("signin") ||
+                   lowerCheck.contains("log in") || lowerCheck.contains("login") ||
+                   lowerCheck.contains("authenticate") || lowerCheck.contains("unauthorized") ||
+                   lowerCheck.contains("access denied") || lowerCheck.contains("account required") {
+                    print("[\(sourceName)] Ignoring auth wall / placeholder banner: \(rawTitle)")
+                    return nil
+                }
+                let quality = parseQuality(from: combinedTitle, filename: stream.behaviorHints?.filename)
+                let size = parseSize(from: rawTitle) ?? formatVideoSize(stream.behaviorHints?.videoSize)
                 let language = parseLanguage(from: combinedTitle)
                 let codec = parseCodec(from: combinedTitle)
                 let bitrate = parseBitrate(from: combinedTitle)
@@ -709,13 +1001,28 @@ class StreamManager {
         return result
     }
     
-    private func parseQuality(from title: String) -> String {
+    func parseQuality(from title: String, filename: String? = nil) -> String {
         let upperTitle = title.uppercased()
-        if upperTitle.contains("4K") || upperTitle.contains("2160P") || upperTitle.contains("UHD") { return "4K" }
-        if upperTitle.contains("1080P") || upperTitle.contains("FHD") { return "1080p" }
-        if upperTitle.contains("720P") { return "720p" }
-        if upperTitle.contains("HD") && !upperTitle.contains("HDR") && !upperTitle.contains("HDR10") { return "720p" }
+        let upperFilename = filename?.uppercased() ?? ""
+        let combined = "\(upperTitle) \(upperFilename)"
+        if combined.contains("4K") || combined.contains("2160P") || combined.contains("UHD") { return "4K" }
+        if combined.contains("1440P") || combined.contains("2K") || combined.contains("QHD") { return "2K" }
+        if combined.contains("1080P") || combined.contains("FHD") { return "1080p" }
+        if combined.contains("720P") { return "720p" }
+        if combined.contains("HD") && !combined.contains("HDR") && !combined.contains("HDR10") { return "720p" }
+        if combined.contains("480P") || combined.contains("SD") { return "480p" }
         return "SD"
+    }
+
+    private func formatVideoSize(_ bytes: Int64?) -> String? {
+        guard let b = bytes, b > 0 else { return nil }
+        let gb = Double(b) / 1_073_741_824.0
+        if gb >= 1.0 {
+            return String(format: "%.2f GB", gb)
+        } else {
+            let mb = Double(b) / 1_048_576.0
+            return String(format: "%.0f MB", mb)
+        }
     }
     
     private func isTitleMatch(streamTitle: String, itemTitle: String) -> Bool {
