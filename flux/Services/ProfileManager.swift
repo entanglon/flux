@@ -21,6 +21,7 @@ final class ProfileManager: ObservableObject {
            let profile = try? JSONDecoder().decode(UserProfile.self, from: data),
            profiles.contains(where: { $0.id == profile.id }) {
             currentProfile = profile
+            restoreSettings(for: profile.id)
             applyProfileDataScope(profile)
         }
     }
