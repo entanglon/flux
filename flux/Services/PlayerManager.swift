@@ -1527,6 +1527,7 @@ class PlayerManager: ObservableObject {
             self.prefetchedStream = nil
             self.prefetchedSubtitles = nil
             self.discardWarmCore()
+            self.sessionController?.resetVolumeBoostIfNeeded()
             self.endSession()
 
             // Run cache eviction in background to strictly enforce the user's cache limit (e.g. 2 GB)

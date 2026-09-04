@@ -155,6 +155,7 @@ class MPVController: ObservableObject {
         self.hasLoadedMedia = true
         self.loadedURL = url
         self.hasAutoSelectedTracksForCurrentMedia = false
+        resetVolumeBoostIfNeeded()
         playerView?.play(url)
     }
 
@@ -172,6 +173,7 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = false
         self.loadedURL = nil
+        resetVolumeBoostIfNeeded()
         playerView?.stop()
     }
     
@@ -205,19 +207,27 @@ class MPVController: ObservableObject {
     private var savedVolume: Double = 1.0
 
     func setVolume(_ value: Double) {
-        playerView?.setVolume(value)
-        volume = value
-        if value > 0 {
-            savedVolume = value
+        let clamped = max(0.0, min(value, 2.0))
+        playerView?.setVolume(clamped)
+        volume = clamped
+        if clamped > 0 {
+            savedVolume = min(clamped, 1.0)
         }
     }
 
     func toggleMute() {
-        if volume > 0 {
-            savedVolume = volume
+        if volume > 0.001 {
+            savedVolume = min(volume, 1.0)
             setVolume(0)
         } else {
             setVolume(savedVolume > 0 ? savedVolume : 1.0)
+        }
+    }
+
+    func resetVolumeBoostIfNeeded() {
+        if volume > 1.001 {
+            print("[MPVController] Resetting boosted volume (\(Int(volume * 100))%) to 100%")
+            setVolume(1.0)
         }
     }
     
@@ -768,12 +778,16 @@ final class MPVLayerView: NSView {
         mpv_set_option_string(mpv, "network-timeout", "45")
         mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
         
+        // Support up to 200% volume amplification (matching VLC and Stremio)
+        mpv_set_option_string(mpv, "volume-max", "200")
+        
         if mpv_initialize(mpv) < 0 {
             print("[MPV] init failed")
             return
         }
         
         // Properties set AFTER initialization (matching Stremio's mpv.cpp)
+        mpv_set_property_string(mpv, "volume-max", "200")
         mpv_set_property_string(mpv, "vo", "libmpv")
         mpv_set_property_string(mpv, "profile", "fast")
         mpv_set_property_string(mpv, "scale", "bilinear")
@@ -928,7 +942,7 @@ final class MPVLayerView: NSView {
     
     func setVolume(_ value: Double) {
         guard mpv != nil else { return }
-        var doubleVal = value * 100
+        var doubleVal = max(0.0, min(value, 2.0)) * 100
         mpv_set_property(mpv, "volume", MPV_FORMAT_DOUBLE, &doubleVal)
     }
     

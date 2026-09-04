@@ -18,6 +18,8 @@ struct PlayerView: View {
     @State private var showAboutStreamSource = false
     @State private var hostWindow: NSWindow?
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
+    @State private var showVolumeHUD = false
+    @State private var volumeHUDTask: Task<Void, Never>? = nil
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -83,6 +85,9 @@ struct PlayerView: View {
 
             // 7. Apple TV / Netflix Style "Up Next" Floating Card
             upNextOverlay
+
+            // 8. Dedicated Volume HUD (Top-Center)
+            volumeHUDOverlay
         }
         .background(
             PlayerWindowAccessor { window in
@@ -155,18 +160,16 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.upArrow) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
-            mpv.setVolume(min(mpv.volume + 0.05, 1.0))
+            adjustVolume(delta: 0.05)
             return .handled
         }
         .onKeyPress(.downArrow) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
-            mpv.setVolume(max(mpv.volume - 0.1, 0.0))
+            adjustVolume(delta: -0.05)
             return .handled
         }
         .onKeyPress(KeyEquivalent("m")) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             mpv.toggleMute()
+            triggerVolumeHUD()
             return .handled
         }
         .onKeyPress(KeyEquivalent("c")) {
@@ -180,6 +183,7 @@ struct PlayerView: View {
             return .handled
         }
         .onAppear {
+            mpv.resetVolumeBoostIfNeeded()
             mpv.onPlaybackError = {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
                 let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
@@ -201,6 +205,7 @@ struct PlayerView: View {
         .onDisappear {
             contextMenuMonitor?.stop()
             contextMenuMonitor = nil
+            mpv.resetVolumeBoostIfNeeded()
             // Entering PiP closes this window as a deliberate handoff — the
             // floating panel owns the core now. Saving progress or stopping
             // mpv here would kill playback mid-handoff.
@@ -500,6 +505,141 @@ struct PlayerView: View {
             }
             .zIndex(25)
         }
+    }
+
+    // MARK: - Volume HUD Overlay & Adjustments
+
+    private func adjustVolume(delta: Double) {
+        let current = mpv.volume
+        let next = ((current + delta) * 20.0).rounded() / 20.0
+        let clamped = max(0.0, min(next, 2.0))
+        mpv.setVolume(clamped)
+        triggerVolumeHUD()
+    }
+
+    private func triggerVolumeHUD() {
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
+            showVolumeHUD = true
+        }
+        volumeHUDTask?.cancel()
+        volumeHUDTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                showVolumeHUD = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var volumeHUDOverlay: some View {
+        if showVolumeHUD {
+            VStack {
+                volumeHUDCard
+                    .padding(.top, 40)
+                Spacer()
+            }
+            .transition(.asymmetric(
+                insertion: .scale(scale: 0.94).combined(with: .opacity).combined(with: .offset(y: -10)),
+                removal: .scale(scale: 0.98).combined(with: .opacity)
+            ))
+            .zIndex(60)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var volumeHUDCard: some View {
+        let vol = mpv.volume
+        let percent = Int((vol * 100).rounded())
+        let isBoosted = vol > 1.001
+        let isMuted = vol <= 0.001
+
+        let iconName: String = {
+            if isMuted { return "speaker.slash.fill" }
+            if vol <= 0.33 { return "speaker.wave.1.fill" }
+            if vol <= 0.66 { return "speaker.wave.2.fill" }
+            if vol <= 1.001 { return "speaker.wave.3.fill" }
+            return "speaker.badge.plus"
+        }()
+
+        return HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(isBoosted ? .orange : (isMuted ? .white.opacity(0.45) : .white))
+                .frame(width: 20)
+
+            // Split Gauge Bar: 0% - 100% (Normal) + 100% - 200% (Boost)
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let midX = w / 2.0
+
+                ZStack(alignment: .leading) {
+                    // Track background
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(width: w, height: h)
+
+                    // 100% divider notch in center
+                    Rectangle()
+                        .fill(Color.white.opacity(0.4))
+                        .frame(width: 1.5, height: h + 2)
+                        .position(x: midX, y: h / 2)
+
+                    // Base Volume Fill (0% to min(vol, 1.0))
+                    let normalRatio = min(vol, 1.0)
+                    let normalWidth = midX * CGFloat(normalRatio)
+                    if normalWidth > 0 {
+                        Capsule()
+                            .fill(Color.white)
+                            .frame(width: max(h, normalWidth), height: h)
+                    }
+
+                    // Boost Volume Fill (1.0 to vol)
+                    if isBoosted {
+                        let boostRatio = min(vol - 1.0, 1.0)
+                        let boostWidth = midX * CGFloat(boostRatio)
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color.orange.opacity(0.85), Color.orange],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                            .frame(width: max(h, boostWidth), height: h)
+                            .offset(x: midX)
+                            .shadow(color: Color.orange.opacity(0.4), radius: 4, x: 0, y: 0)
+                    }
+                }
+            }
+            .frame(width: 140, height: 7)
+
+            // Percentage & Boost Badge
+            HStack(spacing: 4) {
+                Text(isMuted ? "Muted" : "\(percent)%")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(isBoosted ? .orange : .white)
+                    .frame(minWidth: 38, alignment: .trailing)
+
+                if isBoosted {
+                    Text("BOOST")
+                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .tracking(0.5)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.25), in: Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.6), lineWidth: 0.6))
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .capsule)
+        .overlay(
+            Capsule()
+                .stroke(isBoosted ? Color.orange.opacity(0.4) : Color.white.opacity(0.18), lineWidth: 0.8)
+        )
+        .shadow(color: Color.black.opacity(0.5), radius: 25, x: 0, y: 10)
     }
 
     // MARK: - Apple TV & Netflix Style "Up Next" Experience

@@ -101,16 +101,32 @@ struct PlayerControlsView: View {
                         Spacer()
                         
                         // Right Group: Volume
-                        HStack(spacing: 12) {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.8))
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                if volume > 0.001 {
+                                    volume = 0
+                                } else {
+                                    volume = 1.0
+                                }
+                            }) {
+                                Image(systemName: volume > 1.001 ? "speaker.badge.plus" : (volume <= 0.001 ? "speaker.slash.fill" : (volume <= 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill")))
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(volume > 1.001 ? .orange : .white.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+                            .help(volume <= 0.001 ? "Unmute" : "Mute")
+                            .accessibilityLabel("Mute toggle")
                             
-                            Slider(value: $volume, in: 0...1)
-                                .frame(width: 80)
-                                .tint(.white)
+                            Slider(value: $volume, in: 0...2.0)
+                                .frame(width: 84)
+                                .tint(volume > 1.001 ? .orange : .white)
                                 .accessibilityLabel("Volume slider")
                                 .accessibilityValue("\(Int(volume * 100)) percent")
+
+                            Text("\(Int((volume * 100).rounded()))%")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(volume > 1.001 ? .orange : .white.opacity(0.75))
+                                .frame(minWidth: 34, alignment: .trailing)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
