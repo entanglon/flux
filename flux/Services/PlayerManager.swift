@@ -78,6 +78,9 @@ class PlayerManager: ObservableObject {
     private var prefetchedNextStream: Stream?
     private var prefetchedNextSubtitles: [StremioSubtitleTrack]?
     private var prefetchedNextAt: Date?
+    @Published var nextEpisode: Episode? = nil
+
+    private var fetchAndRaceTask: AsyncTask<Void, Never>?
 
     func prefetchKey(for item: MediaItem, season: Int?, episode: Int?) -> String {
         let isEpisodic = item.isSeries || season != nil || episode != nil
@@ -576,6 +579,9 @@ class PlayerManager: ObservableObject {
         self.isManualSelection = false
         self.probeStatus = [:]
         self.resetPreloadState()
+        self.fetchAndRaceTask?.cancel()
+        self.fetchAndRaceTask = nil
+        self.resolveNextEpisode()
 
         // Cancel in-flight prefetch only if targeting a different title,
         // allowing in-flight queries for this title to finish seamlessly.
@@ -794,7 +800,17 @@ class PlayerManager: ObservableObject {
         self.isFetchingStreams = true
         self.isLoading = true
 
-        AsyncTask {
+        self.fetchAndRaceTask?.cancel()
+        self.fetchAndRaceTask = AsyncTask { [weak self] in
+            guard let self = self else { return }
+
+            func isStillCurrentTarget() async -> Bool {
+                guard !Task.isCancelled else { return false }
+                return await MainActor.run {
+                    self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode
+                }
+            }
+
             // ⚡ ADVANCED LOADING fast-path (Flux Mode): if not forcing stream picker
             let key = self.prefetchKey(for: item, season: season, episode: episode)
             let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
@@ -803,10 +819,12 @@ class PlayerManager: ObservableObject {
             let isNextHit = (self.prefetchedNextKey == key && self.prefetchedNextStream != nil)
             
             if !forceStreamPicker, isFluxEnabled, (isDetailHit || isNextHit) {
+                guard await isStillCurrentTarget() else { return }
                 let pf = isDetailHit ? self.prefetchedStream! : self.prefetchedNextStream!
                 let subs = (isDetailHit ? self.prefetchedSubtitles : self.prefetchedNextSubtitles) ?? []
                 print("[PlayerManager] ⚡ Prefetch / Next-Episode HIT — instant start: \(pf.cleanTitle)")
                 let cached = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
+                guard await isStillCurrentTarget() else { return }
                 await MainActor.run {
                     self.availableStreams = cached
                     self.verifyStreamHealth(cached)
@@ -821,9 +839,11 @@ class PlayerManager: ObservableObject {
             }
 
             if let cachedStreams = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode), !cachedStreams.isEmpty {
-                print("[PlayerManager] Cache Hit! Ready to display available streams.")
-                await MainActor.run {
-                    self.availableStreams = cachedStreams
+                if await isStillCurrentTarget() {
+                    print("[PlayerManager] Cache Hit! Ready to display available streams.")
+                    await MainActor.run {
+                        self.availableStreams = cachedStreams
+                    }
                 }
             }
 
@@ -836,6 +856,7 @@ class PlayerManager: ObservableObject {
                 forceRefresh: forceStreamPicker,
                 onProgress: { loaded, total, pending in
                     Task { @MainActor in
+                        guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
                         self.loadedAddonsCount = loaded
                         self.totalAddonsCount = total
                         self.pendingAddonNames = pending
@@ -843,9 +864,15 @@ class PlayerManager: ObservableObject {
                 }
             ) { updatedStreams in
                 Task { @MainActor in
+                    guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)
                 }
+            }
+
+            guard await isStillCurrentTarget() else {
+                print("[PlayerManager] In-flight stream fetch cancelled/superseded for \(item.title) S\(season ?? 0):E\(episode ?? 0)")
+                return
             }
             
             await MainActor.run {
@@ -857,6 +884,7 @@ class PlayerManager: ObservableObject {
             }
 
             let extraSubs = await subsTask
+            guard await isStillCurrentTarget() else { return }
 
             await MainActor.run {
                 self.externalSubtitles = extraSubs
@@ -875,6 +903,10 @@ class PlayerManager: ObservableObject {
             if isFluxEnabled, !streams.isEmpty {
                 await MainActor.run { self.isManualSelection = false }
                 if let winner = await self.raceBestStream(from: streams) {
+                    guard await isStillCurrentTarget() else {
+                        print("[PlayerManager] Discarding Flux Mode stream winner because user selected another title/episode.")
+                        return
+                    }
                     print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
                     await MainActor.run {
                         self.attemptStream(winner)
@@ -884,6 +916,7 @@ class PlayerManager: ObservableObject {
             }
             
             // Fallback: Show list
+            guard await isStillCurrentTarget() else { return }
             await MainActor.run {
                 self.availableStreams = streams
                 self.isLoading = false
@@ -910,7 +943,9 @@ class PlayerManager: ObservableObject {
             preferredLang: preferredLang,
             originalLanguage: currentItem?.originalLanguage,
             enableLanguageFilter: enableLanguageFilter,
-            probeStatus: self.probeStatus
+            probeStatus: self.probeStatus,
+            targetSeason: currentSeason,
+            targetEpisode: currentEpisode
         )
 
         guard let winnerCandidate = primary else { return nil }
@@ -1404,6 +1439,8 @@ class PlayerManager: ObservableObject {
         DispatchQueue.main.async {
             SleepAssertionManager.shared.disableSleepPrevention()
             self.cancelDetailPrefetch()
+            self.fetchAndRaceTask?.cancel()
+            self.fetchAndRaceTask = nil
             // When closing the player, MPV stops reading from the stream, naturally
             // pausing downloads in FluxEngine while preserving verified cache on disk.
             self.currentItem = nil
@@ -1417,6 +1454,7 @@ class PlayerManager: ObservableObject {
             self.currentSeason = nil
             self.currentEpisode = nil
             self.currentEpisodeImage = nil
+            self.nextEpisode = nil
             // Session over — a held warm core is stale now.
             self.prefetchedKey = nil
             self.prefetchedStream = nil
@@ -1454,27 +1492,53 @@ class PlayerManager: ObservableObject {
         
         return nil
     }
+
+    func resolveNextEpisode() {
+        guard let item = currentItem, let next = nextEpisodeInfo else {
+            self.nextEpisode = nil
+            return
+        }
+
+        // 1. Check currentItem.episodes
+        if let ep = item.episodes?.first(where: { $0.seasonNumber == next.season && $0.episodeNumber == next.episode }) {
+            self.nextEpisode = ep
+            return
+        }
+
+        // 2. Check currentItem.seasons
+        if let season = item.seasons?.first(where: { $0.seasonNumber == next.season }),
+           let ep = season.episodes?.first(where: { $0.episodeNumber == next.episode }) {
+            self.nextEpisode = ep
+            return
+        }
+
+        // 3. Background fetch from Stremio Service
+        AsyncTask { [weak self] in
+            guard let self = self else { return }
+            if let meta = try? await StremioService.shared.fetchMeta(type: "series", id: item.id),
+               let ep = meta.episodes?.first(where: { $0.seasonNumber == next.season && $0.episodeNumber == next.episode }) {
+                await MainActor.run {
+                    guard self.currentItem?.id == item.id,
+                          self.currentSeason == next.season || self.nextEpisodeInfo?.season == next.season else { return }
+                    self.nextEpisode = ep
+                }
+            }
+        }
+    }
     
     func playNextEpisode() {
         guard let next = nextEpisodeInfo, let item = currentItem else { return }
-        print("Playing Next Episode: S\(next.season):E\(next.episode)")
+        print("[PlayerManager] ⚡ Playing Next Episode: S\(next.season):E\(next.episode)")
         
-        AsyncTask {
-            // Fetch next episode details to get the image
-            var nextEpisodeImage: URL? = nil
-            if let meta = try? await StremioService.shared.fetchMeta(type: "series", id: item.id) {
-                // Find the episode
-                if let vids = meta.episodes, let ep = vids.first(where: { $0.episodeNumber == next.episode && $0.seasonNumber == next.season }) {
-                    nextEpisodeImage = ep.stillURL
-                }
-            }
-            
-            let finalImage = nextEpisodeImage
-            
-            await MainActor.run {
-                self.play(item, season: next.season, episode: next.episode, episodeImage: finalImage, isAutoAdvance: true)
-            }
-        }
+        let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage
+        
+        self.play(
+            item,
+            season: next.season,
+            episode: next.episode,
+            episodeImage: nextImage,
+            isAutoAdvance: true
+        )
     }
     
     // MARK: - Smart Preloading (Next Episode)
@@ -1515,7 +1579,9 @@ class PlayerManager: ObservableObject {
                 preferredLang: preferredLang,
                 originalLanguage: item.originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
-                probeStatus: await MainActor.run { self.probeStatus }
+                probeStatus: await MainActor.run { self.probeStatus },
+                targetSeason: next.season,
+                targetEpisode: next.episode
             )
 
             guard let winner = bestNext else { return }
@@ -1540,7 +1606,7 @@ class PlayerManager: ObservableObject {
                 self.prefetchedNextSubtitles = subs
                 self.prefetchedNextKey = nextKey
                 self.prefetchedNextAt = Date()
-                print("[PlayerManager] ⚡ Next Episode pre-warmed and ready: \(winner.cleanTitle) (\(winner.source))")
+                print("[PlayerManager] ⚡ Next Episode preloaded & primed: \(winner.cleanTitle)")
             }
         }
     }

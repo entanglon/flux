@@ -112,6 +112,29 @@
   - When Flux Mode is OFF, zero prefetch tasks or background addon scrapes are initiated on detail pages or during video playback.
   - Full test suite passed (48 tests, 0 failures).
 
+### 15. Elimination of In-Flight Playback Hijacking, HTTP Season Pack Disqualification & Netflix/Apple TV "Play Next" Architecture (`PlayerManager.swift`, `StreamManager.swift`, `PlayerView.swift`, `StreamManagerTests.swift`) — Completed & Verified
+- **Issue 1 (In-Flight Stream Hijack)**: Selecting Episode 1 followed quickly by Episode 2 caused Episode 1's ongoing scraper task to continue running untracked. ~30s later when Episode 1's streams finished loading, it unconditionally called `attemptStream(winner)`, hijacking the player and switching back to Episode 1.
+  - **Resolution**: Added `private var fetchAndRaceTask: AsyncTask<Void, Never>?` in `PlayerManager`. On every `play(...)` or `close()`, in-flight tasks are cancelled. Inside `fetchAndRace`, `isStillCurrentTarget()` verifies task cancellation and target identity (`currentItem?.id == item.id && currentSeason == season && currentEpisode == episode`) at every async boundary before updating streams or attempting playback.
+- **Issue 2 (3h40m Duration & Starting from Byte 0)**: In Flux Mode, Episode 2 auto-selected an HTTP stream that was an unparsed full season pack (`The Gentlemen S01 Complete`, `isSeasonPack == true`). Direct HTTP streams have no internal episode selector (`fileIdx`); loading an HTTP season pack streams from byte 0 of the entire multi-episode compilation (Episode 1's opening scene, 3h43m total duration).
+  - **Resolution**: Updated `selectFastStartCandidate` and `computeCompositeRank` in `StreamManager` with `evaluateEpisodeMatch(stream:targetSeason:targetEpisode:)`:
+    - Disqualifies HTTP season packs (`-20000.0` penalty) for episodic queries.
+    - Disqualifies torrent season packs without `fileIdx` (`-15000.0` penalty).
+    - Checks release title for exact episode matches (`S01E02`, `1x02`, `E02`, `EP02`), awarding `+3500.0` bonus.
+    - Explicitly penalizes releases labeled for another episode (`S01E01`, `1x01`, `E01` when targeting Ep 2) with `-25000.0` penalty.
+- **Issue 3 (Apple TV & Netflix "Play Next" Experience)**:
+  - Replaced basic countdown box with an Apple TV / Netflix style glassmorphic **Up Next Card** (`PlayerView.swift`):
+    - Translucent liquid glass card (`.ultraThinMaterial` over dark tint with hairline gradient stroke and soft drop shadow).
+    - Displays next episode 16:9 thumbnail preview with centered play overlay badge.
+    - Displays `UP NEXT` uppercase badge, `S\(season) : E\(episode)`, episode title, and runtime.
+    - Circular animated countdown progress ring ticking down seconds (`remaining <= 15s`).
+    - Primary white pill button ("Play Next Episode" / "Play Now") and "Credits" dismiss button.
+    - Automatically elevates when playback controls appear (`bottom: 100`) and settles down (`bottom: 36`) when controls hide.
+  - Implemented `PlayerManager.resolveNextEpisode()` to fetch next episode metadata in advance, eliminating stalls when advancing episodes.
+- **Verification**:
+  - Full automated test suite passed with 52 unit and UI tests (`StreamManagerTests`, `ArchitectureTests`, `SearchEngineTests`, `UserDataServiceTests`, `TMDBEnricherTests`, `fluxTests`, `fluxUITests`).
+  - Added 4 dedicated unit tests in `StreamManagerTests`: `episodeMatchingAwardsBonusToTargetEpisode`, `episodeMatchingDisqualifiesHttpSeasonPacksForEpisodicQueries`, `episodeMatchingSeverelyPenalizesWrongEpisodeReleases`, and `selectFastStartCandidatePicksTargetEpisodeOverSeasonPackAndWrongEpisode`.
+
+
 ---
 
 ## Sep 3, 2026 — DYNAMIC STREAM PICKER TABS, ICON-ONLY SELECTORS, CAROUSEL HIT TARGET & DETAIL CLEANUP

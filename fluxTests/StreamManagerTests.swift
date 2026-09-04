@@ -629,5 +629,88 @@ struct StreamManagerTests {
         )
         #expect(winnerWithoutFilter?.id == fastForeignStream.id)
     }
+
+    @Test func episodeMatchingAwardsBonusToTargetEpisode() {
+        let manager = StreamManager.shared
+        let ep2Stream = Stream(
+            title: "The.Gentlemen.S01E02.1080p.WEB-DL",
+            cleanTitle: "The Gentlemen S01E02",
+            url: URL(string: "https://stream.server/s01e02.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let bonus = manager.evaluateEpisodeMatch(stream: ep2Stream, targetSeason: 1, targetEpisode: 2)
+        #expect(bonus == 3500.0)
+    }
+
+    @Test func episodeMatchingDisqualifiesHttpSeasonPacksForEpisodicQueries() {
+        let manager = StreamManager.shared
+        let httpSeasonPack = Stream(
+            title: "The Gentlemen Season 1 Complete 1080p",
+            cleanTitle: "The Gentlemen Season 1 Complete",
+            url: URL(string: "https://stream.server/season1_complete.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            isSeasonPack: true
+        )
+        let penalty = manager.evaluateEpisodeMatch(stream: httpSeasonPack, targetSeason: 1, targetEpisode: 2)
+        #expect(penalty == -20000.0)
+    }
+
+    @Test func episodeMatchingSeverelyPenalizesWrongEpisodeReleases() {
+        let manager = StreamManager.shared
+        let ep1Stream = Stream(
+            title: "The.Gentlemen.S01E01.1080p.WEB-DL",
+            cleanTitle: "The Gentlemen S01E01",
+            url: URL(string: "https://stream.server/s01e01.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let penalty = manager.evaluateEpisodeMatch(stream: ep1Stream, targetSeason: 1, targetEpisode: 2)
+        #expect(penalty == -25000.0)
+    }
+
+    @Test func selectFastStartCandidatePicksTargetEpisodeOverSeasonPackAndWrongEpisode() {
+        let manager = StreamManager.shared
+
+        // HTTP Season Pack (compilation) that would otherwise win via HTTP bonus
+        let httpSeasonPack = Stream(
+            title: "The Gentlemen S01 Complete 1080p",
+            cleanTitle: "The Gentlemen S01 Complete",
+            url: URL(string: "https://stream.server/s01_pack.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            isSeasonPack: true
+        )
+
+        // Episode 1 stream
+        let ep1Stream = Stream(
+            title: "The.Gentlemen.S01E01.1080p.WEB-DL",
+            cleanTitle: "The Gentlemen S01E01",
+            url: URL(string: "https://stream.server/s01e01.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        // Target Episode 2 stream
+        let ep2Stream = Stream(
+            title: "The.Gentlemen.S01E02.1080p.WEB-DL",
+            cleanTitle: "The Gentlemen S01E02",
+            url: URL(string: "https://stream.server/s01e02.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [httpSeasonPack, ep1Stream, ep2Stream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            targetSeason: 1,
+            targetEpisode: 2
+        )
+
+        #expect(winner?.id == ep2Stream.id)
+    }
 }
 

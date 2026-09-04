@@ -58,8 +58,11 @@ struct PlayerView: View {
             // 5. Exit Warning Overlay
             exitWarningOverlay
 
-            // 6. Smart Skip Intro / Skip Recap / Next Episode
+            // 6. Smart Skip Intro / Skip Recap
             skipActionOverlay
+
+            // 7. Apple TV / Netflix Style "Up Next" Floating Card
+            upNextOverlay
         }
         .background(
             PlayerWindowAccessor { window in
@@ -329,25 +332,6 @@ struct PlayerView: View {
             .glassEffect(.regular.interactive(), in: .capsule)
             .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
             .transition(.opacity)
-            
-        case .nextEpisode(let season, let episode):
-            Button {
-                playerManager.playNextEpisode()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "forward.end.fill")
-                        .font(.system(size: 13, weight: .bold))
-                    Text("Next: S\(season) E\(episode)")
-                        .font(.system(size: 14, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
-            }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .capsule)
-            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-            .transition(.opacity)
         }
     }
 
@@ -458,79 +442,284 @@ struct PlayerView: View {
             }
             .zIndex(20)
         }
+    }
 
-        // Next Episode Overlay — countdown auto-play (last 10s)
-        if let next = playerManager.nextEpisodeInfo, mpv.isPlaying {
-            let remaining = mpv.duration > 0 ? mpv.duration - mpv.timePos : 999
-            if autoPlayNextEnabled && !autoPlayCancelled && remaining <= 10 && remaining > 0.8 {
-                autoPlayCountdownView(season: next.season, episode: next.episode, seconds: Int(ceil(remaining)))
+    // MARK: - Apple TV & Netflix Style "Up Next" Experience
+
+    private var isEndCreditsOrNearEnd: Bool {
+        guard mpv.isPlaying, mpv.duration > 60 else { return false }
+        let t = mpv.timePos
+        let remaining = mpv.duration - t
+
+        // 1. Native container chapters check (credit/outro/end)
+        if !mpv.chapters.isEmpty {
+            for (idx, chapter) in mpv.chapters.enumerated() {
+                let lower = chapter.title.lowercased()
+                let nextChapterTime = idx + 1 < mpv.chapters.count ? mpv.chapters[idx + 1].time : (chapter.time + 120)
+                if t >= chapter.time && t < nextChapterTime {
+                    if lower.contains("credit") || lower.contains("outro") || lower.contains("end") {
+                        return true
+                    }
+                }
             }
+        }
+
+        // 2. Remaining duration / progress heuristics (e.g. final 25 seconds or 96% progress)
+        if remaining <= 25 && remaining > 0.8 {
+            return true
+        }
+        if mpv.progress >= 0.96 && remaining <= 45 && remaining > 0.8 {
+            return true
+        }
+
+        return false
+    }
+
+    private var shouldShowUpNextCard: Bool {
+        guard playerManager.nextEpisodeInfo != nil,
+              let item = item,
+              item.isSeries || playerManager.currentSeason != nil,
+              autoPlayNextEnabled,
+              !autoPlayCancelled else {
+            return false
+        }
+        return isEndCreditsOrNearEnd
+    }
+
+    @ViewBuilder
+    private var upNextOverlay: some View {
+        if shouldShowUpNextCard, let next = playerManager.nextEpisodeInfo {
+            let remaining = mpv.duration > 0 ? max(0, mpv.duration - mpv.timePos) : 999
+            upNextCard(season: next.season, episode: next.episode, remainingSeconds: remaining)
+                .transition(
+                    .asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.92).combined(with: .opacity)
+                    )
+                )
+                .zIndex(110)
         }
     }
 
-    // Countdown auto-play panel
-    private func autoPlayCountdownView(season: Int, episode: Int, seconds: Int) -> some View {
-        VStack {
+    // MARK: - Apple TV & Netflix Style "Up Next" Card
+    private func upNextCard(season: Int, episode: Int, remainingSeconds: Double) -> some View {
+        let isCountingDown = remainingSeconds <= 15.0 && remainingSeconds > 0.8
+        let displaySeconds = Int(ceil(remainingSeconds))
+        let nextMeta = playerManager.nextEpisode
+        let epTitle = nextMeta?.name.isEmpty == false ? nextMeta!.name : "Episode \(episode)"
+        let stillURL = nextMeta?.stillURL ?? playerManager.currentEpisodeImage
+
+        return VStack {
             Spacer()
             HStack {
                 Spacer()
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Next episode in \(seconds)s")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("S\(season) E\(episode)")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
-                    Button {
-                        autoPlayCancelled = true
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Capsule())
+                VStack(alignment: .leading, spacing: 12) {
+                    // Header Row: "UP NEXT" badge + countdown + Dismiss X
+                    HStack(alignment: .center) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.8))
+                            Text("UP NEXT")
+                                .font(.system(size: 11, weight: .black))
+                                .tracking(1.2)
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3.5)
+                        .background(Color.white.opacity(0.12), in: Capsule())
 
-                    Button {
-                        autoPlayCancelled = true
-                        playerManager.playNextEpisode()
-                    } label: {
-                        Image(systemName: "forward.end.fill")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.black)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Color.white))
+                        Spacer()
+
+                        if isCountingDown {
+                            Text("in \(displaySeconds)s")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                autoPlayCancelled = true
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .frame(width: 22, height: 22)
+                                .background(Color.white.opacity(0.12), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss auto-play and watch credits")
                     }
-                    .buttonStyle(.plain)
+
+                    // Content Row: Episode Thumbnail + Episode Details
+                    HStack(spacing: 12) {
+                        // 16:9 Thumbnail
+                        ZStack {
+                            if let stillURL = stillURL {
+                                AsyncImage(url: stillURL) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                    case .failure, .empty:
+                                        thumbnailPlaceholder
+                                    @unknown default:
+                                        thumbnailPlaceholder
+                                    }
+                                }
+                            } else {
+                                thumbnailPlaceholder
+                            }
+
+                            // Subtle play badge overlay
+                            Circle()
+                                .fill(Color.black.opacity(0.55))
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .offset(x: 1)
+                                )
+                        }
+                        .frame(width: 120, height: 68)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+                        )
+
+                        // Info Column
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("S\(season) : E\(episode)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.6))
+                            
+                            Text(epTitle)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if let runtime = nextMeta?.runtime, runtime > 0 {
+                                Text("\(runtime) min")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    // Action Controls: Big Primary "Play Next" Button + Watch Credits
+                    HStack(spacing: 10) {
+                        Button {
+                            withAnimation {
+                                autoPlayCancelled = true
+                                playerManager.playNextEpisode()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isCountingDown {
+                                    // Circular Animated Timer
+                                    ZStack {
+                                        Circle()
+                                            .stroke(Color.black.opacity(0.2), lineWidth: 2.5)
+                                        Circle()
+                                            .trim(from: 0, to: CGFloat(max(0, min(1.0, remainingSeconds / 15.0))))
+                                            .stroke(Color.black, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                            .rotationEffect(.degrees(-90))
+                                        Image(systemName: "play.fill")
+                                            .font(.system(size: 8, weight: .black))
+                                            .foregroundStyle(.black)
+                                            .offset(x: 0.5)
+                                    }
+                                    .frame(width: 18, height: 18)
+                                } else {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.black)
+                                }
+
+                                Text(isCountingDown ? "Play Next Episode" : "Play Now")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.black)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                autoPlayCancelled = true
+                            }
+                        } label: {
+                            Text("Credits")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss overlay and watch full end credits")
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(14)
+                .frame(width: 360)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(Color.black.opacity(0.78))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.3), Color.white.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.6), radius: 25, x: 0, y: 12)
             }
-            .padding(.trailing, 40)
-            .padding(.bottom, 40)
+            .padding(.trailing, 36)
+            .padding(.bottom, isControlsVisible ? 100 : 36)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isControlsVisible)
         }
+    }
+
+    private var thumbnailPlaceholder: some View {
+        LinearGradient(
+            colors: [Color.white.opacity(0.15), Color.white.opacity(0.05)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(
+            Image(systemName: "film")
+                .font(.system(size: 18))
+                .foregroundStyle(.white.opacity(0.35))
+        )
     }
     
     // MARK: - Smart Skip Action Engine (Native Chapters + TV Heuristics)
     enum SkipActionType: Equatable {
         case recap(targetTime: Double)
         case intro(targetTime: Double)
-        case nextEpisode(season: Int, episode: Int)
     }
 
     private var activeSkipAction: SkipActionType? {
-        guard mpv.isPlaying, !mpv.isUserPaused, mpv.duration > 60 else { return nil }
+        guard mpv.isPlaying, !mpv.isUserPaused, mpv.duration > 60, !shouldShowUpNextCard else { return nil }
         
         let t = mpv.timePos
         let season = playerManager.currentSeason ?? 1
         let episode = playerManager.currentEpisode ?? 1
-        let isTV = item?.category == "TV Show" || playerManager.currentSeason != nil
         
         // 1. Native embedded chapters from video container (MKV / MP4)
         if !mpv.chapters.isEmpty {
@@ -546,18 +735,8 @@ struct PlayerView: View {
                     if lowerTitle.contains("intro") || lowerTitle.contains("opening") || lowerTitle.contains("theme") || lowerTitle.contains("main title") || lowerTitle.contains("title") {
                         return .intro(targetTime: nextChapterTime)
                     }
-                    if lowerTitle.contains("credit") || lowerTitle.contains("outro") || lowerTitle.contains("end") {
-                        if let next = playerManager.nextEpisodeInfo {
-                            return .nextEpisode(season: next.season, episode: next.episode)
-                        }
-                    }
                 }
             }
-        }
-        
-        // 2. Next Episode (end credits)
-        if isTV, let next = playerManager.nextEpisodeInfo, (mpv.progress >= 0.94 || (mpv.duration > 0 && mpv.duration - t <= 60)) {
-            return .nextEpisode(season: next.season, episode: next.episode)
         }
         
         return nil

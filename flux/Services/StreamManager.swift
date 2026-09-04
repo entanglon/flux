@@ -777,7 +777,9 @@ class StreamManager {
         preferredLang: String,
         originalLanguage: String? = nil,
         enableLanguageFilter: Bool = false,
-        probeStatus: [String: StreamProbeResult] = [:]
+        probeStatus: [String: StreamProbeResult] = [:],
+        targetSeason: Int? = nil,
+        targetEpisode: Int? = nil
     ) -> (primary: Stream?, fallbacks: [Stream]) {
         let healthy = streams.filter { stream in
             if probeStatus[stream.stableKey]?.ok == false { return false }
@@ -808,14 +810,18 @@ class StreamManager {
                 preferredLang: preferredLang,
                 originalLanguage: originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
-                probeStatus: probeStatus
+                probeStatus: probeStatus,
+                targetSeason: targetSeason,
+                targetEpisode: targetEpisode
             )
             let score2 = computeCompositeRank(
                 s2,
                 preferredLang: preferredLang,
                 originalLanguage: originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
-                probeStatus: probeStatus
+                probeStatus: probeStatus,
+                targetSeason: targetSeason,
+                targetEpisode: targetEpisode
             )
             if score1 != score2 {
                 return score1 > score2
@@ -833,9 +839,16 @@ class StreamManager {
         preferredLang: String,
         originalLanguage: String? = nil,
         enableLanguageFilter: Bool = false,
-        probeStatus: [String: StreamProbeResult]
+        probeStatus: [String: StreamProbeResult],
+        targetSeason: Int? = nil,
+        targetEpisode: Int? = nil
     ) -> Double {
         var score = 0.0
+
+        // Episode match & Season Pack gating for TV shows
+        if targetEpisode != nil {
+            score += evaluateEpisodeMatch(stream: stream, targetSeason: targetSeason, targetEpisode: targetEpisode)
+        }
 
         // Preferred Audio Language bonus / Foreign Dub penalty (only if language filter is enabled)
         if enableLanguageFilter {
@@ -867,6 +880,81 @@ class StreamManager {
         }
 
         return score
+    }
+
+    /// Evaluates how well a stream matches an episodic query (targetSeason, targetEpisode).
+    /// Returns a score adjustment (bonus or severe penalty for wrong episode / season pack).
+    func evaluateEpisodeMatch(
+        stream: Stream,
+        targetSeason: Int?,
+        targetEpisode: Int?
+    ) -> Double {
+        guard let targetEp = targetEpisode else { return 0.0 }
+        let s = targetSeason ?? 1
+        let text = "\(stream.cleanTitle) \(stream.title)"
+
+        // 1. Season Pack Check:
+        // A direct HTTP stream that is a season pack CANNOT select individual episodes
+        // and starts from byte 0 (usually Episode 1), playing the entire multi-hour compilation.
+        if stream.isSeasonPack {
+            if !stream.isTorrent {
+                return -20000.0 // Disqualify HTTP season pack for episodic query
+            } else if stream.fileIdx == nil {
+                return -15000.0 // Disqualify torrent season pack if it lacks fileIdx
+            } else {
+                return -500.0 // Torrent with valid fileIdx is usable, slight tie-breaker
+            }
+        }
+
+        // 2. Exact Episode Pattern Matches:
+        // S01E02, S1E2, S01.E02, S01_E02, 1x02, 01x02, E02, EP02, EP.02, Episode 2, Episode 02
+        let exactPatterns = [
+            #"(?i)\bS0*"# + "\(s)" + #"[\.\s_-]*E0*"# + "\(targetEp)" + #"\b"#,
+            #"(?i)\b0*"# + "\(s)" + #"x0*"# + "\(targetEp)" + #"\b"#,
+            #"(?i)\bE0*"# + "\(targetEp)" + #"(?!\d)"#,
+            #"(?i)\bEP[\.\s_-]*0*"# + "\(targetEp)" + #"(?!\d)"#,
+            #"(?i)\bEpisode[\.\s_-]*0*"# + "\(targetEp)" + #"(?!\d)"#
+        ]
+
+        var hasExactMatch = false
+        for pattern in exactPatterns {
+            if text.range(of: pattern, options: .regularExpression) != nil {
+                hasExactMatch = true
+                break
+            }
+        }
+
+        if hasExactMatch {
+            return 3500.0 // Strong reward for explicitly verified target episode
+        }
+
+        // 3. Wrong Episode Check:
+        // Does the stream explicitly name a DIFFERENT episode?
+        // e.g. target is Episode 2, but stream is S01E01, 1x01, E01, Episode 1.
+        let wrongEpisodePatterns = [
+            #"(?i)\bS0*"# + "\(s)" + #"[\.\s_-]*E(\d{1,3})\b"#,
+            #"(?i)\b0*"# + "\(s)" + #"x(\d{1,3})\b"#,
+            #"(?i)\bE(\d{1,3})(?!\d)"#,
+            #"(?i)\bEP[\.\s_-]*(\d{1,3})(?!\d)"#,
+            #"(?i)\bEpisode[\.\s_-]*(\d{1,3})(?!\d)"#
+        ]
+
+        for p in wrongEpisodePatterns {
+            if let regex = try? NSRegularExpression(pattern: p),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text),
+               let epNum = Int(text[range]), epNum != targetEp {
+                return -25000.0 // Severe penalty: wrong episode release
+            }
+        }
+
+        // 4. HTTP stream with no episode indicators in an episodic query:
+        // Often a show trailer, promo, or unparsed season dump.
+        if !stream.isTorrent {
+            return -5000.0
+        }
+
+        return 0.0
     }
     
     private func normalizeAddonURL(_ rawUrl: String) -> String {
