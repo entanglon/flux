@@ -134,6 +134,46 @@
   - Full automated test suite passed with 52 unit and UI tests (`StreamManagerTests`, `ArchitectureTests`, `SearchEngineTests`, `UserDataServiceTests`, `TMDBEnricherTests`, `fluxTests`, `fluxUITests`).
   - Added 4 dedicated unit tests in `StreamManagerTests`: `episodeMatchingAwardsBonusToTargetEpisode`, `episodeMatchingDisqualifiesHttpSeasonPacksForEpisodicQueries`, `episodeMatchingSeverelyPenalizesWrongEpisodeReleases`, and `selectFastStartCandidatePicksTargetEpisodeOverSeasonPackAndWrongEpisode`.
 
+### 16. Genre & Actor Pages Overhaul, Liquid Glass Toggles & Layout Stability (`SectionHeader.swift`, `ContentView.swift`, `GenreDetailView.swift`, `PersonView.swift`, `TMDBEnricher.swift`, `HomeView.swift`, `GhostViews.swift`) — Completed & Verified
+- **Liquid Glass Segmented Toggle for Movies & TV Shows (`SectionHeader.swift`)**:
+  - Built `LiquidGlassMediaToggle` using Apple TV-style physics: drag/flick gestures with rubber-banding, tap resolution, zero-distortion crystal-clear glass pill, specular rim glint gradient, and squish/spring physics (`GlassMotion`).
+- **Sidebar Jumping & Glitch Root-Cause Fix (`ContentView.swift`, `GenreDetailView.swift`)**:
+  - Bounded horizontal skeleton rows with `ScrollView(.horizontal)`.
+  - Added silky content crossfade during media switch without destroying existing rails.
+  - Added `.transaction { $0.animation = nil }` on the sidebar container to guarantee complete immunity against parent animations or page transitions.
+  - Removed `.id(refreshToken)` view tree destruction on `Cmd+R`, adopting background in-place data refresh.
+- **TV Shows Missing Bug Fixed (`TMDBEnricher.swift`, `PersonView.swift`)**:
+  - Resolved movie-to-TV genre ID mappings (`10759`, `10765`, `10768`, `9648`) in `TMDBEnricher.swift`.
+  - Fixed category filter in `PersonView.swift` to match `"TV Show"` alongside `"tv"` and `"series"`.
+- **Actor Page Redesign (`PersonView.swift`)**:
+  - Replaced rectangular avatar with circular avatar.
+  - Added 3-segment liquid glass filmography toggle (**All**, **Movies**, **TV Shows**).
+- **Home Hero Stability & High-Fidelity Skeletons (`HomeView.swift`, `GhostViews.swift`)**:
+  - Anchored 680pt hero slot with `GhostHero` fallback, preventing Continue Watching from jumping to the top of the window during refreshes.
+  - Added dedicated `GhostContinueWatchingCard` (290×163) and `GhostContinueWatchingRail`.
+
+### 17. Player Overhaul: Manual Stream Override, Real Buffer Telemetry, Error Modals, Safe Caching & Stream Inspector (`PlayerManager.swift`, `PlayerView.swift`, `MPVVideoView.swift`, `DetailView.swift`) — Completed & Verified
+- **"Choose Stream" Manual Override in Flux Mode**:
+  - Added `@Published var forceStreamPicker: Bool` and `isStreamPickerPresented: Bool` to `PlayerManager`.
+  - In `fetchAndRace`, if `forceStreamPicker` is active, stream racing is bypassed and picker is immediately presented.
+  - Consolidated stream picker visibility in `PlayerView` under `isPickerVisible`.
+  - Added "Choose Stream Source…" context menu to the hero "Play" button in `DetailView.swift`.
+- **Elimination of Fake Buffer Progress**:
+  - Completely excised artificial discovery-ratio math (`min(0.35, discoveryRatio * 0.35)`) and offset constants.
+  - Progress bar strictly tracks genuine `mpv.demuxerCacheTime` and `mpv.bufferProgress`.
+- **Context-Aware "No Streams Available" Modal**:
+  - When 0 streams match the filter, halts loading and displays actionable frosted modal with "Enable Torrents & Retry" (for HTTP-only mode), "Retry", "Choose Another Source", and "Close".
+- **Playback-Verified Stream Caching & Ephemeral Protection**:
+  - Stream caching in `lastPlayedStreams` and watch history only commits after at least 1.0s of verified playback (`confirmPlaybackSuccess()`).
+  - Ephemeral HTTP URLs containing signed tokens (`token=`, `expires=`, `sig=`) are kept in-memory for the session but excluded from persistent disk storage.
+  - Added `invalidateCachedStream(...)` to purge dead streams upon playback failure.
+- **"About Stream Source" Right-Click Inspector HUD**:
+  - Right-clicking video view displays a native liquid glass HUD querying live mpv properties (`video-codec`, `audio-codec`, `hwdec-current`, `video-params/w`, `video-params/h`, demuxer buffer seconds), provider badge, transport type, and includes a "Copy Stream Link" button.
+- **Next Episode Race Condition & Error Glitch Prevention**:
+  - Opening stream picker during 10s countdown cancels auto-play so the timer won't override manual selection.
+  - Added `isIntentionallySwitchingFile` in `MPVViewController` to suppress spurious `MPV_END_FILE_REASON_ERROR` emissions during intentional track/file transitions.
+  - Full test suite passed (62/62 tests).
+
 
 ---
 
