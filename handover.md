@@ -81,6 +81,27 @@
   - **Profile Sync**: Included `"enableFluxLanguageFilter"` in `ProfileManager.playbackSettingKeys` so it snapshots into profile settings and syncs to the cloud DB.
   - **Test Suite**: Added comprehensive unit tests in `StreamManagerTests.swift` covering original language coupling, dual audio, filter bypass, and candidate selection with filter toggle. All 48 tests passed.
 
+### 13. HTTP Fast Start Rank Preservation, Stall Detector Watchdog & Monotonic Progress Bar (`PlayerManager.swift`, `PlayerView.swift`) — Completed & Verified
+- **Issue**:
+  - In Flux Mode with **HTTP Streams Only** and **1080p Maximum Resolution**, playing *The Gentlemen* caused the progress bar to fill to 80%, suddenly reset, stall, and fail to play.
+  - Selecting the #1 stream manually from the Fast Start tab worked immediately (~3 seconds).
+- **Root Causes**:
+  1. **Unconstrained Fastest-HEAD Race Scrambled Ranking**: `raceAndVerifyHTTPCandidates` used Swift's `TaskGroup` which yields in completion order. When multiple HTTP streams were checked concurrently, whichever server returned a HEAD 200/302 10ms faster stole the #1 spot, overriding the superior 1080p candidate selected by `selectFastStartCandidate`.
+  2. **Flat Watchdog Timer Killed Slow-to-Connect Streams**: The previous 6.0s deadline didn't distinguish between a dead stream and a slow-to-connect remote CDN (TLS handshake, redirects, moov atom fetch). It killed actively buffering streams.
+  3. **Progress Bar Unification & 80% -> 0% Jerk**: Addon discovery progress and MPV buffer progress were bound to the same unsegmented variable. When URL changed, progress was set to 0.0, causing an 80% -> 0% regression.
+- **Resolution**:
+  - **Rank Preservation & Ranged GET**: Replaced HEAD with 64KB ranged GET (`Range: bytes=0-65535`, 3.0s timeout). Results are gathered into a dictionary and filtered in original candidate order (`candidates.filter { results[$0.stableKey] == true }`), guaranteeing the #1 ranked candidate always plays if alive.
+  - **Two-Phase Stall Detector Watchdog**: Replaced flat deadline with a two-phase watchdog in `PlayerManager.attemptStream`:
+    - Initial connection timeout (14.0s for HTTP, 18.0s for torrents) covers TLS, DNS, redirects, and first byte.
+    - Once bytes flow (`reportTelemetryProgress(cacheTime:)`), the watchdog switches to a stall detector that aborts only after 6.0s of zero new bytes.
+    - If `cacheTime >= 1.5s` or `hasPlaybackStarted`, the watchdog is completely disarmed.
+  - **Strictly Monotonic Segmented Progress Bar**:
+    - Segmented progress: Phase 1 (Addon discovery, 0% -> 35%), Phase 2 (Connecting & demuxer buffering, 35% -> 95%), Phase 3 (Video reveal, snaps to 100% when `timePos >= 0.05`).
+    - Enforced `self.animatedProgress = max(self.animatedProgress, ...)` so the bar never moves backward.
+    - Deduped reloads via `mpv.play`'s internal check.
+- **Verification**:
+  - Full automated test suite passed with 0 failures (`StreamManagerTests`, `ArchitectureTests`, `SearchEngineTests`, `UserDataServiceTests`, `TMDBEnricherTests`, `fluxTests`, `fluxUITests`).
+
 ---
 
 ## Sep 3, 2026 — DYNAMIC STREAM PICKER TABS, ICON-ONLY SELECTORS, CAROUSEL HIT TARGET & DETAIL CLEANUP

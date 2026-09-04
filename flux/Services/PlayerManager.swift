@@ -70,6 +70,8 @@ class PlayerManager: ObservableObject {
     @Published var standbyFallbacks: [Stream] = []
     @Published var hasPlaybackStarted: Bool = false
     private var startupWatchdogTask: Task<Void, Never>?
+    private var lastTelemetryProgressTime: Date?
+    private var lastObservedCacheTime: Double = 0.0
 
     // Next-Episode preloading state (AIOStreams style)
     private var prefetchedNextKey: String?
@@ -655,7 +657,7 @@ class PlayerManager: ObservableObject {
                         print("[PlayerManager] Active Torrent Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
                         self.currentStreamURL = cached.url
                         self.isLoading = false
-                        if let hash = activeTorrentHash {
+                        if activeTorrentHash != nil {
                             AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
                         }
                         self.populateStreamsInBackground(item: item, season: season, episode: episode)
@@ -944,8 +946,8 @@ class PlayerManager: ObservableObject {
         return winnerCandidate
     }
 
-    /// Races HTTP candidates in parallel via HEAD requests with a 2.5s timeout.
-    /// Returns the verified working winner AND an ordered list of verified working fallbacks.
+    /// Races HTTP candidates in parallel via ranged GET requests with a 3.0s timeout.
+    /// Preserves original ranked preference order: top-ranked stream that responds wins!
     private func raceAndVerifyHTTPCandidates(_ candidates: [Stream]) async -> (winner: Stream?, verifiedFallbacks: [Stream]) {
         guard !candidates.isEmpty else { return (nil, []) }
 
@@ -954,8 +956,9 @@ class PlayerManager: ObservableObject {
                 let playableURL = self.getPlayableURL(for: stream)
                 group.addTask {
                     var request = URLRequest(url: playableURL)
-                    request.httpMethod = "HEAD"
-                    request.timeoutInterval = 2.5
+                    request.httpMethod = "GET"
+                    request.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
+                    request.timeoutInterval = 3.0
                     do {
                         let (_, response) = try await URLSession.shared.data(for: request)
                         if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
@@ -968,17 +971,18 @@ class PlayerManager: ObservableObject {
                 }
             }
 
-            var verified: [Stream] = []
+            var results: [String: Bool] = [:]
             for await (stream, ok) in group {
-                if ok {
-                    verified.append(stream)
-                } else {
+                results[stream.stableKey] = ok
+                if !ok {
                     await MainActor.run {
                         self.probeStatus[stream.stableKey] = StreamProbeResult(ok: false, latency: 99)
                     }
                 }
             }
 
+            // CRITICAL: Preserve original candidate preference ranking
+            let verified = candidates.filter { results[$0.stableKey] == true }
             guard let winner = verified.first else {
                 return (nil, [])
             }
@@ -1073,7 +1077,7 @@ class PlayerManager: ObservableObject {
             }
         }
 
-        var target = stream.url
+        let target = stream.url
         // Route HTTP streams with required headers through the local proxy
         if let headers = stream.proxyHeaders, !headers.isEmpty, !stream.isTorrent,
            StreamProxyManager.shared.isRunning,
@@ -1099,23 +1103,49 @@ class PlayerManager: ObservableObject {
         // Cancel any existing startup watchdog
         startupWatchdogTask?.cancel()
         startupWatchdogTask = nil
+        lastTelemetryProgressTime = nil
+        lastObservedCacheTime = 0.0
 
-        // Set up smart startup watchdog in Flux Mode
+        // Set up smart startup watchdog in Flux Mode with stall detection
         if isFluxEnabled && !isManualSelection {
-            let budget = StreamManager.shared.estimatedStartupBudget(for: stream)
-            print("[PlayerManager] ⏱️ Armed startup watchdog for \(stream.cleanTitle) (\(stream.quality)): \(budget)s")
+            let connectTimeout: TimeInterval = stream.isTorrent ? 18.0 : 14.0
+            print("[PlayerManager] ⏱️ Armed startup stall watchdog for \(stream.cleanTitle) (\(stream.quality)): connect timeout \(Int(connectTimeout))s")
+            let startedAt = Date()
             startupWatchdogTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
                     guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        guard let self = self else { return }
-                        if self.isLoading || !self.hasPlaybackStarted {
-                            print("[PlayerManager] ⏱️ Stream startup budget (\(budget)s) expired for \(stream.cleanTitle). Auto-advancing to standby fallback...")
-                            self.advanceToStandbyFallback()
+
+                    let shouldAdvance = await MainActor.run { () -> Bool in
+                        guard let self = self else { return false }
+                        if self.hasPlaybackStarted { return false }
+
+                        let elapsed = Date().timeIntervalSince(startedAt)
+
+                        // If bytes have started flowing (telemetry received):
+                        if let lastProgress = self.lastTelemetryProgressTime {
+                            let stallDuration = Date().timeIntervalSince(lastProgress)
+                            // Stall timeout: 6 seconds of ZERO new bytes after connection was established
+                            if stallDuration >= 6.0 {
+                                print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
+                                self.advanceToStandbyFallback()
+                                return true
+                            }
+                            return false
                         }
+
+                        // Connecting phase: no bytes received yet
+                        if elapsed >= connectTimeout {
+                            print("[PlayerManager] ⏱️ Stream connect timeout (\(Int(connectTimeout))s, no response). Auto-advancing to standby fallback...")
+                            self.advanceToStandbyFallback()
+                            return true
+                        }
+
+                        return false
                     }
-                } catch {}
+
+                    if shouldAdvance { break }
+                }
             }
         }
 
@@ -1186,6 +1216,16 @@ class PlayerManager: ObservableObject {
     func cancelStartupWatchdog() {
         startupWatchdogTask?.cancel()
         startupWatchdogTask = nil
+    }
+
+    func reportTelemetryProgress(cacheTime: Double) {
+        if cacheTime > lastObservedCacheTime + 0.05 {
+            lastObservedCacheTime = cacheTime
+            lastTelemetryProgressTime = Date()
+        }
+        if cacheTime >= 1.5 {
+            cancelStartupWatchdog()
+        }
     }
 
     func advanceToStandbyFallback() {

@@ -183,14 +183,7 @@ struct PlayerView: View {
             playerManager.close()
         }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
-            if let url = newURL {
-                print("PlayerView: URL changed to \(url), playing...")
-                // Reset buffering progress + auto-play cancellation for the new stream
-                animatedProgress = 0.0
-                autoPlayCancelled = false
-                hasStartedPlayback = false
-                mpv.play(url: url)
-            }
+            handleStreamURLChange(newURL)
         }
         .onChange(of: mpv.timePos) { _, t in
             handleTimePosChange(t)
@@ -214,6 +207,14 @@ struct PlayerView: View {
         }
     }
     
+    private func handleStreamURLChange(_ newURL: URL?) {
+        guard let url = newURL else { return }
+        print("PlayerView: URL changed to \(url), playing...")
+        autoPlayCancelled = false
+        hasStartedPlayback = false
+        mpv.play(url: url)
+    }
+
     private func handleTimePosChange(_ t: Double) {
         if t > 0.05 && !hasStartedPlayback {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -882,10 +883,8 @@ struct PlayerView: View {
             )
             .ignoresSafeArea()
             
-            // Real Telemetry Progress Fill Loading — prefer mpv's actual buffer telemetry, 
-            // fall back to animated progress only when mpv hasn't reported yet
-            let mpvProgress = max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 5.0))
-            let realProgress = CGFloat(mpvProgress > 0.005 ? mpvProgress : animatedProgress)
+            // Real Telemetry Progress Fill Loading — strictly monotonic (never moves backward)
+            let realProgress = CGFloat(animatedProgress)
             
             VStack(spacing: 20) {
                 if let media = item {
@@ -961,23 +960,26 @@ struct PlayerView: View {
             }
 
             if playerManager.currentStreamURL == nil {
-                // Genuine progress based on addons queried
+                // Phase 1: Addon discovery (0% -> 35%)
                 let discoveryRatio = playerManager.totalAddonsCount > 0
                     ? Double(playerManager.loadedAddonsCount) / Double(playerManager.totalAddonsCount)
                     : 0.0
+                let phase1 = min(0.35, discoveryRatio * 0.35)
                 withAnimation(.linear(duration: 0.25)) {
-                    self.animatedProgress = max(self.animatedProgress, min(0.95, discoveryRatio))
+                    self.animatedProgress = max(self.animatedProgress, phase1)
                 }
                 return
             }
 
+            // Phase 2: Stream chosen, connecting & buffering (35% -> 95%)
             let cacheTime = mpv.demuxerCacheTime
-            let mpvBuf = max(mpv.bufferProgress, min(0.99, cacheTime / 5.0))
+            playerManager.reportTelemetryProgress(cacheTime: cacheTime)
 
-            if mpvBuf > 0.005 {
-                withAnimation(.linear(duration: 0.25)) {
-                    self.animatedProgress = max(self.animatedProgress, mpvBuf)
-                }
+            let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 4.0))
+            let phase2 = min(0.95, 0.35 + (mpvBuf * 0.60))
+
+            withAnimation(.linear(duration: 0.25)) {
+                self.animatedProgress = max(self.animatedProgress, phase2)
             }
         }
         .onAppear {
