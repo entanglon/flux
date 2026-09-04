@@ -69,6 +69,7 @@ struct ContentView: View {
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             .toolbar(removing: .title)
             .windowToolbarFullScreenVisibility(.onHover)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.all, edges: .all)
             // Give PiPManager a way to reopen the player window on expand
             // (openWindow is environment-only; capture it while ContentView lives).
@@ -127,7 +128,9 @@ struct ContentView: View {
             .padding(.top, 0)
             .padding(.bottom, 10)
             .ignoresSafeArea(.all, edges: .top)
+            .transaction { $0.animation = nil }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         // MARK: - Floating Season Dropdown (root-level overlay: above rail + sidebar)
         .coordinateSpace(name: "rootSpace")
         .overlay(alignment: .topLeading) {
@@ -186,9 +189,7 @@ struct ContentView: View {
                 await TMDBCatalogCacheActor.shared.clear()
                 await AuthManager.shared.syncNowAsync(forcePull: true)
             }
-            withAnimation(.easeInOut(duration: 0.15)) {
-                refreshToken += 1
-            }
+            refreshToken += 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxNavigate)) { note in
             guard let target = note.object as? SidebarItem else { return }

@@ -14,13 +14,13 @@ struct GenreDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                // Header: Genre Title + Movies / TV Shows switcher
+                // Header: Genre Title + Liquid Glass Movies / TV Shows switcher
                 HStack(spacing: 20) {
                     Text(genre.name)
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
 
-                    mediaTypeToggle
+                    LiquidGlassMediaToggle(selected: $mediaType)
 
                     Spacer()
                 }
@@ -28,16 +28,19 @@ struct GenreDetailView: View {
                 .padding(.trailing, 40)
                 .padding(.top, 48)
 
-                if isLoading {
+                if isLoading && railsData.isEmpty {
                     loadingRails
                 } else if railsData.isEmpty {
                     emptyState
                 } else {
                     railsContent
+                        .opacity(isLoading ? 0.45 : 1.0)
+                        .animation(.easeInOut(duration: 0.2), value: isLoading)
                 }
             }
             .padding(.top, 40)
             .padding(.bottom, 60)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay(alignment: .topLeading) {
             Button(action: { dismiss() }) {
@@ -69,33 +72,6 @@ struct GenreDetailView: View {
             Task {
                 await TMDBCatalogCacheActor.shared.clear()
                 await loadRails()
-            }
-        }
-    }
-
-    // MARK: - Movies / TV Shows Switcher
-
-    @ViewBuilder
-    private var mediaTypeToggle: some View {
-        HStack(spacing: 0) {
-            ForEach(["movie", "tv"], id: \.self) { mt in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if mediaType != mt {
-                            mediaType = mt
-                        }
-                    }
-                } label: {
-                    Text(mt == "movie" ? "Movies" : "TV Shows")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(mediaType == mt ? .black : .white.opacity(0.7))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule().fill(mediaType == mt ? Color.white : Color.white.opacity(0.12))
-                        )
-                }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -176,13 +152,16 @@ struct GenreDetailView: View {
                         .frame(width: 180)
                         .padding(.leading, 268)
 
-                    HStack(spacing: 20) {
-                        ForEach(0..<6, id: \.self) { _ in
-                            GhostCard()
-                                .frame(width: 180)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 20) {
+                            ForEach(0..<6, id: \.self) { _ in
+                                GhostCard()
+                                    .frame(width: 180)
+                            }
                         }
+                        .padding(.leading, 268)
+                        .padding(.trailing, 40)
                     }
-                    .padding(.leading, 268)
                 }
             }
         }
@@ -207,11 +186,15 @@ struct GenreDetailView: View {
     // MARK: - Data Fetching
 
     private func loadRails() async {
-        isLoading = true
+        if railsData.isEmpty {
+            isLoading = true
+        }
         let fetched = await TMDBEnricher.shared.fetchGenreRails(tmdbGenreID: genre.id, mediaType: mediaType)
         await MainActor.run {
-            self.railsData = fetched
-            self.isLoading = false
+            withAnimation(.easeInOut(duration: 0.2)) {
+                self.railsData = fetched
+                self.isLoading = false
+            }
         }
     }
 }

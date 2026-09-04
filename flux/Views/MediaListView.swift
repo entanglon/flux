@@ -139,31 +139,7 @@ struct MediaListView: View {
     
     @ViewBuilder
     private var mediaTypeToggle: some View {
-        HStack(spacing: 0) {
-            ForEach(["movie", "tv"], id: \.self) { mt in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if genreMediaType != mt {
-                            genreMediaType = mt
-                            items = []
-                            currentPage = 1
-                            canLoadMore = true
-                            Task { await loadData() }
-                        }
-                    }
-                } label: {
-                    Text(mt == "movie" ? "Movies" : "TV Shows")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(genreMediaType == mt ? .black : .white.opacity(0.7))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule().fill(genreMediaType == mt ? Color.white : Color.white.opacity(0.12))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
+        LiquidGlassMediaToggle(selected: $genreMediaType)
     }
 
     @ViewBuilder
