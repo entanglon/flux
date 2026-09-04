@@ -5,7 +5,6 @@ struct ContentView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @StateObject private var playerManager = PlayerManager.shared
     @State private var path = NavigationPath()
-    @State private var refreshToken = 0
     @ObservedObject private var seasonDropdown = SeasonDropdownController.shared
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     @Environment(\.openWindow) private var openWindow
@@ -36,8 +35,6 @@ struct ContentView: View {
                             HomeView()
                         }
                     }
-                    // Bumping the token recreates the page → full refresh (Cmd+R)
-                    .id(refreshToken)
                 }
                 .navigationDestination(for: MediaItem.self) { item in
                     DetailView(item: item)
@@ -189,7 +186,6 @@ struct ContentView: View {
                 await TMDBCatalogCacheActor.shared.clear()
                 await AuthManager.shared.syncNowAsync(forcePull: true)
             }
-            refreshToken += 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxNavigate)) { note in
             guard let target = note.object as? SidebarItem else { return }

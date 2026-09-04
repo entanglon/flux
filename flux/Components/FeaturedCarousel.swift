@@ -34,7 +34,12 @@ struct FeaturedCarousel: View {
                                         sidebarWidth: sidebarWidth
                                     )
                                 } else {
-                                    Rectangle().fill(Color.gray.opacity(0.1))
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                    .shimmer()
                                 }
                             }
                         } else {

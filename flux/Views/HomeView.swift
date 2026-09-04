@@ -45,83 +45,92 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                if isLoading && heroContent.isEmpty && trendingTodayItems.isEmpty {
-                    // Ghost loading layout — hero + skeleton rails
-                    VStack(alignment: .leading, spacing: 44) {
-                        GhostHero()
-                        GhostRail()
-                        GhostRail()
-                    }
-                    .padding(.bottom, 40)
-                    .transition(.opacity)
+                // Featured Carousel (Trending Today & Hero Content) or Apple TV Skeleton Hero
+                if !heroContent.isEmpty {
+                    FeaturedCarousel(items: Array(heroContent.prefix(5)))
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
                 } else {
-                    // Featured Carousel (Trending Today & Hero Content)
-                    if !heroContent.isEmpty {
-                        FeaturedCarousel(items: Array(heroContent.prefix(5)))
-                            .padding(.bottom, 10)
-                    }
-                    
-                    // Continue Watching (Real Data with Episode Stills)
-                    let itemsToDisplay = continueWatchingItems
-                    if !itemsToDisplay.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(title: "Continue Watching", value: MediaListView.ListType.continueWatching)
-                                .padding(.leading, 268)
-                                .padding(.trailing, 40)
-                            
-                            CarouselView(items: itemsToDisplay, spacing: 16, itemWidth: 290) { item in
-                                Button(action: {
-                                    PlayerManager.shared.play(
-                                        item,
-                                        season: item.lastSeason,
-                                        episode: item.lastEpisode,
-                                        episodeImage: item.lastEpisodeImage,
-                                        fromContinueWatching: true
-                                    )
-                                    openWindow(id: "player", value: item.id)
-                                }) {
-                                    ContinueWatchingCard(item: item, mode: .continueWatching)
-                                }
-                                .buttonStyle(.plain)
-                                .focusEffectDisabled()
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-
-                    // 1. Combined Trending Rail with Liquid Glass Toggle
-                    let activeTrending = trendingWindow == "day" ? trendingTodayItems : trendingWeekItems
-                    if !activeTrending.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            TrendingToggleSectionHeader(
-                                title: "Trending",
-                                window: $trendingWindow,
-                                value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
-                            )
+                    GhostHero()
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
+                }
+                
+                // Continue Watching (Real Data with Episode Stills) or Ghost Rail if loading
+                let itemsToDisplay = continueWatchingItems
+                if !itemsToDisplay.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ListSectionHeader(title: "Continue Watching", value: MediaListView.ListType.continueWatching)
                             .padding(.leading, 268)
                             .padding(.trailing, 40)
-
-                            CarouselView(items: activeTrending) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
+                        
+                        CarouselView(items: itemsToDisplay, spacing: 16, itemWidth: 290) { item in
+                            Button(action: {
+                                PlayerManager.shared.play(
+                                    item,
+                                    season: item.lastSeason,
+                                    episode: item.lastEpisode,
+                                    episodeImage: item.lastEpisodeImage,
+                                    fromContinueWatching: true
+                                )
+                                openWindow(id: "player", value: item.id)
+                            }) {
+                                ContinueWatchingCard(item: item, mode: .continueWatching)
                             }
-                            .id("trending-home-\(trendingWindow)")
+                            .buttonStyle(.plain)
+                            .focusEffectDisabled()
                         }
-                        .padding(.bottom, 16)
                     }
+                    .padding(.bottom, 16)
+                    .transition(.opacity)
+                } else if isLoading && !userData.history.isEmpty {
+                    GhostContinueWatchingRail()
+                        .transition(.opacity)
+                }
 
-                    // 2. Popular Movies
-                    if !popularMovies.isEmpty {
-                        renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
-                    }
+                // 1. Combined Trending Rail with Liquid Glass Toggle
+                let activeTrending = trendingWindow == "day" ? trendingTodayItems : trendingWeekItems
+                if !activeTrending.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        TrendingToggleSectionHeader(
+                            title: "Trending",
+                            window: $trendingWindow,
+                            value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
+                        )
+                        .padding(.leading, 268)
+                        .padding(.trailing, 40)
 
-                    // 4. Popular TV Shows
-                    if !popularTV.isEmpty {
-                        renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
+                        CarouselView(items: activeTrending) { item in
+                            NavigationLink(value: item) {
+                                GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                    .frame(width: 180)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .id("trending-home-\(trendingWindow)")
                     }
+                    .padding(.bottom, 16)
+                    .transition(.opacity)
+                } else if isLoading {
+                    GhostRail()
+                        .transition(.opacity)
+                }
+
+                // 2. Popular Movies
+                if !popularMovies.isEmpty {
+                    renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+                } else if isLoading {
+                    GhostRail()
+                        .transition(.opacity)
+                }
+
+                // 4. Popular TV Shows
+                if !popularTV.isEmpty {
+                    renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
+                } else if isLoading {
+                    GhostRail()
+                        .transition(.opacity)
+                }
 
                     // 5. Now Playing in Theatres
                     if !nowPlayingMovies.isEmpty {
@@ -195,7 +204,6 @@ struct HomeView: View {
                     watchlistRow
                     genreRow
                     historyRow
-                }
             }
             .padding(.bottom, 80)
         }

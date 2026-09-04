@@ -17,20 +17,16 @@ struct MoviesView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                if isLoading && heroMovies.isEmpty && popularMovies.isEmpty {
-                    VStack(alignment: .leading, spacing: 44) {
-                        GhostHero()
-                        GhostRail()
-                        GhostRail()
-                    }
-                    .padding(.bottom, 40)
-                    .transition(.opacity)
+                // Featured Movies Carousel or Apple TV Skeleton Hero
+                if !heroMovies.isEmpty {
+                    FeaturedCarousel(items: Array(heroMovies.prefix(5)))
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
                 } else {
-                    // Featured Movies Carousel
-                    if !heroMovies.isEmpty {
-                        FeaturedCarousel(items: Array(heroMovies.prefix(5)))
-                            .padding(.bottom, 10)
-                    }
+                    GhostHero()
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
+                }
 
                     // For You Movies
                     if !forYouMovies.isEmpty {
@@ -59,11 +55,18 @@ struct MoviesView: View {
                             .id("trending-movies-\(trendingWindow)")
                         }
                         .padding(.bottom, 16)
+                        .transition(.opacity)
+                    } else if isLoading {
+                        GhostRail()
+                            .transition(.opacity)
                     }
 
                     // 2. Popular Movies
                     if !popularMovies.isEmpty {
                         renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+                    } else if isLoading {
+                        GhostRail()
+                            .transition(.opacity)
                     }
 
                     // 4. Now Playing in Theatres
@@ -90,7 +93,6 @@ struct MoviesView: View {
                     if !quickWatches.isEmpty {
                         renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
                     }
-                }
             }
             .padding(.bottom, 80)
         }

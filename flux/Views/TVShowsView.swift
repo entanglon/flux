@@ -16,20 +16,16 @@ struct TVShowsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                if isLoading && heroShows.isEmpty && popularShows.isEmpty {
-                    VStack(alignment: .leading, spacing: 44) {
-                        GhostHero()
-                        GhostRail()
-                        GhostRail()
-                    }
-                    .padding(.bottom, 40)
-                    .transition(.opacity)
+                // Featured TV Carousel or Apple TV Skeleton Hero
+                if !heroShows.isEmpty {
+                    FeaturedCarousel(items: Array(heroShows.prefix(5)))
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
                 } else {
-                    // Featured TV Carousel
-                    if !heroShows.isEmpty {
-                        FeaturedCarousel(items: Array(heroShows.prefix(5)))
-                            .padding(.bottom, 10)
-                    }
+                    GhostHero()
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
+                }
 
                     // For You TV Shows
                     if !forYouShows.isEmpty {
@@ -56,34 +52,40 @@ struct TVShowsView: View {
                                 .buttonStyle(.plain)
                             }
                             .id("trending-tv-\(trendingWindow)")
-                        }
-                        .padding(.bottom, 16)
                     }
+                    .padding(.bottom, 16)
+                    .transition(.opacity)
+                } else if isLoading {
+                    GhostRail()
+                        .transition(.opacity)
+                }
 
-                    // 2. Popular TV Shows
-                    if !popularShows.isEmpty {
-                        renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
-                    }
+                // 2. Popular TV Shows
+                if !popularShows.isEmpty {
+                    renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
+                } else if isLoading {
+                    GhostRail()
+                        .transition(.opacity)
+                }
 
-                    // 4. Airing Today on TV
-                    if !airingTodayShows.isEmpty {
-                        renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayShows)
-                    }
+                // 4. Airing Today on TV
+                if !airingTodayShows.isEmpty {
+                    renderRail(title: "Airing Today on TV", listType: .airingTodayTV, items: airingTodayShows)
+                }
 
-                    // 5. On The Air / This Week on TV
-                    if !onTheAirShows.isEmpty {
-                        renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirShows)
-                    }
+                // 5. On The Air / This Week on TV
+                if !onTheAirShows.isEmpty {
+                    renderRail(title: "On The Air / This Week", listType: .onTheAirTV, items: onTheAirShows)
+                }
 
-                    // 6. Popular on Streaming
-                    if !streamingShows.isEmpty {
-                        renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
-                    }
+                // 6. Popular on Streaming
+                if !streamingShows.isEmpty {
+                    renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
+                }
 
-                    // 7. Top Rated TV Shows
-                    if !topRatedShows.isEmpty {
-                        renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
-                    }
+                // 7. Top Rated TV Shows
+                if !topRatedShows.isEmpty {
+                    renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
                 }
             }
             .padding(.bottom, 80)
