@@ -15,7 +15,7 @@
 		</dict>
 	</array>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/heisenbug-dev/flux/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/entanglon/flux/main/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 </dict>

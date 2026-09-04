@@ -38,6 +38,7 @@
 		F7D621A12EE1E52000C25561 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Info.plist,
 				"MPVKit-Swift",
 				implementation_plan.md,
 				SecretsExample.txt,
@@ -478,7 +479,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-Wl,-w";
-				PRODUCT_BUNDLE_IDENTIFIER = com.heisenbug.flux;
+				PRODUCT_BUNDLE_IDENTIFIER = com.entanglon.flux;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

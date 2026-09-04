@@ -85,7 +85,7 @@ class StremioServerManager: ObservableObject {
 
     private var fluxDir: String {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let folderName = (Bundle.main.bundleIdentifier == "com.heisenbug.flux") ? "Flux" : "Flux-Debug"
+        let folderName = (Bundle.main.bundleIdentifier == "com.kernelmoth.flux") ? "Flux-Debug" : "Flux"
         return support.appendingPathComponent(folderName).path
     }
     private var serverJSPath: String { fluxDir + "/server.js" }

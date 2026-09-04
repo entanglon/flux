@@ -6,7 +6,7 @@ import Darwin
 /// Held for the process lifetime — a second instance fails to lock and exits.
 private var instanceLockFD: Int32 = -1
 private func acquireSingleInstanceLock() -> Bool {
-    let folderName = (Bundle.main.bundleIdentifier == "com.heisenbug.flux") ? "Flux" : "Flux-Debug"
+    let folderName = (Bundle.main.bundleIdentifier == "com.kernelmoth.flux") ? "Flux-Debug" : "Flux"
     let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         .appendingPathComponent(folderName)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
