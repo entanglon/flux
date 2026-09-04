@@ -10,6 +10,7 @@ struct PlayerControlsView: View {
     @Binding var duration: Double
     @Binding var volume: Double
     @Binding var isControlsVisible: Bool
+    var isVolumeHUDVisible: Binding<Bool> = .constant(false)
     var title: String
     var subtitle: String
     
@@ -100,37 +101,8 @@ struct PlayerControlsView: View {
                         
                         Spacer()
                         
-                        // Right Group: Volume
-                        HStack(spacing: 8) {
-                            Button(action: {
-                                if volume > 0.001 {
-                                    volume = 0
-                                } else {
-                                    volume = 1.0
-                                }
-                            }) {
-                                Image(systemName: volume > 1.001 ? "speaker.badge.plus" : (volume <= 0.001 ? "speaker.slash.fill" : (volume <= 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill")))
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(volume > 1.001 ? .orange : .white.opacity(0.85))
-                            }
-                            .buttonStyle(.plain)
-                            .help(volume <= 0.001 ? "Unmute" : "Mute")
-                            .accessibilityLabel("Mute toggle")
-                            
-                            Slider(value: $volume, in: 0...2.0)
-                                .frame(width: 84)
-                                .tint(volume > 1.001 ? .orange : .white)
-                                .accessibilityLabel("Volume slider")
-                                .accessibilityValue("\(Int(volume * 100)) percent")
-
-                            Text("\(Int((volume * 100).rounded()))%")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(volume > 1.001 ? .orange : .white.opacity(0.75))
-                                .frame(minWidth: 34, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .glassEffect(.regular.interactive(), in: .capsule)
+                        // Right Group: Volume Capsule
+                        volumeCapsule
                     }
                     .padding(.horizontal, 60)
                     .padding(.top, 40)
@@ -402,6 +374,19 @@ struct PlayerControlsView: View {
                     }
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+            } else if isVolumeHUDVisible.wrappedValue {
+                VStack {
+                    HStack(alignment: .top) {
+                        Spacer()
+                        volumeCapsule
+                    }
+                    .padding(.horizontal, 60)
+                    .padding(.top, 40)
+                    
+                    Spacer()
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                .allowsHitTesting(true)
             }
         }
         .onAppear {
@@ -442,6 +427,117 @@ struct PlayerControlsView: View {
         }
     }
     
+    // MARK: - Top-Right Volume Capsule (Interactive Gauge + Boost Indicator)
+    private var volumeCapsule: some View {
+        let vol = volume
+        let percent = Int((vol * 100).rounded())
+        let isBoosted = vol > 1.001
+        let isMuted = vol <= 0.001
+
+        let iconName: String = {
+            if isMuted { return "speaker.slash.fill" }
+            if vol <= 0.33 { return "speaker.wave.1.fill" }
+            if vol <= 0.66 { return "speaker.wave.2.fill" }
+            return "speaker.wave.3.fill"
+        }()
+
+        return HStack(spacing: 8) {
+            Button(action: {
+                if volume > 0.001 {
+                    volume = 0
+                } else {
+                    volume = 1.0
+                }
+            }) {
+                Image(systemName: iconName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(isBoosted ? .orange : (isMuted ? .white.opacity(0.45) : .white.opacity(0.9)))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .help(isMuted ? "Unmute" : "Mute")
+            .accessibilityLabel("Mute toggle")
+
+            // Interactive Gauge Bar with 100% Divider Notch
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let midX = w / 2.0
+
+                ZStack(alignment: .leading) {
+                    // Track background
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: w, height: h)
+
+                    // 100% divider notch in center
+                    Rectangle()
+                        .fill(Color.white.opacity(0.45))
+                        .frame(width: 1.5, height: h + 2)
+                        .position(x: midX, y: h / 2.0)
+
+                    // Base Volume Fill (0% to min(vol, 1.0))
+                    let normalRatio = min(max(vol, 0.0), 1.0)
+                    let normalWidth = midX * CGFloat(normalRatio)
+                    if normalWidth > 0 {
+                        Capsule()
+                            .fill(Color.white)
+                            .frame(width: max(h, normalWidth), height: h)
+                    }
+
+                    // Boost Volume Fill (1.0 to vol)
+                    if isBoosted {
+                        let boostRatio = min(vol - 1.0, 1.0)
+                        let boostWidth = midX * CGFloat(boostRatio)
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color.orange.opacity(0.85), Color.orange],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                            .frame(width: max(h, boostWidth), height: h)
+                            .offset(x: midX)
+                            .shadow(color: Color.orange.opacity(0.4), radius: 3, x: 0, y: 0)
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let clampedX = max(0.0, min(value.location.x, w))
+                            let newVol = Double(clampedX / w) * 2.0
+                            volume = (newVol * 20.0).rounded() / 20.0
+                        }
+                )
+            }
+            .frame(width: 80, height: 6)
+            .accessibilityLabel("Volume gauge")
+            .accessibilityValue("\(percent) percent")
+
+            // Percentage & Boost Badge
+            HStack(spacing: 3) {
+                Text(isMuted ? "0%" : "\(percent)%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(isBoosted ? .orange : .white.opacity(0.75))
+                    .frame(minWidth: 32, alignment: .trailing)
+
+                if isBoosted {
+                    Text("BOOST")
+                        .font(.system(size: 7.5, weight: .heavy, design: .rounded))
+                        .tracking(0.5)
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(Color.orange.opacity(0.2), in: Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.5), lineWidth: 0.5))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .glassEffect(.regular.interactive(), in: .capsule)
+    }
+
     private func showControls() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isControlsVisible = true

@@ -113,6 +113,41 @@ struct MediaChapter: Identifiable, Equatable {
     let time: Double
 }
 
+// MARK: - Perceptual Volume Curve & Audio Amplification
+public struct VolumeCurve {
+    /// Maps UI slider value (0.0 ... 2.0) to mpv volume property (0.0 ... 200.0)
+    /// 0.0 ... 1.0 uses a square root curve so 0.5 slider produces -9.0 dB (perceived half loudness)
+    /// 1.0 ... 2.0 maps linearly up to 200.0 (+18.1 dB audio boost, matching VLC / Stremio)
+    public static func uiToMpv(_ uiVolume: Double) -> Double {
+        let clamped = max(0.0, min(uiVolume, 2.0))
+        if clamped <= 0.0001 {
+            return 0.0
+        } else if clamped <= 1.0 {
+            return sqrt(clamped) * 100.0
+        } else {
+            return clamped * 100.0
+        }
+    }
+
+    /// Maps mpv volume property (0.0 ... 200.0) back to UI slider value (0.0 ... 2.0)
+    public static func mpvToUi(_ mpvVolume: Double) -> Double {
+        let clamped = max(0.0, min(mpvVolume, 200.0))
+        if clamped <= 0.0001 {
+            return 0.0
+        } else if clamped <= 100.0 {
+            return pow(clamped / 100.0, 2.0)
+        } else {
+            return clamped / 100.0
+        }
+    }
+
+    /// Returns the approximate decibel gain or attenuation for a given mpv volume
+    public static func decibels(forMpvVolume mpvVolume: Double) -> Double {
+        guard mpvVolume > 0.0001 else { return -.infinity }
+        return 60.0 * log10(mpvVolume / 100.0)
+    }
+}
+
 // MARK: - Controller
 class MPVController: ObservableObject {
     @Published var isPlaying = false
@@ -267,7 +302,10 @@ class MPVController: ObservableObject {
                 }
             case "volume":
                 if let vol = value as? Double {
-                    self.volume = vol / 100.0
+                    let uiVol = VolumeCurve.mpvToUi(vol)
+                    if abs(self.volume - uiVol) > 0.01 {
+                        self.volume = uiVol
+                    }
                 }
             case "cache-buffering-state":
                 if let percent = value as? Int64 {
@@ -461,7 +499,7 @@ class MPVViewController: NSViewController {
         
         let vol = self.playerView.getVolume()
         DispatchQueue.main.async {
-            self.delegate?.volume = vol / 100.0
+            self.delegate?.volume = vol
         }
     }
     
@@ -780,6 +818,8 @@ final class MPVLayerView: NSView {
         
         // Support up to 200% volume amplification (matching VLC and Stremio)
         mpv_set_option_string(mpv, "volume-max", "200")
+        // Enable AC3 Dynamic Range Compression (dialogue enhancement for movie audio tracks)
+        mpv_set_option_string(mpv, "ad-lavc-ac3drc", "1")
         
         if mpv_initialize(mpv) < 0 {
             print("[MPV] init failed")
@@ -788,6 +828,7 @@ final class MPVLayerView: NSView {
         
         // Properties set AFTER initialization (matching Stremio's mpv.cpp)
         mpv_set_property_string(mpv, "volume-max", "200")
+        mpv_set_property_string(mpv, "ad-lavc-ac3drc", "1")
         mpv_set_property_string(mpv, "vo", "libmpv")
         mpv_set_property_string(mpv, "profile", "fast")
         mpv_set_property_string(mpv, "scale", "bilinear")
@@ -942,7 +983,7 @@ final class MPVLayerView: NSView {
     
     func setVolume(_ value: Double) {
         guard mpv != nil else { return }
-        var doubleVal = max(0.0, min(value, 2.0)) * 100
+        var doubleVal = VolumeCurve.uiToMpv(value)
         mpv_set_property(mpv, "volume", MPV_FORMAT_DOUBLE, &doubleVal)
     }
     
@@ -950,7 +991,7 @@ final class MPVLayerView: NSView {
         var vol: Double = 0
         guard mpv != nil else { return 0 }
         mpv_get_property(mpv, "volume", MPV_FORMAT_DOUBLE, &vol)
-        return vol
+        return VolumeCurve.mpvToUi(vol)
     }
     
     func getTracks() -> [Track] {

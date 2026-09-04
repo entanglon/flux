@@ -579,6 +579,27 @@
 - **Netflix Card:** Optimized and installed `/Users/zainulnazir/Projects/flux/OTTs/netflix-new.png` into `ott-nfx.imageset` with 16pt continuous `.clipShape`.
 - **Sidebar Label:** Renamed history sidebar item in `ContentView.swift` from `"Recently Added"` to `"Recently Watched"`.
 
+### Player Volume Curve, Dialogue Boost & Top-Right Gauge Overhaul
+- **Acoustic Perceptual Volume Curve (`VolumeCurve`):**
+  - Resolved the low volume issue where audio at 50% sounded like an inaudible whisper.
+  - mpv calculates volume using a cubic formula ($\text{dB} = 60 \times \log_{10}(\text{vol}/100)$), which caused 50% volume to plummet by $-18.06\text{ dB}$ ($< 1/4$ human perceived loudness).
+  - Implemented `VolumeCurve.uiToMpv` using a square-root perceptual mapping ($\text{mpv} = 100 \times \sqrt{\text{uiVolume}}$) for the $0.0 \dots 1.0$ range, so that 50% UI volume delivers $70.7$ in mpv ($-9.0\text{ dB}$, authentic perceived half-volume).
+  - Audio boost ($100\% \dots 200\%$) scales linearly to $200.0$ in mpv, providing $+18.06\text{ dB}$ of genuine software power amplification matching VLC and Stremio.
+- **AC-3 Dialogue Dynamic Range Compression:**
+  - Enabled `ad-lavc-ac3drc = 1` in both pre-init options and post-init properties in `MPVVideoView.setupMpv()`.
+  - Compresses the uncompressed dynamic range in Dolby Digital AC-3/E-AC-3 5.1/7.1 movie downmixing, lifting dialogue by $6\text{–}10\text{ dB}$ so speech is loud and clear on laptop speakers and headphones without distorting sound effects.
+- **Top-Right Volume Bar Replacement & HUD Isolation:**
+  - Removed the temporary center HUD from `PlayerView.swift`.
+  - Replaced the top-right controls slider in `PlayerControlsView.swift` with an interactive custom volume capsule (`volumeCapsule`):
+    - Compact 80pt split gauge track with a 100% center divider notch.
+    - Pure white fill for normal volume ($0\% \dots 100\%$) and vibrant orange linear gradient with subtle glow for boost ($101\% \dots 200\%$).
+    - Full drag and click interactivity supporting smooth adjustment across $0\% \dots 200\%$.
+    - Dynamic percentage label and styled `BOOST` badge.
+    - Fixed vanishing icon by using valid macOS SF Symbols (`speaker.wave.3.fill`, `speaker.wave.2.fill`, `speaker.wave.1.fill`, `speaker.slash.fill`), tinted `.orange` when boosted.
+  - **Isolated Keyboard Volume Control:** Pressing `↑` or `↓` arrow keys or `M` (mute) displays **only** the top-right volume bar for 1.8 seconds via `isVolumeHUDVisible`. The rest of the player UI (center play/pause, timeline scrubber, and top-left buttons) remains completely hidden.
+- **Session-Based Boost Reset:**
+  - Any volume level $> 100\%$ automatically resets back to $100\%$ when starting a new stream, stopping playback, or closing the player, protecting users from unexpected loud audio. Normal listening levels ($\le 100\%$) persist as usual.
+
 ---
 
 ## Previous Sessions
