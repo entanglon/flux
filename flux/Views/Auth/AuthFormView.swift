@@ -8,8 +8,10 @@ struct AuthFormView: View {
     var showsTitle: Bool = true
     var onCancel: (() -> Void)? = nil
 
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var authManager = AuthManager.shared
     @State private var isSignUp: Bool
+    @State private var name = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -21,7 +23,7 @@ struct AuthFormView: View {
     @FocusState private var focusedField: FieldID?
 
     private enum FieldID: Hashable {
-        case email, password, confirm
+        case name, email, password, confirm
     }
 
     init(startInSignUp: Bool = false,
@@ -81,7 +83,10 @@ struct AuthFormView: View {
             }
         }
         .onChange(of: authManager.currentUser) { _, user in
-            if user != nil { onCancel?() }
+            if user != nil {
+                dismiss()
+                onCancel?()
+            }
         }
         .onChange(of: authManager.errorMessage) { _, error in
             if let error {
@@ -98,6 +103,15 @@ struct AuthFormView: View {
 
     private var fieldsSection: some View {
         VStack(spacing: 10) {
+            if isSignUp {
+                fieldRow(icon: "person", text: $name, focusID: .name) {
+                    TextField("Your Name", text: $name)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .name)
+                }
+            }
+
             fieldRow(icon: "envelope", text: $email, focusID: .email) {
                 TextField("Email", text: $email)
                     .textFieldStyle(.plain)
@@ -272,6 +286,7 @@ struct AuthFormView: View {
         withAnimation(.easeInOut(duration: 0.18)) {
             isSignUp.toggle()
             errorMessage = nil
+            name = ""
             confirmPassword = ""
             showPassword = false
             showConfirmPassword = false
@@ -291,14 +306,32 @@ struct AuthFormView: View {
             return
         }
 
+        if isSignUp && password.count < 8 {
+            errorMessage = "Password must be at least 8 characters."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
         Task {
+            let success: Bool
             if isSignUp {
-                await AuthManager.shared.signUp(email: email, password: password)
+                success = await AuthManager.shared.signUp(
+                    email: email,
+                    password: password,
+                    displayName: trimmedName.isEmpty ? nil : trimmedName
+                )
             } else {
-                await AuthManager.shared.signIn(email: email, password: password)
+                success = await AuthManager.shared.signIn(email: email, password: password)
+            }
+            if success {
+                await MainActor.run {
+                    dismiss()
+                    onCancel?()
+                }
             }
         }
     }

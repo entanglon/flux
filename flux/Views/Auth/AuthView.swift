@@ -3,14 +3,22 @@ import SwiftUI
 /// Card-hosted auth (Settings sheet + any modal context).
 /// The first-start gate uses `AuthFormView` directly — see AuthGateView.
 struct AuthView: View {
+    @Environment(\.dismiss) private var dismiss
     var startInSignUp: Bool = false
     var onCancel: (() -> Void)? = nil
 
     @State private var showForm = false
+    @State private var isHoveringClose = false
+    @State private var isHoveringCloseTrailing = false
 
     init(startInSignUp: Bool = false, onCancel: (() -> Void)? = nil) {
         self.startInSignUp = startInSignUp
         self.onCancel = onCancel
+    }
+
+    private func handleDismiss() {
+        dismiss()
+        onCancel?()
     }
 
     var body: some View {
@@ -29,26 +37,68 @@ struct AuthView: View {
                         startInSignUp: startInSignUp,
                         showsGuestOption: false,
                         showsTitle: true,
-                        onCancel: onCancel
+                        onCancel: handleDismiss
                     )
                     .padding(.horizontal, 30)
                     .frame(width: 380)
                 }
-                .frame(height: 440)
+                .frame(height: 480)
 
                 // Narrow: stacked
-                VStack(spacing: 18) {
+                VStack(spacing: 16) {
                     brandCompact
                     AuthFormView(
                         startInSignUp: startInSignUp,
                         showsTitle: false,
-                        onCancel: onCancel
+                        onCancel: handleDismiss
                     )
                 }
-                .padding(26)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+                .frame(width: 380)
             }
             .background(cardBackground)
+            .overlay(alignment: .topLeading) {
+                Button(action: handleDismiss) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(red: 1.0, green: 0.36, blue: 0.34))
+                            .frame(width: 13, height: 13)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.black.opacity(0.2), lineWidth: 0.5)
+                            )
+                        Image(systemName: "xmark")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(Color.black.opacity(isHoveringClose ? 0.75 : 0))
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringClose = $0 }
+                .padding([.top, .leading], 12)
+                .help("Close (Esc)")
+            }
+            .overlay(alignment: .topTrailing) {
+                Button(action: handleDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white.opacity(isHoveringCloseTrailing ? 0.65 : 0.28))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringCloseTrailing = $0 }
+                .padding([.top, .trailing], 12)
+                .help("Close (Esc)")
+            }
             .opacity(showForm ? 1 : 0)
+        }
+        .onChange(of: AuthManager.shared.currentUser) { _, user in
+            if user != nil {
+                handleDismiss()
+            }
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.2)) { showForm = true }

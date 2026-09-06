@@ -251,4 +251,22 @@ struct UserDataServiceTests {
         // Clean up
         AuthManager.shared.signOut()
     }
+
+    @Test @MainActor func ensureDefaultProfileSetsWatchingProfileNameToChosenName() {
+        AuthManager.shared.signOut()
+        #expect(ProfileManager.shared.profiles.isEmpty)
+
+        ProfileManager.shared.ensureDefaultProfile(name: "Zainul")
+        #expect(ProfileManager.shared.currentProfile != nil)
+        #expect(ProfileManager.shared.currentProfile?.name == "Zainul")
+        #expect(ProfileManager.shared.profiles.count == 1)
+
+        // Ensure renaming existing single profile updates name cleanly
+        ProfileManager.shared.ensureDefaultProfile(name: "Alex")
+        #expect(ProfileManager.shared.currentProfile?.name == "Alex")
+        #expect(ProfileManager.shared.profiles.count == 1)
+
+        // Clean up
+        AuthManager.shared.signOut()
+    }
 }

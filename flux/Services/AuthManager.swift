@@ -21,6 +21,7 @@ class AuthManager: ObservableObject {
     private static let tokenKey = "flux.authToken"
     private static let userUIDKey = "flux.authUID"
     private static let userEmailKey = "flux.authEmail"
+    private static let userDisplayNameKey = "flux.authDisplayName"
 
     static var isConfigured: Bool {
         !(FluxCloudConfig.baseURL.host ?? "").contains("YOUR-SUBDOMAIN")
@@ -65,7 +66,9 @@ class AuthManager: ObservableObject {
             // Set synchronously — init() runs on the main thread before any
             // @StateObject observation begins, so this is safe and prevents
             // AuthGateView from flashing for one frame on startup.
-            self.currentUser = User(id: uid, email: email, displayName: email.components(separatedBy: "@").first)
+            let savedName = UserDefaults.standard.string(forKey: Self.userDisplayNameKey)
+            let name = (savedName?.isEmpty == false) ? savedName : email.components(separatedBy: "@").first
+            self.currentUser = User(id: uid, email: email, displayName: name)
             self.isAuthenticated = true
             self.isGuestMode = false
         } else if UserDefaults.standard.bool(forKey: Self.guestModeKey) {
@@ -73,8 +76,9 @@ class AuthManager: ObservableObject {
         }
     }
 
-    private func makeUser(uid: String, email: String) -> User {
-        User(id: uid, email: email, displayName: email.components(separatedBy: "@").first)
+    private func makeUser(uid: String, email: String, displayName: String? = nil) -> User {
+        let name = displayName ?? email.components(separatedBy: "@").first
+        return User(id: uid, email: email, displayName: name)
     }
 
     // MARK: - Token
@@ -91,11 +95,14 @@ class AuthManager: ObservableObject {
         return nil
     }
 
-    private func saveSession(_ resp: FluxAuthResponse) {
+    private func saveSession(_ resp: FluxAuthResponse, displayName: String? = nil) {
         KeychainStore.set(resp.token, forKey: Self.tokenKey)
         UserDefaults.standard.removeObject(forKey: Self.tokenKey) // Ensure plaintext copy is purged
         UserDefaults.standard.set(resp.uid, forKey: Self.userUIDKey)
         UserDefaults.standard.set(resp.email, forKey: Self.userEmailKey)
+        if let name = displayName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UserDefaults.standard.set(name, forKey: Self.userDisplayNameKey)
+        }
     }
 
     private func clearSession() {
@@ -103,6 +110,7 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.tokenKey)
         UserDefaults.standard.removeObject(forKey: Self.userUIDKey)
         UserDefaults.standard.removeObject(forKey: Self.userEmailKey)
+        UserDefaults.standard.removeObject(forKey: Self.userDisplayNameKey)
     }
 
     // MARK: - Auth actions
@@ -114,11 +122,16 @@ class AuthManager: ObservableObject {
         }
         do {
             let resp = try await client.signIn(email: email, password: password)
-            saveSession(resp)
+            let savedName = UserDefaults.standard.string(forKey: Self.userDisplayNameKey)
+            let finalName = (savedName?.isEmpty == false) ? savedName! : (resp.email.components(separatedBy: "@").first ?? "User")
+            saveSession(resp, displayName: finalName)
             await MainActor.run {
-                self.currentUser = self.makeUser(uid: resp.uid, email: resp.email)
+                self.currentUser = self.makeUser(uid: resp.uid, email: resp.email, displayName: finalName)
                 self.isAuthenticated = true
                 self.isLoading = false
+                if ProfileManager.shared.profiles.isEmpty {
+                    ProfileManager.shared.ensureDefaultProfile(name: finalName)
+                }
             }
             await syncOnLogin()
             return true
@@ -131,18 +144,21 @@ class AuthManager: ObservableObject {
         }
     }
 
-    func signUp(email: String, password: String) async -> Bool {
+    func signUp(email: String, password: String, displayName: String? = nil) async -> Bool {
         await MainActor.run {
             self.isLoading = true
             self.errorMessage = nil
         }
         do {
             let resp = try await client.signUp(email: email, password: password)
-            saveSession(resp)
+            let cleanName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName = (cleanName?.isEmpty == false) ? cleanName! : (resp.email.components(separatedBy: "@").first ?? "User")
+            saveSession(resp, displayName: finalName)
             await MainActor.run {
-                self.currentUser = self.makeUser(uid: resp.uid, email: resp.email)
+                self.currentUser = self.makeUser(uid: resp.uid, email: resp.email, displayName: finalName)
                 self.isAuthenticated = true
                 self.isLoading = false
+                ProfileManager.shared.ensureDefaultProfile(name: finalName)
             }
             await syncOnLogin()
             return true

@@ -232,7 +232,7 @@ struct GeneralSettingsView: View {
             if keyStatus != .idle { keyStatus = .idle }
         }
         .sheet(isPresented: $showAuth) {
-            AuthView()
+            AuthView(onCancel: { showAuth = false })
         }
     }
 

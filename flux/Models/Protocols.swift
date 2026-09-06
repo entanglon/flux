@@ -43,6 +43,12 @@ protocol AuthServiceProtocol {
     var authToken: String? { get }
     
     func signIn(email: String, password: String) async -> Bool
-    func signUp(email: String, password: String) async -> Bool
+    func signUp(email: String, password: String, displayName: String?) async -> Bool
     func signOut()
+}
+
+extension AuthServiceProtocol {
+    func signUp(email: String, password: String) async -> Bool {
+        await signUp(email: email, password: password, displayName: nil)
+    }
 }

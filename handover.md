@@ -19,11 +19,17 @@
     - Fixed community addon configure links to sanitize `/manifest.json` properly and open `https://<domain>/configure` in browser.
     - Expanded Settings frame from 530x460 to 550x500 to prevent vertical content clipping across all tabs.
   - In `PlayerView.swift`: Added `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()` when "Enable Torrents & Retry" button is pressed so setting changes persist across profile switches.
+- **Auth Modal Traffic Light Close & Custom Name on Account Creation**:
+  - Added interactive macOS red traffic-light close button at `.topLeading` and subtle `xmark.circle.fill` button at `.topTrailing` of `AuthView`, eliminating reliance on only the `Esc` key.
+  - Added `@Environment(\.dismiss)` and wired `onCancel` callbacks so closing or successful auth immediately dismisses the modal.
+  - Added "Your Name" textfield in `AuthFormView` during account creation mode (`isSignUp == true`), mapping to `FieldID.name`.
+  - Wired `AuthManager.signUp(..., displayName:)` to persist the chosen name in session data (`flux.authDisplayName`) and initialize the default watching profile via `ProfileManager.shared.ensureDefaultProfile(name: finalName)`.
+  - When the user registers, the default watching profile immediately inherits the chosen name and starts playing with no extra gates.
 
 ### 2. Verification & Automated Tests
 - **Automated Tests**:
-  - Added unit tests `signOutRemovesActiveWatchingProfileAndData` and `continueAsGuestInitializesFreshGuestWatchingProfile` in `UserDataServiceTests.swift`.
-  - Executed `xcodebuild test`: **100% of 92 unit tests across 6 suites passed cleanly** with 0 failures (`** TEST SUCCEEDED **`).
+  - Added unit tests `signOutRemovesActiveWatchingProfileAndData`, `continueAsGuestInitializesFreshGuestWatchingProfile`, and `ensureDefaultProfileSetsWatchingProfileNameToChosenName` in `UserDataServiceTests.swift`.
+  - Executed `xcodebuild test`: **100% of 93 unit tests across 6 suites passed cleanly** with 0 failures (`** TEST SUCCEEDED **`).
 - **Release Packaging**:
   - Ran `scripts/build-releases.sh --macos26`.
   - Release binary built and codesigned (`** BUILD SUCCEEDED **`).

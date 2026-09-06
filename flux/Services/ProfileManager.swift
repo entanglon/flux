@@ -96,6 +96,30 @@ final class ProfileManager: ObservableObject {
         selectProfile(guest)
     }
 
+    /// Ensures a default watching profile exists with the given name (from account signup or login).
+    func ensureDefaultProfile(name: String, avatarID: String = "face-red") {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profileName = cleanName.isEmpty ? "Default" : cleanName
+
+        if let existing = profiles.first {
+            var updated = existing
+            updated.name = profileName
+            if let idx = profiles.firstIndex(where: { $0.id == existing.id }) {
+                profiles[idx] = updated
+            }
+            saveProfiles()
+            selectProfile(updated)
+            AuthManager.shared.scheduleAutoSync()
+            return
+        }
+
+        let profile = UserProfile(id: UUID(), name: profileName, avatarID: avatarID, createdAt: Date())
+        profiles = [profile]
+        saveProfiles()
+        selectProfile(profile, migrateLegacyData: true)
+        AuthManager.shared.scheduleAutoSync()
+    }
+
     // MARK: - Per-profile settings snapshot
 
     var playbackSettingKeys: [String] {
