@@ -19,9 +19,10 @@
     - Fixed community addon configure links to sanitize `/manifest.json` properly and open `https://<domain>/configure` in browser.
     - Expanded Settings frame from 530x460 to 550x500 to prevent vertical content clipping across all tabs.
   - In `PlayerView.swift`: Added `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()` when "Enable Torrents & Retry" button is pressed so setting changes persist across profile switches.
-- **Auth Modal Traffic Light Close & Custom Name on Account Creation**:
-  - Added interactive macOS red traffic-light close button at `.topLeading` and subtle `xmark.circle.fill` button at `.topTrailing` of `AuthView`, eliminating reliance on only the `Esc` key.
-  - Added `@Environment(\.dismiss)` and wired `onCancel` callbacks so closing or successful auth immediately dismisses the modal.
+- **Auth Modal Sheet Unification & Clean Single Close Button**:
+  - Re-architected `AuthView` to eliminate the nested card layout that previously caused a "window inside a window" appearance within the macOS sheet.
+  - Sized `AuthView` directly as a single native sheet dialog (380x490) with dark background (`Color(red: 0.11, green: 0.12, blue: 0.15)`), eliminating redundant outer backgrounds, borders, and drop shadows.
+  - Standardized on a single sleek `xmark.circle.fill` close button at `.topTrailing` with hover highlights, tooltip, and `.keyboardShortcut(.cancelAction)` (Escape key), eliminating the redundant red traffic-light dot, trailing X, and bottom Cancel text clutter.
   - Added "Your Name" textfield in `AuthFormView` during account creation mode (`isSignUp == true`), mapping to `FieldID.name`.
   - Wired `AuthManager.signUp(..., displayName:)` to persist the chosen name in session data (`flux.authDisplayName`) and initialize the default watching profile via `ProfileManager.shared.ensureDefaultProfile(name: finalName)`.
   - When the user registers, the default watching profile immediately inherits the chosen name and starts playing with no extra gates.
