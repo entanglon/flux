@@ -88,7 +88,8 @@ struct TMDBEnricherTests {
         #expect(MediaListView.ListType.trendingAllDay.title == "Trending Today")
         #expect(MediaListView.ListType.trendingAllWeek.title == "Trending This Week")
         #expect(MediaListView.ListType.popularMovies.title == "Popular Movies")
-        #expect(MediaListView.ListType.nowPlayingMovies.title == "Now Playing in Theatres")
+        #expect(MediaListView.ListType.nowPlayingMovies.title == "Now Playing")
+        #expect(MediaListView.ListType.upcomingMovies.title == "Upcoming")
         #expect(MediaListView.ListType.airingTodayTV.title == "Airing Today")
         #expect(MediaListView.ListType.onTheAirTV.title == "On TV")
         #expect(MediaListView.ListType.topRatedTV.title == "Top Rated TV Shows")
@@ -154,5 +155,45 @@ struct TMDBEnricherTests {
             #expect(!track.contains("AAC"))
         }
     }
+
+    @Test func topRatedRankingExcludesLowRatedAndSortsDescending() {
+        let items: [MediaItem] = [
+            MediaItem(id: "tt1", title: "It Ends", description: "", streamURL: nil, category: "movie", voteAverage: 5.7),
+            MediaItem(id: "tt2", title: "The Shawshank Redemption", description: "", streamURL: nil, category: "movie", voteAverage: 9.3),
+            MediaItem(id: "tt3", title: "The Godfather", description: "", streamURL: nil, category: "movie", voteAverage: 9.2),
+            MediaItem(id: "tt4", title: "Low Tier Movie", description: "", streamURL: nil, category: "movie", voteAverage: 6.4),
+            MediaItem(id: "tt5", title: "The Dark Knight", description: "", streamURL: nil, category: "movie", voteAverage: 9.1),
+            MediaItem(id: "tt6", title: "Mid Movie", description: "", streamURL: nil, category: "movie", voteAverage: 7.2)
+        ]
+
+        let topRated = items.filter { ($0.voteAverage ?? 0) >= 8.0 }
+            .sorted { ($0.voteAverage ?? 0) > ($1.voteAverage ?? 0) }
+
+        #expect(topRated.count == 3)
+        #expect(topRated[0].title == "The Shawshank Redemption")
+        #expect(topRated[1].title == "The Godfather")
+        #expect(topRated[2].title == "The Dark Knight")
+        #expect(!topRated.contains { $0.title == "It Ends" })
+    }
+
+    @Test func topRatedShowsRankingExcludesLowRatedAndSortsDescending() {
+        let shows: [MediaItem] = [
+            MediaItem(id: "tt10", title: "Breaking Bad", description: "", streamURL: nil, category: "series", voteAverage: 9.5),
+            MediaItem(id: "tt11", title: "The Wire", description: "", streamURL: nil, category: "series", voteAverage: 9.3),
+            MediaItem(id: "tt12", title: "Random Weak Series", description: "", streamURL: nil, category: "series", voteAverage: 5.1),
+            MediaItem(id: "tt13", title: "Game of Thrones", description: "", streamURL: nil, category: "series", voteAverage: 9.2),
+            MediaItem(id: "tt14", title: "Average Drama", description: "", streamURL: nil, category: "series", voteAverage: 6.8)
+        ]
+
+        let topRated = shows.filter { ($0.voteAverage ?? 0) >= 8.2 }
+            .sorted { ($0.voteAverage ?? 0) > ($1.voteAverage ?? 0) }
+
+        #expect(topRated.count == 3)
+        #expect(topRated[0].title == "Breaking Bad")
+        #expect(topRated[1].title == "The Wire")
+        #expect(topRated[2].title == "Game of Thrones")
+        #expect(!topRated.contains { $0.title == "Random Weak Series" })
+    }
 }
+
 

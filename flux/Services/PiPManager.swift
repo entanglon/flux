@@ -130,6 +130,7 @@ final class PiPManager: ObservableObject {
 
         isActive = true
         panel = pip
+        SleepAssertionManager.shared.playerDidOpen(reason: "Flux PiP Video Playback")
         takeOverPlaybackDuties(mpv)
 
         pip.makeKeyAndOrderFront(nil)
@@ -273,7 +274,7 @@ final class PiPManager: ObservableObject {
     // MARK: Teardown
 
     private func performFullStop(saveProgress: Bool) {
-        SleepAssertionManager.shared.disableSleepPrevention()
+        SleepAssertionManager.shared.playerDidClose()
         if saveProgress, let m = mpvController, m.duration > 0 {
             PlayerManager.shared.updateWatchProgress(time: m.timePos, duration: m.duration)
         }

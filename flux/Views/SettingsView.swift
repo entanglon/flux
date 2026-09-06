@@ -175,13 +175,11 @@ struct GeneralSettingsView: View {
                                     }
                                 }
                             }) {
-                                Image(systemName: !tmdbApiKey.isEmpty ? "xmark.circle.fill" : "trash.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
+                                Text(!tmdbApiKey.isEmpty ? "Cancel" : "Clear")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help(!tmdbApiKey.isEmpty ? "Cancel" : "Clear")
+                            .help(!tmdbApiKey.isEmpty ? "Cancel editing" : "Clear field")
 
                             // Save & Validate button
                             Button(action: saveTmdbKey) {
@@ -189,9 +187,7 @@ struct GeneralSettingsView: View {
                                     ProgressView()
                                         .controlSize(.small)
                                 } else {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.white)
+                                    Text("Save Key")
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -207,6 +203,10 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
+
+                Link("Get Free TMDB Key ↗", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                    .font(.caption)
+                    .padding(.top, 1)
 
                 if !tmdbApiKey.isEmpty {
                     Divider()
@@ -304,11 +304,16 @@ struct StreamingSettingsView: View {
                     Text("480p").tag("480p")
                 }
                 .pickerStyle(.menu)
+                .disabled(!enableFluxMode)
+                .opacity(enableFluxMode ? 1.0 : 0.6)
 
                 Toggle("Language Filter in Flux Mode", isOn: $enableFluxLanguageFilter)
+                    .disabled(!enableFluxMode)
+                    .opacity(enableFluxMode ? 1.0 : 0.6)
                 Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .opacity(enableFluxMode ? 1.0 : 0.6)
             }
         }
         .formStyle(.grouped)
@@ -332,7 +337,8 @@ struct PlaybackSettingsView: View {
     @AppStorage("defaultAudioLang") private var defaultAudioLang = "English"
     @AppStorage("defaultSubLang") private var defaultSubLang = "English"
 
-    let languages = ["English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
+    let audioLanguages = ["English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
+    let subtitleLanguages = ["Off", "English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
 
     var body: some View {
         Form {
@@ -344,16 +350,16 @@ struct PlaybackSettingsView: View {
                 Toggle("Auto-play Next Episode", isOn: $autoPlayNextEnabled)
             }
 
-            Section(header: Text("Audio"), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Requires exclusive access to the output device.")) {
+            Section(header: Text("Audio"), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Leave disabled when listening through Mac built-in speakers or AirPods.")) {
                 Toggle("Audio Passthrough (Atmos / DTS)", isOn: $enableAudioPassthrough)
             }
             
             Section(header: Text("Languages")) {
                 Picker("Default Audio", selection: $defaultAudioLang) {
-                    ForEach(languages, id: \.self) { Text($0).tag($0) }
+                    ForEach(audioLanguages, id: \.self) { Text($0).tag($0) }
                 }
                 Picker("Default Subtitles", selection: $defaultSubLang) {
-                    ForEach(languages, id: \.self) { Text($0).tag($0) }
+                    ForEach(subtitleLanguages, id: \.self) { Text($0).tag($0) }
                 }
             }
         }
@@ -486,7 +492,7 @@ struct AdvancedSettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Flux")
                             .font(.system(size: 15, weight: .bold))
-                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0") (Beta)")
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }

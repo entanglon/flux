@@ -130,9 +130,9 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
 
-                    // 5. Now Playing in Theatres
+                    // 5. Now Playing
                     if !nowPlayingMovies.isEmpty {
-                        renderRail(title: "Now Playing in Theatres", listType: .nowPlayingMovies, items: nowPlayingMovies)
+                        renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
                     }
 
                     // 6. Airing Today
@@ -160,7 +160,7 @@ struct HomeView: View {
 
                     // 10. Upcoming Movies
                     if !upcomingMovies.isEmpty {
-                        renderRail(title: "Upcoming in Theatres", listType: .upcomingMovies, items: upcomingMovies)
+                        renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
                     }
 
                     // 11. Quick Watches (< 95 mins)

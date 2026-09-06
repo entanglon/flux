@@ -199,20 +199,26 @@ class StreamManager {
     }()
     
     // In-memory cache (Actor-isolated)
-    private let cacheActor = StreamCacheActor()
+    let cacheActor = StreamCacheActor()
     
     func preloadStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async {
         _ = await fetchStreams(for: item, season: season, episode: episode)
     }
     
     // Cache Access
-    func getCachedStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream]? {
+    func getCachedStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil, sourceMode: String? = nil) async -> [Stream]? {
         let s = season ?? 1
         let e = episode ?? 1
         let isSeries = item.category == "TV Show"
         let cacheKey = isSeries ? "\(item.id):\(s):\(e)" : "\(item.id)"
         
-        return await cacheActor.get(key: cacheKey)
+        guard let cached = await cacheActor.get(key: cacheKey) else { return nil }
+        let mode = sourceMode ?? UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+        return cached.filter { s in
+            if mode == "http" { return !s.isTorrent }
+            if mode == "torrent" { return s.isTorrent }
+            return true
+        }
     }
     
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
@@ -506,7 +512,52 @@ class StreamManager {
             }
         }
 
+        // Dolby Vision Profile 5 Deprioritization:
+        // Single-layer Profile 5 (IPTPQc2) lacks an HDR10 base layer fallback,
+        // producing a magenta/green cast in OpenGL libmpv.
+        // Deprioritize P5 so that clean HDR10, Profile 8 (hybrid DV/HDR10), and SDR streams win.
+        if isDolbyVisionProfile5(stream) {
+            score *= 0.20
+        }
+
         return score
+    }
+
+    /// Detects single-layer Dolby Vision Profile 5 (IPTPQc2) streams that lack an HDR10 fallback.
+    /// In OpenGL libmpv, these render with a magenta/green tint because the legacy vo_gpu path
+    /// cannot perform IPTPQc2 polynomial reshaping.
+    func isDolbyVisionProfile5(_ stream: Stream) -> Bool {
+        let text = "\(stream.title) \(stream.cleanTitle)".uppercased()
+        let hasDV = text.contains("DV") || text.contains("DOLBY VISION") || text.contains("DOVI")
+        guard hasDV else { return false }
+        
+        // If the release has explicit HDR / HDR10 / Profile 8 / Profile 7 fallback, it's NOT single-layer Profile 5
+        let hasHDRFallback = text.contains("HDR10") || text.contains("HDR") || text.contains("P8") ||
+            text.contains("PROFILE 8") || text.contains("PROFILE.8") || text.contains("P7") ||
+            text.contains("PROFILE 7") || text.contains("HYBRID")
+        if hasHDRFallback {
+            return false
+        }
+
+        // Explicit Profile 5 patterns (guarded with regex boundaries so DDP5.1 audio never matches)
+        let explicitP5Patterns = [
+            #"(?i)\bPROFILE[\.\s_-]*5\b"#,
+            #"(?i)\bDOVI[\.\s_-]*0?5\b"#,
+            #"(?i)\bDV[\.\s_-]*0?5\b"#,
+            #"(?i)[\.\[\s_-]P0?5[\.\]\s_-]"#
+        ]
+        for pattern in explicitP5Patterns {
+            if text.range(of: pattern, options: .regularExpression) != nil {
+                return true
+            }
+        }
+        
+        // Single-layer WEB-DL / WEBRip releases with DV but NO HDR10 fallback are Profile 5
+        if text.contains("WEB-DL") || text.contains("WEBDL") || text.contains("WEBRIP") {
+            return true
+        }
+        
+        return false
     }
 
     /// Checks if a stream contains or matches the user's preferred audio language,
@@ -879,6 +930,12 @@ class StreamManager {
             score += Double(min(seeders, 300)) * 4.0
         }
 
+        // Dolby Vision Profile 5 penalty:
+        // Prefer HDR10, Profile 8 (hybrid), or SDR streams to avoid OpenGL magenta/green tint
+        if isDolbyVisionProfile5(stream) {
+            score -= 5000.0
+        }
+
         return score
     }
 
@@ -1067,7 +1124,7 @@ class StreamManager {
                     print("[\(sourceName)] Ignoring auth wall / placeholder banner: \(rawTitle)")
                     return nil
                 }
-                let quality = parseQuality(from: combinedTitle, filename: stream.behaviorHints?.filename)
+                let quality = parseQuality(name: nameHeader, title: rawTitle, filename: stream.behaviorHints?.filename)
                 let size = parseSize(from: rawTitle) ?? formatVideoSize(stream.behaviorHints?.videoSize)
                 let language = parseLanguage(from: combinedTitle)
                 let codec = parseCodec(from: combinedTitle)
@@ -1140,31 +1197,137 @@ class StreamManager {
     }
     
     private func cleanTitleString(name: String, title: String) -> String {
-        var result = title.replacingOccurrences(of: "\n", with: " • ")
-        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip emojis from both name and title
+        let emojiPattern = #"[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{FE0F}\u{200D}]"#
+        let cleanRaw = title.replacingOccurrences(of: emojiPattern, with: " ", options: .regularExpression)
         
-        let lowerName = name.lowercased()
-        let lowerResult = result.lowercased()
+        // 1. Process line by line
+        let lines = cleanRaw.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         
-        if !name.isEmpty && !lowerName.contains("torrentio") && !lowerName.contains("stremio") && !lowerResult.hasPrefix(lowerName) {
-            result = "\(name) • \(result)"
+        var meaningfulSegments: [String] = []
+        for line in lines {
+            var l = line
+            // Skip lines that are purely file size (e.g. "5.98 GB" or "77.48 GB")
+            if l.range(of: #"^\d+(\.\d+)?\s*(gb|mb|tb|b)$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                continue
+            }
+            // Skip lines that are purely seeder info (e.g. "450 seeds" or "450")
+            if l.range(of: #"^\d+\s*seeds?$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                continue
+            }
+            // Strip embedded pure file size strings (e.g. "• 5.98 GB")
+            l = l.replacingOccurrences(of: #"\b\d+(\.\d+)?\s*(GB|MB|TB)\b"#, with: "", options: [.regularExpression, .caseInsensitive])
+            // Strip standalone addon branding words
+            l = l.replacingOccurrences(of: #"\b(torrentio|stremio|penguplay|webstreamrmbg|meteor|comet)\b"#, with: "", options: [.regularExpression, .caseInsensitive])
+            // Strip "Source:" prefix
+            l = l.replacingOccurrences(of: #"(?i)\bSource:\s*"#, with: "", options: .regularExpression)
+            
+            let trimmed = l.trimmingCharacters(in: CharacterSet(charactersIn: " •\t-|/"))
+            if !trimmed.isEmpty {
+                meaningfulSegments.append(trimmed)
+            }
         }
         
-        result = result.replacingOccurrences(of: "^[•\\-\\s]+", with: "", options: .regularExpression)
-        return result
+        // If all lines were filtered out, fall back to the original title
+        var combined = meaningfulSegments.isEmpty ? cleanRaw.replacingOccurrences(of: "\n", with: " • ") : meaningfulSegments.joined(separator: " • ")
+        
+        // Remove repetitive movie title & year patterns at the start (e.g. "Project Hail Mary (2026)", "Project.Hail.Mary.2026")
+        combined = combined.replacingOccurrences(of: #"(?i)^[a-z0-9\s._\-]+?\s*[\(\[]?\d{4}[\)\]]?[\s._\-]*"#, with: "", options: .regularExpression)
+        
+        // Remove leading dots/separators
+        combined = combined.replacingOccurrences(of: #"^[.\s•\-—|/]+"#, with: "", options: .regularExpression)
+        
+        // Clean multiple bullet/separator sequences
+        combined = combined.replacingOccurrences(of: #"(\s*[•·|—/]\s*)+"#, with: " • ", options: .regularExpression)
+        combined = combined.trimmingCharacters(in: CharacterSet(charactersIn: " •\t-|/"))
+        
+        // If cleaning resulted in an empty string, fall back to trimmed title
+        if combined.isEmpty {
+            combined = title.replacingOccurrences(of: "\n", with: " • ").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        return combined
     }
     
-    func parseQuality(from title: String, filename: String? = nil) -> String {
-        let upperTitle = title.uppercased()
-        let upperFilename = filename?.uppercased() ?? ""
-        let combined = "\(upperTitle) \(upperFilename)"
-        if combined.contains("4K") || combined.contains("2160P") || combined.contains("UHD") { return "4K" }
-        if combined.contains("1440P") || combined.contains("2K") || combined.contains("QHD") { return "2K" }
-        if combined.contains("1080P") || combined.contains("FHD") { return "1080p" }
-        if combined.contains("720P") { return "720p" }
-        if combined.contains("HD") && !combined.contains("HDR") && !combined.contains("HDR10") { return "720p" }
-        if combined.contains("480P") || combined.contains("SD") { return "480p" }
+    func parseQuality(name: String? = nil, title: String, filename: String? = nil) -> String {
+        // Stage 1: Check tokenized title and filename first for explicit release resolution.
+        let combined = "\(title) \(filename ?? "")"
+        
+        // Neutralize misleading substrings that contain '4K' or 'HD':
+        var cleaned = combined
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)4khdhub(\.com)?"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)4khd"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)hdhub"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)dts-hd(\s*ma)?"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)truehd"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)hdr(10(\+)?)?"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"(?i)\b2k\d{2}\b"#, with: " ", options: .regularExpression)
+
+        // Exact pixel dimensions:
+        if cleaned.range(of: #"\b(3840\s*[xX*]\s*2160|4096\s*[xX*]\s*2160)\b"#, options: .regularExpression) != nil {
+            return "4K"
+        }
+        if cleaned.range(of: #"\b2560\s*[xX*]\s*1440\b"#, options: .regularExpression) != nil {
+            return "2K"
+        }
+        if cleaned.range(of: #"\b1920\s*[xX*]\s*1080\b"#, options: .regularExpression) != nil {
+            return "1080p"
+        }
+        if cleaned.range(of: #"\b1280\s*[xX*]\s*720\b"#, options: .regularExpression) != nil {
+            return "720p"
+        }
+
+        // Standard word-bounded resolution tags in the release title:
+        if cleaned.range(of: #"(?i)\b(2160p?|2160i|4k|uhd)\b"#, options: .regularExpression) != nil {
+            return "4K"
+        }
+        if cleaned.range(of: #"(?i)\b(1440p?|1440i|2k|qhd)\b"#, options: .regularExpression) != nil {
+            return "2K"
+        }
+        if cleaned.range(of: #"(?i)\b(1080p?|1080i|fhd)\b"#, options: .regularExpression) != nil {
+            return "1080p"
+        }
+        if cleaned.range(of: #"(?i)\b(720p?|720i)\b"#, options: .regularExpression) != nil {
+            return "720p"
+        }
+        if cleaned.range(of: #"(?i)\b(hd|hdtv|hdrip)\b"#, options: .regularExpression) != nil {
+            return "720p"
+        }
+        if cleaned.range(of: #"(?i)\b(480p?|480i|576p?|576i|sd)\b"#, options: .regularExpression) != nil {
+            return "480p"
+        }
+
+        // Stage 2: Fallback to addon name header lines.
+        // Stremio addons (Torrentio, WebStreamr, Comet, Meteor, MediaFusion) embed their
+        // authoritative, pre-parsed resolution on a line in the stream's 'name' property.
+        if let name = name, !name.isEmpty {
+            for line in name.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                if trimmed.range(of: #"(?i)\b(2160p?|4k|uhd)\b"#, options: .regularExpression) != nil {
+                    return "4K"
+                }
+                if trimmed.range(of: #"(?i)\b(1440p?|2k|qhd)\b"#, options: .regularExpression) != nil {
+                    return "2K"
+                }
+                if trimmed.range(of: #"(?i)\b(1080p?|1080i|fhd)\b"#, options: .regularExpression) != nil {
+                    return "1080p"
+                }
+                if trimmed.range(of: #"(?i)\b(720p?|720i)\b"#, options: .regularExpression) != nil {
+                    return "720p"
+                }
+                if trimmed.range(of: #"(?i)\b(480p?|480i|576p?|576i|sd)\b"#, options: .regularExpression) != nil {
+                    return "480p"
+                }
+            }
+        }
+
         return "SD"
+    }
+
+    /// Convenience wrapper for backwards compatibility with tests and callers
+    func parseQuality(from title: String, filename: String? = nil) -> String {
+        return parseQuality(name: nil, title: title, filename: filename)
     }
 
     private func formatVideoSize(_ bytes: Int64?) -> String? {

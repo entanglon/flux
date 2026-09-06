@@ -211,7 +211,7 @@ final class ImagePrefetcher: @unchecked Sendable {
 class ImageSession {
     static let shared: URLSession = {
         let config = URLSessionConfiguration.default
-        config.urlCache = URLCache(memoryCapacity: 64 * 1024 * 1024,  // 64 MB memory
+        config.urlCache = URLCache(memoryCapacity: 16 * 1024 * 1024,  // 16 MB memory cache (512 MB on disk)
                                    diskCapacity: 512 * 1024 * 1024,   // 512 MB disk
                                    diskPath: "FluxImageCache")
         return URLSession(configuration: config)
@@ -221,10 +221,15 @@ class ImageSession {
 final class ImageInMemoryCache {
     static let shared: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
-        cache.countLimit = 600
-        cache.totalCostLimit = 256 * 1024 * 1024  // 256 MB of decoded pixels in memory
+        cache.countLimit = 250
+        cache.totalCostLimit = 64 * 1024 * 1024  // 64 MB of decoded pixels in memory (down from 256 MB)
         return cache
     }()
+
+    /// Purges all in-memory decoded rasters (called during video playback to free RAM)
+    static func purgeMemoryCache() {
+        shared.removeAllObjects()
+    }
 
     /// NSCache only enforces totalCostLimit when every insertion supplies a
     /// cost. Decoded image memory is approximately width × height × 4 bytes.

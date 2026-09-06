@@ -611,6 +611,233 @@ struct SearchEngineTests {
         #expect(!suggestions.isEmpty)
         #expect(suggestions.first?.title == "Avatar")
     }
+
+    @Test func franchiseSearchRanksFlagshipAndSequelsAboveVintageAndMockbusters() {
+        let scorer = RelevanceScorer()
+
+        let cal = Calendar(identifier: .gregorian)
+        var comp2012 = DateComponents(); comp2012.year = 2012
+        let date2012 = cal.date(from: comp2012)
+        var comp2019 = DateComponents(); comp2019.year = 2019
+        let date2019 = cal.date(from: comp2019)
+        var comp2018 = DateComponents(); comp2018.year = 2018
+        let date2018 = cal.date(from: comp2018)
+        var comp1961 = DateComponents(); comp1961.year = 1961
+        let date1961 = cal.date(from: comp1961)
+        var comp2015 = DateComponents(); comp2015.year = 2015
+        let date2015 = cal.date(from: comp2015)
+
+        let originalAvengers = MediaCandidate(
+            id: "m-2012",
+            title: "The Avengers",
+            mediaType: .movie,
+            popularity: 87.0,
+            voteCount: 39500,
+            voteAverage: 8.0,
+            posterPath: "/avengers2012.jpg",
+            backdropPath: nil,
+            overview: "Marvel's The Avengers assembly.",
+            releaseDate: date2012,
+            isAdult: false,
+            imdbID: "tt0848228",
+            source: .tmdb
+        )
+
+        let endgame = MediaCandidate(
+            id: "m-2019",
+            title: "Avengers: Endgame",
+            mediaType: .movie,
+            popularity: 58.0,
+            voteCount: 28500,
+            voteAverage: 8.4,
+            posterPath: "/endgame.jpg",
+            backdropPath: nil,
+            overview: "The MCU conclusion.",
+            releaseDate: date2019,
+            isAdult: false,
+            imdbID: "tt4154796",
+            source: .tmdb
+        )
+
+        let infinityWar = MediaCandidate(
+            id: "m-2018",
+            title: "Avengers: Infinity War",
+            mediaType: .movie,
+            popularity: 81.0,
+            voteCount: 32800,
+            voteAverage: 8.3,
+            posterPath: "/infinity.jpg",
+            backdropPath: nil,
+            overview: "Thanos attacks.",
+            releaseDate: date2018,
+            isAdult: false,
+            imdbID: "tt4154756",
+            source: .tmdb
+        )
+
+        let vintage1961 = MediaCandidate(
+            id: "s-1961",
+            title: "The Avengers",
+            mediaType: .tvSeries,
+            popularity: 89.0,
+            voteCount: 154,
+            voteAverage: 7.5,
+            posterPath: "/vintage.jpg",
+            backdropPath: nil,
+            overview: "British espionage series.",
+            releaseDate: date1961,
+            isAdult: false,
+            imdbID: "tt0054518",
+            source: .tmdb
+        )
+
+        let mockbusterGrimm = MediaCandidate(
+            id: "m-grimm",
+            title: "Avengers Grimm",
+            mediaType: .movie,
+            popularity: 2.7,
+            voteCount: 132,
+            voteAverage: 2.7,
+            posterPath: "/grimm.jpg",
+            backdropPath: nil,
+            overview: "Fairy tale heroes assemble.",
+            releaseDate: date2015,
+            isAdult: false,
+            imdbID: "tt4296026",
+            source: .tmdb
+        )
+
+        let candidates = [vintage1961, mockbusterGrimm, infinityWar, endgame, originalAvengers]
+        let ranked = scorer.rank(candidates: candidates, query: "avengers")
+
+        // 1. Marvel's The Avengers (2012) must be #1
+        #expect(ranked[0].title == "The Avengers")
+        #expect(ranked[0].id == "m-2012")
+
+        // 2 & 3. Direct MCU blockbuster sequels must immediately follow
+        let top3Titles = Set(ranked.prefix(3).map(\.title))
+        #expect(top3Titles.contains("The Avengers"))
+        #expect(top3Titles.contains("Avengers: Endgame"))
+        #expect(top3Titles.contains("Avengers: Infinity War"))
+
+        // 4. Vintage 1961 series and mockbuster must rank below all 3 MCU blockbusters
+        let top3IDs = Set(ranked.prefix(3).map(\.id))
+        #expect(!top3IDs.contains("s-1961"))
+        #expect(!top3IDs.contains("m-grimm"))
+
+        // 5. Mockbuster must receive knockoff demotion and rank last
+        #expect(ranked.last?.id == "m-grimm")
+    }
+
+    @Test func cinemetaPowerLawPopularityAndArtworkPreservation() {
+        let metaAmazonPoster = CinemetaMeta(
+            id: "tt4154796",
+            type: "movie",
+            name: "Avengers: Endgame",
+            poster: "https://m.media-amazon.com/images/M/MV5B._V1_SX250.jpg",
+            background: "https://images.metahub.space/background/small/tt4154796/img",
+            description: "Endgame",
+            releaseInfo: "2019",
+            imdbRating: "8.4",
+            genres: ["Action"],
+            popularities: CinemetaPopularities(moviedb: 50.0, stremio: 0.9, trakt: 25.0)
+        )
+
+        // Rank 0 (first catalog item)
+        let candidate0 = metaAmazonPoster.asMediaCandidate(index: 0)
+        #expect(candidate0.popularity >= 250.0)
+        #expect(candidate0.voteCount >= 25000)
+        // Poster upgraded to SX700 and preserved (NOT overwritten by 404 metahub URL)
+        #expect(candidate0.posterPath?.contains("m.media-amazon.com") == true)
+        #expect(candidate0.posterPath?.contains("._V1_SX700.jpg") == true)
+        // Backdrop upgraded to large
+        #expect(candidate0.backdropPath?.contains("/background/large/") == true)
+
+        // Rank 10 should experience significant power-law decay
+        let candidate10 = metaAmazonPoster.asMediaCandidate(index: 10)
+        #expect(candidate10.popularity < candidate0.popularity)
+        #expect(candidate10.voteCount < candidate0.voteCount)
+    }
+
+    @Test func qualityFilterPrunesRifftraxCommentary() {
+        let filter = QualityFilter()
+
+        let rifftrax = MediaCandidate(
+            id: "tt16103750",
+            title: "Rifftrax: Avengers: Endgame",
+            mediaType: .movie,
+            popularity: 5.0,
+            voteCount: 15,
+            voteAverage: 6.0,
+            posterPath: "/poster.jpg",
+            backdropPath: nil,
+            overview: "Audio commentary.",
+            releaseDate: nil,
+            isAdult: false,
+            imdbID: "tt16103750",
+            source: .cinemeta
+        )
+
+        #expect(filter.isEligible(rifftrax) == false)
+    }
+
+    @Test func singularPluralQueryMatchesFlagshipSeriesAtRank1() {
+        let scorer = RelevanceScorer()
+
+        let gotSeries = MediaCandidate(
+            id: "tt0944947",
+            title: "Game of Thrones",
+            mediaType: .tvSeries,
+            popularity: 250.0,
+            voteCount: 40000,
+            voteAverage: 9.2,
+            posterPath: "/got.jpg",
+            backdropPath: nil,
+            overview: "Nine noble families fight for control over the lands of Westeros.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2011, month: 4, day: 17)),
+            isAdult: false,
+            imdbID: "tt0944947",
+            source: .cinemeta
+        )
+
+        let imaxSpecial = MediaCandidate(
+            id: "tt43975484",
+            title: "Game of Thrones: The IMAX Experience",
+            mediaType: .movie,
+            popularity: 200.0,
+            voteCount: 500,
+            voteAverage: 8.5,
+            posterPath: "/imax.jpg",
+            backdropPath: nil,
+            overview: "IMAX special presentation.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2015, month: 1, day: 29)),
+            isAdult: false,
+            imdbID: "tt43975484",
+            source: .cinemeta
+        )
+
+        let conquestRebellion = MediaCandidate(
+            id: "tt7937220",
+            title: "Game of Thrones Conquest & Rebellion: An Animated History of the Seven Kingdoms",
+            mediaType: .movie,
+            popularity: 150.0,
+            voteCount: 300,
+            voteAverage: 7.9,
+            posterPath: "/conquest.jpg",
+            backdropPath: nil,
+            overview: "Animated history.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2017, month: 9, day: 18)),
+            isAdult: false,
+            imdbID: "tt7937220",
+            source: .cinemeta
+        )
+
+        let candidates = [imaxSpecial, conquestRebellion, gotSeries]
+        let ranked = scorer.rank(candidates: candidates, query: "game of throne")
+
+        // Game of Thrones (the flagship series) must rank #1 even with singular "throne" query
+        #expect(ranked.first?.id == "tt0944947")
+    }
 }
 
 

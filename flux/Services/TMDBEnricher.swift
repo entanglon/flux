@@ -537,8 +537,15 @@ class TMDBEnricher {
     
     func fetchTrendingAll(window: String = "day") async throws -> [MediaItem] {
         guard hasKeyForHome else {
-            let movies = (try? await StremioService.shared.fetchTrendingMovies()) ?? []
-            let series = (try? await StremioService.shared.fetchTrendingTVShows()) ?? []
+            let movies: [MediaItem]
+            let series: [MediaItem]
+            if window == "day" {
+                movies = (try? await StremioService.shared.fetchTrendingMovies()) ?? []
+                series = (try? await StremioService.shared.fetchTrendingTVShows()) ?? []
+            } else {
+                movies = (try? await StremioService.shared.fetchPopularMovies()) ?? []
+                series = (try? await StremioService.shared.fetchPopularTVShows()) ?? []
+            }
             var interleaved: [MediaItem] = []
             let maxCount = max(movies.count, series.count)
             for i in 0..<maxCount {
@@ -574,7 +581,11 @@ class TMDBEnricher {
 
     func fetchTrendingMovies(window: String = "day") async throws -> [MediaItem] {
         guard hasKeyForHome else {
-            return try await StremioService.shared.fetchTrendingMovies()
+            if window == "day" {
+                return try await StremioService.shared.fetchTrendingMovies()
+            } else {
+                return try await StremioService.shared.fetchPopularMovies()
+            }
         }
         
         let cacheKey = "trending:movie:\(window)"
@@ -588,7 +599,11 @@ class TMDBEnricher {
 
     func fetchTrendingTV(window: String = "day") async throws -> [MediaItem] {
         guard hasKeyForHome else {
-            return try await StremioService.shared.fetchTrendingTVShows()
+            if window == "day" {
+                return try await StremioService.shared.fetchTrendingTVShows()
+            } else {
+                return try await StremioService.shared.fetchPopularTVShows()
+            }
         }
         
         let cacheKey = "trending:tv:\(window)"
@@ -641,8 +656,7 @@ class TMDBEnricher {
 
     func fetchTopRatedMovies(page: Int = 1) async throws -> [MediaItem] {
         guard hasKeyForHome else {
-            let skip = (page - 1) * 20
-            return try await StremioService.shared.fetchCatalog(type: "movie", id: "imdbRating", skip: skip, preserveOrder: true)
+            return try await StremioService.shared.fetchTopRatedMovies(page: page)
         }
         
         let cacheKey = "movie:top_rated:\(currentRegion):\(page)"
@@ -655,7 +669,10 @@ class TMDBEnricher {
     }
 
     func fetchStreamingMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else { return [] }
+        guard hasKeyForHome else {
+            let skip = (page - 1) * 20 + 20
+            return try await StremioService.shared.fetchCatalog(type: "movie", id: "top", skip: skip, preserveOrder: true)
+        }
         
         let cacheKey = "movie:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -667,7 +684,10 @@ class TMDBEnricher {
     }
 
     func fetchQuickWatchMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else { return [] }
+        guard hasKeyForHome else {
+            let skip = (page - 1) * 20
+            return (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Animation", skip: skip, preserveOrder: true)) ?? []
+        }
         
         let cacheKey = "movie:quick:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -719,8 +739,7 @@ class TMDBEnricher {
 
     func fetchTopRatedTV(page: Int = 1) async throws -> [MediaItem] {
         guard hasKeyForHome else {
-            let skip = (page - 1) * 20
-            return try await StremioService.shared.fetchCatalog(type: "series", id: "imdbRating", skip: skip, preserveOrder: true)
+            return try await StremioService.shared.fetchTopRatedTVShows(page: page)
         }
         
         let cacheKey = "tv:top_rated:\(page)"
@@ -733,7 +752,10 @@ class TMDBEnricher {
     }
 
     func fetchStreamingTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else { return [] }
+        guard hasKeyForHome else {
+            let skip = (page - 1) * 20 + 20
+            return try await StremioService.shared.fetchCatalog(type: "series", id: "top", skip: skip, preserveOrder: true)
+        }
         
         let cacheKey = "tv:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -792,6 +814,33 @@ class TMDBEnricher {
     /// (pages 1..500). Used by the genre pages for endless scroll and rails.
     func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie", category: String = "popular") async -> [MediaItem] {
         let type = mediaType.lowercased().contains("tv") || mediaType.lowercased().contains("series") ? "tv" : "movie"
+        
+        guard hasKeyForHome else {
+            let stremioType = type == "tv" ? "series" : "movie"
+            let genreName: String? = {
+                switch tmdbGenreID {
+                case 10001: return "Animation"
+                case 10002: return "Drama"
+                case 10003: return "Drama"
+                case 10004: return "Drama"
+                case 10005: return "Short"
+                default: return TMDBGenreMapper.idToName[tmdbGenreID]
+                }
+            }()
+            let skip = (page - 1) * 20
+            switch category {
+            case "top_rated":
+                let items = (try? await StremioService.shared.fetchCatalog(type: stremioType, id: "top", genre: genreName, skip: skip, preserveOrder: false)) ?? []
+                return items.sorted { ($0.voteAverage ?? 0) > ($1.voteAverage ?? 0) }
+            case "new_releases":
+                let currentYear = String(Calendar.current.component(.year, from: Date()))
+                return (try? await StremioService.shared.fetchCatalog(type: stremioType, id: "year", genre: currentYear, skip: skip, preserveOrder: true)) ?? []
+            case "trending":
+                return (try? await StremioService.shared.fetchCatalog(type: stremioType, id: "imdbRating", genre: genreName, skip: skip, preserveOrder: true)) ?? []
+            default: // "popular"
+                return (try? await StremioService.shared.fetchCatalog(type: stremioType, id: "top", genre: genreName, skip: skip, preserveOrder: true)) ?? []
+            }
+        }
         let baseFilter: String
         switch tmdbGenreID {
         case 10001: // Anime

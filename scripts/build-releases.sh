@@ -42,6 +42,20 @@ build_macos26() {
   mkdir -p "$STAGING_DIR"
   cp -R "$APP_PATH" "$STAGING_DIR/Flux.app"
 
+  # Ensure uppercase CFBundleName & CFBundleDisplayName for macOS menu bar and Help system
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
+  xattr -cr "$STAGING_DIR/Flux.app"
+  codesign --force --deep --sign - "$STAGING_DIR/Flux.app"
+
+  # Also update /Applications/Flux.app for local testing
+  echo "==> Updating /Applications/Flux.app..."
+  pkill -x "flux" || pkill -x "Flux" || true
+  rm -rf /Applications/Flux.app
+  cp -R "$STAGING_DIR/Flux.app" /Applications/Flux.app
+  xattr -cr /Applications/Flux.app
+  codesign --force --deep --sign - /Applications/Flux.app
+
   "$CREATE_DMG" \
     --volname "Flux" \
     --volicon "$STAGING_DIR/Flux.app/Contents/Resources/AppIcon.icns" \
@@ -84,6 +98,12 @@ build_macos15() {
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
   mkdir -p "$STAGING_DIR"
   cp -R "$APP_PATH" "$STAGING_DIR/Flux.app"
+
+  # Ensure uppercase CFBundleName & CFBundleDisplayName for macOS menu bar and Help system
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
+  xattr -cr "$STAGING_DIR/Flux.app"
+  codesign --force --deep --sign - "$STAGING_DIR/Flux.app"
 
   "$CREATE_DMG" \
     --volname "Flux" \

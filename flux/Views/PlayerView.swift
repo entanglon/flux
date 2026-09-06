@@ -11,6 +11,7 @@ struct PlayerView: View {
     @State private var isControlsVisible = true
     @State private var animatedProgress: Double = 0.0
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
+    @AppStorage(UserDefaults.Key.streamingSourceMode) private var sourceMode: String = "both"
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
     @State private var lastProgressSaveTime: Date = .distantPast
@@ -45,7 +46,8 @@ struct PlayerView: View {
         showManualStreamPicker = false
         playerManager.forceStreamPicker = false
         playerManager.isStreamPickerPresented = false
-        if playerManager.currentStreamURL == nil {
+        let hasActivePlayback = playerManager.currentStreamURL != nil || playerManager.currentSelectedStream != nil || mpv.hasLoadedMedia
+        if !hasActivePlayback {
             playerManager.close()
             dismiss()
         }
@@ -180,6 +182,8 @@ struct PlayerView: View {
             return .handled
         }
         .onAppear {
+            SleepAssertionManager.shared.playerDidOpen()
+            ImageInMemoryCache.purgeMemoryCache()
             mpv.resetVolumeBoostIfNeeded()
             mpv.onPlaybackError = {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
@@ -207,7 +211,7 @@ struct PlayerView: View {
             // floating panel owns the core now. Saving progress or stopping
             // mpv here would kill playback mid-handoff.
             guard !PiPManager.shared.isHandingOffCore else { return }
-            SleepAssertionManager.shared.disableSleepPrevention()
+            SleepAssertionManager.shared.playerDidClose()
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
             mpv.pause()
             mpv.stop()
@@ -1273,7 +1277,6 @@ struct PlayerView: View {
     }
 
     private func errorView(error: String) -> some View {
-        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
         let hasStreams = !playerManager.availableStreams.isEmpty
 
         return ZStack {
@@ -1594,7 +1597,12 @@ struct PlayerView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var streamSelectionView: some View {
-        let allStreams = playerManager.availableStreams
+        let rawAllStreams = playerManager.availableStreams
+        let allStreams: [Stream] = rawAllStreams.filter { s in
+            if sourceMode == "http" { return !s.isTorrent }
+            if sourceMode == "torrent" { return s.isTorrent }
+            return true
+        }
 
         let isStillFetching = playerManager.isFetchingStreams && (playerManager.totalAddonsCount == 0 || playerManager.loadedAddonsCount < playerManager.totalAddonsCount)
 
@@ -1619,16 +1627,16 @@ struct PlayerView: View {
 
         func qualityMatches(stream: Stream, label: String) -> Bool {
             let q = stream.quality.uppercased()
-            switch label {
-            case "4K":
+            switch label.uppercased() {
+            case "4K", "2160P":
                 return q == "4K" || q == "2160P" || q.contains("4K") || q.contains("2160")
-            case "2K":
+            case "2K", "1440P":
                 return q == "2K" || q == "1440P" || q.contains("2K") || q.contains("1440")
-            case "FHD":
+            case "1080P", "FHD":
                 return q == "1080P" || q == "FHD" || q.contains("1080")
-            case "HD":
+            case "720P", "HD":
                 return q == "720P" || q == "HD" || q.contains("720")
-            case "SD":
+            case "480P", "SD":
                 return q == "480P" || q == "SD" || q.contains("480") || q.contains("SD")
             default:
                 return true
@@ -1672,7 +1680,14 @@ struct PlayerView: View {
 
         let availableTabs: [StreamCategoryType] = {
             if selectedSourceFilter == "All" {
-                return StreamCategoryType.allCases
+                switch sourceMode {
+                case "http":
+                    return [.all, .best, .fastStart]
+                case "torrent":
+                    return [.all, .best, .fastStart]
+                default:
+                    return [.all, .best, .fastStart, .direct, .torrents]
+                }
             } else {
                 return [.all, .best, .fastStart]
             }
@@ -1685,6 +1700,7 @@ struct PlayerView: View {
             if !searchLower.isEmpty {
                 streams = streams.filter {
                     $0.cleanTitle.lowercased().contains(searchLower) ||
+                    $0.title.lowercased().contains(searchLower) ||
                     $0.source.lowercased().contains(searchLower) ||
                     $0.quality.lowercased().contains(searchLower) ||
                     ($0.codec?.lowercased().contains(searchLower) ?? false) ||
@@ -1863,7 +1879,7 @@ struct PlayerView: View {
                         selectedQualityFilter = "All"
                     }
                     Divider()
-                    ForEach(["4K", "2K", "FHD", "HD", "SD"], id: \.self) { q in
+                    ForEach(["4K", "2K", "1080p", "720p", "480p"], id: \.self) { q in
                         let count = sourceFilteredStreams.filter { qualityMatches(stream: $0, label: q) }.count
                         Button(selectedQualityFilter == q ? "✓ \(q) (\(count))" : "\(q) (\(count))") {
                             selectedQualityFilter = q
@@ -2079,6 +2095,16 @@ struct PlayerView: View {
             isSearchFocused = true
             return .handled
         }
+        .onAppear {
+            if !availableTabs.contains(selectedCategoryFilter) {
+                selectedCategoryFilter = .all
+            }
+        }
+        .onChange(of: selectedSourceFilter) { _, _ in
+            if !availableTabs.contains(selectedCategoryFilter) {
+                selectedCategoryFilter = .all
+            }
+        }
     }
     
     private func getSubtitle() -> String {
@@ -2099,9 +2125,8 @@ struct StreamRowItemView: View {
     @State private var showDetailCard = false
     @State private var hoverTask: Task<Void, Never>? = nil
 
-    private var isHDR: Bool {
-        let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
-        return t.contains("HDR") || t.contains("HDR10") || t.contains("HDR10+")
+    private var cleanSource: String {
+        cleanProviderName(stream.source)
     }
 
     private var isDolbyVision: Bool {
@@ -2109,204 +2134,312 @@ struct StreamRowItemView: View {
         return t.contains("DV") || t.contains("DOLBY VISION") || t.contains("DOVI")
     }
 
+    private var isHDR10Plus: Bool {
+        let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
+        return t.contains("HDR10+") || t.contains("HDR10PLUS")
+    }
+
+    private var isHDR: Bool {
+        let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
+        return t.contains("HDR") || t.contains("HDR10") || isHDR10Plus
+    }
+
+    private var dynamicRangeText: String? {
+        if isDolbyVision && (isHDR || isHDR10Plus) { return "DV • HDR" }
+        if isDolbyVision { return "DV" }
+        if isHDR10Plus { return "HDR10+" }
+        if isHDR { return "HDR" }
+        return nil
+    }
+
+    private var is10Bit: Bool {
+        let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
+        return t.contains("10BIT") || t.contains("10-BIT") || t.contains("10 BIT") || t.contains("HI10P")
+    }
+
     private var audioBadgeText: String? {
         let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
         if t.contains("ATMOS") { return "ATMOS" }
+        if t.contains("TRUEHD") { return "TRUEHD" }
+        if t.contains("DTS-HD") || t.contains("DTS-HD MA") { return "DTS-HD" }
         if t.contains("7.1") { return "7.1" }
         if t.contains("5.1") || t.contains("DDP5.1") || t.contains("DD5.1") { return "5.1" }
+        if t.contains("DDP") || t.contains("EAC3") { return "EAC3" }
+        if t.contains("AC3") || t.contains("DD") { return "DD" }
         return nil
     }
 
     private var codecBadgeText: String? {
-        if let c = stream.codec { return c }
+        if let c = stream.codec, !c.isEmpty { return c }
         let t = "\(stream.title) \(stream.cleanTitle)".uppercased()
-        if t.contains("HEVC") || t.contains("X265") || t.contains("H.265") { return "HEVC" }
+        if t.contains("HEVC") || t.contains("X265") || t.contains("H.265") || t.contains("H265") { return "HEVC" }
         if t.contains("AV1") { return "AV1" }
-        if t.contains("X264") || t.contains("H.264") || t.contains("AVC") { return "x264" }
+        if t.contains("X264") || t.contains("H.264") || t.contains("H264") || t.contains("AVC") { return "x264" }
         return nil
     }
 
-    private var addonLogoURL: URL? {
-        guard let addon = AddonManager.shared.addons.first(where: {
-            $0.name.lowercased() == stream.source.lowercased()
-        }) else { return nil }
-        if let logo = addon.logoURL, let url = URL(string: logo) { return url }
-        if let icon = addon.iconURL, let url = URL(string: icon) { return url }
+    private var containerBadgeText: String? {
+        let c = stream.containerType
+        return (c != "UNKNOWN" && !c.isEmpty) ? c : nil
+    }
+
+    private var bitrateBadgeText: String? {
+        if let b = stream.bitrate, !b.isEmpty { return b }
+        let t = "\(stream.title) \(stream.cleanTitle)"
+        if let match = t.range(of: #"\b\d+(\.\d+)?\s*(mbps|kbps)\b"#, options: [.regularExpression, .caseInsensitive]) {
+            return String(t[match]).uppercased()
+        }
         return nil
+    }
+
+    private func cleanProviderName(_ source: String) -> String {
+        let lower = source.lowercased()
+        if lower.contains("webstreamrmbg") || lower.contains("webstreamr-mbg") { return "WebStreamrMBG" }
+        if lower.contains("webstream") { return "WebStreamr" }
+        if lower.contains("pengu") { return "PenguPlay" }
+        if lower.contains("torrentio") { return "Torrentio" }
+        if lower.contains("mediafusion") { return "MediaFusion" }
+        if lower.contains("comet") { return "Comet" }
+        if lower.contains("meteor") { return "Meteor" }
+        if lower.contains("stremify") { return "Stremify" }
+        if lower.contains("knightcrawler") { return "KnightCrawler" }
+        if lower.contains("easydebrid") { return "EasyDebrid" }
+        if lower.contains("aiostreams") { return "AIOStreams" }
+        var s = source
+        s = s.replacingOccurrences(of: #"(?i)\s*\[.*?\]"#, with: "", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? source : s
+    }
+
+    private func badgeView(text: String, background: Color, foreground: Color, isBold: Bool = false) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: isBold ? .heavy : .semibold, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(background)
+            .foregroundColor(foreground)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    private var rowFillColor: Color {
+        if isSelected {
+            return Color.cyan.opacity(0.14)
+        } else if isHovered {
+            return Color.white.opacity(0.08)
+        } else {
+            return Color.white.opacity(0.025)
+        }
+    }
+
+    private var rowStrokeColor: Color {
+        if isSelected {
+            return Color.cyan.opacity(0.45)
+        } else if isHovered {
+            return Color.white.opacity(0.22)
+        } else {
+            return Color.white.opacity(0.06)
+        }
+    }
+
+    private var column1Provider: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Provider Badge
+            Text(cleanSource)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(providerGradient(stream.source))
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+
+            // Transport Protocol Indicator
+            HStack(spacing: 4) {
+                Image(systemName: stream.isDirectHTTP ? "link" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 8, weight: .bold))
+                Text(stream.isDirectHTTP ? "Direct HTTP" : "P2P Torrent")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            }
+            .foregroundColor(stream.isDirectHTTP ? Color.cyan.opacity(0.9) : Color.orange.opacity(0.9))
+        }
+        .frame(width: 135, alignment: .leading)
+    }
+
+    private var badgesRow: some View {
+        HStack(spacing: 5) {
+            if let container = containerBadgeText {
+                badgeView(text: container, background: Color.white.opacity(0.12), foreground: .white.opacity(0.85))
+            }
+
+            if let codec = codecBadgeText {
+                badgeView(text: codec, background: Color.indigo.opacity(0.65), foreground: .white)
+            }
+
+            if is10Bit {
+                badgeView(text: "10-BIT", background: Color.purple.opacity(0.6), foreground: .white)
+            }
+
+            if let dr = dynamicRangeText {
+                badgeView(text: dr, background: isDolbyVision ? Color.pink.opacity(0.85) : Color.orange.opacity(0.85), foreground: .white, isBold: true)
+            }
+
+            if let audio = audioBadgeText {
+                HStack(spacing: 3) {
+                    Image(systemName: "speaker.wave.2.fill").font(.system(size: 7))
+                    Text(audio).font(.system(size: 9, weight: .bold, design: .monospaced))
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.cyan.opacity(0.65))
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            if let bitrate = bitrateBadgeText {
+                badgeView(text: bitrate, background: Color.white.opacity(0.10), foreground: .white.opacity(0.75))
+            }
+
+            if let lang = stream.language, !lang.isEmpty {
+                let truncated = Self.truncateBadge(lang, max: 2)
+                HStack(spacing: 3) {
+                    Image(systemName: "globe").font(.system(size: 7))
+                    Text(truncated).font(.system(size: 8, weight: .semibold))
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.purple.opacity(0.55))
+                .foregroundColor(.white.opacity(0.9))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            if let subs = stream.subtitles, !subs.isEmpty {
+                let truncated = Self.truncateBadge(subs, max: 2)
+                HStack(spacing: 3) {
+                    Image(systemName: "captions.bubble").font(.system(size: 7))
+                    Text(truncated).font(.system(size: 8, weight: .semibold))
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.mint.opacity(0.55))
+                .foregroundColor(.white.opacity(0.9))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+
+            if stream.isSeasonPack {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 7))
+                    Text("PACK").font(.system(size: 8, weight: .heavy, design: .monospaced))
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.yellow.opacity(0.4))
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+    }
+
+    private var column2Details: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Line 1: Quality Pill + Clean Release Title
+            HStack(spacing: 8) {
+                // Prominent Quality Badge
+                Text(stream.quality)
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(qualityGradient(stream.quality))
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+
+                // Clean Release Title
+                Text(stream.cleanTitle.isEmpty ? stream.title : stream.cleanTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            // Line 2: Specification Badges Row
+            badgesRow
+        }
+    }
+
+    private var column3StatsAndAction: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .trailing, spacing: 3) {
+                if let size = stream.size {
+                    HStack(spacing: 3) {
+                        Image(systemName: stream.isSeasonPack ? "square.stack.3d.up.fill" : "doc.fill")
+                            .font(.system(size: 8))
+                        Text(stream.isSeasonPack ? "\(size) pack" : size)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundColor(.white.opacity(0.85))
+                }
+
+                if let seeders = stream.seeders, seeders > 0, !stream.isDirectHTTP {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 8))
+                        Text("\(seeders) seeds").font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.green)
+                } else if stream.isDirectHTTP {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill").font(.system(size: 8))
+                        Text("Fast HTTP").font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.cyan)
+                }
+            }
+            .frame(minWidth: 85, alignment: .trailing)
+
+            // Play CTA Button
+            HStack(spacing: 5) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text("Play")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                isSelected || isHovered
+                ? Color.white
+                : Color.white.opacity(0.10)
+            )
+            .foregroundColor(
+                isSelected || isHovered
+                ? Color.black
+                : Color.white.opacity(0.85)
+            )
+            .clipShape(Capsule())
+            .shadow(color: isSelected || isHovered ? Color.white.opacity(0.35) : Color.clear, radius: 6, x: 0, y: 1)
+        }
     }
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 14) {
-                // ── Column 1: Source & Quality Pills ──
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 5) {
-                        // Provider Badge
-                        Text(stream.source)
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(providerGradient(stream.source))
-                            .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                        // Quality Badge
-                        Text(stream.quality)
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(qualityGradient(stream.quality))
-                            .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    }
-
-                    // Direct HTTP vs Torrent Indicator
-                    HStack(spacing: 4) {
-                        Image(systemName: stream.isDirectHTTP ? "link" : "arrow.triangle.2.circlepath")
-                            .font(.system(size: 8))
-                        Text(stream.isDirectHTTP ? "Direct HTTP" : "P2P Torrent")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    }
-                    .foregroundColor(stream.isDirectHTTP ? Color.cyan.opacity(0.85) : Color.orange.opacity(0.85))
-                }
-                .frame(width: 148, alignment: .leading)
-
-                // ── Column 2: Title & Technical Metadata Badges ──
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(stream.cleanTitle)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.95))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    HStack(spacing: 5) {
-                        if let codec = codecBadgeText {
-                            Text(codec)
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Color.indigo.opacity(0.6))
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-
-                        if isDolbyVision {
-                            Text("DV")
-                                .font(.system(size: 8, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Color.pink.opacity(0.8))
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                        }
-
-                        if isHDR {
-                            Text("HDR")
-                                .font(.system(size: 8, weight: .black, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.8))
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                        }
-
-                        if let audio = audioBadgeText {
-                            HStack(spacing: 2) {
-                                Image(systemName: "speaker.wave.2.fill").font(.system(size: 6))
-                                Text(audio).font(.system(size: 9, weight: .bold, design: .monospaced))
-                            }
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.cyan.opacity(0.6))
-                            .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-
-                        if let lang = stream.language {
-                            let truncated = Self.truncateBadge(lang, max: 2)
-                            HStack(spacing: 2) {
-                                Image(systemName: "globe").font(.system(size: 7))
-                                Text(truncated).font(.system(size: 8, weight: .semibold))
-                            }
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.55))
-                            .foregroundColor(.white.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-
-                        if let subs = stream.subtitles {
-                            let truncated = Self.truncateBadge(subs, max: 2)
-                            HStack(spacing: 2) {
-                                Image(systemName: "captions.bubble").font(.system(size: 7))
-                                Text(truncated).font(.system(size: 8, weight: .semibold))
-                            }
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.mint.opacity(0.55))
-                            .foregroundColor(.white.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-                    }
-                }
-
+            HStack(spacing: 16) {
+                column1Provider
+                column2Details
                 Spacer()
-
-                // ── Column 3: Stats & Play Button ──
-                HStack(spacing: 12) {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        if let size = stream.size {
-                            HStack(spacing: 3) {
-                                Image(systemName: stream.isSeasonPack ? "square.stack.3d.up.fill" : "doc.fill")
-                                    .font(.system(size: 8))
-                                Text(stream.isSeasonPack ? "\(size) pack" : size)
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            }
-                            .foregroundColor(.white.opacity(0.75))
-                        }
-
-                        if let seeders = stream.seeders, seeders > 0, !stream.isDirectHTTP {
-                            HStack(spacing: 3) {
-                                Image(systemName: "arrow.up.circle.fill").font(.system(size: 8))
-                                Text("\(seeders) seeds").font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundColor(.green)
-                        } else if stream.isDirectHTTP {
-                            HStack(spacing: 3) {
-                                Image(systemName: "bolt.fill").font(.system(size: 8))
-                                Text("Fast HTTP").font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundColor(.cyan)
-                        }
-                    }
-                    .frame(minWidth: 80, alignment: .trailing)
-
-                    // Play CTA Button
-                    HStack(spacing: 4) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("Play")
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        isSelected || isHovered
-                        ? Color.white
-                        : Color.white.opacity(0.08)
-                    )
-                    .foregroundColor(
-                        isSelected || isHovered
-                        ? Color.black
-                        : Color.white.opacity(0.7)
-                    )
-                    .clipShape(Capsule())
-                }
+                column3StatsAndAction
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .glassEffect(isSelected || isHovered ? .regular : .clear, in: .rect(cornerRadius: 14))
-            .contentShape(.rect(cornerRadius: 14))
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(rowFillColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(rowStrokeColor, lineWidth: isSelected ? 1.0 : 0.6)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -2341,7 +2474,7 @@ struct StreamRowItemView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Header with provider and quality pills
             HStack(spacing: 8) {
-                Text(stream.source)
+                Text(cleanSource)
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -2389,11 +2522,14 @@ struct StreamRowItemView: View {
                     .foregroundColor(.white.opacity(0.45))
 
                 HStack(spacing: 16) {
+                    if let container = containerBadgeText {
+                        specItem(label: "Container", value: container)
+                    }
                     if let codec = codecBadgeText {
                         specItem(label: "Codec", value: codec)
                     }
-                    if isDolbyVision || isHDR {
-                        specItem(label: "HDR", value: isDolbyVision ? "Dolby Vision" : "HDR10")
+                    if let dr = dynamicRangeText {
+                        specItem(label: "Dynamic Range", value: dr)
                     }
                     if let audio = audioBadgeText {
                         specItem(label: "Audio", value: audio)
@@ -2415,7 +2551,7 @@ struct StreamRowItemView: View {
         }
         .padding(16)
         .frame(width: 440)
-        .background(Color(red: 0.10, green: 0.11, blue: 0.14))
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
     }
 
     private func specItem(label: String, value: String) -> some View {
@@ -2472,6 +2608,8 @@ struct StreamRowItemView: View {
         switch quality.uppercased() {
         case "4K", "2160P", "UHD":
             return LinearGradient(colors: [Color(red: 0.65, green: 0.35, blue: 0.95), Color(red: 0.45, green: 0.15, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "2K", "1440P", "QHD":
+            return LinearGradient(colors: [Color(red: 0.45, green: 0.35, blue: 0.95), Color(red: 0.30, green: 0.20, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
         case "1080P", "FHD":
             return LinearGradient(colors: [Color(red: 0.20, green: 0.55, blue: 0.95), Color(red: 0.10, green: 0.40, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
         case "720P", "HD":

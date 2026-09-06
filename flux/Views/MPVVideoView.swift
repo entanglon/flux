@@ -427,6 +427,9 @@ class MPVController: ObservableObject {
         let resultingAudioMatches = currentOrNewAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
 
         // 2. Subtitle Track Selection
+        // If preferredSub is Off or None, the user explicitly does not want subtitles by default
+        guard preferredSub != "Off" && preferredSub != "None" else { return }
+
         // If the audio track is foreign/non-preferred (e.g. only Korean audio available and user wanted English),
         // we MUST automatically turn on preferred subtitles!
         let activeSub = subtitleTracks.first(where: { $0.isSelected })
@@ -525,34 +528,39 @@ class MPVViewController: NSViewController {
 // MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
 final class MPVLayer: CAOpenGLLayer {
     weak var ownerView: MPVLayerView?
-    private let frameLock = NSLock()
-    private var hasNewFrame = false
     
     override init() {
         super.init()
-        self.isAsynchronous = true
+        self.isAsynchronous = false
+        self.contentsFormat = .RGBA8Uint
     }
     
     override init(layer: Any) {
         super.init(layer: layer)
-        self.isAsynchronous = true
+        self.isAsynchronous = false
+        self.contentsFormat = .RGBA8Uint
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        self.isAsynchronous = true
-    }
-    
-    func markNewFrame() {
-        frameLock.lock()
-        hasNewFrame = true
-        frameLock.unlock()
+        self.isAsynchronous = false
+        self.contentsFormat = .RGBA8Uint
     }
     
     override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
-        // Float (RGBA16F) backbuffer only on EDR-capable displays — needed for HDR output
-        let edr = NSScreen.main?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-        let attributes: [CGLPixelFormatAttribute] = edr > 1.0
+        // Evaluate potential EDR capability for the target display mask.
+        // We check `maximumPotentialExtendedDynamicRangeColorComponentValue`,
+        // because at launch before an EDR layer is active, `maximumExtendedDynamicRangeColorComponentValue`
+        // is 1.0 at rest on MacBook Air M1 and Liquid Retina XDR displays.
+        let targetScreen = NSScreen.screens.first(where: {
+            guard let id = ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { return false }
+            return (CGDisplayIDToOpenGLDisplayMask(id) & mask) != 0
+        }) ?? NSScreen.main
+        
+        let edr = targetScreen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+        let useFloat16 = edr > 1.0
+
+        let attributes: [CGLPixelFormatAttribute] = useFloat16
             ? [
                 kCGLPFAAccelerated,
                 kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(kCGLOGLPVersion_3_2_Core.rawValue)),
@@ -583,14 +591,13 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
-        guard let owner = ownerView else { return false }
-        guard let gl = owner.mpvGL else { return true }
-        let flags = mpv_render_context_update(gl)
-        return (flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue)) != 0
+        return ownerView?.mpv != nil
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
         CGLSetCurrentContext(ctx)
+        CGLLockContext(ctx)
+        defer { CGLUnlockContext(ctx) }
         
         guard let owner = ownerView, owner.mpv != nil else {
             glFlush()
@@ -624,18 +631,26 @@ final class MPVLayer: CAOpenGLLayer {
         glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &currentFBO)
         
         var flipY: Int32 = 1
+        // Dynamic depth for dithering:
+        // When actively rendering HDR content in EDR mode, report 16-bit float depth.
+        // When rendering SDR content (or on an SDR screen), report 8-bit depth so mpv's
+        // active fruit / Floyd-Steinberg dithering runs, eliminating banding on 8-bit panels.
+        var depth: Int32 = self.wantsExtendedDynamicRangeContent ? 16 : 8
         var fbo = mpv_opengl_fbo(fbo: currentFBO, w: w, h: h, internal_format: 0)
         
         withUnsafeMutablePointer(to: &fbo) { fboPtr in
             withUnsafeMutablePointer(to: &flipY) { flipPtr in
-                var params = [
-                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
-                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
-                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
-                ]
-                let result = mpv_render_context_render(mpvGL, &params)
-                if result >= 0 {
-                    mpv_render_context_report_swap(mpvGL)
+                withUnsafeMutablePointer(to: &depth) { depthPtr in
+                    var params = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_DEPTH, data: depthPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                    ]
+                    let result = mpv_render_context_render(mpvGL, &params)
+                    if result >= 0 {
+                        mpv_render_context_report_swap(mpvGL)
+                    }
                 }
             }
         }
@@ -663,6 +678,10 @@ final class MPVLayerView: NSView {
     /// Token into MPVCallbackRegistry so mpv's C callbacks never hold a raw,
     /// unretained pointer to this view (use-after-free on teardown).
     fileprivate var callbackToken: UInt64 = 0
+    private var currentScreenNumber: UInt32?
+    private var lastBackingScale: CGFloat = 2.0
+    private var isRenderUpdateScheduled = false
+    private let renderUpdateLock = NSLock()
     
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -679,12 +698,29 @@ final class MPVLayerView: NSView {
     
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        mpvLayer.contentsScale = window?.backingScaleFactor ?? 2.0
+        let scale = window?.backingScaleFactor ?? 2.0
+        if lastBackingScale != scale {
+            lastBackingScale = scale
+            mpvLayer.contentsScale = scale
+        }
+        
+        let screen = window?.screen ?? NSScreen.main
+        let screenNum = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        if currentScreenNumber != screenNum {
+            currentScreenNumber = screenNum
+            lastPipelineKey = ""
+            applyColorPipeline()
+        }
     }
     
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        mpvLayer.contentsScale = window?.backingScaleFactor ?? 2.0
+        let scale = window?.backingScaleFactor ?? 2.0
+        lastBackingScale = scale
+        mpvLayer.contentsScale = scale
+        
+        let screen = window?.screen ?? NSScreen.main
+        currentScreenNumber = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
     }
     
     func setupDisplayLink() {
@@ -711,30 +747,49 @@ final class MPVLayerView: NSView {
         let primaries = getPropertyString("video-params/primaries") ?? ""
         let isHDR = gamma == "pq" || gamma == "hlg"
         let key = "\(gamma)|\(primaries)"
-        guard key != lastPipelineKey || lastPipelineKey.isEmpty == isHDR else { return }
+        guard key != lastPipelineKey else { return }
         lastPipelineKey = key
 
-        if isHDR {
-            let edr = NSScreen.main?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-            let peak = max(300, min(1600, Int(edr * 500)))
-            mpv_set_property_string(mpv, "target-trc", gamma)
-            switch primaries {
-            case "bt.2020": mpv_set_property_string(mpv, "target-prim", "bt.2020")
-            case "display-p3", "dci-p3": mpv_set_property_string(mpv, "target-prim", "display-p3")
-            default: mpv_set_property_string(mpv, "target-prim", "auto")
+        let screen = window?.screen ?? NSScreen.main
+        let potentialEDR = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
+        let currentEDR = screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+        let canDoEDR = isHDR && potentialEDR > 1.0
+
+        if canDoEDR {
+            // Calibrate target peak to display capability:
+            // 1.0 is SDR reference white (~100–250 nits).
+            // On MacBook Air M1 (potential EDR = 2.0), 2.0 * 250 = 500 nits (matches the 500-nit panel).
+            // On MacBook Pro Liquid Retina XDR (potential EDR = 3.2–4.0), matches 1000–1600 nits.
+            let headroom = max(1.0, currentEDR > 1.0 ? currentEDR : potentialEDR)
+            let peak = max(200, min(1600, Int(headroom * 250)))
+
+            if gamma == "pq" {
+                mpv_set_property_string(mpv, "target-trc", "pq")
+                mpv_set_property_string(mpv, "target-prim", (primaries == "display-p3" || primaries == "dci-p3") ? "display-p3" : "bt.2020")
+            } else if gamma == "hlg" {
+                mpv_set_property_string(mpv, "target-trc", "hlg")
+                mpv_set_property_string(mpv, "target-prim", (primaries == "display-p3" || primaries == "dci-p3") ? "display-p3" : "bt.2020")
+            } else {
+                mpv_set_property_string(mpv, "target-trc", "auto")
+                mpv_set_property_string(mpv, "target-prim", "auto")
             }
+
             mpv_set_property_string(mpv, "target-peak", String(peak))
-            mpv_set_property_string(mpv, "tone-mapping", "clip")
-            print("[MPV] HDR pipeline active (gamma=\(gamma), prim=\(primaries), peak=\(peak)nits)")
+            mpv_set_property_string(mpv, "tone-mapping", "auto")
+            print("[MPV] HDR EDR pipeline active (gamma=\(gamma), prim=\(primaries), peak=\(peak)nits)")
         } else {
             for p in ["target-trc", "target-prim", "target-peak", "tone-mapping"] {
                 mpv_set_property_string(mpv, p, "auto")
             }
+            if isHDR {
+                print("[MPV] HDR tone-mapping to SDR active (gamma=\(gamma), prim=\(primaries))")
+            }
         }
 
         DispatchQueue.main.async { [mpvLayer] in
-            mpvLayer.wantsExtendedDynamicRangeContent = isHDR
-            if isHDR {
+            mpvLayer.wantsExtendedDynamicRangeContent = canDoEDR
+            mpvLayer.contentsFormat = canDoEDR ? .RGBA16Float : .RGBA8Uint
+            if canDoEDR {
                 switch (gamma, primaries) {
                 case ("hlg", "bt.2020"):
                     mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
@@ -752,8 +807,20 @@ final class MPVLayerView: NSView {
     }
     
     func mpvRenderUpdate() {
+        renderUpdateLock.lock()
+        if isRenderUpdateScheduled {
+            renderUpdateLock.unlock()
+            return
+        }
+        isRenderUpdateScheduled = true
+        renderUpdateLock.unlock()
+        
         DispatchQueue.main.async { [weak self] in
-            self?.mpvLayer.setNeedsDisplay()
+            guard let self = self else { return }
+            self.renderUpdateLock.lock()
+            self.isRenderUpdateScheduled = false
+            self.renderUpdateLock.unlock()
+            self.mpvLayer.setNeedsDisplay()
         }
     }
     
@@ -832,17 +899,25 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "vo", "libmpv")
         mpv_set_property_string(mpv, "profile", "fast")
         mpv_set_property_string(mpv, "scale", "bilinear")
-        mpv_set_property_string(mpv, "hwdec", "auto")
+        
+        // Connect Hardware Acceleration setting to mpv
+        let useHW = UserDefaults.standard.object(forKey: "useHardwareAcceleration") as? Bool ?? true
+        mpv_set_property_string(mpv, "hwdec", useHW ? "auto" : "no")
         mpv_set_property_string(mpv, "gpu-hwdec-interop", "auto")
         mpv_set_property_string(mpv, "video-sync", "audio")
+        
+        // Audio: CoreAudio with proper downmixing for laptop speakers
+        mpv_set_property_string(mpv, "ao", "coreaudio")
+        mpv_set_property_string(mpv, "audio-channels", "auto-safe")
+        mpv_set_property_string(mpv, "audio-normalize-downmix", "yes")
         
         mpv_set_property_string(mpv, "sub-cache", "yes")
         mpv_set_property_string(mpv, "sub-ass-override", "no")
         
         mpv_set_property_string(mpv, "cache", "yes")
         mpv_set_property_string(mpv, "cache-secs", "60")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "157286400")      // 150 MB demuxer buffer
-        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "31457280") // 30 MB backward seek buffer
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "67108864")      // 64 MB demuxer buffer (IINA standard, prevents RAM bloat)
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "15728640") // 15 MB backward seek buffer
         mpv_set_property_string(mpv, "demuxer-readahead-secs", "12")
         mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
         mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll", "yes")
@@ -871,6 +946,7 @@ final class MPVLayerView: NSView {
         
         func getIsoCode(_ lang: String) -> String {
             switch lang {
+            case "Off", "None": return "no"
             case "English": return "eng,en"
             case "Spanish": return "spa,es"
             case "French": return "fra,fre,fr"
@@ -883,7 +959,12 @@ final class MPVLayerView: NSView {
         }
         
         mpv_set_property_string(mpv, "alang", getIsoCode(audioLang))
-        mpv_set_property_string(mpv, "slang", getIsoCode(subLang))
+        if subLang == "Off" || subLang == "None" {
+            mpv_set_property_string(mpv, "sid", "no")
+            mpv_set_property_string(mpv, "slang", "no")
+        } else {
+            mpv_set_property_string(mpv, "slang", getIsoCode(subLang))
+        }
         
         // Observe properties (Must be called AFTER mpv_initialize)
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)

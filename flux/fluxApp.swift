@@ -40,6 +40,7 @@ struct fluxApp: App {
     @StateObject private var authManager = AuthManager.shared
     @StateObject private var profileManager = ProfileManager.shared
     @StateObject private var updateManager = UpdateManager.shared
+    @State private var showKeyboardShortcuts = false
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
@@ -87,6 +88,12 @@ struct fluxApp: App {
             }
             .preferredColorScheme(.dark)
             .containerBackground(.clear, for: .window)
+            .sheet(isPresented: $showKeyboardShortcuts) {
+                KeyboardShortcutsSheet()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .fluxShowShortcuts)) { _ in
+                showKeyboardShortcuts = true
+            }
             .onOpenURL { url in
                 AddonManager.shared.handleIncomingURL(url)
             }
@@ -94,12 +101,63 @@ struct fluxApp: App {
         .commands {
             SidebarCommands()
             ToolbarCommands()
+
+            CommandGroup(replacing: .appInfo) {
+                Button("About Flux") {
+                    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+                    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+                    NSApplication.shared.orderFrontStandardAboutPanel(
+                        options: [
+                            NSApplication.AboutPanelOptionKey.applicationName: "Flux",
+                            NSApplication.AboutPanelOptionKey.applicationVersion: version,
+                            NSApplication.AboutPanelOptionKey.version: build,
+                            NSApplication.AboutPanelOptionKey(rawValue: "Copyright"): "Copyright © 2026 Flux. All rights reserved."
+                        ]
+                    )
+                }
+            }
+
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     updateManager.checkForUpdates()
                 }
                 .disabled(!updateManager.canCheckForUpdates)
             }
+
+            CommandGroup(replacing: .help) {
+                Button("Flux Help & Documentation") {
+                    if let url = URL(string: "https://github.com/entanglon/flux#readme") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .keyboardShortcut("?", modifiers: .command)
+
+                Button("Keyboard Shortcuts") {
+                    showKeyboardShortcuts = true
+                }
+                .keyboardShortcut("/", modifiers: .command)
+
+                Divider()
+
+                Button("Release Notes") {
+                    if let url = URL(string: "https://github.com/entanglon/flux/releases") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+
+                Button("Report an Issue…") {
+                    if let url = URL(string: "https://github.com/entanglon/flux/issues") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+
+                Button("Flux on GitHub") {
+                    if let url = URL(string: "https://github.com/entanglon/flux") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
                     Task {

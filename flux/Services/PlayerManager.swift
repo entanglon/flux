@@ -883,8 +883,12 @@ class PlayerManager: ObservableObject {
                 guard await isStillCurrentTarget() else { return }
                 let pf = isDetailHit ? self.prefetchedStream! : self.prefetchedNextStream!
                 let subs = (isDetailHit ? self.prefetchedSubtitles : self.prefetchedNextSubtitles) ?? []
-                print("[PlayerManager] ⚡ Prefetch / Next-Episode HIT — instant start: \(pf.cleanTitle)")
-                let cached = await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]
+                let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+                let cached = (await StreamManager.shared.getCachedStreams(for: item, season: season, episode: episode) ?? [pf]).filter { s in
+                    if sourceMode == "http" { return !s.isTorrent }
+                    if sourceMode == "torrent" { return s.isTorrent }
+                    return true
+                }
                 guard await isStillCurrentTarget() else { return }
                 await MainActor.run {
                     self.availableStreams = cached
@@ -951,11 +955,23 @@ class PlayerManager: ObservableObject {
                 self.externalSubtitles = extraSubs
             }
             
-            // If user or caller requested the Stream Selector UI:
-            if forceStreamPicker {
+            // If the user already made a stream selection while background fetching was underway,
+            // do not disrupt active playback or re-open the stream picker.
+            let hasActiveSelection = await MainActor.run { () -> Bool in
+                return self.currentSelectedStream != nil || self.currentStreamURL != nil
+            }
+            if hasActiveSelection {
+                print("[PlayerManager] Stream fetch completed after stream was already chosen. Preserving active playback.")
                 await MainActor.run {
                     self.isLoading = false
-                    self.currentStreamURL = nil
+                }
+                return
+            }
+
+            // If user or caller requested the Stream Selector UI and hasn't yet made a selection:
+            if forceStreamPicker || self.forceStreamPicker {
+                await MainActor.run {
+                    self.isLoading = false
                     self.isStreamPickerPresented = true
                 }
                 return
@@ -981,14 +997,21 @@ class PlayerManager: ObservableObject {
 
             // Flux Mode Auto-Play Engine
             if isFluxEnabled, !streams.isEmpty {
-                await MainActor.run { self.isManualSelection = false }
                 if let winner = await self.raceBestStream(from: streams) {
                     guard await isStillCurrentTarget() else {
                         print("[PlayerManager] Discarding Flux Mode stream winner because user selected another title/episode.")
                         return
                     }
+                    let selectionMade = await MainActor.run { () -> Bool in
+                        return self.currentSelectedStream != nil || self.currentStreamURL != nil
+                    }
+                    if selectionMade {
+                        print("[PlayerManager] Stream already selected manually; discarding auto-play winner.")
+                        return
+                    }
                     print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
                     await MainActor.run {
+                        self.isManualSelection = false
                         self.attemptStream(winner)
                     }
                     return
@@ -997,10 +1020,15 @@ class PlayerManager: ObservableObject {
             
             // Fallback: Show list
             guard await isStillCurrentTarget() else { return }
-            await MainActor.run {
-                self.availableStreams = streams
-                self.isLoading = false
-                self.isStreamPickerPresented = true
+            let selectionMade = await MainActor.run { () -> Bool in
+                return self.currentSelectedStream != nil || self.currentStreamURL != nil
+            }
+            if !selectionMade {
+                await MainActor.run {
+                    self.availableStreams = streams
+                    self.isLoading = false
+                    self.isStreamPickerPresented = true
+                }
             }
         }
     }
@@ -1499,7 +1527,7 @@ class PlayerManager: ObservableObject {
     
     func close() {
         DispatchQueue.main.async {
-            SleepAssertionManager.shared.disableSleepPrevention()
+            SleepAssertionManager.shared.playerDidClose()
             self.cancelDetailPrefetch()
             self.fetchAndRaceTask?.cancel()
             self.fetchAndRaceTask = nil

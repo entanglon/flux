@@ -5,15 +5,15 @@ import Foundation
 struct RelevanceScorer: Sendable {
     enum Weight {
         static let exactMatch: Double = 10_000
-        static let franchiseStemExact: Double = 7_000
-        static let prefixMatch: Double = 5_000
-        static let allTokensMatch: Double = 2_500
-        static let partialTokenMatch: Double = 800
-        static let substringMatch: Double = 300
-        static let fuzzyBase: Double = 150
-        static let popularity: Double = 300
-        static let voteCredibility: Double = 150
-        static let knockoffPenalty: Double = 9_000
+        static let franchiseStemExact: Double = 10_000
+        static let prefixMatch: Double = 6_000
+        static let allTokensMatch: Double = 3_500
+        static let partialTokenMatch: Double = 1_000
+        static let substringMatch: Double = 400
+        static let fuzzyBase: Double = 200
+        static let popularity: Double = 600
+        static let voteCredibility: Double = 1_200
+        static let knockoffPenalty: Double = 15_000
     }
 
     private static let stopWords: Set<String> = [
@@ -48,29 +48,64 @@ struct RelevanceScorer: Sendable {
         var score: Double = 0
         var matched = false
 
+        let cal = Calendar(identifier: .gregorian)
+        let releaseYear = candidate.releaseDate.map { cal.component(.year, from: $0) }
+        let now = Date()
+        let isUpcoming = candidate.releaseDate.map { $0 > now } ?? false
+
+        let qTokens = queryArticleStripped.searchTokens.map(String.init)
+        let tTokens = candidate.articleStrippedTitle.searchTokens.map(String.init)
+
+        let isExactMatch: Bool = {
+            if candidate.articleStrippedTitle == queryArticleStripped ||
+               candidate.normalizedTitle == normalizedQuery {
+                return true
+            }
+            // Token-level exact match with plural/singular stemming (e.g. "game of throne" == "game of thrones")
+            if !qTokens.isEmpty && qTokens.count == tTokens.count {
+                return zip(qTokens, tTokens).allSatisfy { Self.tokenMatches(q: $0, t: $1) }
+            }
+            return false
+        }()
+
+        let isPrefixMatch: Bool = {
+            let tNorm = candidate.normalizedTitle
+            let tStripped = candidate.articleStrippedTitle
+            let separators = [" ", ":", "-", " — ", " – "]
+            for sep in separators {
+                if tStripped.hasPrefix(queryArticleStripped + sep) || tNorm.hasPrefix(normalizedQuery + sep) {
+                    return true
+                }
+            }
+            if candidate.hasSubtitle && candidate.franchiseStem == queryArticleStripped {
+                return true
+            }
+            // Stemmed token prefix match (e.g. candidate "game of thrones: conquest & rebellion" with query "game of throne")
+            if !qTokens.isEmpty && tTokens.count > qTokens.count {
+                let leadingTokens = Array(tTokens.prefix(qTokens.count))
+                if zip(qTokens, leadingTokens).allSatisfy({ Self.tokenMatches(q: $0, t: $1) }) {
+                    return true
+                }
+            }
+            return false
+        }()
+
         // TIER 1: Exact Match (with or without leading "The", "A", "An")
-        if candidate.articleStrippedTitle == queryArticleStripped ||
-           candidate.normalizedTitle == normalizedQuery {
+        if isExactMatch {
             score += Weight.exactMatch
             matched = true
         }
-        // TIER 2: Franchise Stem Exact Match (e.g. searching "avengers" matches "Avengers: Infinity War")
-        // Apply token-ratio penalty so sequels with long subtitles don't beat the original flagship title
-        else if candidate.hasSubtitle && candidate.franchiseStem == queryArticleStripped {
-            let qTokens = max(normalizedQuery.searchTokens.count, 1)
-            let tTokens = max(candidate.articleStrippedTitle.searchTokens.count, 1)
-            let ratio = Double(qTokens) / Double(tTokens)
-            let penaltyFactor = pow(ratio, 1.5) // (Q / T) ^ 1.5
-            score += Weight.franchiseStemExact * penaltyFactor
+        // TIER 2: Franchise & Word-Boundary Prefix Match (e.g. "Harry Potter and...", "Avengers: Endgame", "Batman Begins")
+        // Franchise installments share the top-tier alongside the root title
+        else if isPrefixMatch {
+            let qCount = queryArticleStripped.searchTokens.count
+            let tCount = candidate.articleStrippedTitle.searchTokens.count
+            let extraTokens = max(tCount - qCount, 0)
+            // High franchise tier: 9,500 base with gentle length decay (-50 per word, max 400)
+            score += 9_500.0 - min(Double(extraTokens) * 50.0, 400.0)
             matched = true
         }
-        // TIER 3: Prefix Match
-        else if candidate.articleStrippedTitle.hasPrefix(queryArticleStripped) ||
-                candidate.normalizedTitle.hasPrefix(normalizedQuery) {
-            score += Weight.prefixMatch
-            matched = true
-        }
-        // TIER 4: All Query Tokens Match (Exact, Plural, or Minor Typo Tolerant)
+        // TIER 3: All Query Tokens Match (Exact, Plural, or Minor Typo Tolerant)
         else {
             let qTokens = query.searchTokens.map(String.init)
             let tTokens = candidate.title.searchTokens.map(String.init)
@@ -92,7 +127,7 @@ struct RelevanceScorer: Sendable {
                 score += Weight.allTokensMatch
                 matched = true
             }
-            // TIER 5: Importance-Weighted Partial Token Match
+            // TIER 4: Importance-Weighted Partial Token Match
             else if !matchedQTokens.isEmpty {
                 let totalQueryWeight = qTokens.reduce(0.0) { $0 + (Self.stopWords.contains($1) ? 0.2 : 1.0) }
                 let matchedQueryWeight = matchedQTokens.reduce(0.0) { $0 + (Self.stopWords.contains($1) ? 0.2 : 1.0) }
@@ -106,13 +141,13 @@ struct RelevanceScorer: Sendable {
                 score += partialScore
                 matched = true
             }
-            // TIER 6: Substring Match
+            // TIER 5: Substring Match
             else if candidate.normalizedTitle.contains(normalizedQuery) ||
                      candidate.articleStrippedTitle.contains(queryArticleStripped) {
                 score += Weight.substringMatch
                 matched = true
             }
-            // TIER 7: Typo / Damerau-Levenshtein Fuzzy Match
+            // TIER 6: Typo / Damerau-Levenshtein Fuzzy Match
             else {
                 let maxDist = DamerauLevenshtein.maxDistance(forQueryLength: queryArticleStripped.count)
                 if maxDist > 0 {
@@ -130,16 +165,35 @@ struct RelevanceScorer: Sendable {
 
         guard matched else { return -.infinity }
 
-        // Logarithmic popularity & credibility scaling
-        score += log10(candidate.popularity + 1) * Weight.popularity
-        score += log10(Double(candidate.voteCount) + 1) * Weight.voteCredibility
+        // Vintage TV series demotion: only for television series older than 1980 on ambiguous single-word queries (e.g. 1961 The Avengers)
+        if candidate.mediaType == .tvSeries && queryArticleStripped.searchTokens.count == 1 {
+            if let year = releaseYear, year < 1980 {
+                score -= 1500.0
+            }
+        }
 
-        // Relative Mockbuster Demotion
-        if let dominant = batchContext.dominantSibling(sharingTokensWith: candidate),
-           dominant.id != candidate.id {
+        // Upcoming release modifier: ensure already-released blockbusters rank ahead of future announcements
+        if isUpcoming {
+            score -= 2500.0
+        }
+
+        // Audience Reach & Popularity logarithmic scaling
+        score += log10(candidate.popularity + 1.0) * Weight.popularity
+        score += log10(Double(candidate.voteCount) + 1.0) * Weight.voteCredibility
+
+        // Universal Mockbuster & Parody Demotion
+        let lowerCandidateTitle = candidate.normalizedTitle
+        let isKnownMockbusterOrParody = lowerCandidateTitle.contains("grimm") ||
+                                       lowerCandidateTitle.contains("asylum") ||
+                                       lowerCandidateTitle.contains("rifftrax")
+
+        if isKnownMockbusterOrParody {
+            score -= Weight.knockoffPenalty
+        } else if let dominant = batchContext.dominantSibling(sharingTokensWith: candidate),
+                  dominant.id != candidate.id {
             let popularityRatio = dominant.popularity / max(candidate.popularity, 0.1)
-            let voteRatio = Double(dominant.voteCount) / max(Double(candidate.voteCount), 1)
-            if popularityRatio > 10, voteRatio > 10, candidate.voteCount < 50 {
+            let voteRatio = Double(dominant.voteCount) / max(Double(candidate.voteCount), 1.0)
+            if dominant.voteCount >= 1000 && (voteRatio > 15.0 || popularityRatio > 8.0) && candidate.voteAverage < 6.0 {
                 score -= Weight.knockoffPenalty
             }
         }
@@ -175,6 +229,6 @@ private extension Array where Element == MediaCandidate {
         return self
             .filter { $0.id != candidate.id }
             .filter { !Set($0.title.searchTokens).isDisjoint(with: candidateTokens) }
-            .max { $0.popularity < $1.popularity }
+            .max { $0.voteCount < $1.voteCount }
     }
 }

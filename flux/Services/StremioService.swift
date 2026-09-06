@@ -163,17 +163,74 @@ class StremioService {
     func fetchPopularMovies() async throws -> [MediaItem] {
         return try await fetchCatalog(type: "movie", id: "top", preserveOrder: true)
     }
-    func fetchTopRatedMovies() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "movie", id: "imdbRating", preserveOrder: true)
+    // Cached Top Rated Pools for consistent pagination & instant delivery
+    private var topRatedMoviesPool: [MediaItem] = []
+    private var lastTopRatedMoviesFetch: Date?
+    private var topRatedTVPool: [MediaItem] = []
+    private var lastTopRatedTVFetch: Date?
+
+    func fetchTopRatedMovies(page: Int = 1, pageSize: Int = 20) async throws -> [MediaItem] {
+        let now = Date()
+        if topRatedMoviesPool.isEmpty || now.timeIntervalSince(lastTopRatedMoviesFetch ?? .distantPast) > 1800 {
+            async let p1 = fetchCatalog(type: "movie", id: "top", skip: 0, preserveOrder: false)
+            async let p2 = fetchCatalog(type: "movie", id: "top", skip: 50, preserveOrder: false)
+            async let p3 = fetchCatalog(type: "movie", id: "top", skip: 100, preserveOrder: false)
+            async let p4 = fetchCatalog(type: "movie", id: "top", skip: 150, preserveOrder: false)
+            
+            let combined = ((try? await p1) ?? []) + ((try? await p2) ?? []) + ((try? await p3) ?? []) + ((try? await p4) ?? [])
+            var seen = Set<String>()
+            let unique = combined.filter { seen.insert($0.id).inserted }
+            let filtered = unique.filter { ($0.voteAverage ?? 0) >= 8.0 }
+                .sorted { ($0.voteAverage ?? 0) > ($1.voteAverage ?? 0) }
+            topRatedMoviesPool = filtered
+            lastTopRatedMoviesFetch = now
+        }
+        
+        let startIndex = (page - 1) * pageSize
+        guard startIndex < topRatedMoviesPool.count else { return [] }
+        let endIndex = min(startIndex + pageSize, topRatedMoviesPool.count)
+        return Array(topRatedMoviesPool[startIndex..<endIndex])
     }
+    
+    func fetchTopRatedMovies(skip: Int) async throws -> [MediaItem] {
+        let page = (skip / 20) + 1
+        return try await fetchTopRatedMovies(page: page, pageSize: 20)
+    }
+    
     func fetchTrendingTVShows() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "series", id: "top", preserveOrder: true)
-    }
-    func fetchPopularTVShows() async throws -> [MediaItem] {
-        return try await fetchCatalog(type: "series", id: "top", preserveOrder: true)
-    }
-    func fetchTopRatedTVShows() async throws -> [MediaItem] {
         return try await fetchCatalog(type: "series", id: "imdbRating", preserveOrder: true)
+    }
+    
+    func fetchPopularTVShows(skip: Int = 0) async throws -> [MediaItem] {
+        return try await fetchCatalog(type: "series", id: "top", skip: skip, preserveOrder: true)
+    }
+    
+    func fetchTopRatedTVShows(page: Int = 1, pageSize: Int = 20) async throws -> [MediaItem] {
+        let now = Date()
+        if topRatedTVPool.isEmpty || now.timeIntervalSince(lastTopRatedTVFetch ?? .distantPast) > 1800 {
+            async let p1 = fetchCatalog(type: "series", id: "top", skip: 0, preserveOrder: false)
+            async let p2 = fetchCatalog(type: "series", id: "top", skip: 50, preserveOrder: false)
+            async let p3 = fetchCatalog(type: "series", id: "top", skip: 100, preserveOrder: false)
+            async let p4 = fetchCatalog(type: "series", id: "top", skip: 150, preserveOrder: false)
+            
+            let combined = ((try? await p1) ?? []) + ((try? await p2) ?? []) + ((try? await p3) ?? []) + ((try? await p4) ?? [])
+            var seen = Set<String>()
+            let unique = combined.filter { seen.insert($0.id).inserted }
+            let filtered = unique.filter { ($0.voteAverage ?? 0) >= 8.2 }
+                .sorted { ($0.voteAverage ?? 0) > ($1.voteAverage ?? 0) }
+            topRatedTVPool = filtered
+            lastTopRatedTVFetch = now
+        }
+        
+        let startIndex = (page - 1) * pageSize
+        guard startIndex < topRatedTVPool.count else { return [] }
+        let endIndex = min(startIndex + pageSize, topRatedTVPool.count)
+        return Array(topRatedTVPool[startIndex..<endIndex])
+    }
+    
+    func fetchTopRatedTVShows(skip: Int) async throws -> [MediaItem] {
+        let page = (skip / 20) + 1
+        return try await fetchTopRatedTVShows(page: page, pageSize: 20)
     }
     func searchMulti(query: String) async throws -> (movies: [MediaItem], tvShows: [MediaItem]) {
         let addons = AddonManager.shared.enabledAddons

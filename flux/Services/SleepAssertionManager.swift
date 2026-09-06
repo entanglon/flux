@@ -2,23 +2,62 @@ import Foundation
 import IOKit.pwr_mgt
 
 /// Manages macOS power assertions during active video playback so that the display
-/// and system do not sleep while the user is watching content in Flux or PiP.
+/// and system do not sleep while the user is watching content in Flux or PiP,
+/// and prevents macOS App Nap from throttling the player process.
 final class SleepAssertionManager {
     static let shared = SleepAssertionManager()
     
-    private var assertionID: IOPMAssertionID = 0
-    private var isAsserted = false
-    private var activityToken: NSObjectProtocol?
+    private var displayAssertionID: IOPMAssertionID = 0
+    private var isDisplayAsserted = false
+    private var playbackActivityToken: NSObjectProtocol?
+    private var playerActiveToken: NSObjectProtocol?
     private let lock = NSLock()
     
     private init() {}
+    
+    /// Called when PlayerView opens or enters PiP. Ensures process latency and thread responsiveness
+    /// are maintained (preventing App Nap even if paused or occluded by another window).
+    func playerDidOpen(reason: String = "Flux Player Active") {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        if playerActiveToken == nil {
+            playerActiveToken = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .latencyCritical],
+                reason: reason
+            )
+            print("[SleepAssertionManager] Began latencyCritical player activity")
+        }
+    }
+    
+    /// Called when PlayerView closes or playback terminates completely.
+    func playerDidClose() {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        disableSleepPreventionLocked()
+        
+        if let token = playerActiveToken {
+            ProcessInfo.processInfo.endActivity(token)
+            playerActiveToken = nil
+            print("[SleepAssertionManager] Ended latencyCritical player activity")
+        }
+    }
     
     /// Prevents display and system idle sleep while media is actively playing.
     func enableSleepPrevention(reason: String = "Flux Video Playback") {
         lock.lock()
         defer { lock.unlock() }
         
-        guard !isAsserted else { return }
+        // Ensure playerActiveToken is active as well
+        if playerActiveToken == nil {
+            playerActiveToken = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .latencyCritical],
+                reason: "Flux Player Active"
+            )
+        }
+        
+        guard !isDisplayAsserted else { return }
         
         // 1. IOKit display sleep assertion (primary macOS mechanism for keeping display awake)
         let assertionType = kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString
@@ -33,45 +72,49 @@ final class SleepAssertionManager {
         )
         
         if result == kIOReturnSuccess {
-            assertionID = newID
-            isAsserted = true
-            print("[SleepAssertionManager] Enabled display sleep prevention (Assertion ID: \(assertionID))")
+            displayAssertionID = newID
+            isDisplayAsserted = true
+            print("[SleepAssertionManager] Enabled display sleep prevention (Assertion ID: \(displayAssertionID))")
         } else {
             print("[SleepAssertionManager] Failed to create IOKit sleep assertion: \(result)")
         }
         
-        // 2. Dual-layer ProcessInfo activity to ensure system/display idle sleep is inhibited
-        if activityToken == nil {
-            activityToken = ProcessInfo.processInfo.beginActivity(
+        // 2. Dual-layer ProcessInfo activity to ensure system/display idle sleep is inhibited during playback
+        if playbackActivityToken == nil {
+            playbackActivityToken = ProcessInfo.processInfo.beginActivity(
                 options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled, .userInitiated],
                 reason: reason
             )
         }
     }
     
-    /// Releases the sleep assertions so the display and system can sleep normally when paused/closed.
+    /// Releases the display sleep assertions so the display can sleep normally when paused/closed.
+    /// Does not terminate playerActiveToken so the player process remains warm and responsive.
     func disableSleepPrevention() {
         lock.lock()
         defer { lock.unlock() }
-        
-        if isAsserted {
-            let result = IOPMAssertionRelease(assertionID)
+        disableSleepPreventionLocked()
+    }
+    
+    private func disableSleepPreventionLocked() {
+        if isDisplayAsserted {
+            let result = IOPMAssertionRelease(displayAssertionID)
             if result == kIOReturnSuccess {
-                print("[SleepAssertionManager] Released display sleep prevention (Assertion ID: \(assertionID))")
+                print("[SleepAssertionManager] Released display sleep prevention (Assertion ID: \(displayAssertionID))")
             } else {
                 print("[SleepAssertionManager] Failed to release IOKit sleep assertion: \(result)")
             }
-            assertionID = 0
-            isAsserted = false
+            displayAssertionID = 0
+            isDisplayAsserted = false
         }
         
-        if let token = activityToken {
+        if let token = playbackActivityToken {
             ProcessInfo.processInfo.endActivity(token)
-            activityToken = nil
+            playbackActivityToken = nil
         }
     }
     
     deinit {
-        disableSleepPrevention()
+        playerDidClose()
     }
 }

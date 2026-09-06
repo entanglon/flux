@@ -7,7 +7,7 @@ struct SearchView: View {
     
     // Grid for Search Results
     let resultColumns = [
-        GridItem(.adaptive(minimum: 160), spacing: 24)
+        GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 24)
     ]
     
     var body: some View {
@@ -19,7 +19,7 @@ struct SearchView: View {
 
                     if viewModel.isSearching {
                         if viewModel.isLoading && viewModel.searchResults.isEmpty {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
+                            LazyVGrid(columns: resultColumns, spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()
                                 }

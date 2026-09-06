@@ -470,36 +470,40 @@ struct PlayerControlsView: View {
                         .fill(Color.white.opacity(0.2))
                         .frame(width: w, height: h)
 
-                    // 100% divider notch in center
-                    Rectangle()
-                        .fill(Color.white.opacity(0.45))
-                        .frame(width: 1.5, height: h + 2)
-                        .position(x: midX, y: h / 2.0)
-
                     // Base Volume Fill (0% to min(vol, 1.0))
                     let normalRatio = min(max(vol, 0.0), 1.0)
                     let normalWidth = midX * CGFloat(normalRatio)
                     if normalWidth > 0 {
-                        Capsule()
+                        Rectangle()
                             .fill(Color.white)
-                            .frame(width: max(h, normalWidth), height: h)
+                            .frame(width: normalWidth, height: h)
                     }
 
                     // Boost Volume Fill (1.0 to vol)
                     if isBoosted {
-                        let boostRatio = min(vol - 1.0, 1.0)
+                        let boostRatio = min(max(vol - 1.0, 0.0), 1.0)
                         let boostWidth = midX * CGFloat(boostRatio)
-                        Capsule()
-                            .fill(LinearGradient(
-                                colors: [Color.orange.opacity(0.85), Color.orange],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ))
-                            .frame(width: max(h, boostWidth), height: h)
-                            .offset(x: midX)
-                            .shadow(color: Color.orange.opacity(0.4), radius: 3, x: 0, y: 0)
+                        if boostWidth > 0 {
+                            Rectangle()
+                                .fill(LinearGradient(
+                                    colors: [Color.orange.opacity(0.90), Color.orange],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ))
+                                .frame(width: boostWidth, height: h)
+                                .offset(x: midX)
+                                .shadow(color: Color.orange.opacity(0.4), radius: 3, x: 0, y: 0)
+                        }
                     }
+
+                    // 100% divider notch in center
+                    Rectangle()
+                        .fill(isBoosted ? Color.black.opacity(0.35) : Color.white.opacity(0.55))
+                        .frame(width: 1.5, height: h + 2)
+                        .position(x: midX, y: h / 2.0)
                 }
+                .clipShape(Capsule())
+                .animation(.smooth(duration: 0.12), value: vol)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)

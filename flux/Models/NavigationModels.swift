@@ -5,6 +5,8 @@ extension Notification.Name {
     static let fluxRefresh = Notification.Name("fluxRefresh")
     /// Switch sidebar page — object is a SidebarItem (Cmd+1…4, Cmd+F).
     static let fluxNavigate = Notification.Name("fluxNavigate")
+    /// Display the keyboard shortcuts sheet (Cmd+/).
+    static let fluxShowShortcuts = Notification.Name("fluxShowShortcuts")
 }
 
 struct GenreNavigation: Hashable {

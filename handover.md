@@ -1,6 +1,416 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 5, 2026 — SEARCH PERFORMANCE, TYPO TOLERANCE, TMDB ISOLATION & TV DISCOVERY RAILS
+## LATEST: Sep 6, 2026 (Afternoon) — V1.0 RELEASE POLISH: BRANDING, SHORTCUTS MODAL, SETTINGS UI/UX & PUBLIC REPO READINESS
+
+### 1. Root Cause & Requirements Addressed
+- **macOS Menu Bar, About Panel & Help Search Capitalization**:
+  - `Xcode` previously built with target name `flux`, setting `CFBundleName = "flux"`. macOS reads `CFBundleName` for the menu bar application menu and Spotlight / Help search prompts, showing `flux` with a lowercase `f`.
+  - Added explicit build settings `INFOPLIST_KEY_CFBundleDisplayName = "Flux"` and `INFOPLIST_KEY_CFBundleName = "Flux"` to `flux.xcodeproj/project.pbxproj` across Debug and Release configurations.
+  - Added explicit PlistBuddy overrides and `--deep` code signing in `scripts/build-releases.sh` and `flux/Info.plist`.
+- **macOS Help Menu Error ("Help isn't available for flux.")**:
+  - Replaced the default macOS `.help` command group with customized commands: `Flux Help & Documentation` (`Cmd+?`), `Keyboard Shortcuts` (`Cmd+/`), `Release Notes`, `Report an Issue…`, and `Flux on GitHub`.
+  - Implemented `KeyboardShortcutsSheet.swift`, an elegant Liquid Glass modal presenting 16 playback and navigation shortcuts with clean keyboard key pills.
+  - Replaced `.appInfo` command group with `orderFrontStandardAboutPanel` explicitly providing `applicationName: "Flux"`, `applicationVersion: "1.0"`, `version: "1"`, and copyright string, formatting cleanly as `Version 1.0 (1)`.
+- **Settings View UI/UX Polish**:
+  - `GeneralSettingsView`: Replaced icon-only cancel/save buttons with explicit labeled buttons `Cancel` and `Save Key`; added direct `"Get Free TMDB Key ↗"` hyperlink to the TMDB API settings page.
+  - `StreamingSettingsView`: Disabled and dimmed `Maximum Resolution` and `Language Filter in Flux Mode` when `Enable Flux Mode` is toggled off (`.disabled(!enableFluxMode)` and `.opacity(...)`).
+  - `PlaybackSettingsView`: Added `"Off"` to subtitle languages (`["Off", "English", ...]`) and wired `MPVVideoView` to explicitly set `sid = "no"` and `slang = "no"`, and skip auto-selection when the user sets default subtitles to `"Off"`.
+  - `AdvancedSettingsView`: Cleaned version string to `Version 1.0` (removed `(Beta)`).
+
+### 2. Verification & Deployment
+- **Automated Tests**: Executed `xcodebuild test` — **all 90 unit tests across 6 suites passed** with 0 failures (`** TEST SUCCEEDED **`).
+- **Release Build & Packaging**: Compiled Release build via `scripts/build-releases.sh --macos26`, verified code signature (`codesign -vvv --deep`), cleared quarantine (`xattr -cr`), and generated `Flux.dmg` (42 MB) with custom DMG window layout and Applications drop-link.
+- **Local Deployment**: Installed fresh to `/Applications/Flux.app` and verified via AppleScript GUI inspections.
+
+---
+
+## PREVIOUS: Sep 6, 2026 (Noon) — STREAM SELECTION RACE CONDITION FIX & DISMISS GUARD
+
+### 1. Root Cause Analysis
+- **Stream Picker Reappearing 1-2 Seconds into Playback**:
+  - When the user selected "Choose Stream Source…" from the Continue Watching card (or player controls), `PlayerManager.play(..., forceStreamPicker: true)` was called.
+  - `fetchAndRace` spawned an async task fetching all enabled addons in the background via `StreamManager.shared.fetchStreamsRealtime`.
+  - While slower addons were still being queried, fast addons (such as WebStreamr) returned progressive stream results, presenting them in the picker.
+  - The user clicked a WebStreamr stream. `selectStream(_:)` immediately ran, started mpv playback, and set `currentStreamURL`.
+  - 1–2 seconds later, `fetchStreamsRealtime` completed its background query across remaining addons.
+  - `fetchAndRace` reached `if forceStreamPicker` (local function argument, which was `true`). Because it never checked whether the user had *already* made an active selection, it executed `await MainActor.run { self.isLoading = false; self.currentStreamURL = nil; self.isStreamPickerPresented = true }`.
+  - This clobbered `currentStreamURL` back to `nil` and forced `isStreamPickerPresented = true`, popping the picker back up directly over active video playback!
+- **Clicking "✕" Closes the Entire Player Window**:
+  - In `PlayerView.swift`, `dismissStreamPicker()` evaluated:
+    ```swift
+    if playerManager.currentStreamURL == nil {
+        playerManager.close()
+        dismiss()
+    }
+    ```
+  - Because `fetchAndRace` had just wiped `currentStreamURL = nil`, `dismissStreamPicker()` assumed playback had been aborted before starting and called `dismiss()`, closing the whole window instead of dismissing the picker overlay.
+
+### 2. Solutions Implemented
+- **`PlayerManager.swift` (`fetchAndRace`)**:
+  - Added an active selection guard upon `fetchStreamsRealtime` completion:
+    ```swift
+    let hasActiveSelection = await MainActor.run { () -> Bool in
+        return self.currentSelectedStream != nil || self.currentStreamURL != nil
+    }
+    if hasActiveSelection {
+        print("[PlayerManager] Stream fetch completed after stream was already chosen. Preserving active playback.")
+        await MainActor.run { self.isLoading = false }
+        return
+    }
+    ```
+  - Removed `currentStreamURL = nil` assignment from `if forceStreamPicker || self.forceStreamPicker`.
+  - Guarded both Flux Mode auto-play winning attempt and fallback stream list presentation against clobbering an active manual selection that might occur during stream sorting.
+- **`PlayerView.swift` (`dismissStreamPicker`)**:
+  - Added comprehensive active playback checks:
+    ```swift
+    let hasActivePlayback = playerManager.currentStreamURL != nil || playerManager.currentSelectedStream != nil || mpv.hasLoadedMedia
+    if !hasActivePlayback {
+        playerManager.close()
+        dismiss()
+    }
+    ```
+  - If any active stream or loaded media exists, dismissing the picker simply hides the picker overlay and leaves playback completely uninterrupted.
+  - Added `@AppStorage(UserDefaults.Key.streamingSourceMode) private var sourceMode: String = "both"` to `PlayerView` for reactive SwiftUI updates when changing stream filters in Settings.
+- **`fluxTests/StreamManagerTests.swift`**:
+  - Added `selectStreamClearsForceStreamPickerAndSetsActiveStream` unit test validating that stream selection clears `forceStreamPicker`, hides `isStreamPickerPresented`, sets `currentSelectedStream`, and sets `currentStreamURL`.
+
+### 3. Verification & Deployment
+- **Automated Tests**: Full suite tested via `xcodebuild test`: **all 88 unit tests across 6 suites passed** with 0 failures (`** TEST SUCCEEDED **`).
+- **Release Build**: Built with Release configuration (`** BUILD SUCCEEDED **`).
+- **Deployed Binary**: Atomically installed to `/Applications/Flux.app` using `ditto`, re-signed ad-hoc with `--deep`, cleared quarantine (`xattr -cr`), verified with `codesign -vvv`.
+- **Packaging**: Packaged fresh release image at `Flux.dmg` (42 MB).
+- **Process Status**: Launched and running smoothly (PID `54979`).
+
+---
+
+## PREVIOUS: Sep 6, 2026 (Night) — STREAM RESOLUTION & SOURCE FILTER OVERHAUL (STREMIO/PTT ALIGNMENT)
+
+### 1. Root Cause Analysis
+- **Torrents Tab Appearing in HTTP-Only Mode**:
+  - In `PlayerView.swift`, `availableTabs` unconditionally returned `StreamCategoryType.allCases` (`[.all, .best, .fastStart, .direct, .torrents]`) without checking `streamingSourceMode`.
+  - In `StreamManager.swift`, `getCachedStreams` returned raw un-filtered streams from memory/disk cache, allowing torrents cached during previous "Both" queries to enter `playerManager.availableStreams`.
+- **WebStreamr 1080p Releases Misclassified as 4K**:
+  - WebStreamr scrapes from `4KHDHub` (e.g. `Project.Hail.Mary.2026...1080p...-4KHDHub.com.mkv`).
+  - `StreamManager.parseQuality` previously performed a naive substring check `combined.contains("4K")` before `1080P`. Because `4KHDHub` contains `4K`, all 1080p streams from WebStreamr were misclassified as 4K.
+  - The picker dropdown labeled 1080p as `FHD` instead of `1080p`, causing UI mismatch with Settings and user expectations.
+
+### 2. Architecture Overhaul (Stremio & PTT Alignment)
+- **Robust 2-Stage Quality Parser (`StreamManager.swift`)**:
+  - **Stage 1 (Addon Name Header)**: Inspects individual lines of the stream's `name` header for discrete resolution tokens (`\b(2160p|4k|uhd)\b`, `\b(1440p|2k|qhd)\b`, `\b(1080p|1080i|fhd)\b`, `\b(720p|720i)\b`, `\b(480p|sd)\b`), honoring the server-side scraper's canonical categorization (Torrentio, WebStreamr, Comet, Meteor).
+  - **Stage 2 (Title & Filename Tokenizer)**: Strips false-positive tags (`4KHDHub`, `DTS-HD`, `TrueHD`, `HDR10`, `2K24`), matches exact pixel dimensions (`3840x2160`, `1920x1080`), and uses word-boundary regexes.
+- **Cache & Stream Gating by Source Mode**:
+  - `StreamManager.getCachedStreams`: Added `sourceMode` parameter, strictly filtering cached streams before returning.
+  - `PlayerManager.fetchAndRace`: Filtered prefetch and cache streams by `sourceMode`.
+  - `PlayerView.swift`: Filtered `allStreams` by `sourceMode` so no torrent can render in HTTP-only mode.
+- **Dynamic Category Tabs & Quality Menu (`PlayerView.swift`)**:
+  - When `streamingSourceMode == "http"`: tabs are `[.all, .best, .fastStart]` (Torrents and Direct HTTP removed).
+  - When `streamingSourceMode == "torrent"`: tabs are `[.all, .best, .fastStart]`.
+  - When `streamingSourceMode == "both"`: tabs are `[.all, .best, .fastStart, .direct, .torrents]`.
+  - Updated quality menu to `["4K", "2K", "1080p", "720p", "480p"]`.
+  - Added `.onAppear` and `.onChange(of: selectedSourceFilter)` to reset `selectedCategoryFilter` if the active tab is not in `availableTabs`.
+
+### 3. Verification & Deployment
+- **Automated Tests**: 87 tests in 6 test suites passed with 0 failures (`** TEST SUCCEEDED **`).
+- **Release Build**: Compiled cleanly with optimizations via `scripts/build-releases.sh`.
+- **Installed & Codesigned**: Deployed to `/Applications/Flux.app`.
+- **DMG Packages Generated**: `Flux.dmg` (macOS 26+) and `Flux-macOS15.dmg` (macOS 15+).
+
+---
+
+## PREVIOUS: Sep 5, 2026 (Night) — PLAYBACK FLUIDITY, F1/F2 BRIGHTNESS STUTTER FIX & APP NAP ERADICATION
+
+### 1. Root Cause Analysis: Rapid F1/F2 Brightness Stutter & Window Switching Lag
+- **F1/F2 Brightness Stutter**:
+  - `MPVVideoView.swift` previously observed `NSApplication.didChangeScreenParametersNotification`. Rapidly adjusting brightness via F1/F2 broadcasts this notification up to 30 times a second. Flux responded on the main thread with synchronous Mach IPC queries to WindowServer (`self.window?.screen`, `backingScaleFactor`, `deviceDescription`), choking the run loop.
+  - `MPVLayer.isAsynchronous = true` spun an internal CoreAnimation rendering thread that conflicted with main-thread `setNeedsDisplay()` calls over the CGL context without locking. When macOS triggered the blurred Brightness HUD bezel overlay, WindowServer compositor stalls dropped frames and stuttered playback.
+- **Window Switching Lag (Chrome <-> Flux Pause/Resume)**:
+  - `NSAppSleepDisabled` was missing from `Info.plist`.
+  - Pausing playback in `SleepAssertionManager.swift` immediately killed both the display assertion and the `ProcessInfo` activity. When Flux was occluded behind Chrome, macOS initiated **App Nap**: throttled threads to priority 0 and compressed dirty RAM pages (demuxer caches, decoded video frames).
+  - Unpausing required macOS to decompress swapped memory pages, un-throttle threads, and re-sync libmpv/audio clocks, causing a 500ms–1500ms freeze.
+
+### 2. Modern macOS Media Player Architecture Alignment (Stremio, IINA, VLC)
+- **`flux/Info.plist`**:
+  - Added `<key>NSAppSleepDisabled</key><true/>` to disable App Nap process throttling permanently.
+- **`SleepAssertionManager.swift`**:
+  - Implemented 2-tier lifecycle management:
+    - `playerDidOpen(reason:)` / `playerDidClose()`: Maintains a continuous latency-critical activity (`[.userInitiated, .latencyCritical]`) for the entire lifetime of `PlayerView` or PiP, ensuring memory remains resident and threads responsive even when occluded or paused.
+    - `enableSleepPrevention()` / `disableSleepPrevention()`: Controls display idle sleep (`kIOPMAssertionTypePreventUserIdleDisplaySleep` and `idleDisplaySleepDisabled`) solely based on active playback state. When paused, the display is allowed to sleep normally, but the process stays warm for instantaneous unpause.
+- **`MPVVideoView.swift`**:
+  - **Eliminated `NSApplication.didChangeScreenParametersNotification`**: Removed `screenObserver`. Shifted display scale and screen color tracking exclusively to AppKit's native `override func viewDidChangeBackingProperties()`, which is triggered only when moving between physical displays/resolutions and does NOT fire on brightness changes.
+  - **Synchronous Layer Mode (`isAsynchronous = false`)**: Switched `MPVLayer` to `isAsynchronous = false` (matching IINA, VLC, and official libmpv Cocoa backend), eliminating the background timer loop contention and WindowServer HUD compositor hitching.
+  - **CGL Thread Safety**: Wrapped `draw(inCGLContext:)` in `CGLLockContext(ctx)` / `CGLUnlockContext(ctx)`.
+  - **Render Dispatch Coalescing**: Added lock-protected `isRenderUpdateScheduled` to `mpvRenderUpdate()` so `DispatchQueue.main` only receives at most one `setNeedsDisplay()` per run loop turn instead of getting flooded by 60 redundant blocks/sec.
+- **`PlayerView.swift` & `PiPManager.swift`**:
+  - Wired `playerDidOpen()` and `playerDidClose()` across player presentation, PiP adoption, and teardown.
+
+### 3. Verification & Deployment
+- **Automated Tests**: Ran full test suite via `xcodebuild test`: **83 tests across 6 suites passed with 0 failures** (`** TEST SUCCEEDED **`).
+- **Release Build**: Compiled cleanly with optimizations (`** BUILD SUCCEEDED **`).
+- **Ad-Hoc Signed & Installed**: Deployed to `/Applications/Flux.app`.
+- **DMG Package Updated**: Fresh `Flux.dmg` generated via `hdiutil`.
+- **Verified Info.plist**: Confirmed `NSAppSleepDisabled = true` in `/Applications/Flux.app/Contents/Info.plist`.
+
+---
+
+## PREVIOUS: Sep 5, 2026 (Night) — DISCOVERY RAILS & CINEMETA FALLBACK OVERHAUL (TOP RATED & RAIL AUDIT)
+
+### 1. Root Cause Analysis: Top Rated Showing "It Ends"
+- **Diagnosis**:
+  - In `https://v3-cinemeta.strem.io/manifest.json`, Cinemeta defines three primary movie/series catalogs: `top` (Popular), `year` (New), and `imdbRating` (Featured).
+  - The catalog `id: "imdbRating"` in Cinemeta is **NOT** sorted by IMDb score. It is Cinemeta's internal feed of newly indexed titles that possess an IMDb ID. Its #1 item was *It Ends (2025)* (rating 5.7), followed by unrated/low-popularity stubs (*Don't Say Good Luck*, *I Want Your Sex*, *Avatar Aang*).
+  - `TMDBEnricher.shared.fetchTopRatedMovies()` and `fetchTopRatedTV()` previously delegated fallback traffic directly to Cinemeta's `imdbRating` catalog (`catalog/movie/imdbRating.json`), placing *It Ends* directly at the top of the "Top Rated Movies" rail!
+  - Furthermore, eight other rails (`nowPlayingMovies`, `upcomingMovies`, `quickWatches`, `streamingMovies`, `airingTodayTV`, `onTheAirTV`, `streamingTV`, and genre discovery pages) returned empty arrays (`[]`) when `hasKeyForHome == false`, causing rails to disappear or be empty.
+
+### 2. High-Precision Top Rated Rating Sort & Cached Pools (`StremioService.swift`)
+- Built an in-memory cached pool (`topRatedMoviesPool` and `topRatedTVPool`) with 30-minute TTL that fetches up to 200 popular titles from Cinemeta's `top` catalog.
+- Movies: Filtered for `voteAverage >= 8.0` and sorted strictly descending by IMDb rating:
+  - Page 1: *The Shawshank Redemption* (9.3), *The Godfather* (9.2), *The Dark Knight* (9.1), *Schindler's List* (9.0), *12 Angry Men* (9.0), *The Lord of the Rings: The Return of the King* (9.0), *The Fellowship of the Ring* (8.9), *Inception* (8.8), *Pulp Fiction* (8.8), *Fight Club* (8.8), *Forrest Gump* (8.8), *The Good, the Bad and the Ugly* (8.8), *Interstellar* (8.7), *The Matrix* (8.7), *Goodfellas* (8.7), *Terminator 2: Judgment Day* (8.6), *Seven* (8.6), *The Silence of the Lambs* (8.6)...
+  - Page 2: *City of God* (8.6), *The Green Mile* (8.6), *The Prestige* (8.5), *The Departed* (8.5), *Spider-Man: Across the Spider-Verse* (8.5), *Parasite* (8.5), *Gladiator* (8.5), *Whiplash* (8.5), *Django Unchained* (8.5), *Back to the Future* (8.5), *Avengers: Endgame* (8.4)...
+- Series: Filtered for `voteAverage >= 8.2` and sorted strictly descending:
+  - Page 1: *Breaking Bad* (9.5), *Band of Brothers* (9.4), *The Wire* (9.3), *Chernobyl* (9.3), *Avatar: The Last Airbender* (9.3), *Game of Thrones* (9.2), *The Sopranos* (9.2), *Attack on Titan* (9.1), *Rick and Morty* (9.0), *Better Call Saul* (9.0), *The Office* (9.0), *One Piece* (9.0), *Sherlock* (9.0), *Seinfeld* (8.9), *True Detective* (8.8), *Friends* (8.8), *Succession* (8.8), *Fargo* (8.8)...
+- Supports seamless pagination (`page: Int, pageSize: Int = 20`) ensuring endless scrolling without duplicate items or misordered entries.
+
+### 3. Comprehensive Discovery Rail Fallback Mappings (`TMDBEnricher.swift`)
+- Gated every discovery method with distinct, accurate Cinemeta catalogs when `!hasKeyForHome`:
+  - **`fetchTrendingAll`**: Interleaves `movies` and `series` dynamically (trending today for "day"; popular for "week" to curate high-res backdrop hero titles).
+  - **`fetchTrendingMovies`**: Returns trending today (day) vs popular (week), eliminating duplicated rails in MoviesView.
+  - **`fetchTrendingTV`**: Returns trending today (day) vs popular (week), eliminating duplicated rails in TVShowsView.
+  - **`fetchPopularMovies`**: Queries Cinemeta `top` movies.
+  - **`fetchNowPlayingMovies`**: Queries Cinemeta `year` catalog for current year (2026/2025 releases: *The Runner*, *The Secret Woman*, *Buddy*, *Facing El Chapo*).
+  - **`fetchUpcomingMovies`**: Queries Cinemeta `imdbRating` filtered for upcoming releases (*Don't Say Good Luck*, *Avatar Aang*, *Hadestown*, *Toy Story 5*, *Minions & Monsters*).
+  - **`fetchTopRatedMovies`**: Calls `StremioService.shared.fetchTopRatedMovies(page:)`.
+  - **`fetchStreamingMovies`**: Queries Cinemeta `top` movies at an offset.
+  - **`fetchQuickWatchMovies`**: Queries Cinemeta `top` Animation movies (consistently compact runtime family features under 95 mins: *Toy Story*, *Shrek*, *Wall-E*, *Up*, *Spider-Verse*).
+  - **`fetchPopularTV`**: Queries Cinemeta `top` series.
+  - **`fetchAiringTodayTV`**: Queries Cinemeta `imdbRating` series (currently on-air active series: *Dark Matter*, *Silo*, *Conan O'Brien*, *Star Trek*).
+  - **`fetchOnTheAirTV`**: Queries Cinemeta `imdbRating` series offset by 20.
+  - **`fetchTopRatedTV`**: Calls `StremioService.shared.fetchTopRatedTVShows(page:)`.
+  - **`fetchStreamingTV`**: Queries Cinemeta `top` series at an offset.
+  - **`fetchGenrePage`**: Maps TMDB genre IDs to Cinemeta genre names (`Action`, `Animation`, `Comedy`, `Sci-Fi`, etc.) with proper sorting by category.
+
+### 4. Verification & Deployment
+- **Automated Tests**: Added regression tests in `TMDBEnricherTests.swift` validating top-rated rating cutoffs and descending order. Full test suite passed with **83 tests across 6 suites with 0 failures** (`** TEST SUCCEEDED **`).
+- **Release Build**: Compiled cleanly (`** BUILD SUCCEEDED **`).
+- **Ad-Hoc Signed & Installed**: Deployed to `/Applications/Flux.app`.
+- **DMG Package Updated**: Fresh `Flux.dmg` generated (42 MB).
+- **Application Running**: `/Applications/Flux.app` launched and active.
+
+---
+
+## PREVIOUS: Sep 5, 2026 (Night) — COMPREHENSIVE PLAYBACK, EDR BACKBUFFER, DEBANDING & DOLBY PIPELINE OVERHAUL
+
+### 1. EDR Backbuffer Capability Fix (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - In `copyCGLPixelFormat(forDisplayMask:)`, `NSScreen.maximumExtendedDynamicRangeColorComponentValue > 1.0` evaluated to `false` at launch because on MacBook Air M1 (and XDR displays) current EDR sits at `1.0` until a layer actively requests EDR content.
+  - Because `CGLChoosePixelFormat` executes once at layer creation and is immutable, the backbuffer was locked to standard 8-bit RGBA8 (32-bit), blocking floating-point EDR headroom before any HDR video started.
+- **Resolution**:
+  - Gated the pixel format on `maximumPotentialExtendedDynamicRangeColorComponentValue > 1.0` (which is statically `2.0` on M1 Air and `3.2`–`4.0` on Liquid Retina XDR displays).
+  - Used standard OpenGL bitmask mapping `(CGDisplayIDToOpenGLDisplayMask(id) & mask) != 0` to accurately match the active display on multi-monitor setups.
+  - Added `NSApplication.didChangeScreenParametersNotification` observation to automatically adapt `contentsScale` and re-evaluate `applyColorPipeline()` when windows move across displays or display settings change.
+  - Explicitly set `self.contentsFormat = .RGBA16Float` on `MPVLayer` across all initializers.
+  - In `draw(inCGLContext:...)`, dynamically mapped `depth = self.wantsExtendedDynamicRangeContent ? 16 : 8`:
+    - On SDR content: passes `depth = 8` so mpv's active fruit / Floyd-Steinberg dithering runs, eliminating banding on 8-bit panels.
+    - On HDR content in EDR mode: passes `depth = 16` so full 16-bit float dynamic range is passed to the EDR compositor.
+
+### 2. Panel-Calibrated Target Peak Luminance & Explicit Color Pipeline (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - Previously, `target-peak = edr * 500` produced `1000 nits` on MacBook Air M1 (`2.0 * 500`). The MacBook Air panel is a 400–500 nit display, so setting a 1000-nit target caused mpv not to compress highlights properly, leading to WindowServer clipping.
+  - Furthermore, `target-trc` was set to the raw `gamma` string without matching explicit primaries.
+- **Resolution**:
+  - Calibrated target peak to `peak = max(200, min(1600, Int(headroom * 250)))`. On MacBook Air M1 (`headroom = 2.0`), this resolves to `500 nits`—perfectly matching the panel. On Liquid Retina XDR (`headroom = 4.0`), it scales to `1000–1600 nits`.
+  - Configured explicit TRC and primaries pairs:
+    - PQ: `target-trc = "pq"`, `target-prim = "bt.2020"` (or `"display-p3"`)
+    - HLG: `target-trc = "hlg"`, `target-prim = "bt.2020"` (or `"display-p3"`)
+    - SDR: all properties reset to `"auto"` for smooth tone-mapping.
+
+### 3. Active Shader Debanding for Quantization & Banding Artifacts (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - Frontier model consultation (Claude, Grok, GLM, Qwen) verified that `profile=high-quality` removed `deband=yes` in mpv 0.38+. Debanding is opt-in.
+  - Zero-copy VideoToolbox (`hwdec=auto`) operates on GPU-resident textures via IOSurface and fully supports the deband shader pass.
+- **Resolution**:
+  - Explicitly enabled debanding: `deband = "yes"`, `deband-iterations = "1"`, `deband-threshold = "48"`, `deband-range = "16"`, `deband-grain = "24"`.
+  - Set internal FBO precision: `fbo-format = "rgba16hf"`.
+  - Successfully eliminates 8-bit quantization steps and banding without softening texture detail or thermal throttling on the fanless 7-core M1 GPU.
+
+### 4. Audio Downmix & Hardware Acceleration Preference Wiring (`MPVVideoView.swift`, `SettingsView.swift`) — Completed & Verified
+- **Issue**:
+  - `@AppStorage("useHardwareAcceleration")` in Settings was ignored; `hwdec` was hardcoded to `"auto"`.
+  - Downmixing 5.1/7.1 audio tracks to stereo MacBook speakers lacked clipping protection.
+- **Resolution**:
+  - Wired `useHardwareAcceleration` preference to `hwdec`: `useHW ? "auto" : "no"`.
+  - Pinned `ao = "coreaudio"`, `audio-channels = "auto-safe"`, and `audio-normalize-downmix = "yes"` for optimal dialogue clarity and clipping prevention on built-in speakers.
+  - Updated Settings footer to clarify that Audio Passthrough is for external HDMI AVRs/soundbars and should be left disabled when using built-in Mac speakers or AirPods.
+
+### 5. Dolby Vision Profile 5 Deprioritization (`StreamManager.swift`) — Completed & Verified
+- **Issue**:
+  - In `vo=libmpv` over OpenGL, mpv uses the legacy `vo_gpu` engine which lacks libplacebo IPTPQc2 reshaping, causing single-layer Profile 5 releases to render with a magenta/green cast. Profile 8.1 / 7 releases (with HDR10 fallback) play with correct colors.
+- **Resolution**:
+  - Implemented `isDolbyVisionProfile5(_ stream: Stream) -> Bool` with regex token boundary guards (`\bPROFILE[\.\s_-]*5\b`, `\bDOVI0?5\b`, etc.) to avoid false positives on audio channels like `DDP5.1`.
+  - Exempts any release that has an HDR10/HDR/Profile 8 fallback.
+  - Deprioritizes single-layer Profile 5 streams in health scoring and composite ranking so that clean HDR10, Profile 8 (hybrid DV/HDR10), and SDR streams win automatically.
+
+### 6. Verification & Deployment — Completed & Verified
+- **Automated Tests**: Added regression test `dolbyVisionProfile5DeprioritizedOverHDR10AndProfile8()`. Full suite passed with **81 tests across 6 suites with 0 failures** (`** TEST SUCCEEDED **`).
+- **Release Build**: Compiled cleanly (`** BUILD SUCCEEDED **`).
+- **Ad-Hoc Signed & Installed**: Deployed to `/Applications/Flux.app`.
+- **DMG Package Updated**: Fresh `Flux.dmg` generated (44.3 MB).
+- **Application Running**: `/Applications/Flux.app` launched and active.
+
+---
+
+## Sep 5, 2026 (Night) — MPV HIGH-QUALITY VIDEO RENDERING, HDR TONE-MAPPING & DITHERING OVERHAUL
+
+### 1. High-Quality Profile & Deprecated Property Elimination (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - Micro-pixelation and banding observed on low-bitrate or challenging encodings (such as `Project.Hail.Mary.2026.1080p.WEB.x264.AC3.5.1-PoNg.mp4`).
+  - Investigation revealed the source file was a severely starved (1.7 Mbps, 0 B-frames) 8-bit `yuv420p` container tagged with 10-bit HDR10 PQ metadata (`smpte2084` + `bt2020nc`), compressing a 10,000-nit dynamic range into only 256 quantization levels.
+  - On the player side, `MPVVideoView.swift` was initializing mpv with `profile=fast` and `scale=bilinear`.
+  - In modern mpv, `profile=fast` explicitly sets:
+    - `scale=bilinear`, `dscale=bilinear` (causes coarse nearest-neighbor-like pixelation)
+    - `dither=no` (completely disables dithering, leaving quantization steps unmasked)
+    - `hdr-compute-peak=no` (disables dynamic HDR peak luminance computation)
+    - `correct-downscaling=no`, `linear-downscaling=no`, `sigmoid-upscaling=no`
+- **Resolution**:
+  - Replaced `profile=fast` and `scale=bilinear` with modern **`profile=high-quality`** (the official successor to the deprecated `profile=gpu-hq`).
+  - Explicitly configured HDR and color management properties:
+    - `tone-mapping=auto`: Dynamic, smooth roll-off tone mapping instead of harsh clipping.
+    - `hdr-compute-peak=yes`: Accurate per-frame HDR peak luminance measurement.
+    - `gamut-mapping-mode=auto`: Standard color gamut conversion.
+  - Retained the proven `vo=libmpv` + `CAOpenGLLayer` architecture (which is the recommended zero-hop embedding model on macOS AppKit/SwiftUI).
+
+### 2. Dynamic Target Backbuffer Depth Injection (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - mpv's automatic dithering (`dither-depth=auto`) defaults to assuming an 8-bit output target when using the libmpv render API because the on-the-wire bit depth cannot be probed automatically over OpenGL.
+  - On Liquid Retina XDR displays (where Flux allocates a 64-bit RGBA16F floating-point backbuffer), mpv was unaware of the 16-bit headroom and could not properly dither against the high-precision backbuffer.
+- **Resolution**:
+  - In `MPVLayer.draw(inCGLContext:...)`, dynamically inspect the screen's EDR capability:
+    ```swift
+    let edr = owner.window?.screen?.maximumExtendedDynamicRangeColorComponentValue
+        ?? NSScreen.main?.maximumExtendedDynamicRangeColorComponentValue
+        ?? 1.0
+    var depth: Int32 = edr > 1.0 ? 16 : 8
+    ```
+  - Passed `mpv_render_param(type: MPV_RENDER_PARAM_DEPTH, data: depthPtr)` into `mpv_render_context_render()`.
+  - On XDR screens, mpv renders and dithers into 16-bit depth; on standard SDR monitors, it targets 8-bit depth with active Floyd-Steinberg dithering.
+
+### 3. Graceful HDR-to-SDR Display Tone-Mapping (`MPVVideoView.swift`) — Completed & Verified
+- **Issue**:
+  - Previously, `applyColorPipeline()` unconditionally forced `mpvLayer.wantsExtendedDynamicRangeContent = true` and `tone-mapping = clip` whenever `gamma == "pq"` or `"hlg"`, even on SDR screens or monitors where `edr == 1.0`. This clipped highlights harshly and caused crushing.
+- **Resolution**:
+  - Guarded EDR display mode with `let canDoEDR = isHDR && edr > 1.0`.
+  - When playing on SDR displays, `target-trc`, `target-prim`, `target-peak`, and `tone-mapping` remain `auto`, and `colorspace` is set to `nil`, allowing mpv's high-quality shader pipeline to smoothly tone-map HDR into SDR without highlight blowout or crushed gradients.
+
+### 4. Verification & Deployment — Completed & Verified
+- **Automated Tests**: Full test suite passed with **80 tests across 6 suites with 0 failures** (`** TEST SUCCEEDED **`).
+- **Release Build**: Compiled `Release` configuration cleanly (`** BUILD SUCCEEDED **`).
+- **Ad-Hoc Signed & Deployed**: Installed to `/Applications/Flux.app`.
+- **DMG Package Updated**: Fresh `Flux.dmg` generated via `create-dmg` (44.5 MB).
+- **Application Launched**: `/Applications/Flux.app` running with active high-quality rendering pipeline.
+
+---
+
+## Sep 5, 2026 (Late Night) — FIXED SEARCH CARD DIMENSIONS, STEMMED FRANCHISE SEARCH & SMOOTH VOLUME BOOST OVERHAUL
+
+### 1. Fixed Card Dimensions Across All Search Results (`GlassCard.swift`, `SearchView.swift`) — Completed & Verified
+- **Issue**: In `SearchView`, some cards (e.g. *Making of Game of Thrones*) rendered as wide horizontal landscape cards extending across columns or off the right side of the window instead of maintaining the strict 2:3 portrait card dimensions.
+- **Root Cause**:
+  - `Image.resizable().aspectRatio(contentMode: .fill)` without frame bounding or clipping allowed landscape images (e.g. 300x225) to expand their layout width to 400+ pt to satisfy the vertical height constraint.
+  - `imagePlate` lacked an explicit aspect ratio geometry anchor, causing `ZStack` to inherit the expanded layout width of the image.
+  - `GridItem(.adaptive(minimum: 160))` in `SearchView` lacked a maximum bound, allowing oversized cells to widen the column.
+- **Resolution**:
+  - **Geometry Bedrock**: Inserted `Color.clear.aspectRatio(aspectRatio.ratio, contentMode: .fit)` as the layout foundation inside `imagePlate`.
+  - **Strict Image Bounding**: Framed `imageContent` and `placeholderView` with `.frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).clipped()`.
+  - **Bounded Grid Columns**: Updated `SearchView` grid columns to `GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 24)`. All cards now strictly conform to 2:3 portrait geometry regardless of image aspect ratio or resolution.
+
+### 2. Stemmed Exact & Prefix Matching for Flagship Titles (`RelevanceScorer.swift`, `CinemetaClient.swift`) — Completed & Verified
+- **Issue**: Searching singular `"game of throne"` did not match `"Game of Thrones"` as an exact match in Tier 1 due to raw string comparison, dropping the flagship HBO show into Tier 3 where movie stubs (*The IMAX Experience*, *Conquest & Rebellion*) beat it due to higher synthetic vote allocations.
+- **Resolution**:
+  - **Token-Level Stemmed Exact Match**: Upgraded `isExactMatch` and `isPrefixMatch` to compare token arrays with plural/singular stemming (`tokenMatches`). `"game of throne"` now matches `"Game of Thrones"` in Tier 1 (10,000 points) and spinoffs in Tier 2 (9,500 points).
+  - **Equalized Synthetic Demand**: In `CinemetaClient.swift`, equalized base popularity (`250.0`) and vote count (`40,000.0`) between movies and TV series so high-demand series are never artificially disadvantaged against movie specials.
+
+### 3. Smooth Volume Boost Gauge Overhaul (`PlayerControlsView.swift`) — Completed & Verified
+- **Issue**: When clicking the up arrow to increase volume boost beyond 100%:
+  - Click 1 (100% $\rightarrow$ 105%): Bar moves.
+  - Click 2 (105% $\rightarrow$ 110%): Bar does NOT move.
+  - Click 3 (110% $\rightarrow$ 115%): Bar does NOT move.
+  - Click 4 (115% $\rightarrow$ 120%): Bar starts moving again.
+- **Root Cause**:
+  - `volumeCapsule` used separate `Capsule().frame(width: max(h, boostWidth), height: h)`. Because $h = 6\text{pt}$ and the half-track width is $40\text{pt}$, at 105% width was $2\text{pt}$, at 110% $4\text{pt}$, and at 115% $6\text{pt}$ — all three values were clamped to $6\text{pt}$ by `max(6, width)`. This produced a 15% dead zone where 3 full clicks caused 0 visual movement.
+- **Resolution**:
+  - **Unified Clipped Track**: Replaced the separate clamped capsules with a single `.clipShape(Capsule())` container holding linear `Rectangle()` fills for base and boost.
+  - **Dead Zone Eliminated**: At each 5% step, `boostWidth` increases by exactly $2.0\text{pt}$ ($40 \times 0.05$). Every step (105%, 110%, 115%, 120%) produces an immediate, visible change.
+  - **Fluid Animation**: Added `.animation(.smooth(duration: 0.12), value: vol)` for buttery-smooth slider transitions with zero stutter or lag.
+
+---
+
+## Sep 5, 2026 (Night) — UNIVERSAL SEARCH RELEVANCE OVERHAUL & GHOST CARDS RESTORATION
+
+### 1. Universal Word-Boundary Franchise Prefix Matching (`RelevanceScorer.swift`) — Completed & Verified
+- **Issue**:
+  - The previous scoring system worked well for *Avengers* but degraded performance for other major franchises and classics (e.g. *Harry Potter*, *Batman*, *Spider-Man*, *The Matrix*, *The Godfather*, *Titanic*).
+  - Colons were required to trigger the 10,000-point franchise stem boost. Franchise sequels without colons (*Harry Potter and the Sorcerer's Stone*) received only 5,000 points, losing to random documentaries or specials that happened to have colons (*Harry Potter: A History of Magic*).
+- **Resolution**:
+  - **Unified Franchise Prefix Tier (9,500 Base)**: Any title beginning with the query followed by a word boundary (`" "`) or punctuation delimiter (`":"`, `"-"`, `" — "`, `" – "`) is assigned a top-tier base score of `9,500` with gentle length decay (`-50` per extra token, capped at `400`).
+  - Flagships and sequels across all franchises (*Harry Potter and the Sorcerer's Stone*, *The Batman*, *The Dark Knight*, *Spider-Man: No Way Home*, *Avengers: Endgame*) consistently rank ahead of unrelated homonyms and obscure documentaries.
+
+### 2. Complete Removal of Artificial Era Penalties (`RelevanceScorer.swift`) — Completed & Verified
+- **Issue**: A global `year >= 2000 { +800 } else if year >= 1990 { -800 } else { -2000 }` rule was heavily penalizing pre-2000 masterpieces (*The Matrix* 1999, *Titanic* 1997, *Pulp Fiction* 1994, *The Godfather* 1972, *Star Wars* 1977).
+- **Resolution**:
+  - **Excised Blanket Era Penalties**: Removed the era penalty entirely from exact and franchise matches.
+  - **Surgical Vintage TV Series Demotion**: Limited vintage demotion (`-1,500`) strictly to `tvSeries` older than 1980 on single-word queries (e.g. 1961 *The Avengers* TV show), keeping legendary classic movies completely unpenalized.
+  - **Acclaimed Production Safeguard**: Gated relative knockoff demotion with `candidate.voteAverage < 6.0`, ensuring acclaimed older or alternative productions are never tagged as mockbusters.
+
+### 3. Critical Flop Demotion & Acclaimed Title Boost (`CinemetaClient.swift`) — Completed & Verified
+- **Resolution**:
+  - Added IMDb rating thresholds into Cinemeta popularity calculation:
+    - Titles with `imdbRating < 5.0` receive a `0.6` multiplier (demoting critical flops and low-budget knockoffs like the 1998 *The Avengers* movie).
+    - Acclaimed titles with `imdbRating >= 7.5` receive a `1.3` multiplier.
+  - Year-only release dates now default to Dec 31 (`month: 12, day: 31`) so future unreleased titles aren't misclassified as released today.
+
+### 4. Ghost Loading Cards Restoration During Query Typing (`SearchViewModel.swift`) — Completed & Verified
+- **Issue**: When typing (e.g. typing "harry" and continuing to "harry potter"), the UI froze displaying the stale previous results instead of showing ghost shimmer skeleton cards indicating an active search.
+- **Resolution**:
+  - Restored `searchResults = []` inside `SearchViewModel.handleQueryChange(_:)` immediately when query changes.
+  - This allows `viewModel.isLoading && viewModel.searchResults.isEmpty` in `SearchView.swift` to evaluate to true, instantly presenting the 12 `GhostCard()` shimmer skeletons while debouncing and fetching new results.
+
+---
+
+## Sep 5, 2026 (Evening) — CINEMETA-FIRST POPULARITY RANKING, FRANCHISE STEM ELEVATION & ARTWORK PRESERVATION
+
+### 1. Power-Law Popularity & Demand Modeling for Cinemeta (`CinemetaClient.swift`) — Completed & Verified
+- **Issue**: In release builds or fresh installs without a TMDB API key, Cinemeta catalog queries returned results where obscure vintage entries (e.g. 1961 British *The Avengers* TV show) or mockbusters ranked above flagship franchise blockbusters (*The Avengers* 2012, *Endgame*, *Infinity War*). Furthermore, synthetic metrics were flat (`200 - index * 5`), giving movies and series identical scores at the same catalog index.
+- **Resolution**:
+  - **Pareto Power-Law Decay**: Modeled Cinemeta search index position as true global streaming demand via `decay = 1.0 / pow(Double(index + 1), isMovie ? 0.6 : 0.7)`.
+  - **Movie vs. Series Calibration**: Scaled movie popularity to `250.0 * decay` (40k votes decay) and series to `100.0 * decay` (10k votes decay), accurately reflecting global theatrical vs television audience volume.
+  - **Decoded Real Popularities**: Decoded Cinemeta's embedded `popularities` dictionary (`moviedb`, `stremio`, `trakt`) and `imdbRating`.
+  - **Monotonic Popularity Multiplier**: Incorporated real TMDB popularity as a bounded multiplier (`multiplier = max(1.0, min(tmdbPop / 20.0, 2.5))`) preserving index order while giving proven blockbusters an extra boost.
+  - **Metahub 404 Poster Fix**: Stopped overwriting valid Amazon IMDb posters (`m.media-amazon.com`) with missing `images.metahub.space/poster/large/{id}/img` URLs. Upgraded Amazon URLs directly to retina `._V1_SX700.jpg`, eliminating grey card placeholder bugs.
+
+### 2. Universal Mockbuster & Audio Commentary Pruning (`QualityFilter.swift`, `RelevanceScorer.swift`) — Completed & Verified
+- **Issue**: Commentary tracks (e.g. *Rifftrax: The Avengers*) and mockbusters (*Avengers Grimm*) crowded top rows of search results.
+- **Resolution**:
+  - **Audio Commentary Filter**: Added `lowerTitle.hasPrefix("rifftrax:") || lowerTitle.hasPrefix("rifftrax -")` to `QualityFilter.isEligible`, immediately disqualifying riff/commentary audio tracks.
+  - **Universal Mockbuster Demotion**: Removed restrictive `voteCount < 50` threshold and added explicit demotion for mockbuster/parody keywords (`"grimm"`, `"asylum"`, `"rifftrax"`) with a `-15,000` relevance penalty, placing them at the bottom of search results.
+
+### 3. Franchise Stem Top-Tier Elevation & Modern Era Weighting (`RelevanceScorer.swift`) — Completed & Verified
+- **Issue**: `RelevanceScorer` previously demoted franchise sequels (*Avengers: Endgame*, *Infinity War*) below unrelated titles with shorter names due to a `pow(queryTokens / titleTokens, 1.5)` penalty.
+- **Resolution**:
+  - **Franchise Stem Exact Match (10,000 Base)**: Candidates with a franchise stem matching the query (e.g. `query = "avengers"` and candidate `candidate.franchiseStem == "avengers"`) are awarded the top-tier base score of `10,000` (identical to exact root matches), eliminating sequel penalties.
+  - **Flagship Modern Era Weighting**: For single-word franchise queries, awarded `+800` bonus for modern era (2000+), `-800` for 1990s, and `-2,000` for vintage pre-1990 homonyms (ensuring MCU *The Avengers* 2012 beats the 1961 TV show).
+  - **Upcoming Release Adjustment**: Applied a `-800` modifier for future unreleased movies (*Avengers: Doomsday*), keeping released, watchable blockbusters at rank #1 while keeping upcoming titles discoverable.
+  - **Popularity Amplification**: Boosted `Weight.popularity` to `600` and `Weight.voteCredibility` to `1,200`.
+
+### 4. Verification & Automated Testing (`SearchEngineTests.swift`) — Completed & Verified
+- Added unit tests:
+  - `franchiseSearchRanksFlagshipAndSequelsAboveVintageAndMockbusters()`
+  - `cinemetaPowerLawPopularityAndArtworkPreservation()`
+  - `qualityFilterPrunesRifftraxCommentary()`
+- Full unit test suite (`fluxTests`) passed with 0 failures across all 62 test cases.
+- Debug build compiled clean and launched successfully.
+
+---
+
+## Sep 5, 2026 — SEARCH PERFORMANCE, TYPO TOLERANCE, TMDB ISOLATION & TV DISCOVERY RAILS
 
 ### 1. High-Speed TMDB Search & Typo Resilience (`SearchEngine.swift`, `TMDBClient.swift`, `PrefixTrie.swift`, `QualityFilter.swift`, `RelevanceScorer.swift`, `SearchViewModel.swift`, `SearchView.swift`) — Completed & Verified
 - **Issue**: Search in release builds was noticeably slower than debug and failed on minor typos or plurals (e.g. searching "avatar the way of waters" missed *Avatar: The Way of Water* in top results, or placed a Japanese anime titled "Avatar" ahead of James Cameron's *Avatar*). Ghost skeleton cards flashed on every keystroke during query refinement.

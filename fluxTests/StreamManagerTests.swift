@@ -322,6 +322,58 @@ struct StreamManagerTests {
         #expect(manager.parseQuality(from: "Movie.2024.1080p") == "1080p")
     }
 
+    @Test func parseQualityNeutralizes4KHDHubAndCorrectlyExtracts1080P() {
+        let manager = StreamManager.shared
+        // WebStreamr releases scraping from 4KHDHub must NOT be falsely identified as 4K
+        let title1 = "Project.Hail.Mary.2026.IMAX.REPACK.1080p.AMZN.WEB-DL.MULTi.DDP5.1.Atmos.H.264-4KHDHub.com.mkv"
+        #expect(manager.parseQuality(from: title1) == "1080p")
+
+        let title2 = "Project Hail Mary (2026) IMAX Hybrid 1080p BluRay REMUX AVC (CiNEPHiLES-4kHDHub).mkv"
+        #expect(manager.parseQuality(from: title2) == "1080p")
+
+        let title3 = "Project.Hail.Mary.2026.IMAX.REPACK.1080p.AMZN.WEB-DL.MULTi.DDP5.1.AV1-4KHDHub.com.mkv"
+        #expect(manager.parseQuality(from: title3) == "1080p")
+
+        // 2160p release from 4KHDHub must be 4K
+        let title4 = "Project Hail Mary (2026) IMAX Hybrid 2160p UHD BluRay REMUX DV HDR10P (CiNEPHiLES-4kHDHub).mkv"
+        #expect(manager.parseQuality(from: title4) == "4K")
+    }
+
+    @Test func parseQualityPrioritizesAddonNameHeader() {
+        let manager = StreamManager.shared
+        // WebStreamr header with 1080p
+        let webstreamrHeader = "WebStreamrMBG\n🌐 🇺🇸 🇮🇳 🇮🇳 🇮🇳\n1080p"
+        let rawTitle = "Project.Hail.Mary.2026.IMAX.REPACK.1080p.AMZN.WEB-DL.MULTi.DDP5.1.Atmos.H.264-4KHDHub.com.mkv"
+        #expect(manager.parseQuality(name: webstreamrHeader, title: rawTitle) == "1080p")
+
+        // Torrentio header with 4k HDR
+        let torrentio4k = "Torrentio\n4k HDR"
+        #expect(manager.parseQuality(name: torrentio4k, title: "Fight.Club.1999.Remux.mkv") == "4K")
+
+        // Torrentio header with 1080p
+        let torrentio1080 = "Torrentio\n1080p"
+        #expect(manager.parseQuality(name: torrentio1080, title: "Fight.Club.1999.Remux.mkv") == "1080p")
+
+        // Meteor header with 2160p
+        let meteor4k = "[P2P☁️] Meteor\n2160p"
+        #expect(manager.parseQuality(name: meteor4k, title: "Movie.mkv") == "4K")
+    }
+
+    @Test func parseQualityNeutralizesAudioAndHDRTags() {
+        let manager = StreamManager.shared
+        // TrueHD and DTS-HD contain "HD" but must not falsely identify as 720p HD
+        #expect(manager.parseQuality(from: "Movie.2024.1080p.TrueHD.7.1.Atmos.mkv") == "1080p")
+        #expect(manager.parseQuality(from: "Movie.2024.DTS-HD.MA.720p.x264") == "720p")
+        #expect(manager.parseQuality(from: "Movie.2024.HDR10.1080p.WEBRip") == "1080p")
+        #expect(manager.parseQuality(from: "Movie.2024.UHD.HDR.x265") == "4K")
+        #expect(manager.parseQuality(from: "NBA.2K24.Highlights.1080p") == "1080p")
+
+        // Exact pixel dimensions
+        #expect(manager.parseQuality(from: "Movie.3840x2160.mkv") == "4K")
+        #expect(manager.parseQuality(from: "Movie.1920x1080.mkv") == "1080p")
+        #expect(manager.parseQuality(from: "Movie.1280x720.mkv") == "720p")
+    }
+
     @Test func shouldQueryAddonStrictlyEnforcesSourceModeGating() {
         let manager = StreamManager.shared
         let torrentio = StremioAddon(
@@ -712,6 +764,160 @@ struct StreamManagerTests {
         )
 
         #expect(winner?.id == ep2Stream.id)
+    }
+
+    @Test func dolbyVisionProfile5DeprioritizedOverHDR10AndProfile8() {
+        let manager = StreamManager.shared
+
+        let dvProfile5Stream = Stream(
+            title: "Movie.2024.1080p.ATVP.WEB-DL.DDP5.1.Atmos.DV.H.265-FLUX",
+            cleanTitle: "Movie (2024)",
+            url: URL(string: "https://stream.server/dv_p5.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        let hdr10Stream = Stream(
+            title: "Movie.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR10.H.265-FLUX",
+            cleanTitle: "Movie (2024)",
+            url: URL(string: "https://stream.server/hdr10.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        let profile8HybridStream = Stream(
+            title: "Movie.2024.1080p.UHD.BluRay.DDP5.1.DV.HDR10.x265-FLUX",
+            cleanTitle: "Movie (2024)",
+            url: URL(string: "https://stream.server/p8_hybrid.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        #expect(manager.isDolbyVisionProfile5(dvProfile5Stream) == true)
+        #expect(manager.isDolbyVisionProfile5(hdr10Stream) == false)
+        #expect(manager.isDolbyVisionProfile5(profile8HybridStream) == false)
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [dvProfile5Stream, hdr10Stream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English"
+        )
+
+        #expect(winner?.id == hdr10Stream.id)
+    }
+
+    @Test func getCachedStreamsRespectsSourceModeFiltering() async {
+        let manager = StreamManager.shared
+        let item = MediaItem(
+            id: "tt_test_cache_filtering_\(UUID().uuidString)",
+            title: "Test Movie",
+            description: "",
+            streamURL: nil,
+            category: "Movie"
+        )
+
+        let torrentStream = Stream(
+            title: "Test.Movie.2024.1080p.WEBRip",
+            cleanTitle: "Test Movie (2024)",
+            url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 50
+        )
+
+        let httpStream = Stream(
+            title: "Test Movie 1080p Direct",
+            cleanTitle: "Test Movie (2024)",
+            url: URL(string: "https://webstreamr.club/video.mp4")!,
+            source: "WebStreamrMBG",
+            quality: "1080p"
+        )
+
+        // Pre-populate cache directly with both streams
+        let cacheKey = item.id
+        await manager.cacheActor.set(key: cacheKey, streams: [torrentStream, httpStream])
+
+        // When sourceMode is http: only HTTP streams returned
+        let httpOnly = await manager.getCachedStreams(for: item, sourceMode: "http")
+        #expect(httpOnly != nil)
+        #expect(httpOnly?.count == 1)
+        #expect(httpOnly?.first?.isTorrent == false)
+        #expect(httpOnly?.first?.source == "WebStreamrMBG")
+
+        // When sourceMode is torrent: only Torrent streams returned
+        let torrentOnly = await manager.getCachedStreams(for: item, sourceMode: "torrent")
+        #expect(torrentOnly != nil)
+        #expect(torrentOnly?.count == 1)
+        #expect(torrentOnly?.first?.isTorrent == true)
+        #expect(torrentOnly?.first?.source == "Torrentio")
+
+        // When sourceMode is both: both streams returned
+        let both = await manager.getCachedStreams(for: item, sourceMode: "both")
+        #expect(both != nil)
+        #expect(both?.count == 2)
+    }
+
+    @Test @MainActor func selectStreamClearsForceStreamPickerAndSetsActiveStream() {
+        let player = PlayerManager.shared
+        player.forceStreamPicker = true
+        player.isStreamPickerPresented = true
+        
+        let testStream = Stream(
+            title: "Test Stream 1080p",
+            cleanTitle: "Test Stream",
+            url: URL(string: "https://webstreamr.club/test.mp4")!,
+            source: "WebStreamrMBG",
+            quality: "1080p"
+        )
+        
+        player.selectStream(testStream)
+        
+        #expect(player.forceStreamPicker == false)
+        #expect(player.isStreamPickerPresented == false)
+        #expect(player.currentSelectedStream == testStream)
+        #expect(player.currentStreamURL == testStream.url)
+        
+        player.close()
+    }
+        
+    @Test func parseQualityIdentifiesExplicitReleaseResolutionAndHandlesMisleadingTokens() {
+        let manager = StreamManager.shared
+        
+        // 4khdhub with 1080p release should be 1080p, NOT 4K
+        let q1 = manager.parseQuality(name: "PenguPlay\n1080p", title: "4KHDHub • PixelDrain • 1080p • MKV")
+        #expect(q1 == "1080p")
+        
+        // WebStreamr with 1080p header
+        let q2 = manager.parseQuality(name: "WebStreamrMBG\n1080p", title: "Project Hail Mary (2026) 1080p WEB-DL")
+        #expect(q2 == "1080p")
+        
+        // Genuine 4K release
+        let q3 = manager.parseQuality(name: "Torrentio\n4K", title: "Project.Hail.Mary.2026.2160p.UHD.HDR")
+        #expect(q3 == "4K")
+        
+        // 2K / 1440p
+        let q4 = manager.parseQuality(name: "Comet\n1440p", title: "Project.Hail.Mary.2026.1440p.QHD")
+        #expect(q4 == "2K")
+        
+        // Fallback to name header when title has no resolution tag
+        let q5 = manager.parseQuality(name: "WebStreamrMBG\n1080p", title: "Project Hail Mary WEB-DL")
+        #expect(q5 == "1080p")
+    }
+
+    @Test func streamCleanTitleFormattingStripsRedundancyAndEmojis() {
+        let stream = Stream(
+            title: "Project Hail Mary (2026) • 🗃 1080p • MKV • 5.98 GB • 450 seeds • PixelDrain",
+            cleanTitle: "PixelDrain • WEB-DL",
+            url: URL(string: "https://example.com/video.mkv")!,
+            source: "WebStreamrMBG",
+            quality: "1080p",
+            size: "5.98 GB"
+        )
+        
+        #expect(stream.quality == "1080p")
+        #expect(stream.containerType == "MKV")
+        #expect(stream.cleanTitle == "PixelDrain • WEB-DL")
     }
 }
 

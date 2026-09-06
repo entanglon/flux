@@ -37,6 +37,12 @@ struct QualityFilter: Sendable {
     nonisolated func isEligible(_ candidate: MediaCandidate, now: Date = Date()) -> Bool {
         guard !candidate.isAdult else { return false }
 
+        // Prune commentary and audio riff tracks (e.g. "Rifftrax: Avengers: Endgame")
+        let lowerTitle = candidate.title.lowercased()
+        if lowerTitle.hasPrefix("rifftrax:") || lowerTitle.hasPrefix("rifftrax -") {
+            return false
+        }
+
         // Require valid poster artwork across all sources
         if config.requirePoster {
             guard let poster = candidate.posterPath, !poster.isEmpty else { return false }

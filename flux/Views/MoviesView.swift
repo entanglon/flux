@@ -69,9 +69,9 @@ struct MoviesView: View {
                             .transition(.opacity)
                     }
 
-                    // 4. Now Playing in Theatres
+                    // 4. Now Playing
                     if !nowPlayingMovies.isEmpty {
-                        renderRail(title: "Now Playing in Theatres", listType: .nowPlayingMovies, items: nowPlayingMovies)
+                        renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
                     }
 
                     // 5. Popular on Streaming
@@ -79,9 +79,9 @@ struct MoviesView: View {
                         renderRail(title: "Popular on Streaming", listType: .streamingMovies, items: streamingMovies)
                     }
 
-                    // 6. Upcoming in Theatres
+                    // 6. Upcoming
                     if !upcomingMovies.isEmpty {
-                        renderRail(title: "Upcoming in Theatres", listType: .upcomingMovies, items: upcomingMovies)
+                        renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
                     }
 
                     // 7. Top Rated Movies

@@ -96,7 +96,12 @@ struct GlassCard: View {
 
     private var imagePlate: some View {
         ZStack(alignment: .bottomLeading) {
+            Color.clear
+                .aspectRatio(aspectRatio.ratio, contentMode: .fit)
+
             imageContent
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .clipped()
 
             VStack {
                 HStack {
@@ -136,6 +141,8 @@ struct GlassCard: View {
                     if let img = phase.image {
                         img.resizable()
                             .aspectRatio(contentMode: .fill)
+                            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                            .clipped()
                             .blur(radius: 16)
                             .overlay(Color.black.opacity(0.45))
                     } else {
@@ -161,6 +168,8 @@ struct GlassCard: View {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .clipped()
                 case .failure:
                     placeholderView
                 @unknown default:
@@ -275,6 +284,7 @@ struct GlassCard: View {
                     .padding(.horizontal, 10)
             }
         }
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
     }
 }
 
