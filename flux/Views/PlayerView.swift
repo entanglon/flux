@@ -1309,6 +1309,8 @@ struct PlayerView: View {
                     if !hasStreams && sourceMode == "http" {
                         Button {
                             UserDefaults.standard.set("both", forKey: UserDefaults.Key.streamingSourceMode)
+                            ProfileManager.shared.saveCurrentProfileSettings()
+                            AuthManager.shared.scheduleAutoSync()
                             playerManager.errorMessage = nil
                             playerManager.refreshStreamsForPicker()
                         } label: {

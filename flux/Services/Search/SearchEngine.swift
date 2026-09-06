@@ -123,6 +123,12 @@ actor SearchEngine {
 
         onResults(ranked)
     }
+    
+    /// Clears the trie and re-indexes only public trending titles, purging any previous user data.
+    func clearUserIndex() async {
+        await trie.removeAll()
+        await indexUserAndTrendingData()
+    }
 
     /// Indexes user data (History, Watchlist) and top trending items into the local Prefix Trie
     func indexUserAndTrendingData() async {

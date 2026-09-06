@@ -30,11 +30,17 @@ class UserDataService: ObservableObject {
                let legacy = UserDefaults.standard.array(forKey: "localHistoryDataStremio") {
                 UserDefaults.standard.set(legacy, forKey: historyKey)
             }
+        } else {
+            historyKey = "localHistoryDataStremio"
+            watchlistKey = "localWatchlistDataStremio"
+            collectionsKey = "localCollectionsData"
         }
         watchlist = []
         history = []
         collections = []
-        loadInitialData()
+        if profile != nil {
+            loadInitialData()
+        }
     }
     
     private init() {
@@ -51,7 +57,24 @@ class UserDataService: ObservableObject {
         DispatchQueue.main.async {
             self.watchlist = []
             self.history = []
+            self.collections = []
         }
+    }
+
+    /// Wipes all in-memory library and local storage upon account sign-out.
+    func handleSignOut() {
+        stopSyncing()
+        watchlist = []
+        history = []
+        collections = []
+        historyKey = "localHistoryDataStremio"
+        watchlistKey = "localWatchlistDataStremio"
+        collectionsKey = "localCollectionsData"
+        
+        UserDefaults.standard.removeObject(forKey: "localHistoryDataStremio")
+        UserDefaults.standard.removeObject(forKey: "localWatchlistDataStremio")
+        UserDefaults.standard.removeObject(forKey: "localCollectionsData")
+        UserDefaults.standard.removeObject(forKey: "globalEpisodeProgress")
     }
     
     private func loadInitialData() {
@@ -305,8 +328,12 @@ class UserDataService: ObservableObject {
         UserDefaults.standard.synchronize()
         
         let newItems = parseItems(currentData)
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self[keyPath: target] = newItems
+        } else {
+            DispatchQueue.main.async {
+                self[keyPath: target] = newItems
+            }
         }
         AuthManager.shared.scheduleAutoSync()
     }
@@ -443,8 +470,12 @@ class UserDataService: ObservableObject {
         UserDefaults.standard.synchronize()
         
         let newItems = parseItems(currentData)
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self[keyPath: target] = newItems
+        } else {
+            DispatchQueue.main.async {
+                self[keyPath: target] = newItems
+            }
         }
         AuthManager.shared.scheduleAutoSync()
     }

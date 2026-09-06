@@ -65,6 +65,37 @@ final class ProfileManager: ObservableObject {
         TasteProfileManager.shared.switchProfile(to: nil)
     }
 
+    /// Wipes all active watching profile state and account profiles upon sign-out.
+    func handleSignOut() {
+        for profile in profiles {
+            let prefix = "profile.\(profile.id.uuidString)."
+            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        currentProfile = nil
+        UserDefaults.standard.removeObject(forKey: currentProfileKey)
+        profiles = []
+        UserDefaults.standard.removeObject(forKey: profilesKey)
+        applyProfileDataScope(nil)
+    }
+
+    /// Ensures a clean, dedicated Guest watching profile is selected when continuing as guest.
+    func ensureGuestProfile() {
+        if let existing = profiles.first(where: { $0.name == "Guest" }) {
+            selectProfile(existing)
+            return
+        }
+        if let first = profiles.first {
+            selectProfile(first)
+            return
+        }
+        let guest = UserProfile(id: UUID(), name: "Guest", avatarID: "avatar1", createdAt: Date())
+        profiles = [guest]
+        saveProfiles()
+        selectProfile(guest)
+    }
+
     // MARK: - Per-profile settings snapshot
 
     var playbackSettingKeys: [String] {
@@ -186,6 +217,15 @@ final class ProfileManager: ObservableObject {
         }
         guard !imported.isEmpty else { return }
         DispatchQueue.main.async {
+            // Clean up any local guest profiles being replaced by the cloud profiles
+            for localProfile in self.profiles {
+                if !imported.contains(where: { $0.id == localProfile.id }) {
+                    let prefix = "profile.\(localProfile.id.uuidString)."
+                    for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress"] {
+                        UserDefaults.standard.removeObject(forKey: key)
+                    }
+                }
+            }
             self.profiles = imported
             self.saveProfiles()
             if self.currentProfile == nil || !imported.contains(where: { $0.id == self.currentProfile?.id }) {

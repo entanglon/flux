@@ -18,10 +18,25 @@ final class TasteProfileManager: ObservableObject {
         if let profile {
             lovedKey = "profile.\(profile.id.uuidString).loved"
             watchedKey = "profile.\(profile.id.uuidString).watchSnaps"
+        } else {
+            lovedKey = "tasteProfileLovedItems"
+            watchedKey = "tasteProfileWatchSnapshots"
         }
         lovedItems = []
         snapshots = []
-        load()
+        if profile != nil {
+            load()
+        }
+    }
+
+    /// Wipes all in-memory taste signals and local storage upon account sign-out.
+    func handleSignOut() {
+        lovedItems = []
+        snapshots = []
+        lovedKey = "tasteProfileLovedItems"
+        watchedKey = "tasteProfileWatchSnapshots"
+        UserDefaults.standard.removeObject(forKey: "tasteProfileLovedItems")
+        UserDefaults.standard.removeObject(forKey: "tasteProfileWatchSnapshots")
     }
 
     struct WatchSnapshot: Codable {

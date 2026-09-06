@@ -1,6 +1,38 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 6, 2026 (Afternoon) — V1.0 RELEASE POLISH: BRANDING, SHORTCUTS MODAL, SETTINGS UI/UX & PUBLIC REPO READINESS
+## LATEST: Sep 6, 2026 (Evening) — PROFILE ISOLATION ON SIGN-OUT, GUEST MODE & SETTINGS UI/UX PERFECTION
+
+### 1. Root Cause & Requirements Addressed
+- **Watching Profile Remaining on Account Sign-Out**:
+  - Previously, `AuthManager.signOut()` wiped keychain session tokens and user identity, but left `ProfileManager.shared.currentProfile`, `ProfileManager.shared.profiles`, and `UserDataService.shared` watch history intact in memory.
+  - When the user subsequently clicked "Continue as Guest", `authManager.needsGate` became `false` and `ProfileGateView` was skipped because `currentProfile` was still set to the old account's profile, leading directly into `ContentView` with the old user's profile and watch history.
+  - **Resolution**:
+    - Implemented `ProfileManager.shared.handleSignOut()`: iterates over all user profiles, purges all local namespaced keys `profile.<uuid>.*` (`history`, `watchlist`, `loved`, `watchSnaps`, `settings`, `collections`, `episodeProgress`), removes `fluxCurrentProfile` and `fluxProfiles` from `UserDefaults`, clears `profiles = []`, and sets `currentProfile = nil`.
+    - Implemented `UserDataService.shared.handleSignOut()` and `TasteProfileManager.shared.handleSignOut()`: purges all in-memory lists, clears local storage keys, and resets state.
+    - Implemented `PlayerManager.shared.handleSignOut()`: stops active playback and wipes `lastPlayedStreams`.
+    - Added `ProfileManager.shared.ensureGuestProfile()`: ensures a clean, isolated guest watching profile ("Guest", avatar "avatar1") is created and selected when continuing as guest.
+    - Added animated transitions in `fluxApp.swift` (`.animation(.easeInOut(duration: 0.25), value: authManager.needsGate)` and `.animation(..., value: profileManager.currentProfile?.id)`).
+- **Settings UI/UX & Navigation Polish**:
+  - Added native `SettingsLink` gear button directly to the sidebar's `ProfileFooter` in `ContentView.swift`, allowing users to open Settings from the UI without relying solely on `Cmd+,`.
+  - In `SettingsView.swift` (`AddonsSettingsTabView`):
+    - Removed non-functional/broken configure gear button from stock addons (e.g. OpenSubtitles).
+    - Fixed community addon configure links to sanitize `/manifest.json` properly and open `https://<domain>/configure` in browser.
+    - Expanded Settings frame from 530x460 to 550x500 to prevent vertical content clipping across all tabs.
+  - In `PlayerView.swift`: Added `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()` when "Enable Torrents & Retry" button is pressed so setting changes persist across profile switches.
+
+### 2. Verification & Automated Tests
+- **Automated Tests**:
+  - Added unit tests `signOutRemovesActiveWatchingProfileAndData` and `continueAsGuestInitializesFreshGuestWatchingProfile` in `UserDataServiceTests.swift`.
+  - Executed `xcodebuild test`: **100% of 92 unit tests across 6 suites passed cleanly** with 0 failures (`** TEST SUCCEEDED **`).
+- **Release Packaging**:
+  - Ran `scripts/build-releases.sh --macos26`.
+  - Release binary built and codesigned (`** BUILD SUCCEEDED **`).
+  - `/Applications/Flux.app` updated with fresh build and verified.
+  - Packaged and verified `Flux.dmg` (42 MB).
+
+---
+
+## PREVIOUS: Sep 6, 2026 (Afternoon) — V1.0 RELEASE POLISH: BRANDING, SHORTCUTS MODAL, SETTINGS UI/UX & PUBLIC REPO READINESS
 
 ### 1. Root Cause & Requirements Addressed
 - **macOS Menu Bar, About Panel & Help Search Capitalization**:

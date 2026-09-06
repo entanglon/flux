@@ -210,4 +210,45 @@ struct UserDataServiceTests {
         #expect(stripped1 == stripped2)
         #expect(item1.title.lowercased() == item2.title.lowercased())
     }
+
+    @Test @MainActor func signOutRemovesActiveWatchingProfileAndData() {
+        // Setup mock user session and profile
+        let testProfile = UserProfile(id: UUID(), name: "TestAccountUser", avatarID: "avatar2", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+        
+        let testMovie = MediaItem(id: "tt999999", title: "Test Logout Movie", description: "", streamURL: nil, category: "Movie", progress: 0.5)
+        UserDataService.shared.addToHistory(testMovie, progress: 0.5)
+        
+        #expect(ProfileManager.shared.currentProfile?.name == "TestAccountUser")
+        #expect(UserDataService.shared.history.contains(where: { $0.id == "tt999999" }))
+        
+        // Execute Sign Out
+        AuthManager.shared.signOut()
+        
+        // Verify watching profile is completely removed
+        #expect(ProfileManager.shared.currentProfile == nil)
+        #expect(ProfileManager.shared.profiles.isEmpty)
+        #expect(UserDataService.shared.history.isEmpty)
+        #expect(UserDataService.shared.watchlist.isEmpty)
+        #expect(!AuthManager.shared.isAuthenticated)
+        #expect(!AuthManager.shared.isGuestMode)
+    }
+
+    @Test @MainActor func continueAsGuestInitializesFreshGuestWatchingProfile() {
+        // Sign out to clean state
+        AuthManager.shared.signOut()
+        #expect(ProfileManager.shared.currentProfile == nil)
+        
+        // Continue as guest
+        AuthManager.shared.continueAsGuest()
+        
+        #expect(AuthManager.shared.isGuestMode == true)
+        #expect(ProfileManager.shared.currentProfile != nil)
+        #expect(ProfileManager.shared.currentProfile?.name == "Guest")
+        #expect(UserDataService.shared.history.isEmpty)
+        
+        // Clean up
+        AuthManager.shared.signOut()
+    }
 }

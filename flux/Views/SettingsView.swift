@@ -14,7 +14,7 @@ struct SettingsView: View {
             AdvancedSettingsView()
                 .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
         }
-        .frame(width: 530, height: 460)
+        .frame(width: 550, height: 500)
         .padding()
         .preferredColorScheme(.dark)
     }
@@ -721,25 +721,16 @@ struct AddonsSettingsTabView: View {
                             }
                             
                             // Configure Gear Button (Left of Toggle)
-                            if !addon.url.isEmpty {
+                            if let configURL = configureURL(for: addon) {
                                 Button(action: {
-                                    var urlStr = addon.url
-                                    if !urlStr.contains("/configure") && !urlStr.isEmpty {
-                                        if let configureURL = URL(string: "\(urlStr)/configure") {
-                                            NSWorkspace.shared.open(configureURL)
-                                            return
-                                        }
-                                    }
-                                    if let targetURL = URL(string: urlStr) {
-                                        NSWorkspace.shared.open(targetURL)
-                                    }
+                                    NSWorkspace.shared.open(configURL)
                                 }) {
                                     Image(systemName: "gearshape.fill")
                                         .font(.system(size: 12))
                                         .foregroundColor(.white.opacity(0.75))
                                 }
                                 .buttonStyle(.borderless)
-                                .help("Configure addon")
+                                .help("Configure addon in browser")
                             }
                             
                             // Toggle Switch (Far Right Alignment)
@@ -828,6 +819,20 @@ struct AddonsSettingsTabView: View {
         }
     }
     
+    private func configureURL(for addon: StremioAddon) -> URL? {
+        guard !addon.isStock, !addon.url.isEmpty else { return nil }
+        var base = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.contains("/configure") {
+            return URL(string: base)
+        }
+        if let url = URL(string: base), let scheme = url.scheme, let host = url.host {
+            let portPart = url.port != nil ? ":\(url.port!)" : ""
+            return URL(string: "\(scheme)://\(host)\(portPart)/configure")
+        }
+        return URL(string: "\(base)/configure")
+    }
+
     private func fallbackIcon(name: String) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)

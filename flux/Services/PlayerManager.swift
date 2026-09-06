@@ -1525,6 +1525,13 @@ class PlayerManager: ObservableObject {
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
     
+    func handleSignOut() {
+        close()
+        DispatchQueue.main.async {
+            self.lastPlayedStreams = [:]
+        }
+    }
+
     func close() {
         DispatchQueue.main.async {
             SleepAssertionManager.shared.playerDidClose()

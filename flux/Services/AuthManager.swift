@@ -34,7 +34,15 @@ class AuthManager: ObservableObject {
 
     func continueAsGuest() {
         UserDefaults.standard.set(true, forKey: Self.guestModeKey)
-        DispatchQueue.main.async { self.isGuestMode = true }
+        if Thread.isMainThread {
+            self.isGuestMode = true
+            ProfileManager.shared.ensureGuestProfile()
+        } else {
+            DispatchQueue.main.async {
+                self.isGuestMode = true
+                ProfileManager.shared.ensureGuestProfile()
+            }
+        }
     }
 
     private init() {
@@ -148,12 +156,22 @@ class AuthManager: ObservableObject {
     }
 
     func signOut() {
+        autoSyncTask?.cancel()
+        autoSyncTask = nil
         clearSession()
         UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.cloudLastSyncAt)
         self.currentUser = nil
         self.isAuthenticated = false
         self.isGuestMode = false
         self.lastSyncDate = nil
+        
+        ProfileManager.shared.handleSignOut()
+        UserDataService.shared.handleSignOut()
+        TasteProfileManager.shared.handleSignOut()
+        PlayerManager.shared.handleSignOut()
+        Task { await SearchEngine.shared.clearUserIndex() }
+        NotificationCenter.default.post(name: .fluxRefresh, object: nil)
     }
 
     // MARK: - Library sync

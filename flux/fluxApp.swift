@@ -86,6 +86,8 @@ struct fluxApp: App {
                     ProfileGateView()
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: authManager.needsGate)
+            .animation(.easeInOut(duration: 0.25), value: profileManager.currentProfile?.id)
             .preferredColorScheme(.dark)
             .containerBackground(.clear, for: .window)
             .sheet(isPresented: $showKeyboardShortcuts) {

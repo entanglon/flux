@@ -271,29 +271,41 @@ struct ProfileFooter: View {
     @ObservedObject var profileManager = ProfileManager.shared
 
     var body: some View {
-        Button {
-            profileManager.switchToProfileSelection()
-        } label: {
-            HStack(spacing: 10) {
-                if let profile = profileManager.currentProfile {
-                    AvatarBadge(avatarID: profile.avatarID, size: 28)
+        HStack(spacing: 4) {
+            Button {
+                profileManager.switchToProfileSelection()
+            } label: {
+                HStack(spacing: 10) {
+                    if let profile = profileManager.currentProfile {
+                        AvatarBadge(avatarID: profile.avatarID, size: 28)
 
-                    Text(profile.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                        .foregroundStyle(.white.opacity(0.9))
+                        Text(profile.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.5))
                 }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.5))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 8)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help("Switch profile")
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings (⌘,)")
         }
-        .buttonStyle(.plain)
-        .help("Switch profile")
     }
 }
 
