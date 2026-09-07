@@ -41,6 +41,7 @@ struct fluxApp: App {
     @StateObject private var profileManager = ProfileManager.shared
     @StateObject private var updateManager = UpdateManager.shared
     @State private var showKeyboardShortcuts = false
+    @State private var showDisplayNamePrompt = false
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
@@ -75,7 +76,20 @@ struct fluxApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if authManager.needsGate {
+                if authManager.isLoading {
+                    // Held across login sync + profile resolution so neither
+                    // ProfileGateView nor ContentView flashes mid-transition.
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(1.2)
+                        Text("Signing in…")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                } else if authManager.needsGate {
                     AuthGateView()
                         .environmentObject(authManager)
                 } else if profileManager.currentProfile != nil {
@@ -86,12 +100,36 @@ struct fluxApp: App {
                     ProfileGateView()
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: authManager.isLoading)
             .animation(.easeInOut(duration: 0.25), value: authManager.needsGate)
             .animation(.easeInOut(duration: 0.25), value: profileManager.currentProfile?.id)
             .preferredColorScheme(.dark)
             .containerBackground(.clear, for: .window)
             .sheet(isPresented: $showKeyboardShortcuts) {
                 KeyboardShortcutsSheet()
+            }
+            .sheet(isPresented: $showDisplayNamePrompt) {
+                EditDisplayNameSheet()
+            }
+            .task {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if authManager.isAuthenticated && authManager.needsDisplayNamePrompt && profileManager.currentProfile != nil {
+                    showDisplayNamePrompt = true
+                }
+            }
+            .onChange(of: authManager.currentUser) { _, user in
+                if user != nil && authManager.needsDisplayNamePrompt && profileManager.currentProfile != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        showDisplayNamePrompt = true
+                    }
+                }
+            }
+            .onChange(of: profileManager.currentProfile?.id) { _, profileID in
+                if profileID != nil && authManager.isAuthenticated && authManager.needsDisplayNamePrompt {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        showDisplayNamePrompt = true
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .fluxShowShortcuts)) { _ in
                 showKeyboardShortcuts = true

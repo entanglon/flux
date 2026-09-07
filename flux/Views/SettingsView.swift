@@ -23,6 +23,7 @@ struct SettingsView: View {
 // MARK: - 1. General Settings (Account + App + TMDB)
 struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
+    @ObservedObject var profileManager = ProfileManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
     @AppStorage("enrichHomeWithTMDB") private var enrichHomeWithTMDB = true
     @AppStorage("tmdbApiKey") private var tmdbApiKey = ""   // the saved (validated) key
@@ -30,7 +31,7 @@ struct GeneralSettingsView: View {
     @State private var isEditingKey = false
     @State private var isValidating = false
     @State private var keyStatus: KeyStatus = .idle
-    @State private var showAuth = false
+    @State private var showEditName = false
 
     private enum KeyStatus { case idle, valid, invalid }
 
@@ -39,28 +40,93 @@ struct GeneralSettingsView: View {
             Section(header: Text("Account")) {
                 if authManager.isAuthenticated, let user = authManager.currentUser {
                     HStack(spacing: 12) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.blue.gradient)
+                        if let profile = profileManager.currentProfile {
+                            AvatarBadge(avatarID: profile.avatarID, size: 36)
+                        } else {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.white.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                    )
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                            .frame(width: 36, height: 36)
+                        }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(user.email ?? "User")
-                                .font(.system(size: 13, weight: .semibold))
-                            if let synced = authManager.lastSyncDate {
-                                Text("Synced \(synced.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(user.displayName ?? user.email?.components(separatedBy: "@").first ?? "Flux User")
+                                    .font(.system(size: 13, weight: .semibold))
+
+                                Button(action: { showEditName = true }) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit Display Name")
+
+                                if authManager.needsDisplayNamePrompt {
+                                    Button(action: { showEditName = true }) {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "pencil.line")
+                                                .font(.system(size: 9))
+                                            Text("Add Name")
+                                                .font(.system(size: 10, weight: .semibold))
+                                        }
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(Color.white.opacity(0.12))
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+
+                            Text(user.email ?? "")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(authManager.isLoading ? Color.orange : Color.green)
+                                    .frame(width: 5, height: 5)
+                                if authManager.isLoading {
+                                    Text("Syncing library…")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                } else if let synced = authManager.lastSyncDate {
+                                    Text("Synced \(synced.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Cloud Connected")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
+
                         Spacer()
+
                         Button("Sync Now") { authManager.syncNow() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            .disabled(authManager.isLoading)
+
                         Button("Sign Out") { authManager.signOut() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 3)
                 } else {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -71,86 +137,174 @@ struct GeneralSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Sign In") { showAuth = true }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                        Button("Sign In") {
+                            #if os(macOS)
+                            for window in NSApp.windows {
+                                let title = window.title.lowercased()
+                                let id = window.identifier?.rawValue ?? ""
+                                let autosave = window.frameAutosaveName
+                                if id.contains("Settings") || id.contains("settings") ||
+                                   autosave.contains("Settings") || autosave.contains("settings") ||
+                                   title.contains("settings") || title.contains("general") || title.contains("preferences") {
+                                    window.close()
+                                }
+                            }
+                            #endif
+                            authManager.startSignInFlow()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
                     .padding(.vertical, 2)
-
-                    if let error = authManager.errorMessage {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
                 }
             }
 
-            Section(header: Text("Metadata (Optional)")) {
-                // Header Line with Status on the right
-                HStack {
-                    Label("TMDB API Key", systemImage: "key.fill")
-                        .font(.system(size: 13, weight: .medium))
-                    
-                    Spacer()
-                    
-                    if !tmdbApiKey.isEmpty && !isEditingKey {
-                        HStack(spacing: 8) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Text("Active")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.green)
-                            }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.green.opacity(0.12))
-                            .clipShape(Capsule())
-                            
-                            Button(action: {
-                                withAnimation(.spring(response: 0.3)) {
-                                    draftKey = tmdbApiKey
-                                    isEditingKey = true
+            Section(header: Text("Watching Profiles")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(profileManager.profiles) { profile in
+                                Button(action: {
+                                    profileManager.selectProfile(profile)
+                                }) {
+                                    HStack(spacing: 8) {
+                                        AvatarBadge(avatarID: profile.avatarID, size: 24)
+                                        Text(profile.name)
+                                            .font(.system(size: 12, weight: profile.id == profileManager.currentProfile?.id ? .bold : .medium))
+                                            .foregroundStyle(profile.id == profileManager.currentProfile?.id ? .white : .white.opacity(0.8))
+                                        if profile.id == profileManager.currentProfile?.id {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(.green)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(profile.id == profileManager.currentProfile?.id ? Color.white.opacity(0.14) : Color.white.opacity(0.06))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .stroke(profile.id == profileManager.currentProfile?.id ? Color.white.opacity(0.25) : Color.white.opacity(0.08), lineWidth: 1)
+                                            )
+                                    )
                                 }
-                            }) {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.borderless)
-                            .help("Edit TMDB API Key")
-
-                            Button(action: clearTmdbKey) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.red.opacity(0.85))
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Remove TMDB API Key")
                         }
-                    } else if tmdbApiKey.isEmpty && !isEditingKey {
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3)) {
-                                isEditingKey = true
+                        .padding(.vertical, 2)
+                    }
+
+                    HStack {
+                        Button("Manage / Add Profiles…") {
+                            #if os(macOS)
+                            for window in NSApp.windows {
+                                let title = window.title.lowercased()
+                                let id = window.identifier?.rawValue ?? ""
+                                let autosave = window.frameAutosaveName
+                                if id.contains("Settings") || id.contains("settings") ||
+                                   autosave.contains("Settings") || autosave.contains("settings") ||
+                                   title.contains("settings") || title.contains("general") || title.contains("preferences") {
+                                    window.close()
+                                }
                             }
-                        }) {
-                            Label("Add Key", systemImage: "plus.circle.fill")
-                                .font(.system(size: 11, weight: .medium))
+                            #endif
+                            profileManager.switchToProfileSelection()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+
+                        Spacer()
                     }
                 }
-                .padding(.vertical, 1)
+                .padding(.vertical, 2)
+            }
 
-                // Input field and action buttons (visible when editing or no key configured)
-                if isEditingKey || tmdbApiKey.isEmpty {
+            Section(header: Text("Metadata (Optional)")) {
+                if !tmdbApiKey.isEmpty && !isEditingKey {
+                    // 1. Saved & Active Key Row
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label("TMDB API Key", systemImage: "key.fill")
+                                .font(.system(size: 13, weight: .medium))
+
+                            Spacer()
+
+                            HStack(spacing: 8) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text("Active")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.green)
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.green.opacity(0.12))
+                                .clipShape(Capsule())
+
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.3)) {
+                                        draftKey = tmdbApiKey
+                                        isEditingKey = true
+                                    }
+                                }) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.white.opacity(0.1))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit TMDB API Key")
+
+                                Button(action: clearTmdbKey) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.red.opacity(0.9))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.red.opacity(0.15))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove TMDB API Key")
+                            }
+                        }
+
+                        Text("Custom TMDB API key is active. Flux is using your key for unlimited high-rate metadata, cast credits, and rich recommendations.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                    // 2. Enrich Toggle Row
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Enrich Home & Discovery with TMDB", isOn: $enrichHomeWithTMDB)
+                            .onChange(of: enrichHomeWithTMDB) { _, _ in
+                                NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+                            }
+                        Text("When enabled, Home discovery rails (trending, popular, top rated) and OTT streaming rows are enriched using TMDB. When disabled, Home uses pure native Cinemeta / Stremio catalogs while media details, cast, and search still use TMDB.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                } else if isEditingKey {
+                    // Editing / Adding Key Row
                     VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label(tmdbApiKey.isEmpty ? "Add TMDB API Key" : "Edit TMDB API Key", systemImage: "key.fill")
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                        }
+
                         HStack(spacing: 8) {
                             SecureField("Enter TMDB API Key…", text: $draftKey)
                                 .textFieldStyle(.roundedBorder)
                                 .onSubmit { saveTmdbKey() }
                         }
 
-                        // Save and Clear action buttons on the right side below the field
                         HStack(spacing: 8) {
                             if keyStatus == .invalid {
                                 HStack(spacing: 4) {
@@ -162,26 +316,22 @@ struct GeneralSettingsView: View {
                                         .foregroundStyle(.red)
                                 }
                             }
-                            
+
                             Spacer()
 
-                            // Clear / Cancel button
                             Button(action: {
-                                draftKey = ""
+                                draftKey = tmdbApiKey
                                 keyStatus = .idle
-                                if !tmdbApiKey.isEmpty {
-                                    withAnimation(.spring(response: 0.3)) {
-                                        isEditingKey = false
-                                    }
+                                withAnimation(.spring(response: 0.3)) {
+                                    isEditingKey = false
                                 }
                             }) {
-                                Text(!tmdbApiKey.isEmpty ? "Cancel" : "Clear")
+                                Text("Cancel")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help(!tmdbApiKey.isEmpty ? "Cancel editing" : "Clear field")
+                            .help("Cancel editing")
 
-                            // Save & Validate button
                             Button(action: saveTmdbKey) {
                                 if isValidating {
                                     ProgressView()
@@ -195,44 +345,103 @@ struct GeneralSettingsView: View {
                             .disabled(draftKey.trimmingCharacters(in: .whitespaces).isEmpty || isValidating)
                             .help("Validate and Save Key")
                         }
-                    }
-                    .padding(.top, 4)
-                }
 
-                Text("Flux works out of the box with no key. Add your own free TMDB key to unlock richer detail: cast photos, similar titles, and genre discovery. Leave blank to stay fully keyless.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                        if tmdbApiKey.isEmpty {
+                            Text("Flux works out of the box with no key. Add your own free TMDB key to unlock richer detail: cast photos, similar titles, and genre discovery.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
 
-                Link("Get Free TMDB Key ↗", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
-                    .font(.caption)
-                    .padding(.top, 1)
-
-                if !tmdbApiKey.isEmpty {
-                    Divider()
-                        .padding(.vertical, 4)
-                    
-                    Toggle("Enrich Home & Discovery with TMDB", isOn: $enrichHomeWithTMDB)
-                        .onChange(of: enrichHomeWithTMDB) { _, _ in
-                            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+                            Link("Get Free TMDB Key ↗", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                                .font(.caption)
+                                .foregroundStyle(.blue)
                         }
-                    Text("When enabled, Home discovery rails (trending, popular, top rated) and OTT streaming rows are enriched using TMDB. When disabled, Home uses pure native Cinemeta / Stremio catalogs while media details, cast, and search still use TMDB.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                    if !tmdbApiKey.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Enrich Home & Discovery with TMDB", isOn: $enrichHomeWithTMDB)
+                                .onChange(of: enrichHomeWithTMDB) { _, _ in
+                                    NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+                                }
+                            Text("When enabled, Home discovery rails (trending, popular, top rated) and OTT streaming rows are enriched using TMDB. When disabled, Home uses pure native Cinemeta / Stremio catalogs while media details, cast, and search still use TMDB.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                } else {
+                    // Empty and Not Editing
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label("TMDB API Key", systemImage: "key.fill")
+                                .font(.system(size: 13, weight: .medium))
+
+                            Spacer()
+
+                            Button(action: {
+                                withAnimation(.spring(response: 0.3)) {
+                                    draftKey = ""
+                                    keyStatus = .idle
+                                    isEditingKey = true
+                                }
+                            }) {
+                                Label("Add Key", systemImage: "plus.circle.fill")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        Text("Flux works out of the box with no key. Add your own free TMDB key to unlock richer detail: cast photos, similar titles, and genre discovery. Leave blank to stay fully keyless.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Link("Get Free TMDB Key ↗", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    .padding(.vertical, 2)
                 }
+            }
+
+            Section(header: Text("App Information")) {
+                HStack(spacing: 12) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Flux")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Link("Project GitHub ↗", destination: URL(string: "https://github.com/entanglon/flux")!)
+                        .font(.caption)
+                }
+                .padding(.vertical, 2)
             }
         }
         .formStyle(.grouped)
         .onAppear {
             draftKey = tmdbApiKey
-            isEditingKey = tmdbApiKey.isEmpty
+            isEditingKey = false
             keyStatus = tmdbApiKey.isEmpty ? .idle : .valid
         }
         .onChange(of: draftKey) { _, _ in
             if keyStatus != .idle { keyStatus = .idle }
         }
-        .sheet(isPresented: $showAuth) {
-            AuthView(onCancel: { showAuth = false })
+        .sheet(isPresented: $showEditName) {
+            EditDisplayNameSheet()
         }
     }
 
@@ -247,10 +456,13 @@ struct GeneralSettingsView: View {
                 isValidating = false
                 if ok {
                     tmdbApiKey = key      // persist only when verified
+                    UserDefaults.standard.set(key, forKey: UserDefaults.Key.tmdbApiKey)
                     keyStatus = .valid
                     withAnimation(.spring(response: 0.35)) {
                         isEditingKey = false
                     }
+                    authManager.scheduleAutoSync(delay: 0.1)
+                    NotificationCenter.default.post(name: .fluxRefresh, object: nil)
                 } else {
                     keyStatus = .invalid  // leave the saved key untouched
                 }
@@ -263,8 +475,11 @@ struct GeneralSettingsView: View {
             tmdbApiKey = ""
             draftKey = ""
             keyStatus = .idle
-            isEditingKey = true
+            isEditingKey = false
         }
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+        authManager.scheduleAutoSync(delay: 0.1)
+        NotificationCenter.default.post(name: .fluxRefresh, object: nil)
     }
 }
 

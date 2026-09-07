@@ -27,6 +27,7 @@ struct AuthView: View {
                 startInSignUp: startInSignUp,
                 showsGuestOption: false,
                 showsTitle: false,
+                isModal: true,
                 onCancel: nil
             )
         }

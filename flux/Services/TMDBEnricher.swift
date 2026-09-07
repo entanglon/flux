@@ -66,9 +66,22 @@ class TMDBEnricher {
     private init() {}
     
     // MARK: - ID Translation
+    /// Extracts the root IMDb id (`tt1234567`) from plain, episodic
+    /// (`tt1234567:1:2`), or prefixed (`series:tt1234567`) identifiers.
+    /// TMDB's `/find/` endpoint rejects anything but the bare `tt…` id.
+    func rootImdbID(from rawID: String) -> String? {
+        if let match = rawID.range(of: "tt[0-9]+", options: .regularExpression) {
+            return String(rawID[match])
+        }
+        return nil
+    }
+
     func resolveTmdbID(imdbID: String, type: String) async -> String? {
+        // Sanitize episodic suffixes (e.g. "tt0903747:1:1" -> "tt0903747")
+        // before hitting TMDB's /find/ endpoint.
+        let cleanImdbID = rootImdbID(from: imdbID) ?? imdbID
         let mediaType = type.contains("movie") ? "movie" : "tv"
-        let findURL = "\(baseURL)/find/\(imdbID)?api_key=\(apiKey)&external_source=imdb_id"
+        let findURL = "\(baseURL)/find/\(cleanImdbID)?api_key=\(apiKey)&external_source=imdb_id"
         
         guard let url = URL(string: findURL),
               let (data, _) = try? await URLSession.shared.data(from: url),
@@ -115,7 +128,7 @@ class TMDBEnricher {
             cached.lastEpisodeImage = item.lastEpisodeImage ?? cached.lastEpisodeImage
             cached.progress = item.progress ?? cached.progress
             cached.runtime = item.runtime ?? cached.runtime
-            cached.logoURL = item.logoURL ?? cached.logoURL
+            cached.logoURL = cached.logoURL ?? item.logoURL
             return cached
         }
         
@@ -187,14 +200,16 @@ class TMDBEnricher {
             }
         }
         
-        // Retain caller's episode session properties
+        // Retain caller's episode session properties. Logo must NOT be
+        // overwritten with item.logoURL (which is nil for Cinemeta-origin
+        // items) — doing so wipes the TMDB logo that quickEnrich just
+        // fetched from /images.
         enriched.lastSeason = item.lastSeason
         enriched.lastEpisode = item.lastEpisode
         enriched.lastEpisodeTitle = item.lastEpisodeTitle
         enriched.lastEpisodeImage = item.lastEpisodeImage
         enriched.progress = item.progress
         enriched.runtime = item.runtime
-        enriched.logoURL = item.logoURL
 
         await memoryCache.storeItem(enriched, for: item.id)
         return enriched
@@ -533,6 +548,50 @@ class TMDBEnricher {
         TimeZone.current.identifier
     }
 
+    // MARK: - Batch Logo Enrichment for Catalog Items
+
+    /// Fetches logos from TMDB /images for each item in the array, setting
+    /// `logoURL` on every item that has a valid TMDB ID. Runs up to 5
+    /// concurrent requests to stay well under TMDB's rate limit (40 req/s).
+    private func batchEnrichLogos(_ items: inout [MediaItem]) async {
+        guard hasKey else { return }
+        await withTaskGroup(of: (Int, URL?).self) { group in
+            var active = 0
+            for i in items.indices {
+                let item = items[i]
+                let type = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") ? "tv" : "movie"
+                let tmdbID: String
+                if item.id.starts(with: "tt") {
+                    guard let resolved = await resolveTmdbID(imdbID: item.id, type: type) else { continue }
+                    tmdbID = resolved
+                } else {
+                    tmdbID = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+                }
+                group.addTask { [apiKey = self.apiKey, baseURL = self.baseURL] in
+                    let url = URL(string: "\(baseURL)/\(type)/\(tmdbID)/images?api_key=\(apiKey)&include_image_language=en,null")
+                    guard let url, let (data, _) = try? await URLSession.shared.data(from: url),
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let logos = json["logos"] as? [[String: Any]], !logos.isEmpty else {
+                        return (i, nil)
+                    }
+                    let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
+                    guard let path = enLogo?["file_path"] as? String else { return (i, nil) }
+                    return (i, URL(string: "https://image.tmdb.org/t/p/w500\(path)"))
+                }
+                active += 1
+                if active >= 5 {
+                    if let (idx, logo) = await group.next() {
+                        items[idx].logoURL = logo
+                        active -= 1
+                    }
+                }
+            }
+            for await (idx, logo) in group {
+                items[idx].logoURL = logo
+            }
+        }
+    }
+
     // MARK: - Catalog Fetching (Flux Discovery Layer with TTL-Aware Caching)
     
     func fetchTrendingAll(window: String = "day") async throws -> [MediaItem] {
@@ -573,7 +632,11 @@ class TMDBEnricher {
             if name.contains("tagesschau") || name.contains("tagesthemen") { return false }
             return true
         }
-        let results = filtered.compactMap { $0.toMediaItem() }
+        var results = filtered.compactMap { $0.toMediaItem() }
+
+        // Batch-fetch logos for all items so catalog renders with correct
+        // artwork from the start (no Cinemeta → TMDB flicker).
+        await batchEnrichLogos(&results)
         
         await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: results, ttl: window == "day" ? .trendingDay : .trendingWeek)
         return results
@@ -592,7 +655,8 @@ class TMDBEnricher {
         if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/trending/movie/\(window)?api_key=\(apiKey)"
-        let items = try await fetchCatalog(from: urlString, type: "movie")
+        var items = try await fetchCatalog(from: urlString, type: "movie")
+        await batchEnrichLogos(&items)
         await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: window == "day" ? .trendingDay : .trendingWeek)
         return items
     }
@@ -610,7 +674,8 @@ class TMDBEnricher {
         if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/trending/tv/\(window)?api_key=\(apiKey)"
-        let items = try await fetchCatalog(from: urlString, type: "tv")
+        var items = try await fetchCatalog(from: urlString, type: "tv")
+        await batchEnrichLogos(&items)
         await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: window == "day" ? .trendingDay : .trendingWeek)
         return items
     }
@@ -625,7 +690,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/movie/popular?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie")
+        var items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .popular) }
         return items
     }
@@ -663,7 +729,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/movie/top_rated?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie")
+        var items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .topRated) }
         return items
     }
@@ -708,7 +775,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&sort_by=popularity.desc&without_genres=10763,10767&include_adult=false&vote_count.gte=10&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "tv")
+        var items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .popular) }
         return items
     }
@@ -746,7 +814,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/tv/top_rated?api_key=\(apiKey)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "tv")
+        var items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .topRated) }
         return items
     }

@@ -269,4 +269,99 @@ struct UserDataServiceTests {
         // Clean up
         AuthManager.shared.signOut()
     }
+
+    @Test @MainActor func cloudPayloadExportsAndRestoresTMDBKeyAndDisplayName() {
+        let testKey = "test_tmdb_key_\(UUID().uuidString)"
+        let testName = "TestUser_\(UUID().uuidString.prefix(6))"
+
+        UserDefaults.standard.set(testKey, forKey: UserDefaults.Key.tmdbApiKey)
+        UserDefaults.standard.set(testName, forKey: "flux.authDisplayName")
+
+        let payload = UserDataService.shared.exportCloudPayload()
+        #expect(payload["tmdbApiKey"] as? String == testKey)
+        #expect(payload["userDisplayName"] as? String == testName)
+
+        // Clear local state
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+        UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
+        #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) == nil)
+
+        // Apply cloud payload
+        UserDataService.shared.applyCloudPayload(payload)
+
+        #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) == testKey)
+        #expect(UserDefaults.standard.string(forKey: "flux.authDisplayName") == testName)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+        UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
+    }
+
+    @Test @MainActor func profileManagerManagesPlaybackSettingsSeparatelyFromTMDBKey() {
+        UserDefaults.standard.set(true, forKey: "autoPlayNextEnabled")
+        let settings = ProfileManager.shared.exportGlobalSettings()
+        #expect(settings["autoPlayNextEnabled"] as? Bool == true)
+        #expect(settings[UserDefaults.Key.tmdbApiKey] == nil)
+    }
+
+    @Test @MainActor func freshSignUpGuaranteesEmptyLibraryAndStockAddonsOnly() {
+        AuthManager.shared.signOut()
+        #expect(UserDataService.shared.history.isEmpty)
+        #expect(UserDataService.shared.watchlist.isEmpty)
+        #expect(UserDataService.shared.collections.isEmpty)
+        #expect(AddonManager.shared.addons.count == 1)
+        #expect(AddonManager.shared.addons.first?.id == "opensubtitles3")
+        #expect(AddonManager.shared.addons.first?.isStock == true)
+    }
+
+    @Test @MainActor func sanitizeProfileNamesConvertsDefaultToGuestOrUserName() {
+        // Test in guest mode
+        UserDefaults.standard.set(true, forKey: "flux.authGuestMode")
+        let legacyProfile = UserProfile(id: UUID(), name: "Default", avatarID: "face-blue", createdAt: Date())
+        ProfileManager.shared.profiles = [legacyProfile]
+        ProfileManager.shared.currentProfile = legacyProfile
+
+        ProfileManager.shared.sanitizeProfileNames()
+
+        #expect(ProfileManager.shared.currentProfile?.name == "Guest")
+        #expect(ProfileManager.shared.profiles.first?.name == "Guest")
+
+        // Clean up
+        ProfileManager.shared.handleSignOut()
+        UserDefaults.standard.removeObject(forKey: "flux.authGuestMode")
+    }
+
+    @Test @MainActor func startSignInFlowClearsGuestModeAndEnablesAuthGate() {
+        AuthManager.shared.continueAsGuest()
+        #expect(AuthManager.shared.isGuestMode == true)
+        #expect(AuthManager.shared.needsGate == false)
+
+        AuthManager.shared.startSignInFlow()
+        #expect(AuthManager.shared.isGuestMode == false)
+        #expect(AuthManager.shared.needsGate == true)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: "flux.authGuestMode")
+    }
+
+    @Test @MainActor func needsDisplayNamePromptRejectsDefaultAndGuest() {
+        // Authenticate with a fallback name "Default"
+        AuthManager.shared.currentUser = User(id: "test-user-123", email: "test@example.com", displayName: "Default")
+        AuthManager.shared.isAuthenticated = true
+
+        #expect(AuthManager.shared.needsDisplayNamePrompt == true)
+
+        // Authenticate with "Guest"
+        AuthManager.shared.currentUser = User(id: "test-user-123", email: "test@example.com", displayName: "Guest")
+        #expect(AuthManager.shared.needsDisplayNamePrompt == true)
+
+        // Update with custom name
+        AuthManager.shared.updateDisplayName("Alex Smith")
+        #expect(AuthManager.shared.currentUser?.displayName == "Alex Smith")
+        #expect(AuthManager.shared.needsDisplayNamePrompt == false)
+
+        // Clean up
+        AuthManager.shared.signOut()
+    }
 }
+

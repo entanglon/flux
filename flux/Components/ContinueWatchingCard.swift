@@ -51,8 +51,11 @@ struct ContinueWatchingCard: View {
     private var activeLogoURL: URL? {
         if let logo = item.logoURL { return logo }
         if let logo = fetchedLogo { return logo }
-        if !TMDBEnricher.shared.hasKey, item.id.starts(with: "tt") {
-            return URL(string: "https://images.metahub.space/logo/medium/\(item.id)/img")
+        if !TMDBEnricher.shared.hasKey {
+            if let match = item.id.range(of: "tt[0-9]+", options: .regularExpression) {
+                let imdbID = String(item.id[match])
+                return URL(string: "https://images.metahub.space/logo/medium/\(imdbID)/img")
+            }
         }
         return nil
     }

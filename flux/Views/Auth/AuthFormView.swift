@@ -6,6 +6,7 @@ struct AuthFormView: View {
     var startInSignUp: Bool = false
     var showsGuestOption: Bool = false
     var showsTitle: Bool = true
+    var isModal: Bool = false
     var onCancel: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -29,10 +30,12 @@ struct AuthFormView: View {
     init(startInSignUp: Bool = false,
          showsGuestOption: Bool = false,
          showsTitle: Bool = true,
+         isModal: Bool = false,
          onCancel: (() -> Void)? = nil) {
         self.startInSignUp = startInSignUp
         self.showsGuestOption = showsGuestOption
         self.showsTitle = showsTitle
+        self.isModal = isModal
         self.onCancel = onCancel
         _isSignUp = State(initialValue: startInSignUp)
     }
@@ -83,7 +86,7 @@ struct AuthFormView: View {
             }
         }
         .onChange(of: authManager.currentUser) { _, user in
-            if user != nil {
+            if user != nil && isModal {
                 dismiss()
                 onCancel?()
             }
@@ -210,8 +213,8 @@ struct AuthFormView: View {
             ctaHovered = hovering
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .disabled(busy || email.isEmpty || !isValidEmail(email.trimmingCharacters(in: .whitespacesAndNewlines)) || password.isEmpty || (isSignUp && (confirmPassword.isEmpty || password != confirmPassword)))
-        .opacity((busy || email.isEmpty || !isValidEmail(email.trimmingCharacters(in: .whitespacesAndNewlines)) || password.isEmpty || (isSignUp && (confirmPassword.isEmpty || password != confirmPassword))) ? 0.55 : 1)
+        .disabled(busy || email.isEmpty || !isValidEmail(email.trimmingCharacters(in: .whitespacesAndNewlines)) || password.isEmpty || (isSignUp && (name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || confirmPassword.isEmpty || password != confirmPassword || password.count < 8)))
+        .opacity((busy || email.isEmpty || !isValidEmail(email.trimmingCharacters(in: .whitespacesAndNewlines)) || password.isEmpty || (isSignUp && (name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || confirmPassword.isEmpty || password != confirmPassword || password.count < 8))) ? 0.55 : 1)
     }
 
     private var switchModeButton: some View {
@@ -329,8 +332,10 @@ struct AuthFormView: View {
             }
             if success {
                 await MainActor.run {
-                    dismiss()
-                    onCancel?()
+                    if isModal {
+                        dismiss()
+                        onCancel?()
+                    }
                 }
             }
         }

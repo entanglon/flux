@@ -194,6 +194,35 @@ struct TMDBEnricherTests {
         #expect(topRated[2].title == "Game of Thrones")
         #expect(!topRated.contains { $0.title == "Random Weak Series" })
     }
+
+    @Test func rootImdbIDStripsEpisodicSuffix() {
+        let enricher = TMDBEnricher.shared
+        #expect(enricher.rootImdbID(from: "tt0903747:1:1") == "tt0903747")
+        #expect(enricher.rootImdbID(from: "tt0111161") == "tt0111161")
+        #expect(enricher.rootImdbID(from: "series:tt0903747") == "tt0903747")
+        #expect(enricher.rootImdbID(from: "tmdb-12345") == nil)
+    }
+
+    @Test func stremioMetaDetailDecodesLogoAndMapsToMediaItem() throws {
+        let json = """
+        {"id":"tt0111161","type":"movie","name":"The Shawshank Redemption","poster":"https://images.metahub.space/poster/small/tt0111161/img","background":"https://images.metahub.space/background/medium/tt0111161/img","logo":"https://images.metahub.space/logo/medium/tt0111161/img","description":"Hope","releaseInfo":"1994","imdbRating":"9.3"}
+        """.data(using: .utf8)!
+        let detail = try JSONDecoder().decode(StremioMetaDetail.self, from: json)
+        #expect(detail.logo == "https://images.metahub.space/logo/medium/tt0111161/img")
+        let item = detail.toMediaItem()
+        #expect(item.logoURL?.absoluteString == "https://images.metahub.space/logo/medium/tt0111161/img")
+    }
+
+    @Test func stremioMetaPreviewFallsBackToMetahubLogoURL() throws {
+        let json = """
+        {"id":"tt0903747","type":"series","name":"Breaking Bad"}
+        """.data(using: .utf8)!
+        let preview = try JSONDecoder().decode(StremioMetaPreview.self, from: json)
+        let item = preview.toMediaItem()
+        // No embedded logo → constructed Metahub fallback so the buffering
+        // view shows the graphic logo instead of the text fallback.
+        #expect(item.logoURL?.absoluteString == "https://images.metahub.space/logo/medium/tt0903747/img")
+    }
 }
 
 

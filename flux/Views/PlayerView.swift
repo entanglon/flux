@@ -21,6 +21,7 @@ struct PlayerView: View {
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
     @State private var showVolumeHUD = false
     @State private var volumeHUDTask: Task<Void, Never>? = nil
+    @State private var fetchedLogo: URL? = nil
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
 
@@ -76,8 +77,10 @@ struct PlayerView: View {
                 midPlaybackLogoBufferingView
             }
             
-            // 4. Controls Layer (Only active once playback has started)
-            controlsLayer
+            // 4. Controls Layer (Only active once playback has started, hidden during mid-playback buffering)
+            if !isMidPlaybackBuffering {
+                controlsLayer
+            }
             
             // 5. Exit Warning Overlay
             exitWarningOverlay
@@ -96,10 +99,28 @@ struct PlayerView: View {
                 }
             }
         )
+        .task(id: item?.id) {
+            // On-demand logo fetch — matches ContinueWatchingCard behaviour.
+            // If the item has no enriched logo (Cinemeta without TMDB, or
+            // TMDB catalog item whose batch enrichment missed), fetch it
+            // from TMDB /images so the buffering view shows the graphic.
+            guard let media = item, media.logoURL == nil, fetchedLogo == nil else { return }
+            let isTV = media.category.lowercased().contains("tv") || media.category.lowercased().contains("series")
+            let type = isTV ? "tv" : "movie"
+            var tmdbID: String? = nil
+            if media.id.starts(with: "tt") {
+                tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: media.id, type: type)
+            } else {
+                let clean = media.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+                tmdbID = clean
+            }
+            if let id = tmdbID, let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                await MainActor.run { self.fetchedLogo = logo }
+            }
+        }
         .focusable() // Make the view capable of receiving key presses
         .focusEffectDisabled() // Remove the blue focus ring
         .onKeyPress(.space) {
-            withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = true }
             if mpv.timePos >= 0.5 {
                 mpv.togglePlayPause()
             }
@@ -1092,7 +1113,15 @@ struct PlayerView: View {
                 }
         }
     }
-    
+
+    private func resolvedLogoURL(for media: MediaItem) -> URL? {
+        // 1. Enriched logo (TMDB or Cinemeta)
+        if let logo = media.logoURL { return logo }
+        // 2. On-demand fetch (matches ContinueWatchingCard behaviour)
+        if let fetched = fetchedLogo { return fetched }
+        return nil
+    }
+
     private var midPlaybackLogoBufferingView: some View {
         ZStack {
             // Subtle dark vignette over the paused video frame
@@ -1103,8 +1132,8 @@ struct PlayerView: View {
             let realProgress = CGFloat(mpvProgressMid > 0.005 ? mpvProgressMid : animatedProgress)
 
             if let media = item {
-                let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
-                
+                let logoURL = resolvedLogoURL(for: media)
+
                 PulsingLogoContainer {
                     ZStack {
                         if let lURL = logoURL {
@@ -1118,7 +1147,7 @@ struct PlayerView: View {
                             } placeholder: {
                                 EmptyView()
                             }
-                            
+
                             // Real progress fill logo (left-to-right fill)
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
@@ -1141,7 +1170,7 @@ struct PlayerView: View {
                             Text(media.title.uppercased())
                                 .font(.system(size: 36, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white.opacity(0.25))
-                            
+
                             Text(media.title.uppercased())
                                 .font(.system(size: 36, weight: .black, design: .rounded))
                                 .foregroundStyle(Color.white)
@@ -1189,27 +1218,27 @@ struct PlayerView: View {
             
             VStack(spacing: 20) {
                 if let media = item {
-                    let logoURL = media.logoURL ?? (media.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/logo/medium/\(media.id)/img") : nil)
-                    
+                    let logoURL = resolvedLogoURL(for: media)
+
                     PulsingLogoContainer {
                         ZStack {
                             if let lURL = logoURL {
                                 // Base translucent watermark logo
                                 AsyncImage(url: lURL) { img in
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 140)
-                                        .opacity(0.25)
-                                        .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                                } placeholder: {
-                                    EmptyView()
-                                }
-                                
-                                // Real progress fill logo (left-to-right fill)
-                                AsyncImage(url: lURL) { img in
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 140)
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 100)
+                                    .opacity(0.25)
+                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+                            } placeholder: {
+                                EmptyView()
+                            }
+
+                            // Real progress fill logo (left-to-right fill)
+                            AsyncImage(url: lURL) { img in
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 100)
                                         .opacity(1.0)
                                         .mask(
                                             GeometryReader { geo in
@@ -1225,11 +1254,11 @@ struct PlayerView: View {
                             } else {
                                 // Text fallback for media with no logo image
                                 Text(media.title.uppercased())
-                                    .font(.system(size: 48, weight: .black, design: .rounded))
+                                    .font(.system(size: 36, weight: .black, design: .rounded))
                                     .foregroundStyle(Color.white.opacity(0.25))
-                                
+
                                 Text(media.title.uppercased())
-                                    .font(.system(size: 48, weight: .black, design: .rounded))
+                                    .font(.system(size: 36, weight: .black, design: .rounded))
                                     .foregroundStyle(Color.white)
                                     .mask(
                                         GeometryReader { geo in
@@ -1306,27 +1335,6 @@ struct PlayerView: View {
                 }
 
                 HStack(spacing: 12) {
-                    if !hasStreams && sourceMode == "http" {
-                        Button {
-                            UserDefaults.standard.set("both", forKey: UserDefaults.Key.streamingSourceMode)
-                            ProfileManager.shared.saveCurrentProfileSettings()
-                            AuthManager.shared.scheduleAutoSync()
-                            playerManager.errorMessage = nil
-                            playerManager.refreshStreamsForPicker()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                Text("Enable Torrents & Retry")
-                            }
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color.accentColor, in: Capsule())
-                            .foregroundColor(.white)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
                     if !hasStreams {
                         Button {
                             playerManager.errorMessage = nil

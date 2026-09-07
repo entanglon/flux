@@ -24,6 +24,49 @@ final class ProfileManager: ObservableObject {
             restoreSettings(for: profile.id)
             applyProfileDataScope(profile)
         }
+        sanitizeProfileNames()
+    }
+
+    func sanitizeProfileNames() {
+        var didChange = false
+        let isGuest = UserDefaults.standard.bool(forKey: "flux.authGuestMode")
+        let savedName = UserDefaults.standard.string(forKey: "flux.authDisplayName")
+        let email = UserDefaults.standard.string(forKey: "flux.authEmail")
+        let userName = (savedName?.isEmpty == false && savedName != "Default" && savedName != "Guest") 
+            ? savedName! 
+            : (email?.components(separatedBy: "@").first ?? (isGuest ? "Guest" : "User"))
+
+        for idx in profiles.indices {
+            let pName = profiles[idx].name
+            if pName == "Default" || pName.isEmpty {
+                profiles[idx].name = isGuest ? "Guest" : userName
+                didChange = true
+            } else if isGuest && pName == "User" {
+                profiles[idx].name = "Guest"
+                didChange = true
+            }
+        }
+
+        if let cur = currentProfile {
+            if cur.name == "Default" || cur.name.isEmpty {
+                var updated = cur
+                updated.name = isGuest ? "Guest" : userName
+                currentProfile = updated
+                didChange = true
+            } else if isGuest && cur.name == "User" {
+                var updated = cur
+                updated.name = "Guest"
+                currentProfile = updated
+                didChange = true
+            }
+        }
+
+        if didChange {
+            saveProfiles()
+            if let cur = currentProfile, let data = try? JSONEncoder().encode(cur) {
+                UserDefaults.standard.set(data, forKey: currentProfileKey)
+            }
+        }
     }
 
     var isFirstRun: Bool { profiles.isEmpty }
@@ -34,11 +77,11 @@ final class ProfileManager: ObservableObject {
         let profile = UserProfile(id: UUID(), name: trimmed, avatarID: avatarID, createdAt: Date())
         profiles.append(profile)
         saveProfiles()
-        selectProfile(profile, migrateLegacyData: profiles.count == 1)
+        selectProfile(profile)
         AuthManager.shared.scheduleAutoSync()
     }
 
-    func selectProfile(_ profile: UserProfile, migrateLegacyData: Bool = false) {
+    func selectProfile(_ profile: UserProfile) {
         // Per-profile playback settings: snapshot globals for the old profile,
         // restore the new profile's snapshot into the global keys
         if let old = currentProfile {
@@ -50,8 +93,6 @@ final class ProfileManager: ObservableObject {
         }
         restoreSettings(for: profile.id)
         applyProfileDataScope(profile)
-        UserDataService.shared.switchProfile(to: profile, migrateLegacyData: migrateLegacyData)
-        TasteProfileManager.shared.switchProfile(to: profile)
     }
 
     /// Returns to the "Who's Watching?" screen (data stays intact).
@@ -82,12 +123,19 @@ final class ProfileManager: ObservableObject {
 
     /// Ensures a clean, dedicated Guest watching profile is selected when continuing as guest.
     func ensureGuestProfile() {
+        sanitizeProfileNames()
         if let existing = profiles.first(where: { $0.name == "Guest" }) {
             selectProfile(existing)
             return
         }
         if let first = profiles.first {
-            selectProfile(first)
+            var updated = first
+            updated.name = "Guest"
+            if let idx = profiles.firstIndex(where: { $0.id == first.id }) {
+                profiles[idx] = updated
+            }
+            saveProfiles()
+            selectProfile(updated)
             return
         }
         let guest = UserProfile(id: UUID(), name: "Guest", avatarID: "avatar1", createdAt: Date())
@@ -96,14 +144,19 @@ final class ProfileManager: ObservableObject {
         selectProfile(guest)
     }
 
-    /// Ensures a default watching profile exists with the given name (from account signup or login).
+    /// Ensures a watching profile exists with the given user name (from account signup or login).
     func ensureDefaultProfile(name: String, avatarID: String = "face-red") {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let profileName = cleanName.isEmpty ? "Default" : cleanName
+        let fallbackName = AuthManager.shared.currentUser?.displayName ?? AuthManager.shared.currentUser?.email?.components(separatedBy: "@").first ?? "User"
+        let profileName = (!cleanName.isEmpty && cleanName != "Default" && cleanName != "Guest") 
+            ? cleanName 
+            : ((!fallbackName.isEmpty && fallbackName != "Default" && fallbackName != "Guest") ? fallbackName : "User")
 
         if let existing = profiles.first {
             var updated = existing
-            updated.name = profileName
+            if updated.name == "Default" || updated.name == "Guest" || updated.name.isEmpty || updated.name != profileName {
+                updated.name = profileName
+            }
             if let idx = profiles.firstIndex(where: { $0.id == existing.id }) {
                 profiles[idx] = updated
             }
@@ -116,7 +169,7 @@ final class ProfileManager: ObservableObject {
         let profile = UserProfile(id: UUID(), name: profileName, avatarID: avatarID, createdAt: Date())
         profiles = [profile]
         saveProfiles()
-        selectProfile(profile, migrateLegacyData: true)
+        selectProfile(profile)
         AuthManager.shared.scheduleAutoSync()
     }
 
@@ -198,7 +251,7 @@ final class ProfileManager: ObservableObject {
     }
 
     private func applyProfileDataScope(_ profile: UserProfile?) {
-        UserDataService.shared.switchProfile(to: profile, migrateLegacyData: profiles.count <= 1)
+        UserDataService.shared.switchProfile(to: profile)
         TasteProfileManager.shared.switchProfile(to: profile)
     }
 
@@ -240,22 +293,56 @@ final class ProfileManager: ObservableObject {
             }
         }
         guard !imported.isEmpty else { return }
-        DispatchQueue.main.async {
-            // Clean up any local guest profiles being replaced by the cloud profiles
-            for localProfile in self.profiles {
-                if !imported.contains(where: { $0.id == localProfile.id }) {
-                    let prefix = "profile.\(localProfile.id.uuidString)."
-                    for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress"] {
-                        UserDefaults.standard.removeObject(forKey: key)
+
+        let applyBlock = {
+            // Clean up any local profiles being replaced by the cloud profiles,
+            // but preserve any local history/watchlist by carrying it into the primary imported profile!
+            if let targetPrimary = imported.first {
+                let targetPrefix = "profile.\(targetPrimary.id.uuidString)."
+                for localProfile in self.profiles {
+                    if !imported.contains(where: { $0.id == localProfile.id }) {
+                        let sourcePrefix = "profile.\(localProfile.id.uuidString)."
+                        let targetHist = (UserDefaults.standard.array(forKey: targetPrefix + "history") as? [[String: Any]]) ?? []
+                        if targetHist.isEmpty,
+                           let localHist = UserDefaults.standard.array(forKey: sourcePrefix + "history") as? [[String: Any]], !localHist.isEmpty {
+                            UserDefaults.standard.set(localHist, forKey: targetPrefix + "history")
+                        }
+                        let targetWatch = (UserDefaults.standard.array(forKey: targetPrefix + "watchlist") as? [[String: Any]]) ?? []
+                        if targetWatch.isEmpty,
+                           let localWatch = UserDefaults.standard.array(forKey: sourcePrefix + "watchlist") as? [[String: Any]], !localWatch.isEmpty {
+                            UserDefaults.standard.set(localWatch, forKey: targetPrefix + "watchlist")
+                        }
+                        for key in [sourcePrefix + "history", sourcePrefix + "watchlist", sourcePrefix + "loved", sourcePrefix + "watchSnaps", sourcePrefix + "settings", sourcePrefix + "collections", sourcePrefix + "episodeProgress"] {
+                            UserDefaults.standard.removeObject(forKey: key)
+                        }
                     }
                 }
             }
-            self.profiles = imported
-            self.saveProfiles()
-            if self.currentProfile == nil || !imported.contains(where: { $0.id == self.currentProfile?.id }) {
-                if let first = imported.first {
-                    self.selectProfile(first)
+
+            let userName = AuthManager.shared.currentUser?.displayName ?? AuthManager.shared.currentUser?.email?.components(separatedBy: "@").first ?? ""
+            let sanitized = imported.map { p -> UserProfile in
+                if (p.name == "Default" || p.name == "Guest") && !userName.isEmpty && userName != "Default" && userName != "Guest" {
+                    return UserProfile(id: p.id, name: userName, avatarID: p.avatarID, createdAt: p.createdAt)
                 }
+                return p
+            }
+
+            self.profiles = sanitized
+            self.saveProfiles()
+            if let cur = self.currentProfile, !sanitized.contains(where: { $0.id == cur.id }) {
+                if let first = sanitized.first {
+                    self.selectProfile(first)
+                } else {
+                    self.currentProfile = nil
+                }
+            }
+        }
+
+        if Thread.isMainThread {
+            applyBlock()
+        } else {
+            DispatchQueue.main.sync {
+                applyBlock()
             }
         }
     }

@@ -2,10 +2,6 @@ import SwiftUI
 
 /// First-start identity gate: full-page split — branding left, form card right.
 struct AuthGateView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.openWindow) private var openWindow
-    @State private var showTab = false
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -45,6 +41,7 @@ struct AuthGateView: View {
                             startInSignUp: false,
                             showsGuestOption: true,
                             showsTitle: true,
+                            isModal: false,
                             onCancel: nil
                         )
                         .padding(44)
@@ -63,16 +60,6 @@ struct AuthGateView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            if showTab {
-                ContentView()
-                    .transition(.opacity)
-                    .onAppear { openWindow(id: "miniPlayer") }
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: showTab)
-        .onChange(of: AuthManager.shared.currentUser) { _, user in
-            if user != nil { showTab = true }
         }
     }
 }

@@ -1,6 +1,74 @@
 # Flux — Active Session Journal
 
-## LATEST: Sep 6, 2026 (Evening) — PROFILE ISOLATION ON SIGN-OUT, GUEST MODE & SETTINGS UI/UX PERFECTION
+## ACTIVE OPEN ISSUES / HANDOVER FOR INVESTIGATION (Sep 7, 2026)
+
+### 1. Buffering Logo — FIXED (This Session)
+- **Problem**: Buffering progress bar displayed text fallback instead of graphic logo. Cinemeta `logo` field was not decoded; TMDB episode IDs with `:season:episode` suffix broke `/find/` lookups; `AsyncImage` `.empty` phase flashed text every tick.
+- **Resolution**:
+  - Added `let logo: String?` to `StremioMetaDetail` and `StremioMetaPreview` in `StremioService.swift`; mapped to `MediaItem.logoURL` via `logoURL()` helper (Cinemeta decode or Metahub fallback).
+  - Added `rootImdbID(from:)` sanitizer in `TMDBEnricher.swift` to strip `:season:episode` suffix before TMDB `/find/` calls.
+  - Added `batchEnrichLogos()` to main TMDB catalog methods (trending, popular, top-rated) so items have logos from the start.
+  - Added on-demand logo fetch in `PlayerView.swift` via `.task(id:)` — fetches TMDB `/images` logo if `item.logoURL` is nil, matching `ContinueWatchingCard` behaviour.
+  - Added 3 regression tests in `TMDBEnricherTests.swift`.
+
+### 2. Profile Gate Flash — FIXED (This Session)
+- **Problem**: Profile selection screen flashed and auto-dismissed on login because `syncNowInternal` held `isLoading=true` across the entire cloud sync (network fetch → heavy main-thread merge → network push), then auto-selected profiles.
+- **Resolution**:
+  - `signIn`: After auth, quick profile-only cloud pull → show UI immediately → full library sync in background `Task`.
+  - `signUp`: Auth → create profile → show UI immediately → push to cloud in background `Task`.
+  - Previously 3-8 second spinner; now UI appears as soon as profiles resolve (~1s).
+
+### 3. Login Speed — FIXED (This Session)
+- See Profile Gate Flash fix above — the root cause was the same: holding `isLoading=true` across the full cloud sync.
+
+### 4. Torrent Warnings — FIXED (This Session)
+- **Problem**: "No streams" error showed verbose messages ("Try enabling torrents in Settings > Streaming or check installed addons") and an "Enable Torrents & Retry" button.
+- **Resolution**: Replaced all verbose messages with clean `"No streams found for this title."`. Removed "Enable Torrents & Retry" button entirely.
+
+### 5. Buffering Visual Effects — FIXED (This Session)
+- **Problem**: Refactoring inline `AsyncImage` into a shared `bufferingLogoOrText` helper using `CachedImage` broke the rendering pipeline — progress bar, zoom animation, size, and shadows were lost.
+- **Resolution**: Restored original inline `AsyncImage` rendering with `EmptyView()` placeholder in both `logoBufferingView` and `midPlaybackLogoBufferingView`. Kept the on-demand logo fetch via `resolvedLogoURL(for:)`.
+
+### 6. Buffering Logo Size — FIXED (This Session)
+- **Problem**: Initial buffer logo was too large (maxHeight: 140, fontSize: 48) compared to midplayback (maxHeight: 100, fontSize: 36).
+- **Resolution**: Matched `logoBufferingView` to `midPlaybackLogoBufferingView` — maxHeight: 100, fontSize: 36.
+
+### 7. Controls During Midplayback Buffering — FIXED (This Session)
+- **Problem**: Play/skip/volume buttons remained visible during midplayback buffering.
+- **Resolution**: Wrapped `controlsLayer` in `if !isMidPlaybackBuffering` — controls disappear when buffering starts, reappear when it ends.
+
+### 8. Space Bar Pause Showing Controls — FIXED (This Session)
+- **Problem**: Pressing space to pause forced `isControlsVisible = true`, showing the controls overlay.
+- **Resolution**: Removed `isControlsVisible = true` from `.onKeyPress(.space)` handler. Controls only show from mouse movement now.
+
+---
+
+## PREVIOUS: Sep 7, 2026 — MULTI-PROFILE PICKER RACE FIX, DATA ISOLATION & SETTINGS PROFILES
+
+### 1. Root Cause & Requirements Addressed
+- **Profile Picker Dismissal Race Condition**:
+  - **Symptom**: When clicking the profile switcher icon in the sidebar, the "Who's Watching?" screen appeared for a millisecond and automatically snapped back to the main view.
+  - **Root Cause**: `switchToProfileSelection()` sets `currentProfile = nil` to display `ProfileGateView`. However, asynchronous background cloud sync (`syncOnLaunch` or `scheduleAutoSync`) was executing `applyCloudProfilesData`. Inside that method, an `if self.currentProfile == nil` check erroneously assumed the profile was uninitialized and force-called `self.selectProfile(first)`, immediately terminating the profile selection mode.
+  - **Fix**: Removed the `self.currentProfile == nil` auto-selection branch in `ProfileManager.swift` line 332. When `currentProfile` is `nil`, the user is intentionally on the profile selection screen, and remote sync respects that state.
+- **Account & Profile Data Leakage Fixes**:
+  - Completely removed legacy data scavenging (`migrateLegacyDataIfNeeded`) from `UserDataService.swift` and `fluxApp.swift`.
+  - Decoupled `tmdbApiKey` from per-profile settings dictionaries (`playbackSettingKeys`).
+  - Added `resetToStockAddons()` in `AddonManager.swift` to ensure third-party addons do not persist across logouts or new signups.
+  - Added `RecentSearchManager.shared.clear()` to `signOut()` and `signUp()` in `AuthManager.swift`.
+  - Enforced a hard reset of local cache and in-memory lists upon sign-out and new account registration.
+- **Watching Profiles in Settings**:
+  - Added a dedicated "Watching Profiles" section in `SettingsView.swift` (`GeneralSettingsView`), displaying horizontal profile chips with avatars, active profile indicators, instant profile switching, and a "Manage / Add Profiles…" shortcut that smoothly presents the profile manager.
+- **Settings UI Polish**:
+  - Redesigned TMDB key management rows with high-contrast, visible glass action buttons for edit and delete.
+  - Aligned account avatar badge with Flux's native geometric avatars.
+
+### 2. Verification & Build
+- Executed `xcodebuild test`: All 99 tests across 6 test suites passed cleanly (`** TEST SUCCEEDED **`).
+- Recompiled Release configuration and installed to `/Applications/Flux.app`.
+
+---
+
+## PREVIOUS: Sep 6, 2026 (Evening) — PROFILE ISOLATION ON SIGN-OUT, GUEST MODE & SETTINGS UI/UX PERFECTION
 
 ### 1. Root Cause & Requirements Addressed
 - **Watching Profile Remaining on Account Sign-Out**:

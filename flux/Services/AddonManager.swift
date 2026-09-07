@@ -182,6 +182,13 @@ class AddonManager: ObservableObject {
         sortAddonsDeterministically()
         saveAddons()
     }
+
+    /// Resets addons to only stock addons (clearing all third-party/community addons).
+    func resetToStockAddons() {
+        addons = []
+        ensureDefaultAddons()
+        saveAddons()
+    }
     
     private func sortAddonsDeterministically() {
         addons.sort { (a, b) -> Bool in

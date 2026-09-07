@@ -15,6 +15,7 @@ struct StremioMetaPreview: Codable {
     let name: String
     let poster: String?
     let background: String?
+    let logo: String?
     let description: String?
     let releaseInfo: String?
     let imdbRating: String?
@@ -41,6 +42,7 @@ struct StremioMetaDetail: Codable {
     let name: String
     let poster: String?
     let background: String?
+    let logo: String?
     let description: String?
     let releaseInfo: String?
     let imdbRating: String?
@@ -364,6 +366,22 @@ fileprivate func sharpBackdropURL(_ raw: String?) -> URL? {
     return URL(string: upgraded)
 }
 
+/// Cinemeta ships `logo` as `logo/medium/{tt}/img`. Prefer the raw value when
+/// present; fall back to constructing the Metahub URL from the IMDb id so
+/// catalog items without an embedded logo still resolve.
+fileprivate func logoURL(_ raw: String?, imdbID: String) -> URL? {
+    if let raw, !raw.isEmpty {
+        return URL(string: raw)
+    }
+    if imdbID.hasPrefix("tt") {
+        return URL(string: "https://images.metahub.space/logo/medium/\(imdbID)/img")
+    }
+    if let match = imdbID.range(of: "tt[0-9]+", options: .regularExpression) {
+        return URL(string: "https://images.metahub.space/logo/medium/\(imdbID[match])/img")
+    }
+    return nil
+}
+
 extension StremioMetaPreview {
     func toMediaItem() -> MediaItem {
         return MediaItem(
@@ -374,6 +392,7 @@ extension StremioMetaPreview {
             posterURL: sharpPosterURL(self.poster, imdbID: self.id),
             backdropURL: sharpBackdropURL(self.background),
             heroURL: sharpBackdropURL(self.background),
+            logoURL: logoURL(self.logo, imdbID: self.id),
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             genres: self.genres,
@@ -441,6 +460,7 @@ extension StremioMetaDetail {
             posterURL: sharpPosterURL(self.poster, imdbID: self.id),
             backdropURL: sharpBackdropURL(self.background),
             heroURL: sharpBackdropURL(self.background),
+            logoURL: logoURL(self.logo, imdbID: self.id),
             streamURL: nil,
             category: self.type == "series" ? "TV Show" : "Movie",
             cast: finalCast,

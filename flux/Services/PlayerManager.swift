@@ -985,11 +985,11 @@ class PlayerManager: ObservableObject {
                     self.currentStreamURL = nil
                     let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
                     if sourceMode == "http" {
-                        self.errorMessage = "No direct HTTP streams found for this title. Try enabling torrents in Settings > Streaming or check installed addons."
+                        self.errorMessage = "No streams found for this title."
                     } else if sourceMode == "torrent" {
-                        self.errorMessage = "No torrent streams found for this title. Try enabling HTTP streams in Settings > Streaming or verify installed addons."
+                        self.errorMessage = "No streams found for this title."
                     } else {
-                        self.errorMessage = "No streams found for this title. Please check your installed addons in Settings."
+                        self.errorMessage = "No streams found for this title."
                     }
                 }
                 return

@@ -19,17 +19,11 @@ class UserDataService: ObservableObject {
     /// Scopes all history/watchlist storage to a profile. When `migrateLegacyData`
     /// is set (first profile ever created), pre-profile data is carried over so
     /// nobody loses their library.
-    func switchProfile(to profile: UserProfile?, migrateLegacyData: Bool = false) {
+    func switchProfile(to profile: UserProfile?) {
         if let profile {
             historyKey = "profile.\(profile.id.uuidString).history"
             watchlistKey = "profile.\(profile.id.uuidString).watchlist"
             collectionsKey = "profile.\(profile.id.uuidString).collections"
-
-            if migrateLegacyData,
-               (UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]]) == nil,
-               let legacy = UserDefaults.standard.array(forKey: "localHistoryDataStremio") {
-                UserDefaults.standard.set(legacy, forKey: historyKey)
-            }
         } else {
             historyKey = "localHistoryDataStremio"
             watchlistKey = "localWatchlistDataStremio"
@@ -75,6 +69,7 @@ class UserDataService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "localWatchlistDataStremio")
         UserDefaults.standard.removeObject(forKey: "localCollectionsData")
         UserDefaults.standard.removeObject(forKey: "globalEpisodeProgress")
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
     }
     
     private func loadInitialData() {
@@ -108,7 +103,7 @@ class UserDataService: ObservableObject {
             enriched.lastEpisodeImage = item.lastEpisodeImage ?? enriched.lastEpisodeImage
             enriched.progress = item.progress ?? enriched.progress
             enriched.runtime = item.runtime ?? enriched.runtime
-            enriched.logoURL = item.logoURL ?? enriched.logoURL
+            enriched.logoURL = enriched.logoURL ?? item.logoURL
 
             // If TV show history item is missing season/episode, default to S1, E1 to repair
             if (enriched.category == "TV Show" || enriched.category == "Series") && enriched.lastSeason == nil {
@@ -628,6 +623,9 @@ class UserDataService: ObservableObject {
         }
         let epProgress = (UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]]) ?? [:]
 
+        let tmdbKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
+        let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
+
         return [
             "version": 2,
             "watchlist": sanitizedWatchlist,
@@ -646,7 +644,9 @@ class UserDataService: ObservableObject {
             "tasteLoved": TasteProfileManager.shared.exportLovedData(),
             "tasteSnapshots": TasteProfileManager.shared.exportSnapshotsData(),
             "profiles": ProfileManager.shared.exportProfilesData(),
-            "addons": AddonManager.shared.exportAddonsPayload()
+            "addons": AddonManager.shared.exportAddonsPayload(),
+            "tmdbApiKey": tmdbKey,
+            "userDisplayName": displayName
         ]
     }
 
@@ -760,15 +760,53 @@ class UserDataService: ObservableObject {
 
     /// Applies a cloud payload to the CURRENT profile with two-way smart merging
     /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
-    func applyCloudPayload(_ payload: [String: Any]) {
+    @discardableResult
+    func applyCloudPayload(_ payload: [String: Any]) -> Bool {
+        // 1. Restore remote profiles FIRST so the active profile matches the cloud profile
+        let profilesData = payload["profiles"] as? [[String: Any]]
+        ProfileManager.shared.applyCloudProfilesData(profilesData)
+
+        // 2. Restore TMDB API Key if present in cloud payload and unset locally
+        if let remoteTmdb = payload["tmdbApiKey"] as? String, !remoteTmdb.isEmpty {
+            let localTmdb = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
+            if localTmdb.isEmpty {
+                UserDefaults.standard.set(remoteTmdb, forKey: UserDefaults.Key.tmdbApiKey)
+                print("[UserDataService] Restored TMDB API key from cloud payload")
+            }
+        }
+
+        // 3. Restore Display Name if present in cloud payload
+        if let remoteName = payload["userDisplayName"] as? String, !remoteName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let localName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
+            if localName.isEmpty || localName == AuthManager.shared.currentUser?.email?.components(separatedBy: "@").first {
+                UserDefaults.standard.set(remoteName, forKey: "flux.authDisplayName")
+                if Thread.isMainThread {
+                    AuthManager.shared.updateDisplayName(remoteName)
+                } else {
+                    DispatchQueue.main.async {
+                        AuthManager.shared.updateDisplayName(remoteName)
+                    }
+                }
+            }
+        }
+
+        // 4. Merge history & watchlist for the now-active profile
         let remoteWatchlist = payload["watchlist"] as? [[String: Any]] ?? []
         let remoteHistory = payload["history"] as? [[String: Any]] ?? []
 
-        let localWatchlist = (UserDefaults.standard.array(forKey: self.watchlistKey) as? [[String: Any]]) ?? []
-        let localHistory = (UserDefaults.standard.array(forKey: self.historyKey) as? [[String: Any]]) ?? []
+        let localWatchlist = (UserDefaults.standard.array(forKey: self.watchlistKey) as? [[String: Any]])
+            ?? (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]])
+            ?? []
+        let localHistory = (UserDefaults.standard.array(forKey: self.historyKey) as? [[String: Any]])
+            ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
+            ?? []
 
         let mergedWatchlist = mergeWatchlistData(local: localWatchlist, remote: remoteWatchlist)
         let mergedHistory = mergeHistoryData(local: localHistory, remote: remoteHistory)
+
+        // Persist directly to disk before returning
+        UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
+        UserDefaults.standard.set(mergedHistory, forKey: self.historyKey)
 
         var imported: [UserCollection] = []
         if let raw = payload["collections"] as? [[String: Any]] {
@@ -790,24 +828,18 @@ class UserDataService: ObservableObject {
 
         let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
-        let profilesData = payload["profiles"] as? [[String: Any]]
         let addonsData = payload["addons"] as? [[String: Any]]
         let remoteSettings = payload["settings"] as? [String: Any]
         let remoteEpProgress = payload["episodeProgress"] as? [String: [String: Any]]
 
-        DispatchQueue.main.async {
-            // Persist first so disk matches memory.
+        let applyUIUpdates = {
             self.collections = mergedCollections.sorted { $0.createdAt < $1.createdAt }
             self.saveCollections()
             
-            UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
             self.watchlist = self.parseItems(mergedWatchlist)
-            
-            UserDefaults.standard.set(mergedHistory, forKey: self.historyKey)
             self.history = self.parseItems(mergedHistory)
             
             TasteProfileManager.shared.applyCloudData(loved: tasteLoved, snapshots: tasteSnapshots)
-            ProfileManager.shared.applyCloudProfilesData(profilesData)
             if let addonsData {
                 AddonManager.shared.syncWithCloudAddons(addonsData)
             }
@@ -829,8 +861,33 @@ class UserDataService: ObservableObject {
                 }
                 UserDefaults.standard.set(localEpProgress, forKey: self.episodeProgressKey)
             }
+            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
             print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
         }
+
+        let remoteHasTmdb = !((payload["tmdbApiKey"] as? String) ?? "").isEmpty
+        let localHasTmdb = !(UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? "").isEmpty
+        let missingTmdbInCloud = !remoteHasTmdb && localHasTmdb
+
+        let remoteHasName = !((payload["userDisplayName"] as? String) ?? "").isEmpty
+        let localHasName = !(UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? "").isEmpty
+        let missingNameInCloud = !remoteHasName && localHasName
+
+        let hasLocalHistoryAdditions = mergedHistory.count > remoteHistory.count
+        let hasLocalWatchlistAdditions = mergedWatchlist.count > remoteWatchlist.count
+        let hasLocalCollectionAdditions = mergedCollections.count > imported.count
+
+        let hasLocalAdditionsToPush = missingTmdbInCloud || missingNameInCloud || hasLocalHistoryAdditions || hasLocalWatchlistAdditions || hasLocalCollectionAdditions
+
+        if Thread.isMainThread {
+            applyUIUpdates()
+        } else {
+            DispatchQueue.main.sync {
+                applyUIUpdates()
+            }
+        }
+
+        return hasLocalAdditionsToPush
     }
 }
 

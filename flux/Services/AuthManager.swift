@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import OSLog
+#if os(macOS)
+import AppKit
+#endif
 
 /// Account identity via Cloudflare Worker native auth; library data via Worker D1.
 /// Worker owns credentials (PBKDF2 hashing, HMAC-signed JWTs, throttling).
@@ -46,6 +49,33 @@ class AuthManager: ObservableObject {
         }
     }
 
+    func startSignInFlow() {
+        UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
+        let perform = {
+            self.isGuestMode = false
+            #if os(macOS)
+            NSApp.activate(ignoringOtherApps: true)
+            for window in NSApp.windows {
+                let id = window.identifier?.rawValue ?? ""
+                let autosave = window.frameAutosaveName
+                let title = window.title.lowercased()
+                if id.contains("Settings") || autosave.contains("Settings") || title.contains("settings") || title.contains("general") || title.contains("preferences") {
+                    window.close()
+                } else if window.canBecomeMain {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            #endif
+        }
+        if Thread.isMainThread {
+            perform()
+        } else {
+            DispatchQueue.main.async {
+                perform()
+            }
+        }
+    }
+
     private init() {
         let token: String? = {
             if let secureToken = KeychainStore.get(Self.tokenKey), !secureToken.isEmpty {
@@ -67,7 +97,7 @@ class AuthManager: ObservableObject {
             // @StateObject observation begins, so this is safe and prevents
             // AuthGateView from flashing for one frame on startup.
             let savedName = UserDefaults.standard.string(forKey: Self.userDisplayNameKey)
-            let name = (savedName?.isEmpty == false) ? savedName : email.components(separatedBy: "@").first
+            let name = (savedName?.isEmpty == false && savedName != "Default" && savedName != "Guest") ? savedName : email.components(separatedBy: "@").first
             self.currentUser = User(id: uid, email: email, displayName: name)
             self.isAuthenticated = true
             self.isGuestMode = false
@@ -100,7 +130,7 @@ class AuthManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.tokenKey) // Ensure plaintext copy is purged
         UserDefaults.standard.set(resp.uid, forKey: Self.userUIDKey)
         UserDefaults.standard.set(resp.email, forKey: Self.userEmailKey)
-        if let name = displayName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let name = displayName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name != "Default", name != "Guest" {
             UserDefaults.standard.set(name, forKey: Self.userDisplayNameKey)
         }
     }
@@ -123,17 +153,38 @@ class AuthManager: ObservableObject {
         do {
             let resp = try await client.signIn(email: email, password: password)
             let savedName = UserDefaults.standard.string(forKey: Self.userDisplayNameKey)
-            let finalName = (savedName?.isEmpty == false) ? savedName! : (resp.email.components(separatedBy: "@").first ?? "User")
+            let finalName = (savedName?.isEmpty == false && savedName != "Default" && savedName != "Guest") ? savedName! : (resp.email.components(separatedBy: "@").first ?? "User")
             saveSession(resp, displayName: finalName)
+            UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
             await MainActor.run {
                 self.currentUser = self.makeUser(uid: resp.uid, email: resp.email, displayName: finalName)
                 self.isAuthenticated = true
-                self.isLoading = false
-                if ProfileManager.shared.profiles.isEmpty {
-                    ProfileManager.shared.ensureDefaultProfile(name: finalName)
+                self.isGuestMode = false
+            }
+            // Quick cloud pull — profiles only, skip heavy library merge.
+            // Library syncs in the background so the UI appears instantly.
+            if let token = authToken, let remote = try? await client.fetchData(token: token) {
+                await MainActor.run {
+                    ProfileManager.shared.applyCloudProfilesData(remote.payload["profiles"] as? [[String: Any]])
+                    if !ProfileManager.shared.profiles.isEmpty {
+                        if ProfileManager.shared.currentProfile != nil {
+                            ProfileManager.shared.switchToProfileSelection()
+                        }
+                    } else {
+                        let resolvedName = self.currentUser?.displayName ?? finalName
+                        ProfileManager.shared.ensureDefaultProfile(name: resolvedName)
+                    }
+                    self.isLoading = false
+                }
+                // Full library sync in background — no UI blocking
+                Task { await syncNowInternal(pullFirst: true, forcePull: true) }
+            } else {
+                await MainActor.run {
+                    let resolvedName = self.currentUser?.displayName ?? finalName
+                    ProfileManager.shared.ensureDefaultProfile(name: resolvedName)
+                    self.isLoading = false
                 }
             }
-            await syncOnLogin()
             return true
         } catch {
             await MainActor.run {
@@ -152,15 +203,34 @@ class AuthManager: ObservableObject {
         do {
             let resp = try await client.signUp(email: email, password: password)
             let cleanName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalName = (cleanName?.isEmpty == false) ? cleanName! : (resp.email.components(separatedBy: "@").first ?? "User")
+            let finalName = (cleanName?.isEmpty == false && cleanName != "Default" && cleanName != "Guest") ? cleanName! : (resp.email.components(separatedBy: "@").first ?? "User")
+            // Clean slate for new account: guarantee no leftover API keys, old history, or third-party addons
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+            UserDefaults.standard.removeObject(forKey: "localHistoryDataStremio")
+            UserDefaults.standard.removeObject(forKey: "localWatchlistDataStremio")
+            UserDefaults.standard.removeObject(forKey: "localCollectionsData")
+            UserDefaults.standard.removeObject(forKey: "globalEpisodeProgress")
+            UserDataService.shared.watchlist = []
+            UserDataService.shared.history = []
+            UserDataService.shared.collections = []
+            TasteProfileManager.shared.handleSignOut()
+            AddonManager.shared.resetToStockAddons()
+            RecentSearchManager.shared.clear()
+
             saveSession(resp, displayName: finalName)
+            UserDefaults.standard.set("true", forKey: "flux.hasExplicitlyCustomizedName")
+            UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
             await MainActor.run {
                 self.currentUser = self.makeUser(uid: resp.uid, email: resp.email, displayName: finalName)
                 self.isAuthenticated = true
-                self.isLoading = false
+                self.isGuestMode = false
+                // New account: single profile expected — create it now so the
+                // gate never shows "Create Your Profile".
                 ProfileManager.shared.ensureDefaultProfile(name: finalName)
+                self.isLoading = false
             }
-            await syncOnLogin()
+            // Push to cloud in background — no UI blocking
+            Task { await syncNowInternal(pullFirst: true, forcePull: false) }
             return true
         } catch {
             await MainActor.run {
@@ -177,6 +247,9 @@ class AuthManager: ObservableObject {
         clearSession()
         UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
         UserDefaults.standard.removeObject(forKey: UserDefaults.Key.cloudLastSyncAt)
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+        UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
+        UserDefaults.standard.removeObject(forKey: "flux.hasExplicitlyCustomizedName")
         self.currentUser = nil
         self.isAuthenticated = false
         self.isGuestMode = false
@@ -185,7 +258,9 @@ class AuthManager: ObservableObject {
         ProfileManager.shared.handleSignOut()
         UserDataService.shared.handleSignOut()
         TasteProfileManager.shared.handleSignOut()
+        AddonManager.shared.resetToStockAddons()
         PlayerManager.shared.handleSignOut()
+        RecentSearchManager.shared.clear()
         Task { await SearchEngine.shared.clearUserIndex() }
         NotificationCenter.default.post(name: .fluxRefresh, object: nil)
     }
@@ -232,13 +307,23 @@ class AuthManager: ObservableObject {
     private func syncNowInternal(pullFirst: Bool, forcePull: Bool = false) async {
         guard let token = authToken else { return }
         do {
+            var pulledNewer = false
+            var hasLocalAdditionsToPush = false
             if pullFirst, let remote = try await client.fetchData(token: token) {
                 let lastSync = UserDefaults.standard.double(forKey: UserDefaults.Key.cloudLastSyncAt)
                 if forcePull || remote.updatedAt > lastSync {
-                    await UserDataService.shared.applyCloudPayload(remote.payload)
+                    hasLocalAdditionsToPush = UserDataService.shared.applyCloudPayload(remote.payload)
                     UserDefaults.standard.set(remote.updatedAt, forKey: UserDefaults.Key.cloudLastSyncAt)
                     Logger.auth.info("Cloud library pulled (\(remote.updatedAt))")
+                    pulledNewer = true
                 }
+            }
+
+            // If we pulled newer data from cloud, only skip push if local had NO extra additions
+            // and push is not forced.
+            if pulledNewer && !forcePull && !hasLocalAdditionsToPush {
+                await MainActor.run { self.lastSyncDate = Date() }
+                return
             }
 
             let payload = UserDataService.shared.exportCloudPayload()
@@ -254,5 +339,37 @@ class AuthManager: ObservableObject {
         } catch {
             Logger.auth.error("Sync failed: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Display Name Management
+
+    func updateDisplayName(_ newName: String) {
+        let clean = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean != "Default", clean != "Guest" else { return }
+        UserDefaults.standard.set(clean, forKey: Self.userDisplayNameKey)
+        UserDefaults.standard.set("true", forKey: "flux.hasExplicitlyCustomizedName")
+        if let user = currentUser {
+            self.currentUser = User(id: user.id, email: user.email, displayName: clean, photoURL: user.photoURL, creationDate: user.creationDate)
+        }
+        if let current = ProfileManager.shared.currentProfile {
+            ProfileManager.shared.updateProfile(current, name: clean, avatarID: current.avatarID)
+        } else if let first = ProfileManager.shared.profiles.first {
+            ProfileManager.shared.updateProfile(first, name: clean, avatarID: first.avatarID)
+        }
+        scheduleAutoSync(delay: 0.5)
+    }
+
+    var needsDisplayNamePrompt: Bool {
+        guard isAuthenticated, let user = currentUser else { return false }
+        guard let name = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty, name != "Default", name != "Guest" else { return true }
+        if let emailPrefix = user.email?.components(separatedBy: "@").first, name.lowercased() == emailPrefix.lowercased() {
+            return UserDefaults.standard.string(forKey: "flux.hasExplicitlyCustomizedName") != "true"
+        }
+        return false
+    }
+
+    func markDisplayNameAsCustomized() {
+        UserDefaults.standard.set("true", forKey: "flux.hasExplicitlyCustomizedName")
     }
 }

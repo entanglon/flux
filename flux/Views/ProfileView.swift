@@ -3,6 +3,7 @@ import SwiftUI
 struct ProfileView: View {
     @ObservedObject var authManager = AuthManager.shared
     @Environment(\.dismiss) var dismiss
+    @State private var showEditName = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -61,7 +62,11 @@ struct ProfileView: View {
                         
                         // Menu Items (Real Data)
                         VStack(spacing: 1) { // 1px spacing for separators
-                            buildRow(title: "Name", value: user.displayName ?? "Not Set")
+                            Button(action: { showEditName = true }) {
+                                buildRow(title: "Name", value: user.displayName ?? "Not Set")
+                            }
+                            .buttonStyle(.plain)
+
                             buildRow(title: "Email", value: user.email ?? "Not Set")
                             
                             if let creationDate = user.creationDate {
@@ -96,6 +101,9 @@ struct ProfileView: View {
         .frame(width: 400, height: 500)
         .glassEffect(.regular, in: .rect)
         .ignoresSafeArea()
+        .sheet(isPresented: $showEditName) {
+            EditDisplayNameSheet()
+        }
     }
     
     @ViewBuilder
