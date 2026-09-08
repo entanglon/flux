@@ -45,6 +45,9 @@ class AddonManager: ObservableObject {
         if id == "opensubtitles3" || id == "org.stremio.opensubtitlesv3" {
             return addons.contains(where: { $0.id == "opensubtitles3" || $0.id == "org.stremio.opensubtitlesv3" || $0.url.contains("opensubtitles") })
         }
+        if id == "cinemeta" {
+            return addons.contains(where: { $0.id == "cinemeta" || $0.url.contains("cinemeta") })
+        }
         return addons.contains(where: { $0.id == id })
     }
     
@@ -179,8 +182,58 @@ class AddonManager: ObservableObject {
             addons.append(openSubs)
         }
 
+        // Cinemeta — stock metadata & catalog addon (fallback when no TMDB key)
+        let cinemetaID = "cinemeta"
+        let cinemetaHost = "https://v3-cinemeta.strem.io"
+        let cinemetaCatalogs: [StremioCatalog] = [
+            StremioCatalog(type: "movie", id: "top", name: "Top Movies"),
+            StremioCatalog(type: "movie", id: "imdbRating", name: "Top Rated"),
+            StremioCatalog(type: "series", id: "top", name: "Top Series"),
+            StremioCatalog(type: "series", id: "imdbRating", name: "Top Rated Series")
+        ]
+
+        if let existingIdx = addons.firstIndex(where: { $0.id == cinemetaID || $0.url.contains("cinemeta") }) {
+            addons[existingIdx].id = cinemetaID
+            addons[existingIdx].isStock = true
+            addons[existingIdx].url = cinemetaHost
+            addons[existingIdx].transportUrl = cinemetaHost
+            addons[existingIdx].logoURL = "https://www.strem.io/images/addons/cinemeta-logo.png"
+            addons[existingIdx].catalogs = cinemetaCatalogs
+        } else {
+            let cinemeta = StremioAddon(
+                id: cinemetaID,
+                name: "Cinemeta",
+                description: "Free movies & series metadata catalog (Stremio stock addon)",
+                version: "4.0.0",
+                logoURL: "https://www.strem.io/images/addons/cinemeta-logo.png",
+                url: cinemetaHost,
+                transportUrl: cinemetaHost,
+                isEnabled: true,
+                isStock: true,
+                category: AddonCategory.official.rawValue,
+                catalogs: cinemetaCatalogs,
+                resources: ["catalog", "meta", "stream"]
+            )
+            addons.append(cinemeta)
+        }
+
         sortAddonsDeterministically()
         saveAddons()
+    }
+
+    /// Whether Cinemeta is currently enabled and available for use.
+    /// Returns false when TMDB enrichment is active (TMDB replaces Cinemeta entirely)
+    /// or when the user has explicitly disabled the Cinemeta addon.
+    var isCinemetaEnabled: Bool {
+        guard !TMDBEnricher.shared.hasKeyForHome else { return false }
+        return addons.contains(where: { $0.id == "cinemeta" && $0.isEnabled })
+    }
+
+    /// Whether Cinemeta is available for metadata (episodes, seasons).
+    /// Even when TMDB is the primary discovery source, Cinemeta may still be
+    /// needed for episode listings. Returns false only if user explicitly disabled it.
+    var isCinemetaAvailableForMetadata: Bool {
+        return addons.contains(where: { $0.id == "cinemeta" && $0.isEnabled })
     }
 
     /// Resets addons to only stock addons (clearing all third-party/community addons).

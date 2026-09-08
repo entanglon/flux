@@ -3,28 +3,20 @@ import Combine
 
 struct FeaturedCarousel: View {
     let items: [MediaItem]
-    @State private var currentIndex = 0
-    @State private var isHovering = false
+    @StateObject private var state = CarouselState()
     @ObservedObject private var userData = UserDataService.shared
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
-    let timer = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
-    
     var body: some View {
+        let safeIndex = max(0, min(state.currentIndex, items.count - 1))
+        let item = items[safeIndex]
+        
         ZStack(alignment: .bottomLeading) {
             if !items.isEmpty {
-                let safeIndex = max(0, min(currentIndex, items.count - 1))
-                let item = items[safeIndex]
-                
                 // 1. Hero Image / Backdrop Selection
                 GeometryReader { geo in
                     ZStack {
-                        // Logic: Only use backdrop/hero (landscape). Never stretch a poster.
                         if let heroURL = item.heroURL ?? item.backdropURL {
-                            // The carousel is visually full-width, but decoding a 4K
-                            // image for every slide can retain ~32 MB per image. 1920px
-                            // remains crisp for this view while keeping the image cache
-                            // within its byte budget.
                             CachedImage(url: heroURL.highQuality(), maxDimension: 1920) { phase in
                                 if let image = phase.image {
                                     HeroBackdrop.banner(
@@ -43,8 +35,6 @@ struct FeaturedCarousel: View {
                                 }
                             }
                         } else {
-                            // High-quality fallback for items without backdrops (e.g. some Stremio catalogs)
-                            // Use a premium glass/gradient background instead of a blurry stretched poster.
                             LinearGradient(
                                 colors: [.blue.opacity(0.3), .purple.opacity(0.3), .black],
                                 startPoint: .topLeading,
@@ -61,19 +51,16 @@ struct FeaturedCarousel: View {
                     }
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.8)))
-                .id(currentIndex)
+                .id(state.currentIndex)
                 
-                // 2. Dual Vignette Gradient Mesh (Apple TV Master Grade)
+                // 2. Dual Vignette Gradient Mesh
                 ZStack {
-                    
-                    // Left Vignette (Title text readability)
                     LinearGradient(
                         gradient: Gradient(colors: [.black.opacity(0.85), .black.opacity(0.4), .clear]),
                         startPoint: .leading,
                         endPoint: .init(x: 0.65, y: 0.5)
                     )
                     
-                    // Bottom-Up Vignette (Seamless row transition)
                     LinearGradient(
                         gradient: Gradient(stops: [
                             .init(color: .clear, location: 0.35),
@@ -90,7 +77,6 @@ struct FeaturedCarousel: View {
                 VStack(alignment: .leading, spacing: 14) {
                     NavigationLink(value: item) {
                         VStack(alignment: .leading, spacing: 14) {
-                            // Category Eyebrow / Upcoming Badge
                             if !item.isReleased {
                                 Text(item.upcomingBadgeText)
                                     .font(.system(size: 12, weight: .bold))
@@ -108,7 +94,6 @@ struct FeaturedCarousel: View {
                                     .shadow(color: .black.opacity(0.5), radius: 4)
                             }
                             
-                            // Title (Logo styling)
                             Text(item.title)
                                 .font(.system(size: 56, weight: .heavy))
                                 .foregroundStyle(.white)
@@ -116,7 +101,6 @@ struct FeaturedCarousel: View {
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                             
-                            // Metadata Row with Tech Badges
                             HStack(spacing: 10) {
                                 if let year = item.releaseDateYear {
                                     Text(year)
@@ -148,7 +132,6 @@ struct FeaturedCarousel: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.white.opacity(0.9))
                             
-                            // Description
                             Text(item.description)
                                 .font(.system(size: 15, weight: .regular))
                                 .foregroundStyle(.white.opacity(0.85))
@@ -162,10 +145,8 @@ struct FeaturedCarousel: View {
                     }
                     .buttonStyle(.plain)
                     
-                    // Action Buttons (Apple TV Master Layout)
                     HStack(spacing: 14) {
                         if !item.isReleased {
-                            // Primary Add to Watchlist Button
                             Button(action: {
                                 userData.toggleWatchlist(item)
                             }) {
@@ -186,7 +167,6 @@ struct FeaturedCarousel: View {
                             .buttonStyle(.plain)
                             .contentShape(Capsule())
                         } else {
-                            // Primary Play Button
                             NavigationLink(value: item) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "play.fill")
@@ -205,7 +185,6 @@ struct FeaturedCarousel: View {
                             .buttonStyle(.plain)
                             .contentShape(Capsule())
                             
-                            // Secondary Watchlist Button (Circular Glass + Button)
                             Button(action: {
                                 userData.toggleWatchlist(item)
                             }) {
@@ -228,17 +207,18 @@ struct FeaturedCarousel: View {
                 .padding(.bottom, 40)
             }
             
-            // Apple TV Dynamic Page Indicators (Pills)
+            // Page Indicators
             HStack(spacing: 6) {
                 ForEach(0..<items.count, id: \.self) { index in
                     Capsule()
-                        .fill(index == currentIndex ? Color.white : Color.white.opacity(0.3))
-                        .frame(width: index == currentIndex ? 24 : 8, height: 8)
-                        .shadow(color: index == currentIndex ? .white.opacity(0.5) : .clear, radius: 4)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: currentIndex)
+                        .fill(index == state.currentIndex ? Color.white : Color.white.opacity(0.3))
+                        .frame(width: index == state.currentIndex ? 24 : 8, height: 8)
+                        .shadow(color: index == state.currentIndex ? .white.opacity(0.5) : .clear, radius: 4)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: state.currentIndex)
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.4)) {
-                                currentIndex = index
+                                state.currentIndex = index
+                                state.restartTimer()
                             }
                         }
                 }
@@ -250,10 +230,11 @@ struct FeaturedCarousel: View {
         }
         .frame(height: 680)
         .overlay(alignment: .leading) {
-            if isHovering {
+            if state.isHovering {
                 Button(action: {
                     withAnimation {
-                        currentIndex = (currentIndex - 1 + items.count) % items.count
+                        state.currentIndex = (state.currentIndex - 1 + items.count) % items.count
+                        state.restartTimer()
                     }
                 }) {
                     arrowButton(direction: "left")
@@ -264,10 +245,11 @@ struct FeaturedCarousel: View {
             }
         }
         .overlay(alignment: .trailing) {
-            if isHovering {
-                 Button(action: {
+            if state.isHovering {
+                Button(action: {
                     withAnimation {
-                        currentIndex = (currentIndex + 1) % items.count
+                        state.currentIndex = (state.currentIndex + 1) % items.count
+                        state.restartTimer()
                     }
                 }) {
                     arrowButton(direction: "right")
@@ -278,13 +260,27 @@ struct FeaturedCarousel: View {
             }
         }
         .onHover { hovering in
-            withAnimation { isHovering = hovering }
+            withAnimation { state.isHovering = hovering }
         }
-        .onReceive(timer) { _ in
-            guard !items.isEmpty, !isHovering else { return }
-            withAnimation(.easeInOut(duration: 0.5)) {
-                currentIndex = (currentIndex + 1) % items.count
+        .onChange(of: state.isHovering) { _, hovering in
+            if hovering {
+                state.stopTimer()
+            } else {
+                state.startTimer()
             }
+        }
+        .onChange(of: items.count) { _, newCount in
+            if state.currentIndex >= newCount {
+                state.currentIndex = 0
+            }
+            state.restartTimer()
+        }
+        .onAppear {
+            state.items = items
+            state.startTimer()
+        }
+        .onDisappear {
+            state.stopTimer()
         }
     }
     
@@ -295,6 +291,42 @@ struct FeaturedCarousel: View {
             .frame(width: 44, height: 44)
             .contentShape(Circle())
             .glassEffect(.regular.interactive(), in: .circle)
+    }
+}
+
+// MARK: - Observable state manager (reference type, avoids @State capture issues)
+
+@MainActor
+private final class CarouselState: ObservableObject {
+    @Published var currentIndex = 0
+    @Published var isHovering = false
+    
+    /// Back-reference to the items array so the timer closure can read current count.
+    var items: [MediaItem] = []
+    
+    private var timer: Timer?
+    private let interval: TimeInterval = 8
+    
+    func startTimer() {
+        guard timer == nil, !items.isEmpty else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isHovering, !self.items.isEmpty else { return }
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    self.currentIndex = (self.currentIndex + 1) % self.items.count
+                }
+            }
+        }
+    }
+    
+    func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+    
+    func restartTimer() {
+        stopTimer()
+        startTimer()
     }
 }
 

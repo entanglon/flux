@@ -116,9 +116,7 @@ struct GlassCard: View {
             }
 
             if progress != nil {
-                GeometryReader { geo in
-                    progressBarView(totalWidth: geo.size.width)
-                }
+                progressBarOverlay
             }
         }
         .aspectRatio(aspectRatio.ratio, contentMode: .fit)
@@ -136,21 +134,17 @@ struct GlassCard: View {
     @ViewBuilder
     private var imageContent: some View {
         if aspectRatio == .landscape && displayItem.backdropURL == nil {
+            // No backdrop: single decode on a static gradient. (Previously a
+            // full-image .blur(16) + second decode of the same URL — a Gaussian
+            // blur composited every frame while scrolling.)
             ZStack {
-                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL) { phase in
-                    if let img = phase.image {
-                        img.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                            .clipped()
-                            .blur(radius: 16)
-                            .overlay(Color.black.opacity(0.45))
-                    } else {
-                        Rectangle().fill(Color.gray.opacity(0.2))
-                    }
-                }
-                
-                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL, maxDimension: 800) { phase in
+                LinearGradient(
+                    colors: [Color(red: 0.16, green: 0.16, blue: 0.20), Color(red: 0.07, green: 0.07, blue: 0.09)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                CachedImage(url: displayItem.posterURL ?? displayItem.imageURL, maxDimension: 480) { phase in
                     if let img = phase.image {
                         img.resizable()
                             .aspectRatio(contentMode: .fit)
@@ -160,7 +154,10 @@ struct GlassCard: View {
                 }
             }
         } else {
-            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 1200) { phase in
+            // Cards render at ~180-300pt (≈360-600px @2x). Decoding at 480px
+            // keeps them tack-sharp while using ~6x less memory than 1200px
+            // and easing pressure on the 64MB image cache during scroll.
+            CachedImage(url: aspectRatio == .portrait ? (displayItem.posterURL ?? displayItem.imageURL) : (displayItem.backdropURL ?? displayItem.imageURL), maxDimension: 480) { phase in
                 switch phase {
                 case .empty:
                     placeholderView
@@ -189,8 +186,9 @@ struct GlassCard: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4.5)
                 .background(
+                    // glassEffect already provides the material; layering
+                    // .ultraThinMaterial underneath doubles backdrop-blur cost.
                     Capsule(style: .continuous)
-                        .fill(.ultraThinMaterial)
                         .glassEffect(.regular, in: .capsule)
                 )
                 .overlay(
@@ -239,8 +237,10 @@ struct GlassCard: View {
         }
     }
 
+    /// Progress fill via GPU scale transform instead of GeometryReader, so the
+    /// bar never forces an extra layout pass per card during scroll.
     @ViewBuilder
-    private func progressBarView(totalWidth: CGFloat) -> some View {
+    private var progressBarOverlay: some View {
         if let progress = progress {
             VStack {
                 Spacer()
@@ -250,7 +250,7 @@ struct GlassCard: View {
                         .frame(height: 4)
                     Rectangle()
                         .fill(Color.white)
-                        .frame(width: totalWidth * progress, height: 4)
+                        .scaleEffect(x: max(0, min(1, progress)), anchor: .leading)
                 }
                 .frame(height: 4)
                 .padding(.bottom, 12)
@@ -261,8 +261,11 @@ struct GlassCard: View {
 
     private var placeholderView: some View {
         ZStack {
+            // Flat fill, not .ultraThinMaterial: placeholders are visible for
+            // every card while images resolve during fast scroll, and backdrop
+            // blur per card is one of the most expensive compositor operations.
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
                 .overlay(
                     LinearGradient(
                         colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],

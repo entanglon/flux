@@ -104,17 +104,13 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
         let nextEnd = min(index + 3, items.count - 1)
         guard nextStart <= nextEnd else { return }
 
+        // Direct cast only — runtime Mirror introspection on the scroll path is
+        // far more expensive than the prefetch it serves. Non-MediaItem rows
+        // (genres, platforms) use local assets/text and need no prefetch.
         var urls: [URL?] = []
         for i in nextStart...nextEnd {
-            let candidate = items[i]
-            if let media = candidate as? MediaItem {
+            if let media = items[i] as? MediaItem {
                 urls.append(media.posterURL ?? media.imageURL ?? media.backdropURL)
-            } else if let mirror = Mirror(reflecting: candidate).descendant("posterURL") as? URL? {
-                urls.append(mirror)
-            } else if let mirror = Mirror(reflecting: candidate).descendant("imageURL") as? URL? {
-                urls.append(mirror)
-            } else if let mirror = Mirror(reflecting: candidate).descendant("stillURL") as? URL? {
-                urls.append(mirror)
             }
         }
         ImagePrefetcher.shared.prefetch(urls: urls, maxDimension: itemWidth * 1.5)

@@ -405,6 +405,8 @@ extension HomeView {
                         withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
                     }
                 } else if let items = try? await StremioService.shared.fetchTrendingMovies(), !items.isEmpty {
+                    // Cinemeta fallback only when no TMDB key exists
+                    guard !TMDBEnricher.shared.hasKey else { return }
                     let filtered = items.filter { ($0.backdropURL != nil || $0.heroURL != nil) && $0.isReleased }
                     await MainActor.run {
                         self.heroContent = Array((filtered.isEmpty ? items : filtered).prefix(7))

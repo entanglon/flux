@@ -595,7 +595,10 @@ class TMDBEnricher {
     // MARK: - Catalog Fetching (Flux Discovery Layer with TTL-Aware Caching)
     
     func fetchTrendingAll(window: String = "day") async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        // Only fall back to Cinemeta when no TMDB key exists at all.
+        // When a key exists but enrichment is disabled, return empty (Cinemeta catalog
+        // methods handle enrichment directly without TMDB overlay).
+        guard hasKey else {
             let movies: [MediaItem]
             let series: [MediaItem]
             if window == "day" {
@@ -613,6 +616,8 @@ class TMDBEnricher {
             }
             return interleaved
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "trending:all:\(window)"
         if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) {
@@ -643,13 +648,15 @@ class TMDBEnricher {
     }
 
     func fetchTrendingMovies(window: String = "day") async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             if window == "day" {
                 return try await StremioService.shared.fetchTrendingMovies()
             } else {
                 return try await StremioService.shared.fetchPopularMovies()
             }
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "trending:movie:\(window)"
         if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -662,13 +669,15 @@ class TMDBEnricher {
     }
 
     func fetchTrendingTV(window: String = "day") async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             if window == "day" {
                 return try await StremioService.shared.fetchTrendingTVShows()
             } else {
                 return try await StremioService.shared.fetchPopularTVShows()
             }
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "trending:tv:\(window)"
         if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -681,10 +690,12 @@ class TMDBEnricher {
     }
 
     func fetchPopularMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "movie", id: "top", skip: skip, preserveOrder: true)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:popular:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -721,9 +732,11 @@ class TMDBEnricher {
     }
 
     func fetchTopRatedMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             return try await StremioService.shared.fetchTopRatedMovies(page: page)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:top_rated:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -736,10 +749,12 @@ class TMDBEnricher {
     }
 
     func fetchStreamingMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             let skip = (page - 1) * 20 + 20
             return try await StremioService.shared.fetchCatalog(type: "movie", id: "top", skip: skip, preserveOrder: true)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -751,10 +766,12 @@ class TMDBEnricher {
     }
 
     func fetchQuickWatchMovies(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             let skip = (page - 1) * 20
             return (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Animation", skip: skip, preserveOrder: true)) ?? []
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "movie:quick:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -766,10 +783,12 @@ class TMDBEnricher {
     }
 
     func fetchPopularTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             let skip = (page - 1) * 20
             return try await StremioService.shared.fetchCatalog(type: "series", id: "top", skip: skip, preserveOrder: true)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:popular:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -806,9 +825,11 @@ class TMDBEnricher {
     }
 
     func fetchTopRatedTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             return try await StremioService.shared.fetchTopRatedTVShows(page: page)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:top_rated:\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -821,10 +842,12 @@ class TMDBEnricher {
     }
 
     func fetchStreamingTV(page: Int = 1) async throws -> [MediaItem] {
-        guard hasKeyForHome else {
+        guard hasKey else {
             let skip = (page - 1) * 20 + 20
             return try await StremioService.shared.fetchCatalog(type: "series", id: "top", skip: skip, preserveOrder: true)
         }
+        
+        guard hasKeyForHome else { return [] }
         
         let cacheKey = "tv:streaming:\(currentRegion):\(page)"
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
@@ -884,7 +907,7 @@ class TMDBEnricher {
     func fetchGenrePage(tmdbGenreID: Int, page: Int, mediaType: String = "movie", category: String = "popular") async -> [MediaItem] {
         let type = mediaType.lowercased().contains("tv") || mediaType.lowercased().contains("series") ? "tv" : "movie"
         
-        guard hasKeyForHome else {
+        guard hasKey else {
             let stremioType = type == "tv" ? "series" : "movie"
             let genreName: String? = {
                 switch tmdbGenreID {
@@ -910,6 +933,8 @@ class TMDBEnricher {
                 return (try? await StremioService.shared.fetchCatalog(type: stremioType, id: "top", genre: genreName, skip: skip, preserveOrder: true)) ?? []
             }
         }
+        
+        guard hasKeyForHome else { return [] }
         let baseFilter: String
         switch tmdbGenreID {
         case 10001: // Anime

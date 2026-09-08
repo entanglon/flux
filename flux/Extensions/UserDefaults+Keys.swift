@@ -6,7 +6,6 @@ extension UserDefaults {
     enum Key {
         // MARK: - App & General Settings
         static let tmdbApiKey = "tmdbApiKey"
-        static let cloudBaseURL = "cloudBaseURL"
         static let cloudLastSyncAt = "cloudLastSyncAt"
         static let stremioCacheGB = "stremioCacheGB"
         static let preferredQuality = "preferredQuality"

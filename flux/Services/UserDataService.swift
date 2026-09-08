@@ -758,6 +758,15 @@ class UserDataService: ObservableObject {
         return order.compactMap { map[$0] }
     }
 
+    /// Order-sensitive raw comparison for merged cloud arrays. Serialization
+    /// failure (non-JSON values) treats the data as changed — the safe direction.
+    private static func rawJSONEqual(_ a: [[String: Any]], _ b: [[String: Any]]) -> Bool {
+        guard a.count == b.count,
+              let da = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys]),
+              let db = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys]) else { return false }
+        return da == db
+    }
+
     /// Applies a cloud payload to the CURRENT profile with two-way smart merging
     /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
     @discardableResult
@@ -832,13 +841,29 @@ class UserDataService: ObservableObject {
         let remoteSettings = payload["settings"] as? [String: Any]
         let remoteEpProgress = payload["episodeProgress"] as? [String: [String: Any]]
 
+        // Only publish/post when the merge actually changed something. @Published
+        // fires on every set (even for identical values), and fluxRefresh makes
+        // every page wipe caches and refetch all rails — posting it on a no-op
+        // pull kept the whole UI churning and pinned scrolling at ~10fps.
         let applyUIUpdates = {
-            self.collections = mergedCollections.sorted { $0.createdAt < $1.createdAt }
-            self.saveCollections()
-            
-            self.watchlist = self.parseItems(mergedWatchlist)
-            self.history = self.parseItems(mergedHistory)
-            
+            let watchlistChanged = !Self.rawJSONEqual(mergedWatchlist, localWatchlist)
+            let historyChanged = !Self.rawJSONEqual(mergedHistory, localHistory)
+            let mergedSig = mergedCollections.map { "\($0.id):\($0.items.count)" }
+            let currentSig = self.collections.map { "\($0.id):\($0.items.count)" }
+            let collectionsChanged = mergedSig != currentSig
+
+            if collectionsChanged {
+                self.collections = mergedCollections.sorted { $0.createdAt < $1.createdAt }
+                self.saveCollections()
+            }
+
+            if watchlistChanged {
+                self.watchlist = self.parseItems(mergedWatchlist)
+            }
+            if historyChanged {
+                self.history = self.parseItems(mergedHistory)
+            }
+
             TasteProfileManager.shared.applyCloudData(loved: tasteLoved, snapshots: tasteSnapshots)
             if let addonsData {
                 AddonManager.shared.syncWithCloudAddons(addonsData)
@@ -861,8 +886,10 @@ class UserDataService: ObservableObject {
                 }
                 UserDefaults.standard.set(localEpProgress, forKey: self.episodeProgressKey)
             }
-            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
-            print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count))")
+            if watchlistChanged || historyChanged || collectionsChanged {
+                NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+            }
+            print("[UserDataService] Smart cloud merge applied (watchlist: \(self.watchlist.count), history: \(self.history.count), collections: \(self.collections.count), changed: \(watchlistChanged || historyChanged || collectionsChanged))")
         }
 
         let remoteHasTmdb = !((payload["tmdbApiKey"] as? String) ?? "").isEmpty

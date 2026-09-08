@@ -4,6 +4,7 @@ import OpenGL.GL
 import Libmpv
 import Combine
 import Darwin
+import OSLog
 // MARK: - SwiftUI View
 struct MPVVideoView: NSViewControllerRepresentable {
     @ObservedObject var controller: MPVController
@@ -164,6 +165,8 @@ class MPVController: ObservableObject {
     private(set) var loadedURL: URL?
     
     @Published var isBuffering = false
+    /// When the current cache stall began (nil while flowing). Telemetry only.
+    private var stallStartDate: Date?
     @Published var demuxerCacheTime: Double = 0.0
     @Published var isSeeking = false
     @Published var isUserPaused = false
@@ -176,6 +179,10 @@ class MPVController: ObservableObject {
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
     
     var onPlaybackError: (() -> Void)?
+    /// Bumped once per natural end-of-file (see event loop). PlayerView observes
+    /// via onChange — a closure would capture a stale View struct.
+    @Published private(set) var endOfFileCount = 0
+    func registerEndOfFile() { endOfFileCount += 1 }
     weak var playerView: MPVViewController?
     private var hasAutoSelectedTracksForCurrentMedia = false
     
@@ -291,6 +298,19 @@ class MPVController: ObservableObject {
                 }
             case "paused-for-cache":
                 if let buff = value as? Bool {
+                    // Persisted stall telemetry: sub-second freezes leave no
+                    // other trace, so log transitions with cache level + position.
+                    // (Numbers are marked public — os.Logger redacts interpolations by default.)
+                    if buff && !self.isBuffering {
+                        self.stallStartDate = Date()
+                        let cache = String(format: "%.1f", self.demuxerCacheTime)
+                        let pos = String(format: "%.0f", self.timePos)
+                        Logger.player.info("Cache stall began (demuxer cache: \(cache, privacy: .public)s, at \(pos, privacy: .public)s)")
+                    } else if !buff && self.isBuffering {
+                        let duration = self.stallStartDate.map { Date().timeIntervalSince($0) } ?? 0
+                        Logger.player.info("Cache stall ended after \(String(format: "%.2f", duration), privacy: .public)s")
+                        self.stallStartDate = nil
+                    }
                     self.isBuffering = buff
                     if buff {
                         self.isUserPaused = false
@@ -494,10 +514,16 @@ class MPVViewController: NSViewController {
         }
         
         self.playerView.onPlaybackError = { [weak self] in
-             print("[MPV] Playback error detected")
-             DispatchQueue.main.async {
-                 self?.delegate?.onPlaybackError?()
-             }
+              print("[MPV] Playback error detected")
+              DispatchQueue.main.async {
+                  self?.delegate?.onPlaybackError?()
+              }
+        }
+
+        self.playerView.onEndOfFile = { [weak self] in
+              DispatchQueue.main.async {
+                  self?.delegate?.registerEndOfFile()
+              }
         }
         
         let vol = self.playerView.getVolume()
@@ -670,6 +696,9 @@ final class MPVLayerView: NSView {
     var queue = DispatchQueue(label: "mpv", qos: .userInteractive)
     var onPropertyChange: ((String, Any) -> Void)?
     var onPlaybackError: (() -> Void)?
+    /// Fired exactly once when the file ends naturally (EOF). File switches
+    /// emit STOP/REDIRECT reasons instead, so autoplay must only listen here.
+    var onEndOfFile: (() -> Void)?
     private var isEventLoopRunning = false
     private let eventLoopLock = NSLock()
     private var isCleaningUp = false
@@ -916,7 +945,7 @@ final class MPVLayerView: NSView {
         
         mpv_set_property_string(mpv, "cache", "yes")
         mpv_set_property_string(mpv, "cache-secs", "60")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "67108864")      // 64 MB demuxer buffer (IINA standard, prevents RAM bloat)
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "268435456")     // 256 MB demuxer buffer: the 64 MB cap held only ~6s of 4K-remux-grade bitrates, so any swarm/server dip showed as a split-second freeze. 256 MB ≈ 25s at 80 Mbps; trivial on unified memory.
         mpv_set_property_string(mpv, "demuxer-max-back-bytes", "15728640") // 15 MB backward seek buffer
         mpv_set_property_string(mpv, "demuxer-readahead-secs", "12")
         mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
@@ -1195,6 +1224,9 @@ final class MPVLayerView: NSView {
                     if reason == MPV_END_FILE_REASON_ERROR && !self.isIntentionallySwitchingFile {
                         print("[MPV] Error: End File Reason ERROR (code: \(error))")
                         DispatchQueue.main.async { self.onPlaybackError?() }
+                    } else if reason == MPV_END_FILE_REASON_EOF && !self.isIntentionallySwitchingFile {
+                        print("[MPV] Natural end of file reached")
+                        DispatchQueue.main.async { self.onEndOfFile?() }
                     }
                 case MPV_EVENT_FILE_LOADED:
                     print("[MPV EVENT] FILE_LOADED")

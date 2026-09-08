@@ -23,17 +23,22 @@ struct ContinueWatchingCard: View {
         let cinemetaBackdrop = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/background/medium/\(item.id)/img") : nil
         let cinemetaPoster = item.id.starts(with: "tt") ? URL(string: "https://images.metahub.space/poster/medium/\(item.id)/img") : nil
 
+        /// Cards render at 290x163 (~580x326 @2x) and downsample to 600px, so
+        /// request w780/medium sources directly instead of downloading w1280/4K
+        /// and throwing the pixels away.
         func upgraded(_ url: URL?) -> URL? {
             guard var urlString = url?.absoluteString else { return nil }
             if urlString.contains("image.tmdb.org") {
-                urlString = urlString.replacingOccurrences(of: "/w300/", with: "/w1280/")
-                                     .replacingOccurrences(of: "/w500/", with: "/w1280/")
-                                     .replacingOccurrences(of: "/w780/", with: "/w1280/")
+                urlString = urlString.replacingOccurrences(of: "/w300/", with: "/w780/")
+                                     .replacingOccurrences(of: "/w500/", with: "/w780/")
+                                     .replacingOccurrences(of: "/w1280/", with: "/w780/")
+                                     .replacingOccurrences(of: "/original/", with: "/w780/")
             }
             if urlString.contains("images.metahub.space") || urlString.contains("episodes.metahub.space") {
-                urlString = urlString.replacingOccurrences(of: "/small/", with: "/large/")
-                                     .replacingOccurrences(of: "/medium/", with: "/large/")
-                                     .replacingOccurrences(of: "/w780/", with: "/w1280/")
+                urlString = urlString.replacingOccurrences(of: "/small/", with: "/medium/")
+                                     .replacingOccurrences(of: "/large/", with: "/medium/")
+                                     .replacingOccurrences(of: "/w780/", with: "/medium/")
+                                     .replacingOccurrences(of: "/w1280/", with: "/medium/")
             }
             return URL(string: urlString)
         }
@@ -87,8 +92,10 @@ struct ContinueWatchingCard: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                     default:
+                    // Flat fill, not .ultraThinMaterial: this placeholder shows
+                    // for every card while images resolve during fast scroll.
                     Rectangle()
-                        .fill(.ultraThinMaterial)
+                        .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
                         .overlay(
                             LinearGradient(
                                 colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
@@ -125,7 +132,8 @@ struct ContinueWatchingCard: View {
                 // Title Treatment: Transparent Logo with Typographic Fallback
                 Group {
                     if let logo = activeLogoURL {
-                        CachedImage(url: logo) { phase in
+                        // Logos render at ~160x36; no need for the 300px default decode.
+                        CachedImage(url: logo, maxDimension: 200) { phase in
                             switch phase {
                             case .success(let img):
                                 img

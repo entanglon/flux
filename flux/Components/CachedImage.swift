@@ -6,9 +6,40 @@ struct DecodedImage: @unchecked Sendable {
     let cost: Int
 }
 
+/// Bounds how many ImageIO decodes run at once. Scrolling reveals batches of
+/// cards; without a gate, 20+ simultaneous decodes spike CPU in bursts and
+/// stall the main thread between bursts (scroll-pause-scroll-pause). Overcount
+/// from cancelled waiters self-heals on the next waiter-less release.
+actor DecodeGate {
+    static let shared = DecodeGate()
+    private let maxConcurrent = 4
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if running < maxConcurrent {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if !waiters.isEmpty {
+            waiters.removeFirst().resume()
+        } else {
+            running = max(0, running - 1)
+        }
+    }
+}
+
 enum CachedImageDownsampler {
     static func downsample(data: Data, maxDimension: CGFloat) async -> DecodedImage? {
-        await Task.detached(priority: .userInitiated) { () -> DecodedImage? in
+        guard !Task.isCancelled else { return nil }
+        await DecodeGate.shared.acquire()
+        let result = await Task.detached(priority: .utility) { () -> DecodedImage? in
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
@@ -29,6 +60,8 @@ enum CachedImageDownsampler {
                 cost: ImageInMemoryCache.decodedImageCost(width: cgImage.width, height: cgImage.height)
             )
         }.value
+        await DecodeGate.shared.release()
+        return result
     }
 }
 
@@ -221,8 +254,11 @@ class ImageSession {
 final class ImageInMemoryCache {
     static let shared: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
-        cache.countLimit = 250
-        cache.totalCostLimit = 64 * 1024 * 1024  // 64 MB of decoded pixels in memory (down from 256 MB)
+        // No count limit: ~300 live cards across all rails exceeded 250 and
+        // forced LRU thrash (re-decode on every scroll-back). The byte budget
+        // below is the real bound — each entry carries an accurate pixel cost.
+        cache.countLimit = 0
+        cache.totalCostLimit = 128 * 1024 * 1024  // 128 MB of decoded pixels (≈100-200 cards at rail sizes; trivial on Apple Silicon unified memory)
         return cache
     }()
 

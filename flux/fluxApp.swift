@@ -83,7 +83,7 @@ struct fluxApp: App {
                         ProgressView()
                             .progressViewStyle(.circular)
                             .scaleEffect(1.2)
-                        Text("Signing in…")
+                        Text(authManager.isLoadingMessage)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.white.opacity(0.55))
                     }

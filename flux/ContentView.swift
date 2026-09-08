@@ -181,10 +181,16 @@ struct ContentView: View {
         .onChange(of: selectedCategory) {
             path = NavigationPath()
         }
+        // NOTE: intentionally no cloud sync here. fluxRefresh means "reload UI".
+        // Syncing here re-pulls, re-merges, and re-posts fluxRefresh
+        // (applyCloudPayload publishes unconditionally), which self-perpetuates:
+        // every cycle cleared all rails caches, refetched ~15 rails per page,
+        // and rebuilt every @Published observer — holding scroll at ~10fps.
+        // Sync keeps its own triggers: launch, login, becomeActive, Cmd+R,
+        // and debounced autosync after local mutations.
         .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
             Task {
                 await TMDBCatalogCacheActor.shared.clear()
-                await AuthManager.shared.syncNowAsync(forcePull: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxNavigate)) { note in

@@ -78,13 +78,14 @@ class StremioService {
         }
         // Addon returns the full catalog in one request — only serve it on page 1.
         guard page == 1 else { return [] }
+        guard AddonManager.shared.isCinemetaEnabled else { return [] }
         return try await fetchCatalog(type: type, id: platformID, baseURL: ottCatalogBase, preserveOrder: true)
     }
 
     private init() {}
     
     // MARK: - Catalogs Fetching
-    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0, preserveOrder: Bool = true) async throws -> [MediaItem] {
+    func fetchCatalog(type: String, id: String, baseURL: String? = nil, sector: String? = nil, genre: String? = nil, search: String? = nil, skip: Int = 0, preserveOrder: Bool = true, skipEnrichment: Bool = false) async throws -> [MediaItem] {
         let base = baseURL ?? cinemetaURL
         var urlString = "\(base)/catalog/\(type)/\(id)"
         
@@ -109,6 +110,12 @@ class StremioService {
         
         let catalogResponse = try JSONDecoder().decode(StremioCatalogResponse.self, from: data)
         let items = catalogResponse.metas.map { $0.toMediaItem() }
+        
+        // Skip TMDB enrichment when explicitly requested (Cinemeta-only mode)
+        // or when the Cinemeta addon is disabled (user chose TMDB exclusively)
+        guard !skipEnrichment, AddonManager.shared.isCinemetaEnabled else {
+            return items
+        }
         
         // Internal Enrichment: Process in parallel before returning
         var enrichedItems: [MediaItem] = []
@@ -142,6 +149,12 @@ class StremioService {
     
     // MARK: - Meta Fetching
     func fetchMeta(type: String, id: String) async throws -> MediaItem {
+        // Cinemeta metadata is only available when the Cinemeta addon is enabled.
+        // When TMDB is the primary source, callers should use TMDBEnricher.fullEnrich() directly.
+        guard AddonManager.shared.isCinemetaAvailableForMetadata else {
+            throw URLError(.fileDoesNotExist)
+        }
+        
         let urlString = "\(cinemetaURL)/meta/\(type)/\(id).json"
         
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
@@ -240,12 +253,13 @@ class StremioService {
         var allTVShows: [MediaItem] = []
         
         await withTaskGroup(of: (movies: [MediaItem], tvShows: [MediaItem]).self) { group in
-            // Cinemeta is the primary search source — query it directly (it's no
-            // longer a user-facing addon, so it won't appear in enabledAddons).
-            group.addTask {
-                let m = (try? await self.fetchCatalog(type: "movie", id: "top", search: query)) ?? []
-                let t = (try? await self.fetchCatalog(type: "series", id: "top", search: query)) ?? []
-                return (m, t)
+            // Cinemeta search — only when Cinemeta is enabled (no TMDB key or enrichment disabled)
+            if AddonManager.shared.isCinemetaEnabled {
+                group.addTask {
+                    let m = (try? await self.fetchCatalog(type: "movie", id: "top", search: query, skipEnrichment: true)) ?? []
+                    let t = (try? await self.fetchCatalog(type: "series", id: "top", search: query, skipEnrichment: true)) ?? []
+                    return (m, t)
+                }
             }
 
             for addon in addons {
@@ -298,12 +312,13 @@ class StremioService {
     }
     
     func fetchRelated(type: String, genres: [String]?) async throws -> [MediaItem] {
+        guard AddonManager.shared.isCinemetaEnabled else { return [] }
         guard let genres = genres, let primaryGenre = genres.first else {
-            return try await fetchCatalog(type: type, id: "top")
+            return try await fetchCatalog(type: type, id: "top", skipEnrichment: true)
         }
         
         // Fetch from the same primary genre
-        return try await fetchCatalog(type: type, id: "top", genre: primaryGenre)
+        return try await fetchCatalog(type: type, id: "top", genre: primaryGenre, skipEnrichment: true)
     }
 
     // MARK: - Subtitles Discovery

@@ -617,6 +617,12 @@ class PlayerManager: ObservableObject {
         self.currentSeason = season
         self.currentEpisode = episode
         self.currentEpisodeImage = episodeImage
+        // New episode → completion may be attempted again (clears stale keys).
+        let episodeKey = "\(item.id):\(season ?? -1):\(episode ?? -1)"
+        if episodeKey != lastCompletedEpisodeKey {
+            attemptedAdvances.removeAll()
+            lastCompletedEpisodeKey = episodeKey
+        }
         self.errorMessage = nil
         self.currentSelectedStream = nil
         self.hasConfirmedPlaybackSuccess = false
@@ -1494,20 +1500,15 @@ class PlayerManager: ObservableObject {
                 item.runtime = "\(minutes)m"
             }
         }
-        // If an episode in a TV show is completed (progress >= 90%), advance Continue Watching to the next episode!
-        if (item.category == "TV Show" || currentSeason != nil), progress >= 0.90, let next = nextEpisodeInfo {
-            UserDataService.shared.addToHistory(
-                item,
-                progress: 0.0,
-                season: next.season,
-                episode: next.episode,
-                episodeImage: nil,
-                playbackPosition: 0.0,
-                playbackDuration: duration,
-                streamURL: nil,
-                torrentInfoHash: nil,
-                fileIndex: nil
-            )
+        // Completed episode (progress >= 90%): advance Continue Watching to the
+        // next *released* episode (async — may fetch season listings). EOF calls
+        // completeEpisode directly so natural ends count even under 90%.
+        if (item.category == "TV Show" || currentSeason != nil), progress >= 0.90,
+           let s = currentSeason, let e = currentEpisode {
+            let snapshot = item
+            Task { @MainActor [weak self] in
+                await self?.completeEpisode(item: snapshot, season: s, episode: e, duration: duration, autoplay: false, cancelled: true, pickerVisible: true)
+            }
         } else {
             UserDataService.shared.addToHistory(
                 item,
@@ -1524,7 +1525,44 @@ class PlayerManager: ObservableObject {
         }
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
-    
+
+    /// Episodes already run through completion (per session). Prevents repeated
+    /// season fetches from the 5-second progress saver while credits roll.
+    private var attemptedAdvances = Set<String>()
+    private var lastCompletedEpisodeKey = ""
+
+    /// Records episode completion: advances Continue Watching to the next
+    /// *released* episode, or autoplays it when requested. Safe to call
+    /// repeatedly (idempotent per episode). Clips under 5 minutes can never
+    /// advance a series (kills phantom jumps from mislabeled micro-streams).
+    func completeEpisode(item: MediaItem, season: Int, episode: Int, duration: Double, autoplay: Bool, cancelled: Bool, pickerVisible: Bool) async {
+        guard duration >= 300 else { return }
+        let key = "\(item.id):\(season):\(episode)"
+        guard !attemptedAdvances.contains(key) else { return }
+        attemptedAdvances.insert(key)
+        guard let next = await resolveNextReleased(item: item, season: season, episode: episode) else { return }
+        if autoplay && !cancelled && !pickerVisible {
+            // Play explicitly with resolved values (never recompute-and-diverge).
+            let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage
+            self.play(item, season: next.season, episode: next.episode, episodeImage: nextImage, isAutoAdvance: true)
+            return
+        }
+        if let stored = UserDataService.shared.getHistoryItem(for: item),
+           stored.lastSeason == next.season && stored.lastEpisode == next.episode { return }
+        UserDataService.shared.addToHistory(
+            item,
+            progress: 0.0,
+            season: next.season,
+            episode: next.episode,
+            episodeImage: nil,
+            playbackPosition: 0.0,
+            playbackDuration: duration,
+            streamURL: nil,
+            torrentInfoHash: nil,
+            fileIndex: nil
+        )
+    }
+
     func handleSignOut() {
         close()
         DispatchQueue.main.async {
@@ -1577,23 +1615,114 @@ class PlayerManager: ObservableObject {
     var nextEpisodeInfo: (season: Int, episode: Int)? {
         guard let item = currentItem,
               let currentSeasonNum = currentSeason,
-              let currentEpisodeNum = currentEpisode,
-              let seasons = item.seasons else { return nil }
-        
+              let currentEpisodeNum = currentEpisode else { return nil }
+        return countBasedNext(seasons: item.seasons, season: currentSeasonNum, episode: currentEpisodeNum)
+    }
+
+    /// Count-based next episode (legacy semantics, no air-date knowledge).
+    private func countBasedNext(seasons: [Season]?, season: Int, episode: Int) -> (season: Int, episode: Int)? {
+        guard let seasons else { return nil }
         // 1. Check current season
-        if let currentSeasonObj = seasons.first(where: { $0.seasonNumber == currentSeasonNum }) {
-            if currentEpisodeNum < currentSeasonObj.episodeCount {
-                return (currentSeasonNum, currentEpisodeNum + 1)
+        if let currentSeasonObj = seasons.first(where: { $0.seasonNumber == season }) {
+            if episode < currentSeasonObj.episodeCount {
+                return (season, episode + 1)
             }
         }
-        
         // 2. Check next season
-        let nextSeasonNum = currentSeasonNum + 1
+        let nextSeasonNum = season + 1
         if seasons.contains(where: { $0.seasonNumber == nextSeasonNum }) {
             return (nextSeasonNum, 1)
         }
-        
         return nil
+    }
+
+    private static let airedDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// True when the episode has aired (or its air date is unknown — unprovable
+    /// unreleased episodes are allowed; only known-future ones are blocked).
+    private func airedOrUnknown(_ airDate: String?) -> Bool {
+        guard let airDate, !airDate.isEmpty else { return true }
+        guard let date = Self.airedDateFormatter.date(from: String(airDate.prefix(10))) else { return true }
+        return Calendar.current.startOfDay(for: date) <= Calendar.current.startOfDay(for: Date())
+    }
+
+    /// Air-date verdict for the episode after (season, episode), plus whether
+    /// episode listings actually covered the decision. Returns legacy
+    /// count-based info when uncovered; nil only when coverage proves nothing
+    /// released is next (unaired or absent from a covered season).
+    private func releaseVerdict(episodes: [Episode]?, seasons: [Season]?, season cs: Int, episode ce: Int) -> (next: (season: Int, episode: Int)?, covered: Bool) {
+        if let eps = episodes, !eps.isEmpty {
+            let seasonEps = eps.filter { $0.seasonNumber == cs }
+            if !seasonEps.isEmpty {
+                if let nxt = seasonEps.filter({ $0.episodeNumber > ce }).min(by: { $0.episodeNumber < $1.episodeNumber }) {
+                    return (airedOrUnknown(nxt.airDate) ? (cs, nxt.episodeNumber) : nil, true)
+                }
+                let nextSeasonEps = eps.filter { $0.seasonNumber == cs + 1 }
+                if !nextSeasonEps.isEmpty {
+                    if let e1 = nextSeasonEps.first(where: { $0.episodeNumber == 1 }) {
+                        return (airedOrUnknown(e1.airDate) ? (cs + 1, 1) : nil, true)
+                    }
+                    return (nil, true)
+                }
+                return (countBasedNext(seasons: seasons, season: cs, episode: ce), false)
+            }
+        }
+        return (countBasedNext(seasons: seasons, season: cs, episode: ce), false)
+    }
+
+    /// Air-date-aware next episode. Behaves like nextEpisodeInfo, except an
+    /// episode known to be unaired (or absent from a season listing covering
+    /// its season) resolves to nil instead of being offered/auto-played.
+    var nextReleasedEpisodeInfo: (season: Int, episode: Int)? {
+        guard let item = currentItem,
+              let cs = currentSeason,
+              let ce = currentEpisode else { return nil }
+        return releaseVerdict(episodes: item.episodes, seasons: item.seasons, season: cs, episode: ce).next
+    }
+
+    private func tmdbID(for item: MediaItem) async -> String? {
+        let clean = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+        if !clean.isEmpty, CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: clean)) {
+            return clean
+        }
+        if item.id.starts(with: "tt") {
+            return await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: "tv")
+        }
+        return nil
+    }
+
+    /// Resolves the next *released* episode, fetching season listings when the
+    /// in-memory item lacks them (e.g. resumed from Continue Watching).
+    /// Falls back to legacy count-based info only when air dates can't be
+    /// established anywhere. Nil = nothing aired is next (hold the rail).
+    func resolveNextReleased(item: MediaItem, season: Int, episode: Int) async -> (season: Int, episode: Int)? {
+        let (syncNext, covered) = releaseVerdict(episodes: item.episodes, seasons: item.seasons, season: season, episode: episode)
+        // A positively-aired verdict is final (air dates can't un-happen).
+        if covered, let syncNext { return syncNext }
+        // Covered-nil (stale listings?) or uncovered: verify against TMDB.
+        if TMDBEnricher.shared.hasKey, let tvId = await tmdbID(for: item), !Task.isCancelled {
+            let fetched = await TMDBEnricher.shared.fetchSeasonEpisodes(tvId: tvId, seasonNumber: season)
+            if !fetched.isEmpty {
+                let (fNext, fCovered) = releaseVerdict(episodes: fetched, seasons: nil, season: season, episode: episode)
+                if fCovered {
+                    if fNext == nil {
+                        // Same season exhausted per authoritative listing — check next season premiere.
+                        let nextSeas = await TMDBEnricher.shared.fetchSeasonEpisodes(tvId: tvId, seasonNumber: season + 1)
+                        if let e1 = nextSeas.first(where: { $0.episodeNumber == 1 }), airedOrUnknown(e1.airDate) {
+                            return (season + 1, 1)
+                        }
+                        return nil
+                    }
+                    return fNext
+                }
+            }
+        }
+        return syncNext
     }
 
     func resolveNextEpisode() {
@@ -1624,13 +1753,30 @@ class PlayerManager: ObservableObject {
                     guard self.currentItem?.id == item.id,
                           self.currentSeason == next.season || self.nextEpisodeInfo?.season == next.season else { return }
                     self.nextEpisode = ep
+                    // Backfill listings so air-gated math + rail advancement work
+                    // for items resumed from Continue Watching (which carry no
+                    // seasons/episodes arrays). Never clobbers richer data.
+                    // (fetchMeta already returns a full MediaItem.)
+                    if var cur = self.currentItem, cur.id == item.id {
+                        var changed = false
+                        if (cur.episodes == nil || cur.episodes?.isEmpty == true), let meps = meta.episodes, !meps.isEmpty {
+                            cur.episodes = meps
+                            changed = true
+                        }
+                        if (cur.seasons == nil || cur.seasons?.isEmpty == true), let mseas = meta.seasons, !mseas.isEmpty {
+                            cur.seasons = mseas
+                            changed = true
+                        }
+                        if changed { self.currentItem = cur }
+                    }
                 }
             }
         }
     }
     
     func playNextEpisode() {
-        guard let next = nextEpisodeInfo, let item = currentItem else { return }
+        // Air-gated: never offer or auto-play an episode known to be unaired.
+        guard let next = nextReleasedEpisodeInfo, let item = currentItem else { return }
         print("[PlayerManager] ⚡ Playing Next Episode: S\(next.season):E\(next.episode)")
         
         let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage

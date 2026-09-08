@@ -234,7 +234,7 @@ final class PiPManager: ObservableObject {
             }
             let autoPlayEnabled = UserDefaults.standard.object(forKey: "autoPlayNextEnabled") as? Bool ?? true
             if autoPlayEnabled,
-               manager.nextEpisodeInfo != nil,
+               manager.nextReleasedEpisodeInfo != nil,
                m.duration > 0, m.timePos > 0.5,
                (m.duration - m.timePos) <= 1.0 {
                 manager.playNextEpisode() // play(isAutoAdvance:) → same core keeps floating

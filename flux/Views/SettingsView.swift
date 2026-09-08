@@ -138,18 +138,6 @@ struct GeneralSettingsView: View {
                         }
                         Spacer()
                         Button("Sign In") {
-                            #if os(macOS)
-                            for window in NSApp.windows {
-                                let title = window.title.lowercased()
-                                let id = window.identifier?.rawValue ?? ""
-                                let autosave = window.frameAutosaveName
-                                if id.contains("Settings") || id.contains("settings") ||
-                                   autosave.contains("Settings") || autosave.contains("settings") ||
-                                   title.contains("settings") || title.contains("general") || title.contains("preferences") {
-                                    window.close()
-                                }
-                            }
-                            #endif
                             authManager.startSignInFlow()
                         }
                         .buttonStyle(.borderedProminent)

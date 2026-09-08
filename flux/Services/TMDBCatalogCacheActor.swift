@@ -27,14 +27,14 @@ actor TMDBCatalogCacheActor {
         
         var interval: TimeInterval {
             switch self {
-            case .trendingDay: return 3600
-            case .trendingWeek: return 21600
-            case .nowPlaying: return 14400
-            case .upcoming: return 14400
-            case .airingToday: return 14400
-            case .popular: return 43200
-            case .topRated: return 86400
-            case .discover: return 21600
+            case .trendingDay: return 1800       // 30 min
+            case .trendingWeek: return 7200      // 2 hours
+            case .nowPlaying: return 7200        // 2 hours
+            case .upcoming: return 7200          // 2 hours
+            case .airingToday: return 7200       // 2 hours
+            case .popular: return 14400          // 4 hours
+            case .topRated: return 28800         // 8 hours
+            case .discover: return 7200          // 2 hours
             case .custom(let seconds): return seconds
             }
         }

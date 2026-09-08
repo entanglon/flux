@@ -185,39 +185,50 @@ struct PlayerControlsView: View {
                                     VStack(alignment: .leading, spacing: 0) {
                                         // Online subtitle search (OpenSubtitles addon etc.)
                                         VStack(alignment: .leading, spacing: 8) {
-                                            Button {
-                                                Task {
-                                                    isSearchingSubtitles = true
-                                                    subtitleSearchDone = false
-                                                    if let item = PlayerManager.shared.currentItem {
-                                                        onlineSubtitles = await SubtitleManager.shared.fetchSubtitles(
-                                                            for: item,
-                                                            season: PlayerManager.shared.currentSeason,
-                                                            episode: PlayerManager.shared.currentEpisode
-                                                        )
+                                            // Centered, prominent full-width action
+                                            HStack(spacing: 0) {
+                                                Spacer(minLength: 0)
+                                                Button {
+                                                    Task {
+                                                        isSearchingSubtitles = true
+                                                        subtitleSearchDone = false
+                                                        if let item = PlayerManager.shared.currentItem {
+                                                            onlineSubtitles = await SubtitleManager.shared.fetchSubtitles(
+                                                                for: item,
+                                                                season: PlayerManager.shared.currentSeason,
+                                                                episode: PlayerManager.shared.currentEpisode
+                                                            )
+                                                        }
+                                                        isSearchingSubtitles = false
+                                                        subtitleSearchDone = true
                                                     }
-                                                    isSearchingSubtitles = false
-                                                    subtitleSearchDone = true
-                                                }
-                                            } label: {
-                                                HStack(spacing: 6) {
-                                                    if isSearchingSubtitles {
-                                                        ProgressView().controlSize(.mini)
-                                                    } else {
-                                                        Image(systemName: "globe")
-                                                            .font(.system(size: 12, weight: .semibold))
-                                                        Text("Search Online Subtitles")
-                                                            .font(.system(size: 12, weight: .medium))
+                                                } label: {
+                                                    HStack(spacing: 8) {
+                                                        if isSearchingSubtitles {
+                                                            ProgressView().controlSize(.small)
+                                                        } else {
+                                                            Image(systemName: "globe")
+                                                                .font(.system(size: 14, weight: .semibold))
+                                                        }
+                                                        Text(isSearchingSubtitles ? "Searching…" : "Search Online Subtitles")
+                                                            .font(.system(size: 13, weight: .semibold))
                                                     }
+                                                    .foregroundColor(.white)
+                                                    .frame(maxWidth: .infinity)
+                                                    .padding(.vertical, 9)
+                                                    .background(Color.white.opacity(0.14))
+                                                    .cornerRadius(8)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                                                    )
                                                 }
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(Color.white.opacity(0.12))
-                                                .cornerRadius(6)
+                                                .buttonStyle(.plain)
+                                                .disabled(isSearchingSubtitles)
+                                                Spacer(minLength: 0)
                                             }
-                                            .buttonStyle(.plain)
-                                            .disabled(isSearchingSubtitles)
+                                            .padding(.horizontal, 10)
+                                            .padding(.top, 10)
                                             
                                             ForEach(onlineSubtitles) { sub in
                                                 Button {

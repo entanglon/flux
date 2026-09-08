@@ -14,6 +14,16 @@ struct PlayerView: View {
     @AppStorage(UserDefaults.Key.streamingSourceMode) private var sourceMode: String = "both"
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
+    /// Latched when mpv reports natural end-of-file. Keeps the Up Next card
+    /// visible after playback stops (it requires isPlaying otherwise) until
+    /// the next episode starts. Cleared on URL change / seek-away-from-end.
+    @State private var didReachEnd = false
+    /// Delayed first-frame-aware flip of hasStartedPlayback (see confirmPlaybackStarted).
+    @State private var playbackStartTask: Task<Void, Never>? = nil
+    /// Mid-playback overlay/controls gate with grace: brief seeks (<0.6s) never
+    /// unmount the controls layer, so ±10/15s skips don't flicker the UI.
+    @State private var sustainedBuffering = false
+    @State private var bufferingGraceTask: Task<Void, Never>? = nil
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
     @State private var showAboutStreamSource = false
@@ -72,13 +82,15 @@ struct PlayerView: View {
                     .zIndex(10)
             }
             
-            // 3. Mid-Playback Buffering (Logo buffer bar over the paused video frame)
-            if isMidPlaybackBuffering {
+            // 3. Mid-Playback Buffering (Logo buffer bar over the paused video frame).
+            // Gated on sustainedBuffering (0.6s grace) so brief seeks never flash
+            // the overlay or unmount the controls layer.
+            if sustainedBuffering {
                 midPlaybackLogoBufferingView
             }
-            
-            // 4. Controls Layer (Only active once playback has started, hidden during mid-playback buffering)
-            if !isMidPlaybackBuffering {
+
+            // 4. Controls Layer (Only active once playback has started, hidden during sustained buffering)
+            if !sustainedBuffering {
                 controlsLayer
             }
             
@@ -250,6 +262,24 @@ struct PlayerView: View {
         .onChange(of: mpv.isSeeking) { wasSeeking, isSeeking in
             handleSeekEnd(wasSeeking: wasSeeking, isSeeking: isSeeking)
         }
+        .onChange(of: mpv.endOfFileCount) { _, _ in
+            handleEndOfFile()
+        }
+        .onChange(of: isMidPlaybackBuffering) { _, buffering in
+            // Grace: brief seeks/buffer blips (<0.6s) never flash the overlay
+            // or unmount the controls layer (the ±10/15s skip flicker).
+            bufferingGraceTask?.cancel()
+            bufferingGraceTask = nil
+            if buffering {
+                bufferingGraceTask = Task {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run { sustainedBuffering = true }
+                }
+            } else {
+                sustainedBuffering = false
+            }
+        }
         .onChange(of: mpv.duration) { _, dur in
             handleDurationChange(dur)
         }
@@ -278,20 +308,69 @@ struct PlayerView: View {
         print("PlayerView: URL changed to \(url), playing...")
         autoPlayCancelled = false
         hasStartedPlayback = false
+        didReachEnd = false
+        sustainedBuffering = false
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        bufferingGraceTask?.cancel()
+        bufferingGraceTask = nil
         mpv.play(url: url)
     }
 
-    private func handleTimePosChange(_ t: Double) {
-        if t > 0.05 && !hasStartedPlayback {
-            withAnimation(.easeOut(duration: 0.2)) {
-                hasStartedPlayback = true
-                animatedProgress = 1.0
+    /// Flips hasStartedPlayback only once time is advancing AND mpv is neither
+    /// cache-paused nor seeking (first frames are actually flowing), then holds
+    /// the buffering screen ~0.35s more so it fades out over rendered video
+    /// instead of overlapping the first frames.
+    private func confirmPlaybackStarted() {
+        guard !hasStartedPlayback, playbackStartTask == nil,
+              mpv.timePos > 0.05, !mpv.isBuffering, !mpv.isSeeking else { return }
+        playbackStartTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, mpv.timePos > 0.05 else {
+                await MainActor.run { playbackStartTask = nil }
+                return
             }
-            playerManager.markPlaybackStarted()
-            if mpv.isPlaying {
-                SleepAssertionManager.shared.enableSleepPrevention()
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    hasStartedPlayback = true
+                    animatedProgress = 1.0
+                }
+                playerManager.markPlaybackStarted()
+                if mpv.isPlaying {
+                    SleepAssertionManager.shared.enableSleepPrevention()
+                }
+                playbackStartTask = nil
             }
         }
+    }
+
+    /// Natural end-of-file from mpv (EOF reason only — user stops and file
+    /// switches are filtered in the event loop). EOF counts as completion even
+    /// under 90%: autoplay the next *released* episode when enabled, otherwise
+    /// just advance the Continue Watching rail. Latches end state so the Up
+    /// Next card survives playback stopping.
+    private func handleEndOfFile() {
+        if (item?.isSeries ?? false) || playerManager.currentSeason != nil {
+            didReachEnd = true
+        }
+        guard let media = item,
+              let s = playerManager.currentSeason,
+              let e = playerManager.currentEpisode else { return }
+        let duration = mpv.duration
+        let autoplay = autoPlayNextEnabled
+        let cancelled = autoPlayCancelled
+        let picker = isPickerVisible
+        Task { @MainActor in
+            await playerManager.completeEpisode(item: media, season: s, episode: e, duration: duration, autoplay: autoplay, cancelled: cancelled, pickerVisible: picker)
+        }
+    }
+
+    private func handleTimePosChange(_ t: Double) {
+        // User replayed/seeked away from the end: drop the latched end state.
+        if didReachEnd, mpv.duration > 0, (mpv.duration - t) > 5.0 {
+            didReachEnd = false
+        }
+        confirmPlaybackStarted()
         // If playback is actively running, clear any stale or erroneous errorMessage
         if hasStartedPlayback && mpv.isPlaying && playerManager.errorMessage != nil {
             print("[PlayerView] Video is actively playing, clearing stale error message.")
@@ -591,19 +670,23 @@ struct PlayerView: View {
     }
 
     private var shouldShowUpNextCard: Bool {
-        guard playerManager.nextEpisodeInfo != nil,
+        // Air-gated: unaired episodes are never offered, here or anywhere else.
+        guard playerManager.nextReleasedEpisodeInfo != nil,
               let item = item,
               item.isSeries || playerManager.currentSeason != nil,
               autoPlayNextEnabled,
               !autoPlayCancelled else {
             return false
         }
-        return isEndCreditsOrNearEnd
+        // didReachEnd latches on natural EOF so the card survives playback
+        // stopping (isEndCreditsOrNearEnd requires isPlaying) until the next
+        // episode starts or the user dismisses / seeks away.
+        return isEndCreditsOrNearEnd || didReachEnd
     }
 
     @ViewBuilder
     private var upNextOverlay: some View {
-        if shouldShowUpNextCard, let next = playerManager.nextEpisodeInfo {
+        if shouldShowUpNextCard, let next = playerManager.nextReleasedEpisodeInfo {
             let remaining = mpv.duration > 0 ? max(0, mpv.duration - mpv.timePos) : 999
             upNextCard(season: next.season, episode: next.episode, remainingSeconds: remaining)
                 .transition(
@@ -1276,14 +1359,15 @@ struct PlayerView: View {
         }
         .onReceive(loadingTimer) { _ in
             if mpv.isPlaying && mpv.timePos >= 0.05 {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    self.hasStartedPlayback = true
-                    self.animatedProgress = 1.0
-                }
+                // First-frame-aware delayed flip (buffering screen fades over
+                // rendered video, never over the first frames).
+                self.confirmPlaybackStarted()
 
-                // Auto-play next episode at the very end (countdown UI shows from 10s)
+                // Backup auto-play trigger at the very end (countdown UI shows
+                // from 10s). Primary trigger is the EOF event → handleEndOfFile.
+                // Air-gated like everything else: unaired next episodes never fire.
                 if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
-                   playerManager.nextEpisodeInfo != nil,
+                   playerManager.nextReleasedEpisodeInfo != nil,
                    mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
                     playerManager.playNextEpisode()
                 }
