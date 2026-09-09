@@ -3,6 +3,8 @@ import Foundation
 extension Notification.Name {
     /// Reload the currently visible page (Cmd+R).
     static let fluxRefresh = Notification.Name("fluxRefresh")
+    /// Move keyboard focus into the search field (Cmd+F while already on Search).
+    static let fluxFocusSearch = Notification.Name("fluxFocusSearch")
     /// Switch sidebar page — object is a SidebarItem (Cmd+1…4, Cmd+F).
     static let fluxNavigate = Notification.Name("fluxNavigate")
     /// Display the keyboard shortcuts sheet (Cmd+/).

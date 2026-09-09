@@ -199,6 +199,12 @@ struct ContentView: View {
                 selectedCategory = target
                 path = NavigationPath()
             }
+            // Cmd+F while already on Search: nothing remounts (so onAppear never
+            // refires) — focus the field explicitly instead. Navigating in from
+            // another page is covered by SearchView.onAppear.
+            if target == .search {
+                NotificationCenter.default.post(name: .fluxFocusSearch, object: nil)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {

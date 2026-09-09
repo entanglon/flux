@@ -98,6 +98,10 @@ struct SearchView: View {
                         .regular.interactive(),
                         in: .capsule
                     )
+                    // Whole capsule is a tap target: icon/padding/edges focus
+                    // the field too, so typing never needs a pixel-perfect hit.
+                    .contentShape(Capsule())
+                    .onTapGesture { isSearchFocused = true }
                     .scaleEffect(isSearchFocused ? 1.01 : 1.0)
                     .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isSearchFocused)
                     
@@ -121,6 +125,9 @@ struct SearchView: View {
                     viewModel.commitSearch()
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxFocusSearch)) { _ in
+            isSearchFocused = true
         }
     }
     

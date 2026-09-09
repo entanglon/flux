@@ -16,6 +16,15 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
+## Sep 9, 2026 — FIXED: Search Page Cmd+F + Capsule Hit-Testing
+
+- **Symptom 1**: Cmd+F on the Search page did nothing (worked elsewhere). Root cause: Cmd+F is bound to the *Search* menu item (navigate), not a focus command — other pages only *appeared* to focus because a fresh SearchView mounts (`.onAppear` focuses). Already-there → no remount → no focus. Also pointlessly reset the nav stack.
+- **Fix**: navigating to Search now posts `.fluxFocusSearch`, observed by SearchView (fresh-arrive still covered by `.onAppear`).
+- **Symptom 2**: typing required a pixel-perfect hit on the text glyphs (icon/padding/edges dead).
+- **Fix**: whole capsule is one tap target (`contentShape(Capsule)` + `onTapGesture` → focus).
+
+---
+
 ## Sep 8, 2026 — FIXED: Autoplay "No Streams" While Manual Picker Works (Disk-Poisoned Stream Cache)
 
 - **Symptom**: Autoplay errored "No streams found" on two anime, yet manual stream pick showed working sources.
