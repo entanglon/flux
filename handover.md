@@ -16,6 +16,14 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
+## Sep 8, 2026 — FIXED: Autoplay "No Streams" While Manual Picker Works (Disk-Poisoned Stream Cache)
+
+- **Symptom**: Autoplay errored "No streams found" on two anime, yet manual stream pick showed working sources.
+- **Root cause**: `StreamCacheActor.set` stored EMPTY arrays (memory + `flux_streams_cache_v2.json`, 24h TTL). Autoplay reads cache without forceRefresh → served instant [] with no network hit; manual picker force-refreshes → network → streams. One failed fetch poisoned a title for 24h across relaunches.
+- **Fix**: `set` ignores empties; `get` treats empty entries as miss (self-heals poisoned disk entries); `loadFromDisk` drops empties. Deliberately no autoplay retry (would double waits on genuinely-empty titles).
+
+---
+
 ## Sep 8, 2026 — OPEN: Genre Page Movies/TV Toggle Shows Movies for Both (UNRESOLVED)
 
 - **Symptom**: On genre pages (e.g. Adventure), tapping "TV Shows" slides the toggle pill but all rails keep showing movies. Drill-down ("extend a list" → MediaListView) with its own toggle DOES show TV correctly. Screenshots confirmed identical rails under both toggle states.
