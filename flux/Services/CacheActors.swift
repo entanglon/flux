@@ -134,7 +134,10 @@ actor StreamCacheActor {
         guard let url = diskURL, let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([String: CacheEntry].self, from: data) else { return }
         let now = Date()
-        self.cache = decoded.filter { now.timeIntervalSince($0.value.timestamp) < ttl }
+        // Drop expired AND empty entries: a single fully-failed fetch must never
+        // poison a title (autoplay reads cache without forceRefresh while the
+        // manual picker bypasses it — the exact "no streams yet picker works" split).
+        self.cache = decoded.filter { now.timeIntervalSince($0.value.timestamp) < ttl && !$0.value.streams.isEmpty }
     }
 
     private func saveToDisk() {
@@ -144,7 +147,9 @@ actor StreamCacheActor {
 
     func get(key: String) -> [Stream]? {
         guard let entry = cache[key] else { return nil }
-        if Date().timeIntervalSince(entry.timestamp) > ttl {
+        // Empty entries are cache poison (see loadFromDisk): treat as a miss so
+        // already-poisoned titles self-heal on next read instead of erroring.
+        if entry.streams.isEmpty || Date().timeIntervalSince(entry.timestamp) > ttl {
             cache.removeValue(forKey: key)
             saveToDisk()
             return nil
@@ -153,6 +158,9 @@ actor StreamCacheActor {
     }
 
     func set(key: String, streams: [Stream]) {
+        // Never store empty results: a transient all-addon failure would otherwise
+        // persist as "No streams" for the full TTL (autoplay trusts cache).
+        guard !streams.isEmpty else { return }
         if cache.count >= maxEntries {
             let sorted = cache.sorted { $0.value.timestamp < $1.value.timestamp }
             for (k, _) in sorted.prefix(maxEntries / 4) {
