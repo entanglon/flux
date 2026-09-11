@@ -24,6 +24,10 @@ class UserDataService: ObservableObject {
             historyKey = "profile.\(profile.id.uuidString).history"
             watchlistKey = "profile.\(profile.id.uuidString).watchlist"
             collectionsKey = "profile.\(profile.id.uuidString).collections"
+
+            if !profile.isKids {
+                migrateLegacyDataIfNeeded(for: profile.id)
+            }
         } else {
             historyKey = "localHistoryDataStremio"
             watchlistKey = "localWatchlistDataStremio"
@@ -34,6 +38,30 @@ class UserDataService: ObservableObject {
         collections = []
         if profile != nil {
             loadInitialData()
+        }
+    }
+
+    private func migrateLegacyDataIfNeeded(for profileID: UUID) {
+        let pWatchKey = "profile.\(profileID.uuidString).watchlist"
+        let pHistKey = "profile.\(profileID.uuidString).history"
+        let pColKey = "profile.\(profileID.uuidString).collections"
+
+        let existingWatch = UserDefaults.standard.array(forKey: pWatchKey) as? [[String: Any]] ?? []
+        if existingWatch.isEmpty,
+           let legacyWatch = UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]], !legacyWatch.isEmpty {
+            UserDefaults.standard.set(legacyWatch, forKey: pWatchKey)
+        }
+
+        let existingHist = UserDefaults.standard.array(forKey: pHistKey) as? [[String: Any]] ?? []
+        if existingHist.isEmpty,
+           let legacyHist = UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]], !legacyHist.isEmpty {
+            UserDefaults.standard.set(legacyHist, forKey: pHistKey)
+        }
+
+        let existingCol = UserDefaults.standard.array(forKey: pColKey) as? [[String: Any]] ?? []
+        if existingCol.isEmpty,
+           let legacyCol = UserDefaults.standard.array(forKey: "localCollectionsData") as? [[String: Any]], !legacyCol.isEmpty {
+            UserDefaults.standard.set(legacyCol, forKey: pColKey)
         }
     }
     
@@ -104,6 +132,45 @@ class UserDataService: ObservableObject {
             enriched.progress = item.progress ?? enriched.progress
             enriched.runtime = item.runtime ?? enriched.runtime
             enriched.logoURL = enriched.logoURL ?? item.logoURL
+            enriched.isNewEpisode = item.isNewEpisode ?? enriched.isNewEpisode
+
+            // If the item was previously finished (progress >= 0.90) and is a TV series,
+            // check if a newly aired episode or season has been released.
+            let isSeries = (enriched.category == "TV Show" || enriched.category == "Series" || enriched.isSeries)
+            if isSeries,
+               let curSeason = enriched.lastSeason,
+               let curEpisode = enriched.lastEpisode,
+               (enriched.progress ?? 0) >= 0.90 {
+                if let next = await PlayerManager.shared.resolveNextReleased(item: enriched, season: curSeason, episode: curEpisode) {
+                    if next.season != curSeason || next.episode != curEpisode {
+                        enriched.lastSeason = next.season
+                        enriched.lastEpisode = next.episode
+                        enriched.progress = 0.0
+                        enriched.lastPlaybackPosition = 0.0
+                        enriched.isNewEpisode = true
+                        enriched.timestamp = Date().timeIntervalSince1970
+                        
+                        let type = "tv"
+                        let tmdbID = enriched.id.starts(with: "tt") ? await TMDBEnricher.shared.resolveTmdbID(imdbID: enriched.id, type: type) : enriched.id
+                        if let id = tmdbID {
+                            let info = await TMDBEnricher.shared.fetchEpisodeInfo(tmdbID: id, season: next.season, episode: next.episode)
+                            if let still = info.stillURL {
+                                enriched.lastEpisodeImage = still
+                            }
+                            if let title = info.title, !title.isEmpty {
+                                enriched.lastEpisodeTitle = title
+                            }
+                            if let rt = info.runtime {
+                                enriched.runtime = rt
+                            }
+                        }
+                        didChange = true
+                    }
+                }
+            } else if (enriched.progress ?? 0) > 0.05 && (enriched.isNewEpisode == true) {
+                enriched.isNewEpisode = false
+                didChange = true
+            }
 
             // If TV show history item is missing season/episode, default to S1, E1 to repair
             if (enriched.category == "TV Show" || enriched.category == "Series") && enriched.lastSeason == nil {
@@ -131,8 +198,37 @@ class UserDataService: ObservableObject {
                 }
             }
 
+            // If TMDB key is active, ensure we fetch and persist official TMDB transparent logos
+            if TMDBEnricher.shared.hasKey {
+                let isSeries = (enriched.category == "TV Show" || enriched.category == "Series" || enriched.isSeries)
+                let type = isSeries ? "tv" : "movie"
+                let needsTMDBLogo = enriched.logoURL == nil || (enriched.logoURL?.absoluteString.contains("tmdb.org") == false) || (enriched.logoURL?.absoluteString.contains("/original/") == false)
+                if needsTMDBLogo {
+                    let cleanID = enriched.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+                    let tmdbID = enriched.id.starts(with: "tt") ? await TMDBEnricher.shared.resolveTmdbID(imdbID: enriched.id, type: type) : cleanID
+                    if let id = tmdbID, let tmdbLogo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                        enriched.logoURL = tmdbLogo
+                        didChange = true
+                    }
+                }
+            }
+
+            // Ensure logo is high-quality (upgrades any /medium/ to /large/ or /w500/ to /original/)
+            if let existing = enriched.logoURL {
+                let hq = existing.highQuality()
+                if hq != existing {
+                    enriched.logoURL = hq
+                    didChange = true
+                }
+            } else if let match = enriched.id.range(of: "tt[0-9]+", options: .regularExpression) {
+                // Fallback to Metahub large logo if none present
+                let imdbID = String(enriched.id[match])
+                enriched.logoURL = URL(string: "https://images.metahub.space/logo/large/\(imdbID)/img")
+                didChange = true
+            }
+
             enriched.timestamp = item.timestamp
-            if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL || enriched.lastEpisodeImage != item.lastEpisodeImage || enriched.lastSeason != item.lastSeason {
+            if enriched.backdropURL != item.backdropURL || enriched.posterURL != item.posterURL || enriched.lastEpisodeImage != item.lastEpisodeImage || enriched.lastSeason != item.lastSeason || enriched.logoURL != item.logoURL {
                 didChange = true
             }
             updated.append(enriched)
@@ -175,6 +271,7 @@ class UserDataService: ObservableObject {
             let lastStreamURLString = dict["lastStreamURL"] as? String
             let lastTorrentInfoHash = dict["lastTorrentInfoHash"] as? String
             let lastFileIndex = dict["lastFileIndex"] as? Int
+            let isNewEpisode = dict["isNewEpisode"] as? Bool
             
             var item = MediaItem(
                 id: idString,
@@ -212,6 +309,7 @@ class UserDataService: ObservableObject {
             }
             item.lastTorrentInfoHash = lastTorrentInfoHash
             item.lastFileIndex = lastFileIndex
+            item.isNewEpisode = isNewEpisode
             
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
                 item.lastEpisodeImage = url
@@ -220,7 +318,7 @@ class UserDataService: ObservableObject {
                 item.runtime = r
             }
             if let l = dict["logo"] as? String, let u = URL(string: l) {
-                item.logoURL = u
+                item.logoURL = u.highQuality()
             }
             
             return (item, timestamp)
@@ -274,12 +372,122 @@ class UserDataService: ObservableObject {
         }
     }
     
-    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
+    /// In-progress titles: started (<90% progress or next episode queued in a series).
+    /// Sorted by most recently watched first, deduplicated by ID and normalized title.
+    var continueWatching: [MediaItem] {
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+
+        for item in history {
+            // Completed titles belong in Recently Watched, not Continue Watching
+            if isWatched(item) { continue }
+
+            // Must have some record of watching (progress > 0 or a specific TV episode queued)
+            let prog = item.progress ?? 0.0
+            let hasQueuedEpisode = (item.lastSeason != nil && item.lastEpisode != nil)
+            if prog <= 0.001 && !hasQueuedEpisode {
+                continue
+            }
+
+            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
+            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            let idKey = "id:\(item.id)"
+            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
+
+            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
+                result.append(item)
+                seen.insert(idKey)
+                seen.insert(numKey)
+                if !item.title.isEmpty && item.title != "Unknown" {
+                    seen.insert(titleKey)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Completed titles (progress >= 90% or marked watched).
+    /// Sorted by most recently watched first, deduplicated by ID and normalized title.
+    var recentlyWatched: [MediaItem] {
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+
+        for item in history {
+            // Only genuinely completed titles belong in recently watched
+            guard isWatched(item) else { continue }
+
+            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
+            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            let idKey = "id:\(item.id)"
+            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
+
+            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
+                result.append(item)
+                seen.insert(idKey)
+                seen.insert(numKey)
+                if !item.title.isEmpty && item.title != "Unknown" {
+                    seen.insert(titleKey)
+                }
+            }
+        }
+        return result
+    }
+
+    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
         let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
         let backdropVal = item.backdropURL?.absoluteString ?? item.heroURL?.absoluteString ?? imageVal
         
+        var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
+        // Find and remove existing item if present (handles exact ID, stripped 'tt' IMDb/TMDB cross-format, and normalized title+type)
+        let cleanNewTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let strippedNewID = item.id.replacingOccurrences(of: "tt", with: "")
+        var existingEntry: [String: Any]?
+        currentData.removeAll { existing in
+            guard let existingID = existing["id"] as? String else { return false }
+            let isMatch: Bool
+            if existingID == item.id {
+                isMatch = true
+            } else {
+                let strippedExistingID = existingID.replacingOccurrences(of: "tt", with: "")
+                if !strippedExistingID.isEmpty && strippedExistingID == strippedNewID {
+                    isMatch = true
+                } else {
+                    let existingTitle = (existing["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let existingType = existing["type"] as? String ?? ""
+                    isMatch = !cleanNewTitle.isEmpty && cleanNewTitle != "unknown" && existingTitle == cleanNewTitle && existingType == typeString
+                }
+            }
+            if isMatch && existingEntry == nil {
+                existingEntry = existing
+            }
+            return isMatch
+        }
+
+        // Monotonic high-water mark progress calculation:
+        // Progress for Continue Watching cards must NEVER regress backwards when re-opening
+        // or scrubbing to an earlier timestamp, unless explicitly restarting.
+        var finalProgress: Double? = progress ?? item.progress
+        if let newProg = finalProgress {
+            if isRestart {
+                finalProgress = newProg
+            } else if let existingProg = existingEntry?["progress"] as? Double {
+                let existingSeason = existingEntry?["lastSeason"] as? Int
+                let existingEpisode = existingEntry?["lastEpisode"] as? Int
+                let isSameUnit = (typeString == "movie") || (existingSeason == season && existingEpisode == episode)
+                if isSameUnit {
+                    // If previously finished (>= 90%) and starting again (< 2%), permit restart
+                    if existingProg >= 0.90 && newProg < 0.02 {
+                        finalProgress = newProg
+                    } else {
+                        // High-water mark
+                        finalProgress = max(existingProg, newProg)
+                    }
+                }
+            }
+        }
+
         var finalItem: [String: Any] = [
             "id": item.id,
             "type": typeString,
@@ -289,35 +497,24 @@ class UserDataService: ObservableObject {
             "timestamp": Date().timeIntervalSince1970
         ]
         
-        if let p = progress { finalItem["progress"] = p }
+        if let p = finalProgress { finalItem["progress"] = p }
         if let s = season { finalItem["lastSeason"] = s }
         if let e = episode { finalItem["lastEpisode"] = e }
         if let et = episodeTitle { finalItem["lastEpisodeTitle"] = et }
         if let ei = episodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
         if let r = item.runtime { finalItem["runtime"] = r }
         if let l = item.logoURL?.absoluteString { finalItem["logo"] = l }
-        if let pos = playbackPosition ?? item.lastPlaybackPosition { finalItem["lastPlaybackPosition"] = pos }
-        if let dur = playbackDuration ?? item.lastPlaybackDuration { finalItem["lastPlaybackDuration"] = dur }
+        if let pos = playbackPosition ?? item.lastPlaybackPosition ?? (existingEntry?["lastPlaybackPosition"] as? Double) { finalItem["lastPlaybackPosition"] = pos }
+        if let dur = playbackDuration ?? item.lastPlaybackDuration ?? (existingEntry?["lastPlaybackDuration"] as? Double) { finalItem["lastPlaybackDuration"] = dur }
         if let su = streamURL ?? item.lastStreamURL { finalItem["lastStreamURL"] = su.absoluteString }
         if let hash = torrentInfoHash ?? item.lastTorrentInfoHash { finalItem["lastTorrentInfoHash"] = hash }
         if let fi = fileIndex ?? item.lastFileIndex { finalItem["lastFileIndex"] = fi }
-        
-        var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
-        // Remove existing item if present (handles exact ID, stripped 'tt' IMDb/TMDB cross-format, and normalized title+type)
-        let cleanNewTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let strippedNewID = item.id.replacingOccurrences(of: "tt", with: "")
-        currentData.removeAll { existing in
-            guard let existingID = existing["id"] as? String else { return false }
-            if existingID == item.id { return true }
-            let strippedExistingID = existingID.replacingOccurrences(of: "tt", with: "")
-            if !strippedExistingID.isEmpty && strippedExistingID == strippedNewID { return true }
-            let existingTitle = (existing["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let existingType = existing["type"] as? String ?? ""
-            if !cleanNewTitle.isEmpty && cleanNewTitle != "unknown" && existingTitle == cleanNewTitle && existingType == typeString {
-                return true
-            }
-            return false
+        if (finalProgress ?? 0) > 0.05 {
+            finalItem["isNewEpisode"] = false
+        } else if let ne = item.isNewEpisode ?? (existingEntry?["isNewEpisode"] as? Bool) {
+            finalItem["isNewEpisode"] = ne
         }
+        
         currentData.append(finalItem)
         UserDefaults.standard.set(currentData, forKey: key)
         UserDefaults.standard.synchronize()
@@ -336,7 +533,7 @@ class UserDataService: ObservableObject {
     /// Returns true only when the media is genuinely completed (progress >= 90% or marked 100%).
     /// Titles with <90% progress are "In Progress / Continue Watching" and not treated as finished.
     func isWatched(_ item: MediaItem) -> Bool {
-        guard let existing = history.first(where: { $0.id == item.id }) else { return false }
+        guard let existing = getHistoryItem(for: item) ?? history.first(where: { $0.id == item.id }) else { return false }
         return (existing.progress ?? 0) >= 0.90
     }
 
@@ -385,7 +582,7 @@ class UserDataService: ObservableObject {
         if isWatched(item) {
             removeFromHistory(item)
         } else {
-            addToHistory(item, progress: 1.0, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage)
+            addToHistory(item, progress: 1.0, season: season, episode: episode, episodeTitle: episodeTitle, episodeImage: episodeImage, isRestart: true)
         }
     }
 
@@ -406,11 +603,18 @@ class UserDataService: ObservableObject {
         return (progress, position, duration)
     }
 
-    func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double) {
+    func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double, isRestart: Bool = false) {
         guard duration > 0 else { return }
         let key = "\(itemID)_s\(season)e\(episode)"
         var allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
-        let prog = min(1.0, max(0.0, position / duration))
+        let rawProg = min(1.0, max(0.0, position / duration))
+        let prevProg = allProgress[key]?["progress"] as? Double ?? 0.0
+        let prog: Double
+        if isRestart || (prevProg >= 0.90 && rawProg < 0.02) {
+            prog = rawProg
+        } else {
+            prog = max(prevProg, rawProg)
+        }
         allProgress[key] = [
             "position": position,
             "duration": duration,
@@ -421,23 +625,30 @@ class UserDataService: ObservableObject {
         UserDefaults.standard.synchronize()
     }
 
-    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil) {
-        if let s = season, let e = episode, let pos = playbackPosition, let dur = playbackDuration {
-            saveEpisodeProgress(for: item.id, season: s, episode: e, position: pos, duration: dur)
+    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false) {
+        let effProgress = progress ?? item.progress
+        let effSeason = season ?? item.lastSeason
+        let effEpisode = episode ?? item.lastEpisode
+        let effPos = playbackPosition ?? item.lastPlaybackPosition
+        let effDur = playbackDuration ?? item.lastPlaybackDuration
+
+        if let s = effSeason, let e = effEpisode, let pos = effPos, let dur = effDur {
+            saveEpisodeProgress(for: item.id, season: s, episode: e, position: pos, duration: dur, isRestart: isRestart)
         }
         addToList(
             key: historyKey,
             item: item,
-            progress: progress,
-            season: season,
-            episode: episode,
-            episodeTitle: episodeTitle,
-            episodeImage: episodeImage,
-            playbackPosition: playbackPosition,
-            playbackDuration: playbackDuration,
-            streamURL: streamURL,
-            torrentInfoHash: torrentInfoHash,
-            fileIndex: fileIndex,
+            progress: effProgress,
+            season: effSeason,
+            episode: effEpisode,
+            episodeTitle: episodeTitle ?? item.lastEpisodeTitle,
+            episodeImage: episodeImage ?? item.lastEpisodeImage,
+            playbackPosition: effPos,
+            playbackDuration: effDur,
+            streamURL: streamURL ?? item.lastStreamURL,
+            torrentInfoHash: torrentInfoHash ?? item.lastTorrentInfoHash,
+            fileIndex: fileIndex ?? item.lastFileIndex,
+            isRestart: isRestart,
             target: \.history
         )
     }
@@ -526,6 +737,7 @@ class UserDataService: ObservableObject {
         if let su = item.lastStreamURL?.absoluteString { dict["lastStreamURL"] = su }
         if let hash = item.lastTorrentInfoHash { dict["lastTorrentInfoHash"] = hash }
         if let fi = item.lastFileIndex { dict["lastFileIndex"] = fi }
+        if let ne = item.isNewEpisode { dict["isNewEpisode"] = ne }
         return dict
     }
     
@@ -598,36 +810,44 @@ class UserDataService: ObservableObject {
 
     // MARK: - Cloud sync payload
 
-    /// Full library snapshot for the cloud blob. Uses raw UserDefaults arrays so
-    /// it captures everything exactly as persisted (including episode metadata).
+    /// Sanitizes history and watchlist items for cloud sync by stripping device-local ephemeral fields.
+    func sanitizeDataArray(_ items: [[String: Any]]) -> [[String: Any]] {
+        return items.map { dict -> [String: Any] in
+            var copy = dict
+            copy.removeValue(forKey: "lastStreamURL")
+            copy.removeValue(forKey: "lastTorrentInfoHash")
+            return copy
+        }
+    }
+
+    /// Full library snapshot for the cloud blob.
+    /// In multi-profile mode, root `watchlist` and `history` mirror the primary adult profile
+    /// for backward compatibility with older clients or single-profile views, while each
+    /// profile's scoped library is independently synchronized within the `profiles` array.
     func exportCloudPayload() -> [String: Any] {
-        let watchlistData = (UserDefaults.standard.array(forKey: watchlistKey) as? [[String: Any]])
+        let profiles = ProfileManager.shared.profiles
+        let primaryProfile = profiles.first(where: { !$0.isKids }) ?? profiles.first
+        let primaryPrefix = primaryProfile.map { "profile.\($0.id.uuidString)." }
+
+        let primaryWatchlistKey = primaryPrefix.map { $0 + "watchlist" } ?? watchlistKey
+        let primaryHistoryKey = primaryPrefix.map { $0 + "history" } ?? historyKey
+
+        let watchlistData = (UserDefaults.standard.array(forKey: primaryWatchlistKey) as? [[String: Any]])
             ?? (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]])
             ?? []
-        let historyData = (UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]])
+        let historyData = (UserDefaults.standard.array(forKey: primaryHistoryKey) as? [[String: Any]])
             ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
             ?? []
 
-        // Ephemeral stream URLs and torrent hashes are kept strictly device-local
-        let sanitizedWatchlist = watchlistData.map { dict -> [String: Any] in
-            var copy = dict
-            copy.removeValue(forKey: "lastStreamURL")
-            copy.removeValue(forKey: "lastTorrentInfoHash")
-            return copy
-        }
-        let sanitizedHistory = historyData.map { dict -> [String: Any] in
-            var copy = dict
-            copy.removeValue(forKey: "lastStreamURL")
-            copy.removeValue(forKey: "lastTorrentInfoHash")
-            return copy
-        }
+        let sanitizedWatchlist = sanitizeDataArray(watchlistData)
+        let sanitizedHistory = sanitizeDataArray(historyData)
         let epProgress = (UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]]) ?? [:]
 
         let tmdbKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
         let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
 
         return [
-            "version": 2,
+            "version": 3,
             "watchlist": sanitizedWatchlist,
             "history": sanitizedHistory,
             "settings": ProfileManager.shared.exportGlobalSettings(),
@@ -670,7 +890,7 @@ class UserDataService: ObservableObject {
         return "id:\(id)"
     }
 
-    private func mergeHistoryData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
+    func mergeHistoryData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
         var map: [String: [String: Any]] = [:]
         for item in local {
             guard let _ = item["id"] as? String else { continue }
@@ -701,7 +921,7 @@ class UserDataService: ObservableObject {
         }
     }
 
-    private func mergeWatchlistData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
+    func mergeWatchlistData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
         var map: [String: [String: Any]] = [:]
         var order: [String] = []
         for item in local {
@@ -767,6 +987,11 @@ class UserDataService: ObservableObject {
         return da == db
     }
 
+    /// Reloads current profile data from disk into memory.
+    func reloadCurrentProfileData() {
+        loadInitialData()
+    }
+
     /// Applies a cloud payload to the CURRENT profile with two-way smart merging
     /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
     @discardableResult
@@ -774,6 +999,7 @@ class UserDataService: ObservableObject {
         // 1. Restore remote profiles FIRST so the active profile matches the cloud profile
         let profilesData = payload["profiles"] as? [[String: Any]]
         ProfileManager.shared.applyCloudProfilesData(profilesData)
+        ProfileManager.shared.cleanKidsProfileDataIfNeeded()
 
         // 2. Restore TMDB API Key if present in cloud payload and unset locally
         if let remoteTmdb = payload["tmdbApiKey"] as? String, !remoteTmdb.isEmpty {
@@ -802,20 +1028,43 @@ class UserDataService: ObservableObject {
         // 4. Merge history & watchlist for the now-active profile
         let remoteWatchlist = payload["watchlist"] as? [[String: Any]] ?? []
         let remoteHistory = payload["history"] as? [[String: Any]] ?? []
+        let isCurrentKids = ProfileManager.shared.currentProfile?.isKids == true
 
         let localWatchlist = (UserDefaults.standard.array(forKey: self.watchlistKey) as? [[String: Any]])
-            ?? (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]])
+            ?? (isCurrentKids ? [] : (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]]))
             ?? []
         let localHistory = (UserDefaults.standard.array(forKey: self.historyKey) as? [[String: Any]])
-            ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
+            ?? (isCurrentKids ? [] : (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]]))
             ?? []
 
-        let mergedWatchlist = mergeWatchlistData(local: localWatchlist, remote: remoteWatchlist)
-        let mergedHistory = mergeHistoryData(local: localHistory, remote: remoteHistory)
+        let mergedWatchlist: [[String: Any]]
+        let mergedHistory: [[String: Any]]
 
-        // Persist directly to disk before returning
-        UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
-        UserDefaults.standard.set(mergedHistory, forKey: self.historyKey)
+        if isCurrentKids {
+            // Under Kids mode, root watchlist/history belongs to the primary adult profile.
+            // Never copy adult items into the Kids profile!
+            // Kids profile data was already restored/merged per-profile in applyCloudProfilesData().
+            mergedWatchlist = localWatchlist
+            mergedHistory = localHistory
+
+            // Ensure adult profile receives any root payload updates
+            if let primary = ProfileManager.shared.profiles.first(where: { !$0.isKids }) {
+                let pPrefix = "profile.\(primary.id.uuidString)."
+                let pLocalWatch = (UserDefaults.standard.array(forKey: pPrefix + "watchlist") as? [[String: Any]])
+                    ?? (UserDefaults.standard.array(forKey: "localWatchlistDataStremio") as? [[String: Any]]) ?? []
+                let pLocalHist = (UserDefaults.standard.array(forKey: pPrefix + "history") as? [[String: Any]])
+                    ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]]) ?? []
+                let pMergedWatch = mergeWatchlistData(local: pLocalWatch, remote: remoteWatchlist)
+                let pMergedHist = mergeHistoryData(local: pLocalHist, remote: remoteHistory)
+                UserDefaults.standard.set(pMergedWatch, forKey: pPrefix + "watchlist")
+                UserDefaults.standard.set(pMergedHist, forKey: pPrefix + "history")
+            }
+        } else {
+            mergedWatchlist = mergeWatchlistData(local: localWatchlist, remote: remoteWatchlist)
+            mergedHistory = mergeHistoryData(local: localHistory, remote: remoteHistory)
+            UserDefaults.standard.set(mergedWatchlist, forKey: self.watchlistKey)
+            UserDefaults.standard.set(mergedHistory, forKey: self.historyKey)
+        }
 
         var imported: [UserCollection] = []
         if let raw = payload["collections"] as? [[String: Any]] {
@@ -833,7 +1082,12 @@ class UserDataService: ObservableObject {
             }
         }
 
-        let mergedCollections = mergeCollections(local: self.collections, remote: imported)
+        let mergedCollections: [UserCollection]
+        if isCurrentKids {
+            mergedCollections = self.collections
+        } else {
+            mergedCollections = mergeCollections(local: self.collections, remote: imported)
+        }
 
         let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]

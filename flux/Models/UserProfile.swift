@@ -6,6 +6,31 @@ struct UserProfile: Identifiable, Codable, Hashable {
     var name: String
     var avatarID: String
     var createdAt: Date
+    var isKids: Bool
+    var isStock: Bool
+
+    init(id: UUID, name: String, avatarID: String, createdAt: Date, isKids: Bool = false, isStock: Bool = false) {
+        self.id = id
+        self.name = name
+        self.avatarID = avatarID
+        self.createdAt = createdAt
+        self.isKids = isKids
+        self.isStock = isStock
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, avatarID, createdAt, isKids, isStock
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        avatarID = try container.decode(String.self, forKey: .avatarID)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        isKids = try container.decodeIfPresent(Bool.self, forKey: .isKids) ?? false
+        isStock = try container.decodeIfPresent(Bool.self, forKey: .isStock) ?? false
+    }
 }
 
 /// Netflix-style profile avatars: solid color tiles with minimalist drawn
@@ -37,6 +62,41 @@ struct AvatarStyle: Identifiable, Hashable {
     static func style(for id: String) -> AvatarStyle {
         all.first { $0.id == id } ?? all[0]
     }
+}
+
+/// Avatar item model supporting both illustrated character assets and programmatic faces.
+public struct AvatarItem: Identifiable, Hashable {
+    public enum Category: String, CaseIterable {
+        case characters = "Cats"
+        case pets = "Pets"
+        case classic = "Faces"
+    }
+
+    public let id: String
+    public let name: String
+    public let category: Category
+    public let isImage: Bool
+
+    public static let characters: [AvatarItem] = [
+        AvatarItem(id: "avatar-cat-1", name: "Happy Pink", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-2", name: "Smirk Green", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-3", name: "Laugh Pink", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-4", name: "Excited Yellow", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-5", name: "Sneak Yellow", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-6", name: "Sly Blue", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-7", name: "Hero Pink", category: .characters, isImage: true),
+        AvatarItem(id: "avatar-cat-8", name: "Corner Pink", category: .characters, isImage: true)
+    ]
+
+    public static let pets: [AvatarItem] = (1...12).map {
+        AvatarItem(id: "avatar-pet-\($0)", name: "Pet \($0)", category: .pets, isImage: true)
+    }
+
+    public static let classics: [AvatarItem] = AvatarStyle.all.map {
+        AvatarItem(id: $0.id, name: $0.id.replacingOccurrences(of: "face-", with: "").capitalized, category: .classic, isImage: false)
+    }
+
+    public static let all: [AvatarItem] = characters + pets + classics
 }
 
 /// Draws the minimalist face on a color tile.

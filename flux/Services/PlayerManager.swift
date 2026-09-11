@@ -573,6 +573,10 @@ class PlayerManager: ObservableObject {
         forceStreamPicker: Bool = false,
         startFromBeginning: Bool = false
     ) {
+        if ProfileManager.shared.currentProfile?.isKids == true && KidsContentFilter.shared.isRestricted(item: item) {
+            print("[PlayerManager] Playback blocked for restricted title '\(item.title)' in Kids Profile")
+            return
+        }
         pruneSessionCaches()
         // USER-initiated playback while a PiP session floats: same title =
         // expand (resume at the floating position); different title = tear the
@@ -1078,8 +1082,22 @@ class PlayerManager: ObservableObject {
                     print("[PlayerManager] ⚡ Flux Mode verified alive HTTP stream: \(verified.cleanTitle) (\(verified.quality))")
                     return verified
                 } else if sourceMode == "http" {
-                    print("[PlayerManager] All candidate HTTP streams failed HEAD verification (404/expired/timeout).")
-                    return nil
+                    // In HTTP-only mode, if probing was inconclusive/slow, fall back to the top candidate
+                    // rather than failing auto-play.
+                    print("[PlayerManager] HTTP probe inconclusive; falling back to top candidate: \(winnerCandidate.cleanTitle)")
+                    await MainActor.run {
+                        self.standbyFallbacks = fallbacks
+                    }
+                    return winnerCandidate
+                } else {
+                    // In 'both' mode, if HTTP candidates are unresponsive, fall back to best torrent candidate!
+                    if let topTorrent = ([winnerCandidate] + fallbacks).first(where: { $0.isTorrent }) {
+                        print("[PlayerManager] HTTP candidates unresponsive; falling back to best torrent: \(topTorrent.cleanTitle)")
+                        await MainActor.run {
+                            self.standbyFallbacks = fallbacks.filter { $0.stableKey != topTorrent.stableKey }
+                        }
+                        return topTorrent
+                    }
                 }
             }
         }
@@ -1099,35 +1117,48 @@ class PlayerManager: ObservableObject {
         return winnerCandidate
     }
 
-    /// Races HTTP candidates in parallel via ranged GET requests with a 3.0s timeout.
+    /// Races HTTP candidates in parallel via lightweight HEAD / Range probes with a 5.0s timeout.
     /// Preserves original ranked preference order: top-ranked stream that responds wins!
     private func raceAndVerifyHTTPCandidates(_ candidates: [Stream]) async -> (winner: Stream?, verifiedFallbacks: [Stream]) {
         guard !candidates.isEmpty else { return (nil, []) }
 
-        return await withTaskGroup(of: (Stream, Bool).self) { group in
+        return await withTaskGroup(of: (Stream, Bool, Int).self) { group in
             for stream in candidates {
                 let playableURL = self.getPlayableURL(for: stream)
                 group.addTask {
                     var request = URLRequest(url: playableURL)
-                    request.httpMethod = "GET"
-                    request.setValue("bytes=0-65535", forHTTPHeaderField: "Range")
-                    request.timeoutInterval = 3.0
+                    request.httpMethod = "HEAD"
+                    request.timeoutInterval = 5.0
                     do {
                         let (_, response) = try await URLSession.shared.data(for: request)
-                        if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                            return (stream, true)
+                        if let http = response as? HTTPURLResponse {
+                            let statusCode = http.statusCode
+                            if (200...399).contains(statusCode) {
+                                return (stream, true, statusCode)
+                            }
+                            return (stream, false, statusCode)
                         }
-                        return (stream, false)
+                        return (stream, false, 0)
                     } catch {
-                        return (stream, false)
+                        // Fallback: quick ranged probe
+                        var getReq = URLRequest(url: playableURL)
+                        getReq.httpMethod = "GET"
+                        getReq.setValue("bytes=0-1024", forHTTPHeaderField: "Range")
+                        getReq.timeoutInterval = 4.0
+                        if let (_, getResp) = try? await URLSession.shared.data(for: getReq),
+                           let http = getResp as? HTTPURLResponse, (200...399).contains(http.statusCode) {
+                            return (stream, true, http.statusCode)
+                        }
+                        return (stream, false, -1)
                     }
                 }
             }
 
             var results: [String: Bool] = [:]
-            for await (stream, ok) in group {
+            for await (stream, ok, statusCode) in group {
                 results[stream.stableKey] = ok
-                if !ok {
+                // Only permanently blacklist on explicit 404/410/403 status codes, NOT timeouts
+                if !ok && (statusCode == 404 || statusCode == 410 || statusCode == 403) {
                     await MainActor.run {
                         self.probeStatus[stream.stableKey] = StreamProbeResult(ok: false, latency: 99)
                     }
@@ -1139,8 +1170,8 @@ class PlayerManager: ObservableObject {
             guard let winner = verified.first else {
                 return (nil, [])
             }
-            let verifiedFallbacks = Array(verified.dropFirst())
-            return (winner, verifiedFallbacks)
+            let fallbacks = verified.dropFirst()
+            return (winner, Array(fallbacks))
         }
     }
     
@@ -1500,6 +1531,16 @@ class PlayerManager: ObservableObject {
                 item.runtime = "\(minutes)m"
             }
         }
+        let currentEpKey = "\(item.id):\(currentSeason ?? -1):\(currentEpisode ?? -1)"
+        if currentEpKey != currentTrackingEpisodeKey {
+            currentTrackingEpisodeKey = currentEpKey
+            sessionMaxPosition = time
+            sessionMaxProgress = progress
+        } else {
+            sessionMaxPosition = max(sessionMaxPosition, time)
+            sessionMaxProgress = max(sessionMaxProgress, progress)
+        }
+
         // Completed episode (progress >= 90%): advance Continue Watching to the
         // next *released* episode (async — may fetch season listings). EOF calls
         // completeEpisode directly so natural ends count even under 90%.
@@ -1512,7 +1553,7 @@ class PlayerManager: ObservableObject {
         } else {
             UserDataService.shared.addToHistory(
                 item,
-                progress: progress,
+                progress: sessionMaxProgress,
                 season: currentSeason,
                 episode: currentEpisode,
                 episodeImage: currentEpisodeImage,
@@ -1525,6 +1566,11 @@ class PlayerManager: ObservableObject {
         }
         TasteProfileManager.shared.recordWatch(item, progress: progress)
     }
+
+    /// High-water mark tracking per playback session to prevent Continue Watching regress
+    private var sessionMaxPosition: Double = 0.0
+    private var sessionMaxProgress: Double = 0.0
+    private var currentTrackingEpisodeKey: String = ""
 
     /// Episodes already run through completion (per session). Prevents repeated
     /// season fetches from the 5-second progress saver while credits roll.
@@ -1540,7 +1586,24 @@ class PlayerManager: ObservableObject {
         let key = "\(item.id):\(season):\(episode)"
         guard !attemptedAdvances.contains(key) else { return }
         attemptedAdvances.insert(key)
-        guard let next = await resolveNextReleased(item: item, season: season, episode: episode) else { return }
+        guard let next = await resolveNextReleased(item: item, season: season, episode: episode) else {
+            // Reached series finale / no next released episode:
+            // Mark the series as completed (progress = 1.0) so it leaves Continue Watching and moves to Recently Watched!
+            UserDataService.shared.addToHistory(
+                item,
+                progress: 1.0,
+                season: season,
+                episode: episode,
+                episodeImage: self.currentEpisodeImage,
+                playbackPosition: duration,
+                playbackDuration: duration,
+                streamURL: self.currentStreamURL,
+                torrentInfoHash: self.activeTorrentHash,
+                fileIndex: nil,
+                isRestart: true
+            )
+            return
+        }
         if autoplay && !cancelled && !pickerVisible {
             // Play explicitly with resolved values (never recompute-and-diverge).
             let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage

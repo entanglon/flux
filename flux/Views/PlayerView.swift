@@ -27,6 +27,7 @@ struct PlayerView: View {
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
     @State private var showAboutStreamSource = false
+    @State private var showPlayerHUD = false
     @State private var hostWindow: NSWindow?
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
     @State private var showVolumeHUD = false
@@ -102,6 +103,17 @@ struct PlayerView: View {
 
             // 7. Apple TV / Netflix Style "Up Next" Floating Card
             upNextOverlay
+
+            // 8. Player Tuning & Diagnostics HUD
+            if showPlayerHUD {
+                SecretPlayerHUDView(mpv: mpv, onClose: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        showPlayerHUD = false
+                    }
+                })
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .zIndex(150)
+            }
         }
         .background(
             PlayerWindowAccessor { window in
@@ -112,11 +124,13 @@ struct PlayerView: View {
             }
         )
         .task(id: item?.id) {
-            // On-demand logo fetch — matches ContinueWatchingCard behaviour.
-            // If the item has no enriched logo (Cinemeta without TMDB, or
-            // TMDB catalog item whose batch enrichment missed), fetch it
-            // from TMDB /images so the buffering view shows the graphic.
-            guard let media = item, media.logoURL == nil, fetchedLogo == nil else { return }
+            guard let media = item else { return }
+            // Only query TMDB if an active API key is available
+            guard TMDBEnricher.shared.hasKey else { return }
+            // If already have a valid TMDB logo at original resolution, skip
+            if fetchedLogo != nil || (media.logoURL != nil && media.logoURL?.absoluteString.contains("image.tmdb.org") == true && media.logoURL?.absoluteString.contains("/original/") == true) {
+                return
+            }
             let isTV = media.category.lowercased().contains("tv") || media.category.lowercased().contains("series")
             let type = isTV ? "tv" : "movie"
             var tmdbID: String? = nil
@@ -124,7 +138,9 @@ struct PlayerView: View {
                 tmdbID = await TMDBEnricher.shared.resolveTmdbID(imdbID: media.id, type: type)
             } else {
                 let clean = media.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
-                tmdbID = clean
+                if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: clean)) {
+                    tmdbID = clean
+                }
             }
             if let id = tmdbID, let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
                 await MainActor.run { self.fetchedLogo = logo }
@@ -139,6 +155,12 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.escape) {
+            if showPlayerHUD {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showPlayerHUD = false
+                }
+                return .handled
+            }
             if showAboutStreamSource {
                 withAnimation(.easeOut(duration: 0.2)) {
                     showAboutStreamSource = false
@@ -213,6 +235,23 @@ struct PlayerView: View {
         .onKeyPress(KeyEquivalent("f")) {
             toggleFullScreen()
             return .handled
+        }
+        .onKeyPress(phases: .down) { press in
+            // Option + D for Player Tuning HUD / Diagnostics
+            if (press.key == KeyEquivalent("d") || press.key == KeyEquivalent("D")) && press.modifiers.contains(.option) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showPlayerHUD.toggle()
+                }
+                return .handled
+            }
+            // Control + Shift + P for HUD
+            if (press.key == KeyEquivalent("p") || press.key == KeyEquivalent("P")) && press.modifiers.contains([.control, .shift]) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showPlayerHUD.toggle()
+                }
+                return .handled
+            }
+            return .ignored
         }
         .onAppear {
             SleepAssertionManager.shared.playerDidOpen()
@@ -466,7 +505,9 @@ struct PlayerView: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: .capsule)
-            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
             .transition(.opacity)
             
         case .intro(let targetTime):
@@ -481,7 +522,9 @@ struct PlayerView: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: .capsule)
-            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
             .transition(.opacity)
         }
     }
@@ -520,6 +563,12 @@ struct PlayerView: View {
                 },
                 onTogglePiP: {
                     PiPManager.shared.toggle(mpv: mpv)
+                },
+                mpv: mpv,
+                onOpenHUD: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        showPlayerHUD.toggle()
+                    }
                 },
                 audioTracks: mpv.audioTracks,
                 subtitleTracks: mpv.subtitleTracks,
@@ -1198,10 +1247,20 @@ struct PlayerView: View {
     }
 
     private func resolvedLogoURL(for media: MediaItem) -> URL? {
-        // 1. Enriched logo (TMDB or Cinemeta)
-        if let logo = media.logoURL { return logo }
-        // 2. On-demand fetch (matches ContinueWatchingCard behaviour)
-        if let fetched = fetchedLogo { return fetched }
+        // 1. If TMDB key is present: prefer fetched TMDB logo or TMDB-sourced media.logoURL
+        if TMDBEnricher.shared.hasKey {
+            if let fetched = fetchedLogo { return fetched.highQuality() }
+            if let logo = media.logoURL, logo.absoluteString.contains("image.tmdb.org") { return logo.highQuality() }
+        }
+        // 2. Fallback to existing enriched logo (upgraded to high quality)
+        if let logo = media.logoURL { return logo.highQuality() }
+        if let fetched = fetchedLogo { return fetched.highQuality() }
+
+        // 3. Cinemeta/Metahub fallback (large FHD)
+        if let match = media.id.range(of: "tt[0-9]+", options: .regularExpression) {
+            let imdbID = String(media.id[match])
+            return URL(string: "https://images.metahub.space/logo/large/\(imdbID)/img")
+        }
         return nil
     }
 
@@ -1224,7 +1283,7 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 100)
+                                    .frame(maxWidth: 340, maxHeight: 120)
                                     .opacity(0.25)
                                     .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
                             } placeholder: {
@@ -1235,7 +1294,7 @@ struct PlayerView: View {
                             AsyncImage(url: lURL) { img in
                                 img.resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 100)
+                                    .frame(maxWidth: 340, maxHeight: 120)
                                     .opacity(1.0)
                                     .mask(
                                         GeometryReader { geo in
@@ -1308,20 +1367,20 @@ struct PlayerView: View {
                             if let lURL = logoURL {
                                 // Base translucent watermark logo
                                 AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 100)
-                                    .opacity(0.25)
-                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                            } placeholder: {
-                                EmptyView()
-                            }
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxWidth: 340, maxHeight: 120)
+                                        .opacity(0.25)
+                                        .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+                                } placeholder: {
+                                    EmptyView()
+                                }
 
-                            // Real progress fill logo (left-to-right fill)
-                            AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxHeight: 100)
+                                // Real progress fill logo (left-to-right fill)
+                                AsyncImage(url: lURL) { img in
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxWidth: 340, maxHeight: 120)
                                         .opacity(1.0)
                                         .mask(
                                             GeometryReader { geo in

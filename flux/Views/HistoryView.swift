@@ -13,7 +13,12 @@ struct HistoryView: View {
         case completed = "Watched"
     }
     
-    @State private var activeFilter: Filter = .all
+    @State private var activeFilter: Filter
+    
+    init(showAsContinueWatching: Bool = false) {
+        self.showAsContinueWatching = showAsContinueWatching
+        _activeFilter = State(initialValue: showAsContinueWatching ? .inProgress : .all)
+    }
     
     var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 280), spacing: 24)]
@@ -24,9 +29,9 @@ struct HistoryView: View {
         case .all:
             return userData.history
         case .inProgress:
-            return userData.history.filter { !userData.isWatched($0) }
+            return userData.continueWatching
         case .completed:
-            return userData.history.filter { userData.isWatched($0) }
+            return userData.recentlyWatched
         }
     }
     
@@ -84,75 +89,76 @@ struct HistoryView: View {
                                         let count: Int = {
                                             switch filter {
                                             case .all: return userData.history.count
-                                            case .inProgress: return userData.history.filter { !userData.isWatched($0) }.count
-                                            case .completed: return userData.history.filter { userData.isWatched($0) }.count
+                                            case .inProgress: return userData.continueWatching.count
+                                            case .completed: return userData.recentlyWatched.count
                                             }
                                         }()
                                         
                                         Button {
                                             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                                                activeFilter = filter
-                                            }
-                                        } label: {
-                                            HStack(spacing: 6) {
-                                                Text(filter.rawValue)
-                                                    .font(.system(size: 13, weight: activeFilter == filter ? .bold : .medium))
-                                                Text("\(count)")
-                                                    .font(.system(size: 11, weight: .bold))
-                                                    .opacity(activeFilter == filter ? 0.9 : 0.5)
-                                            }
-                                            .foregroundStyle(activeFilter == filter ? .white : .white.opacity(0.65))
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 8)
-                                            .background(
-                                                Capsule()
-                                                    .fill(activeFilter == filter ? Color.white.opacity(0.18) : Color.white.opacity(0.06))
-                                            )
-                                            .overlay(
-                                                Capsule()
-                                                    .stroke(activeFilter == filter ? Color.white.opacity(0.35) : Color.clear, lineWidth: 1)
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        )
-                        
-                        if filteredItems.isEmpty {
-                            VStack(spacing: 12) {
-                                Text("No \(activeFilter.rawValue.lowercased()) titles in your history")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.8))
-                                Button("Show All History") {
-                                    withAnimation { activeFilter = .all }
-                                }
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(Color.accentColor)
-                                .buttonStyle(.plain)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 60)
-                        } else {
-                            LazyVGrid(columns: columns, spacing: 32) {
-                                ForEach(filteredItems) { item in
-                                    Button(action: {
-                                        PlayerManager.shared.play(
-                                            item,
-                                            season: item.lastSeason,
-                                            episode: item.lastEpisode,
-                                            episodeImage: item.lastEpisodeImage,
-                                            fromContinueWatching: true
-                                        )
-                                        openWindow(id: "player", value: item.id)
-                                    }) {
-                                        ContinueWatchingCard(item: item, mode: showAsContinueWatching ? .continueWatching : .recentlyWatched)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .focusEffectDisabled()
-                                }
-                            }
-                        }
+                                                 activeFilter = filter
+                                             }
+                                         } label: {
+                                             HStack(spacing: 6) {
+                                                 Text(filter.rawValue)
+                                                     .font(.system(size: 13, weight: activeFilter == filter ? .bold : .medium))
+                                                 Text("\(count)")
+                                                     .font(.system(size: 11, weight: .bold))
+                                                     .opacity(activeFilter == filter ? 0.9 : 0.5)
+                                             }
+                                             .foregroundStyle(activeFilter == filter ? .white : .white.opacity(0.65))
+                                             .padding(.horizontal, 16)
+                                             .padding(.vertical, 8)
+                                             .background(
+                                                 Capsule()
+                                                     .fill(activeFilter == filter ? Color.white.opacity(0.18) : Color.white.opacity(0.06))
+                                             )
+                                             .overlay(
+                                                 Capsule()
+                                                     .stroke(activeFilter == filter ? Color.white.opacity(0.35) : Color.clear, lineWidth: 1)
+                                             )
+                                         }
+                                         .buttonStyle(.plain)
+                                     }
+                                 }
+                             }
+                         )
+                         
+                         if filteredItems.isEmpty {
+                             VStack(spacing: 12) {
+                                 Text("No \(activeFilter.rawValue.lowercased()) titles in your history")
+                                     .font(.system(size: 18, weight: .semibold))
+                                     .foregroundStyle(.white.opacity(0.8))
+                                 Button("Show All History") {
+                                     withAnimation { activeFilter = .all }
+                                 }
+                                 .font(.system(size: 13, weight: .bold))
+                                 .foregroundStyle(Color.accentColor)
+                                 .buttonStyle(.plain)
+                             }
+                             .frame(maxWidth: .infinity)
+                             .padding(.vertical, 60)
+                         } else {
+                             LazyVGrid(columns: columns, spacing: 32) {
+                                 ForEach(filteredItems) { item in
+                                     let isItemInProgress = (activeFilter == .inProgress || (activeFilter == .all && !userData.isWatched(item)))
+                                     Button(action: {
+                                         PlayerManager.shared.play(
+                                             item,
+                                             season: item.lastSeason,
+                                             episode: item.lastEpisode,
+                                             episodeImage: item.lastEpisodeImage,
+                                             fromContinueWatching: isItemInProgress
+                                         )
+                                         openWindow(id: "player", value: item.id)
+                                     }) {
+                                         ContinueWatchingCard(item: item, mode: isItemInProgress ? .continueWatching : .recentlyWatched)
+                                     }
+                                     .buttonStyle(.plain)
+                                     .focusEffectDisabled()
+                                 }
+                             }
+                         }
                     }
                     .padding(.leading, LibraryScheme.leadingPadding)
                     .padding(.trailing, LibraryScheme.trailingPadding)

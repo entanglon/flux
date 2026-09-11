@@ -71,6 +71,10 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
             .onHover { hovering in
                 isHovering = hovering
             }
+            .onChange(of: items.first?.id) { _, _ in
+                scrollTargetIndex = 0
+                proxy.scrollTo(0, anchor: .leading)
+            }
         }
     }
     

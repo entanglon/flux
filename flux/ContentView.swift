@@ -281,11 +281,16 @@ struct ContentView: View {
 /// Current local profile identity — click returns to the profile picker.
 struct ProfileFooter: View {
     @ObservedObject var profileManager = ProfileManager.shared
+    @State private var showingPinPrompt = false
 
     var body: some View {
         HStack(spacing: 4) {
             Button {
-                profileManager.switchToProfileSelection()
+                if profileManager.requiresPinToExit {
+                    showingPinPrompt = true
+                } else {
+                    profileManager.switchToProfileSelection()
+                }
             } label: {
                 HStack(spacing: 10) {
                     if let profile = profileManager.currentProfile {
@@ -295,6 +300,15 @@ struct ProfileFooter: View {
                             .font(.system(size: 13, weight: .semibold))
                             .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.9))
+
+                        if profile.isKids {
+                            Text("KIDS")
+                                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.yellow))
+                        }
                     }
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
@@ -307,6 +321,16 @@ struct ProfileFooter: View {
             }
             .buttonStyle(.plain)
             .help("Switch profile")
+            .sheet(isPresented: $showingPinPrompt) {
+                PINEntrySheet(mode: .verify(
+                    title: "Parental PIN",
+                    subtitle: "Enter the 4-digit PIN to exit Kids Profile",
+                    profileId: profileManager.currentProfile?.id,
+                    onSuccess: {
+                        profileManager.switchToProfileSelection()
+                    }
+                ))
+            }
 
             SettingsLink {
                 Image(systemName: "gearshape")

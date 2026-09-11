@@ -836,16 +836,18 @@ class StreamManager {
             if probeStatus[stream.stableKey]?.ok == false { return false }
             return true
         }
-        guard !healthy.isEmpty else { return (nil, []) }
+        let pool = healthy.isEmpty ? streams : healthy
 
         // 1. Source mode filter
         let modeFiltered: [Stream]
         if sourceMode == "http" {
-            modeFiltered = healthy.filter { !$0.isTorrent }
+            let httpOnly = pool.filter { !$0.isTorrent }
+            modeFiltered = httpOnly.isEmpty ? streams.filter { !$0.isTorrent } : httpOnly
         } else if sourceMode == "torrent" {
-            modeFiltered = healthy.filter { $0.isTorrent }
+            let torrentOnly = pool.filter { $0.isTorrent }
+            modeFiltered = torrentOnly.isEmpty ? streams.filter { $0.isTorrent } : torrentOnly
         } else {
-            modeFiltered = healthy
+            modeFiltered = pool
         }
         guard !modeFiltered.isEmpty else { return (nil, []) }
 

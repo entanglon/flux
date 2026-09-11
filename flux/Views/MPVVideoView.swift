@@ -53,6 +53,18 @@ struct MPVVideoView: NSViewControllerRepresentable {
 }
 
 // MARK: - Models
+struct PlaybackDiagnostics: Equatable {
+    var videoCodec: String = "Unknown"
+    var audioCodec: String = "Unknown"
+    var resolution: String = "Unknown"
+    var fps: Double = 0.0
+    var videoBitrate: Double = 0.0 // kbps
+    var audioBitrate: Double = 0.0 // kbps
+    var hwDecoder: String = "None"
+    var droppedFrames: Int = 0
+    var cacheBufferSeconds: Double = 0.0
+}
+
 struct Track: Identifiable, Equatable {
     let id: Int
     let type: String // "audio", "sub"
@@ -174,6 +186,92 @@ class MPVController: ObservableObject {
     @Published var audioTracks: [Track] = []
     @Published var subtitleTracks: [Track] = []
     @Published var chapters: [MediaChapter] = []
+    
+    // MARK: - Playback Calibration & Shaders
+    @Published var subtitleDelay: Double = 0.0 // seconds (-10.0 ... 10.0)
+    @Published var subtitleScale: Double = 1.0 // 0.5 ... 2.0
+    @Published var subtitlePos: Double = 100.0 // 0 ... 100
+    @Published var audioDelay: Double = 0.0 // seconds (-10.0 ... 10.0)
+    @Published var isDialogueBoostEnabled: Bool = false
+    @Published var videoAspect: String = "auto" // auto, 16:9, 21:9, 4:3
+    @Published var isDebandEnabled: Bool = false
+    @Published var contrast: Double = 0.0 // -100 ... 100
+    @Published var brightness: Double = 0.0 // -100 ... 100
+    @Published var saturation: Double = 0.0 // -100 ... 100
+
+    func setSubtitleDelay(_ delay: Double) {
+        let rounded = (delay * 20.0).rounded() / 20.0
+        self.subtitleDelay = rounded
+        playerView?.setSubtitleDelay(rounded)
+    }
+
+    func setSubtitleScale(_ scale: Double) {
+        let clamped = max(0.5, min(scale, 2.0))
+        let rounded = (clamped * 10.0).rounded() / 10.0
+        self.subtitleScale = rounded
+        playerView?.setSubtitleScale(rounded)
+    }
+
+    func setSubtitlePos(_ pos: Double) {
+        let clamped = max(0.0, min(pos, 100.0))
+        self.subtitlePos = clamped
+        playerView?.setSubtitlePos(clamped)
+    }
+
+    func setAudioDelay(_ delay: Double) {
+        let rounded = (delay * 20.0).rounded() / 20.0
+        self.audioDelay = rounded
+        playerView?.setAudioDelay(rounded)
+    }
+
+    func toggleDialogueBoost() {
+        self.isDialogueBoostEnabled.toggle()
+        playerView?.setDialogueBoost(self.isDialogueBoostEnabled)
+    }
+
+    func setVideoAspect(_ aspect: String) {
+        self.videoAspect = aspect
+        playerView?.setVideoAspect(aspect)
+    }
+
+    func toggleDeband() {
+        self.isDebandEnabled.toggle()
+        playerView?.setDeband(self.isDebandEnabled)
+    }
+
+    func setContrast(_ value: Double) {
+        self.contrast = max(-100, min(value, 100))
+        playerView?.setContrast(self.contrast)
+    }
+
+    func setBrightness(_ value: Double) {
+        self.brightness = max(-100, min(value, 100))
+        playerView?.setBrightness(self.brightness)
+    }
+
+    func setSaturation(_ value: Double) {
+        self.saturation = max(-100, min(value, 100))
+        playerView?.setSaturation(self.saturation)
+    }
+
+    func getPlaybackDiagnostics() -> PlaybackDiagnostics {
+        let backend = playerView?.playerView
+        var diag = PlaybackDiagnostics()
+        diag.videoCodec = backend?.getPropertyString("video-codec") ?? backend?.getPropertyString("video-format") ?? "Unknown"
+        diag.audioCodec = backend?.getPropertyString("audio-codec") ?? "Unknown"
+        let w = backend?.getPropertyInt("video-params/w")
+        let h = backend?.getPropertyInt("video-params/h")
+        if let w = w, let h = h, w > 0, h > 0 {
+            diag.resolution = "\(w)×\(h)"
+        }
+        diag.fps = backend?.getPropertyDouble("estimated-vf-fps") ?? 0.0
+        diag.videoBitrate = (backend?.getPropertyDouble("video-bitrate") ?? 0.0) / 1000.0
+        diag.audioBitrate = (backend?.getPropertyDouble("audio-bitrate") ?? 0.0) / 1000.0
+        diag.hwDecoder = backend?.getPropertyString("hwdec-current") ?? "software"
+        diag.droppedFrames = backend?.getPropertyInt("frame-drop-count") ?? 0
+        diag.cacheBufferSeconds = self.demuxerCacheTime
+        return diag
+    }
     
     // Settings
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
@@ -545,6 +643,17 @@ class MPVViewController: NSViewController {
     func getChapters() -> [MediaChapter] { return playerView.getChapters() }
     func selectTrack(_ track: Track) { playerView.selectTrack(track) }
     func addExternalSubtitle(url: String, title: String) { playerView.addExternalSubtitle(url: url, title: title) }
+
+    func setSubtitleDelay(_ delay: Double) { playerView?.setSubtitleDelay(delay) }
+    func setSubtitleScale(_ scale: Double) { playerView?.setSubtitleScale(scale) }
+    func setSubtitlePos(_ pos: Double) { playerView?.setSubtitlePos(pos) }
+    func setAudioDelay(_ delay: Double) { playerView?.setAudioDelay(delay) }
+    func setDialogueBoost(_ enabled: Bool) { playerView?.setDialogueBoost(enabled) }
+    func setVideoAspect(_ aspect: String) { playerView?.setVideoAspect(aspect) }
+    func setDeband(_ enabled: Bool) { playerView?.setDeband(enabled) }
+    func setContrast(_ value: Double) { playerView?.setContrast(value) }
+    func setBrightness(_ value: Double) { playerView?.setBrightness(value) }
+    func setSaturation(_ value: Double) { playerView?.setSaturation(value) }
 
     /// Pixel aspect of the loaded video (for PiP window sizing). Falls back to 16:9.
     var videoAspectRatio: Double { playerView?.videoAspectRatio ?? 16.0 / 9.0 }
@@ -1149,6 +1258,69 @@ final class MPVLayerView: NSView {
     
     func addExternalSubtitle(url: String, title: String) {
         command("sub-add", url, "select", title)
+    }
+    
+    func setSubtitleDelay(_ delay: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "sub-delay", String(format: "%.3f", delay))
+    }
+
+    func setSubtitleScale(_ scale: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "sub-scale", String(format: "%.2f", scale))
+    }
+
+    func setSubtitlePos(_ pos: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "sub-pos", String(format: "%.0f", pos))
+    }
+
+    func setAudioDelay(_ delay: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "audio-delay", String(format: "%.3f", delay))
+    }
+
+    func setDialogueBoost(_ enabled: Bool) {
+        guard let mpv = mpv else { return }
+        if enabled {
+            mpv_set_property_string(mpv, "af", "lavfi=[dynaudnorm=f=150:g=15:m=10.0:r=0.9]")
+        } else {
+            mpv_set_property_string(mpv, "af", "")
+        }
+    }
+
+    func setVideoAspect(_ aspect: String) {
+        guard let mpv = mpv else { return }
+        switch aspect.lowercased() {
+        case "16:9":
+            mpv_set_property_string(mpv, "video-aspect-override", "16:9")
+        case "21:9", "2.35:1":
+            mpv_set_property_string(mpv, "video-aspect-override", "2.35:1")
+        case "4:3":
+            mpv_set_property_string(mpv, "video-aspect-override", "4:3")
+        default:
+            mpv_set_property_string(mpv, "video-aspect-override", "-1")
+        }
+    }
+
+    func setDeband(_ enabled: Bool) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "deband", enabled ? "yes" : "no")
+    }
+
+    func setContrast(_ value: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "contrast", String(format: "%.0f", value))
+    }
+
+    func setBrightness(_ value: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "brightness", String(format: "%.0f", value))
+    }
+
+    func setSaturation(_ value: Double) {
+        guard let mpv = mpv else { return }
+        mpv_set_property_string(mpv, "saturation", String(format: "%.0f", value))
     }
     
     private func command(_ args: String...) {

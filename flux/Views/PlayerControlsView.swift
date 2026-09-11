@@ -19,6 +19,8 @@ struct PlayerControlsView: View {
     var onSkipBackward: () -> Void
     var onClose: () -> Void
     var onTogglePiP: (() -> Void)? = nil
+    var mpv: MPVController? = nil
+    var onOpenHUD: (() -> Void)? = nil
     
     // Track Support
     var audioTracks: [Track]
@@ -98,6 +100,9 @@ struct PlayerControlsView: View {
                             .accessibilityLabel("Copy Stream Link")
                         }
                         .glassEffect(.regular.interactive(), in: .capsule)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+                        .shadow(color: Color.black.opacity(0.20), radius: 8, x: 0, y: 3)
                         
                         Spacer()
                         
@@ -114,9 +119,12 @@ struct PlayerControlsView: View {
                         Button(action: onSkipBackward) {
                             Image(systemName: "gobackward.10")
                                 .font(.system(size: 28))
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(.white.opacity(0.95))
                                 .padding(24)
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .background(Circle().fill(Color.white.opacity(0.06)))
+                                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+                                .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 4)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -128,6 +136,9 @@ struct PlayerControlsView: View {
                                 .foregroundColor(.white) // Pure White
                                 .padding(36) // Larger Hit Area
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .background(Circle().fill(Color.white.opacity(0.06)))
+                                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+                                .shadow(color: Color.black.opacity(0.25), radius: 12, x: 0, y: 5)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -136,9 +147,12 @@ struct PlayerControlsView: View {
                         Button(action: onSkipForward) {
                             Image(systemName: "goforward.10")
                                 .font(.system(size: 28))
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(.white.opacity(0.95))
                                 .padding(24)
                                 .glassEffect(.regular.interactive(), in: .circle)
+                                .background(Circle().fill(Color.white.opacity(0.06)))
+                                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+                                .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 4)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -278,6 +292,7 @@ struct PlayerControlsView: View {
                                             title: "Subtitles",
                                             tracks: subtitleTracks,
                                             externalTracks: externalTracks,
+                                            mpv: mpv,
                                             onSelect: onSelectTrack,
                                             onSelectExternal: onSelectExternalSub
                                         )
@@ -305,12 +320,34 @@ struct PlayerControlsView: View {
                                         title: "Audio", 
                                         tracks: audioTracks, 
                                         externalTracks: [], 
+                                        mpv: mpv,
                                         onSelect: onSelectTrack,
                                         onSelectExternal: { _ in }
                                     )
                                 }
+
+                                Divider()
+                                    .frame(height: 20)
+                                    .background(Color.white.opacity(0.2))
+
+                                // Player Tuning / Stats for Nerds Button
+                                Button {
+                                    onOpenHUD?()
+                                } label: {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.white.opacity(0.9))
+                                        .frame(width: 44, height: 36)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Playback tuning and diagnostics")
+                                .help("Playback Tuning & Diagnostics (⌥D)")
                             }
                             .glassEffect(.regular.interactive(), in: .capsule)
+                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+                            .shadow(color: Color.black.opacity(0.20), radius: 8, x: 0, y: 3)
                             .padding(.bottom, 6)
                         }
                         .padding(.horizontal, 60)
@@ -538,6 +575,9 @@ struct PlayerControlsView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .glassEffect(.regular.interactive(), in: .capsule)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+        .shadow(color: Color.black.opacity(0.20), radius: 8, x: 0, y: 3)
     }
 
     private func showControls() {
@@ -606,6 +646,7 @@ struct TrackSelectionList: View {
     let title: String
     let tracks: [Track]
     let externalTracks: [StremioSubtitleTrack]
+    var mpv: MPVController? = nil
     let onSelect: (Track) -> Void
     let onSelectExternal: (StremioSubtitleTrack) -> Void
     
@@ -720,8 +761,167 @@ struct TrackSelectionList: View {
                     .padding(.horizontal, 8)
                 }
             }
+
+            // Calibration footer for Subtitles / Audio
+            if let mpv = mpv {
+                Divider()
+                    .background(Color.white.opacity(0.12))
+                    .padding(.horizontal, 8)
+                
+                if isSubtitles {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Delay")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Button {
+                                    mpv.setSubtitleDelay(mpv.subtitleDelay - 0.05)
+                                } label: {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Text(String(format: "%+.2fs", mpv.subtitleDelay))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .frame(minWidth: 46)
+                                
+                                Button {
+                                    mpv.setSubtitleDelay(mpv.subtitleDelay + 0.05)
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                
+                                if abs(mpv.subtitleDelay) > 0.01 {
+                                    Button {
+                                        mpv.setSubtitleDelay(0.0)
+                                    } label: {
+                                        Image(systemName: "arrow.counterclockwise")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Size")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Button {
+                                    mpv.setSubtitleScale(mpv.subtitleScale - 0.1)
+                                } label: {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Text("\(Int(mpv.subtitleScale * 100))%")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .frame(minWidth: 46)
+                                
+                                Button {
+                                    mpv.setSubtitleScale(mpv.subtitleScale + 0.1)
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Delay")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Button {
+                                    mpv.setAudioDelay(mpv.audioDelay - 0.05)
+                                } label: {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Text(String(format: "%+.2fs", mpv.audioDelay))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .frame(minWidth: 46)
+                                
+                                Button {
+                                    mpv.setAudioDelay(mpv.audioDelay + 0.05)
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                
+                                if abs(mpv.audioDelay) > 0.01 {
+                                    Button {
+                                        mpv.setAudioDelay(0.0)
+                                    } label: {
+                                        Image(systemName: "arrow.counterclockwise")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Dialogue Boost")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Night mode normalizer")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { mpv.isDialogueBoostEnabled },
+                                set: { _ in mpv.toggleDialogueBoost() }
+                            ))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .scaleEffect(0.7)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                }
+            }
         }
-        .frame(minWidth: 200, maxHeight: 300)
+        .frame(minWidth: 220, maxHeight: 360)
         .padding(.bottom, 8)
     }
 }

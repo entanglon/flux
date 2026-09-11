@@ -178,7 +178,7 @@ struct UserDataServiceTests {
 
     @Test func cloudPayloadExportContainsEssentialSubsystems() {
         let payload = UserDataService.shared.exportCloudPayload()
-        #expect(payload["version"] as? Int == 2)
+        #expect(payload["version"] as? Int == 3)
         #expect(payload["watchlist"] != nil)
         #expect(payload["history"] != nil)
         #expect(payload["collections"] != nil)
@@ -259,12 +259,13 @@ struct UserDataServiceTests {
         ProfileManager.shared.ensureDefaultProfile(name: "Zainul")
         #expect(ProfileManager.shared.currentProfile != nil)
         #expect(ProfileManager.shared.currentProfile?.name == "Zainul")
-        #expect(ProfileManager.shared.profiles.count == 1)
+        #expect(ProfileManager.shared.profiles.count == 2)
+        #expect(ProfileManager.shared.profiles.contains(where: { $0.isKids }))
 
         // Ensure renaming existing single profile updates name cleanly
         ProfileManager.shared.ensureDefaultProfile(name: "Alex")
         #expect(ProfileManager.shared.currentProfile?.name == "Alex")
-        #expect(ProfileManager.shared.profiles.count == 1)
+        #expect(ProfileManager.shared.profiles.count == 2)
 
         // Clean up
         AuthManager.shared.signOut()
@@ -309,9 +310,10 @@ struct UserDataServiceTests {
         #expect(UserDataService.shared.history.isEmpty)
         #expect(UserDataService.shared.watchlist.isEmpty)
         #expect(UserDataService.shared.collections.isEmpty)
-        #expect(AddonManager.shared.addons.count == 1)
-        #expect(AddonManager.shared.addons.first?.id == "opensubtitles3")
-        #expect(AddonManager.shared.addons.first?.isStock == true)
+        #expect(AddonManager.shared.addons.count == 2)
+        #expect(AddonManager.shared.addons.contains(where: { $0.id == "opensubtitles3" && $0.isStock }))
+        #expect(AddonManager.shared.addons.contains(where: { $0.id == "cinemeta" && $0.isStock }))
+        #expect(AddonManager.shared.addons.allSatisfy { $0.isStock })
     }
 
     @Test @MainActor func sanitizeProfileNamesConvertsDefaultToGuestOrUserName() {
@@ -362,6 +364,312 @@ struct UserDataServiceTests {
 
         // Clean up
         AuthManager.shared.signOut()
+    }
+
+    @Test @MainActor func stockKidsProfileCannotBeDeletedOrRenamed() {
+        ProfileManager.shared.handleSignOut()
+        ProfileManager.shared.ensureGuestProfile()
+        
+        let kids = ProfileManager.shared.profiles.first(where: { $0.isKids })
+        #expect(kids != nil)
+        #expect(kids?.name == "Kids")
+        #expect(kids?.isStock == true)
+        
+        // Attempt renaming
+        if let kidsProfile = kids {
+            ProfileManager.shared.updateProfile(kidsProfile, name: "HackedName", avatarID: kidsProfile.avatarID)
+            let updated = ProfileManager.shared.profiles.first(where: { $0.id == kidsProfile.id })
+            #expect(updated?.name == "Kids")
+            
+            // Attempt deletion
+            ProfileManager.shared.deleteProfile(kidsProfile)
+            let remaining = ProfileManager.shared.profiles.first(where: { $0.id == kidsProfile.id })
+            #expect(remaining != nil)
+        }
+        
+        ProfileManager.shared.handleSignOut()
+    }
+
+    @Test @MainActor func parentalPinVerificationAndKeychainStorage() {
+        ParentalLockManager.shared.removePin()
+        #expect(ParentalLockManager.shared.hasPin == false)
+        
+        // Invalid PIN formats
+        #expect(ParentalLockManager.shared.setPin("12") == false)
+        #expect(ParentalLockManager.shared.setPin("abcd") == false)
+        #expect(ParentalLockManager.shared.setPin("12345") == false)
+        #expect(ParentalLockManager.shared.hasPin == false)
+        
+        // Valid PIN format
+        #expect(ParentalLockManager.shared.setPin("1234") == true)
+        #expect(ParentalLockManager.shared.hasPin == true)
+        
+        // Verification
+        #expect(ParentalLockManager.shared.verify(pin: "9999") == false)
+        #expect(ParentalLockManager.shared.verify(pin: "1234") == true)
+        
+        // Clean up
+        ParentalLockManager.shared.removePin()
+        #expect(ParentalLockManager.shared.hasPin == false)
+    }
+
+    @Test @MainActor func switchingFromKidsProfileRequiresPIN() {
+        ProfileManager.shared.handleSignOut()
+        ProfileManager.shared.ensureGuestProfile()
+        ParentalLockManager.shared.removePin()
+        
+        guard let kids = ProfileManager.shared.profiles.first(where: { $0.isKids }) else {
+            Issue.record("Kids profile was not found")
+            return
+        }
+        
+        ProfileManager.shared.selectProfile(kids)
+        #expect(ProfileManager.shared.currentProfile?.isKids == true)
+        // No PIN set yet -> requiresPinToExit is false
+        #expect(ProfileManager.shared.requiresPinToExit == false)
+        
+        // Set PIN
+        ParentalLockManager.shared.setPin("4321")
+        #expect(ProfileManager.shared.requiresPinToExit == true)
+        
+        // Clean up
+        ParentalLockManager.shared.removePin()
+        ProfileManager.shared.handleSignOut()
+    }
+
+    @Test @MainActor func perProfilePinVerificationAndIsolation() {
+        let profileA = UUID()
+        let profileB = UUID()
+
+        ParentalLockManager.shared.removePin(for: profileA)
+        ParentalLockManager.shared.removePin(for: profileB)
+        ParentalLockManager.shared.removePin()
+
+        #expect(ParentalLockManager.shared.hasPin(for: profileA) == false)
+        #expect(ParentalLockManager.shared.hasPin(for: profileB) == false)
+
+        // Set PIN for Profile A only
+        #expect(ParentalLockManager.shared.setPin("1111", for: profileA) == true)
+        #expect(ParentalLockManager.shared.hasPin(for: profileA) == true)
+        #expect(ParentalLockManager.shared.hasPin(for: profileB) == false)
+
+        // Verify Profile A accepts its PIN
+        #expect(ParentalLockManager.shared.verify(pin: "1111", for: profileA) == true)
+        #expect(ParentalLockManager.shared.verify(pin: "2222", for: profileA) == false)
+
+        // Set PIN for Profile B
+        #expect(ParentalLockManager.shared.setPin("2222", for: profileB) == true)
+        #expect(ParentalLockManager.shared.verify(pin: "2222", for: profileB) == true)
+        #expect(ParentalLockManager.shared.verify(pin: "1111", for: profileB) == false)
+
+        // Clean up
+        ParentalLockManager.shared.removePin(for: profileA)
+        ParentalLockManager.shared.removePin(for: profileB)
+        ParentalLockManager.shared.removePin()
+    }
+
+    @Test @MainActor func avatarItemCatalogIncludesCatsPetsAndClassics() {
+        #expect(AvatarItem.characters.count == 8)
+        #expect(AvatarItem.pets.count == 12)
+        #expect(AvatarItem.classics.count == 12)
+        #expect(AvatarItem.all.count == 32)
+
+        let cat1 = AvatarItem.characters.first(where: { $0.id == "avatar-cat-1" })
+        #expect(cat1 != nil)
+        #expect(cat1?.isImage == true)
+        #expect(cat1?.category == .characters)
+
+        let pet1 = AvatarItem.pets.first(where: { $0.id == "avatar-pet-1" })
+        #expect(pet1 != nil)
+        #expect(pet1?.isImage == true)
+        #expect(pet1?.category == .pets)
+
+        let classicRed = AvatarItem.classics.first(where: { $0.id == "face-red" })
+        #expect(classicRed != nil)
+        #expect(classicRed?.isImage == false)
+        #expect(classicRed?.category == .classic)
+    }
+
+    @Test @MainActor func kidsProfileDataIsolationOnCloudApply() {
+        // Setup mock adult and kids profiles
+        let adultID = UUID()
+        let kidsID = UUID()
+        let adultProfile = UserProfile(id: adultID, name: "Zayn", avatarID: "face-red", createdAt: Date(), isKids: false)
+        let kidsProfile = UserProfile(id: kidsID, name: "Kids", avatarID: "face-lime", createdAt: Date(), isKids: true, isStock: true)
+
+        ProfileManager.shared.profiles = [adultProfile, kidsProfile]
+        ProfileManager.shared.selectProfile(kidsProfile)
+
+        // Clear any pre-existing keys
+        let kidsWatchKey = "profile.\(kidsID.uuidString).watchlist"
+        let kidsHistKey = "profile.\(kidsID.uuidString).history"
+        let adultWatchKey = "profile.\(adultID.uuidString).watchlist"
+        let adultHistKey = "profile.\(adultID.uuidString).history"
+
+        UserDefaults.standard.removeObject(forKey: kidsWatchKey)
+        UserDefaults.standard.removeObject(forKey: kidsHistKey)
+        UserDefaults.standard.removeObject(forKey: adultWatchKey)
+        UserDefaults.standard.removeObject(forKey: adultHistKey)
+
+        // Simulate cloud payload where root contains adult watchlist/history
+        let adultItem: [String: Any] = [
+            "id": "tt0111161",
+            "type": "movie",
+            "title": "The Shawshank Redemption",
+            "timestamp": 1700000000.0,
+            "certification": "R"
+        ]
+
+        let payload: [String: Any] = [
+            "version": 3,
+            "watchlist": [adultItem],
+            "history": [adultItem],
+            "profiles": [
+                [
+                    "id": adultID.uuidString,
+                    "name": "Zayn",
+                    "avatarID": "face-red",
+                    "createdAt": Date().timeIntervalSince1970,
+                    "isKids": false,
+                    "isStock": false,
+                    "watchlist": [adultItem],
+                    "history": [adultItem]
+                ],
+                [
+                    "id": kidsID.uuidString,
+                    "name": "Kids",
+                    "avatarID": "face-lime",
+                    "createdAt": Date().timeIntervalSince1970,
+                    "isKids": true,
+                    "isStock": true,
+                    "watchlist": [],
+                    "history": []
+                ]
+            ]
+        ]
+
+        UserDataService.shared.applyCloudPayload(payload)
+
+        // Verify kids profile remains isolated and has zero adult items
+        let kidsWatch = UserDefaults.standard.array(forKey: kidsWatchKey) as? [[String: Any]] ?? []
+        let kidsHist = UserDefaults.standard.array(forKey: kidsHistKey) as? [[String: Any]] ?? []
+
+        #expect(kidsWatch.isEmpty, "Kids watchlist should be empty, but found \(kidsWatch.count) items")
+        #expect(kidsHist.isEmpty, "Kids history should be empty, but found \(kidsHist.count) items")
+        #expect(UserDataService.shared.watchlist.isEmpty)
+        #expect(UserDataService.shared.history.isEmpty)
+
+        // Verify adult profile correctly received the items
+        let adultWatch = UserDefaults.standard.array(forKey: adultWatchKey) as? [[String: Any]] ?? []
+        let adultHist = UserDefaults.standard.array(forKey: adultHistKey) as? [[String: Any]] ?? []
+        #expect(adultWatch.count == 1)
+        #expect(adultHist.count == 1)
+
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: kidsWatchKey)
+        UserDefaults.standard.removeObject(forKey: kidsHistKey)
+        UserDefaults.standard.removeObject(forKey: adultWatchKey)
+        UserDefaults.standard.removeObject(forKey: adultHistKey)
+    }
+
+    @Test @MainActor func cloudPayloadExportVersion3HasPerProfileData() {
+        ProfileManager.shared.ensureDefaultProfile(name: "TestUser")
+        let payload = UserDataService.shared.exportCloudPayload()
+        #expect(payload["version"] as? Int == 3)
+        #expect(payload["profiles"] != nil)
+        let profiles = payload["profiles"] as? [[String: Any]]
+        #expect(profiles != nil)
+        #expect(profiles?.isEmpty == false)
+    }
+
+    @Test @MainActor func continueWatchingAndRecentlyWatchedSeparation() {
+        let profileID = UUID()
+        let profile = UserProfile(id: profileID, name: "Test Separation", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [profile]
+        ProfileManager.shared.selectProfile(profile)
+        
+        let histKey = UserDefaults.Key.profileHistory(id: profileID.uuidString)
+        UserDefaults.standard.removeObject(forKey: histKey)
+        UserDataService.shared.history = []
+        
+        let inProgressItem = MediaItem(
+            id: "tt_test_prog",
+            title: "In Progress Show",
+            description: "",
+            streamURL: nil,
+            category: "series",
+            progress: 0.45
+        )
+        
+        let completedItem = MediaItem(
+            id: "tt_test_done",
+            title: "Finished Movie",
+            description: "",
+            streamURL: nil,
+            category: "movie",
+            progress: 0.95
+        )
+        
+        UserDataService.shared.addToHistory(inProgressItem)
+        UserDataService.shared.addToHistory(completedItem)
+        
+        let cw = UserDataService.shared.continueWatching
+        let rw = UserDataService.shared.recentlyWatched
+        
+        #expect(cw.contains(where: { $0.id == "tt_test_prog" }))
+        #expect(!cw.contains(where: { $0.id == "tt_test_done" }))
+        
+        #expect(rw.contains(where: { $0.id == "tt_test_done" }))
+        #expect(!rw.contains(where: { $0.id == "tt_test_prog" }))
+        
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: histKey)
+    }
+
+    @Test @MainActor func monotonicProgressPreventsBackwardRegression() {
+        let profileID = UUID()
+        let profile = UserProfile(id: profileID, name: "Test Monotonic", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [profile]
+        ProfileManager.shared.selectProfile(profile)
+        
+        let histKey = UserDefaults.Key.profileHistory(id: profileID.uuidString)
+        UserDefaults.standard.removeObject(forKey: histKey)
+        UserDataService.shared.history = []
+        
+        let itemFirst = MediaItem(
+            id: "tt_test_seek",
+            title: "Seek Test Movie",
+            description: "",
+            streamURL: nil,
+            category: "movie",
+            progress: 0.60
+        )
+        UserDataService.shared.addToHistory(itemFirst)
+        
+        let saved1 = UserDataService.shared.getHistoryItem(for: itemFirst)
+        #expect(saved1?.progress == 0.60)
+        
+        // User reopens and scrubs back to 0.20
+        let itemScrubbedBack = MediaItem(
+            id: "tt_test_seek",
+            title: "Seek Test Movie",
+            description: "",
+            streamURL: nil,
+            category: "movie",
+            progress: 0.20
+        )
+        UserDataService.shared.addToHistory(itemScrubbedBack, isRestart: false)
+        
+        let saved2 = UserDataService.shared.getHistoryItem(for: itemFirst)
+        #expect(saved2?.progress == 0.60, "Progress should preserve high-water mark at 0.60, got \(String(describing: saved2?.progress))")
+        
+        // Explicit restart resets progress
+        UserDataService.shared.addToHistory(itemScrubbedBack, isRestart: true)
+        let saved3 = UserDataService.shared.getHistoryItem(for: itemFirst)
+        #expect(saved3?.progress == 0.20, "Explicit restart should allow resetting progress to 0.20")
+        
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: histKey)
     }
 }
 

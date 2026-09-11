@@ -153,7 +153,7 @@ struct SearchView: View {
                     
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
-                            ForEach(recentManager.recentItems) { item in
+                            ForEach(displayRecentItems) { item in
                                 NavigationLink(value: item) {
                                     RecentSearchCard(item: item)
                                 }
@@ -167,12 +167,12 @@ struct SearchView: View {
             
             // Section 2: Browse
             VStack(alignment: .leading, spacing: 16) {
-                Text("Browse")
+                Text(isKidsProfile ? "Browse for Kids" : "Browse")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 24) {
-                    ForEach(Genre.allGenres, id: \.id) { genre in
+                    ForEach(browseGenres, id: \.id) { genre in
                         NavigationLink(value: GenreNavigation(name: genre.name, id: genre.id)) {
                             GenreCard(genre: genre)
                         }
@@ -181,6 +181,24 @@ struct SearchView: View {
                 }
             }
         }
+    }
+
+    private var isKidsProfile: Bool {
+        ProfileManager.shared.currentProfile?.isKids == true
+    }
+
+    private var browseGenres: [Genre] {
+        if isKidsProfile {
+            return Genre.allGenres.filter { KidsContentFilter.shared.isGenreSafeForKids($0.name) }
+        }
+        return Genre.allGenres
+    }
+
+    private var displayRecentItems: [MediaItem] {
+        if isKidsProfile {
+            return recentManager.recentItems.filter { !KidsContentFilter.shared.isRestricted(item: $0) }
+        }
+        return recentManager.recentItems
     }
 }
 

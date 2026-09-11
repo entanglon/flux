@@ -16,6 +16,9 @@ struct DetailView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
     @ObservedObject private var tasteProfile = TasteProfileManager.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
+    @State private var isRestrictedItem = false
+    @State private var showingPinToSwitch = false
     @State private var isDownloading = false
     @State private var showCollectionsPopover = false
     @State private var trailerURL: URL? = nil
@@ -818,12 +821,24 @@ struct DetailView: View {
                 .zIndex(100)
             }
         }
+        .overlay {
+            if isRestrictedItem {
+                contentRestrictedOverlay
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .task {
-            prefetchPlaybackSources()
-            await loadDetails()
-            prefetchPlaybackSources()
+            await checkKidsRestriction()
+            if !isRestrictedItem {
+                prefetchPlaybackSources()
+                await loadDetails()
+                prefetchPlaybackSources()
+                await checkKidsRestriction()
+            }
+        }
+        .onChange(of: displayItem.certification) { _, _ in
+            Task { await checkKidsRestriction() }
         }
         .onChange(of: selectedSeason?.seasonNumber) { _, _ in
             prefetchPlaybackSources()
@@ -1830,5 +1845,123 @@ extension DetailView {
             seasonEpisode: seasonEpisode,
             url: PlayerManager.shared.getPlayableURL(for: best)
         )
+    }
+
+    // MARK: - Kids Profile Content Gating
+
+    private func checkKidsRestriction() async {
+        guard profileManager.currentProfile?.isKids == true else {
+            await MainActor.run { self.isRestrictedItem = false }
+            return
+        }
+        if KidsContentFilter.shared.isRestricted(item: displayItem) {
+            await MainActor.run { self.isRestrictedItem = true }
+            return
+        }
+        let safe = await KidsContentFilter.shared.isKidsSafe(item: displayItem)
+        await MainActor.run {
+            self.isRestrictedItem = !safe
+        }
+    }
+
+    @ViewBuilder private var contentRestrictedOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.12))
+                        .frame(width: 80, height: 80)
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.red, .orange],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+
+                VStack(spacing: 8) {
+                    Text("Content Restricted")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text(restrictedReasonText)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                HStack(spacing: 14) {
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Text("Go Back")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.white.opacity(0.12))
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        showingPinToSwitch = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.open.fill")
+                                .font(.system(size: 12))
+                            Text("Unlock with PIN")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.yellow)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 8)
+            }
+            .padding(40)
+            .frame(maxWidth: 480)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(red: 0.12, green: 0.13, blue: 0.16).opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+            )
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
+        }
+        .sheet(isPresented: $showingPinToSwitch) {
+            PINEntrySheet(mode: .verify(
+                title: "Parental Unlock",
+                subtitle: "Enter PIN to switch to an adult profile",
+                profileId: profileManager.currentProfile?.id,
+                onSuccess: {
+                    profileManager.switchToProfileSelection()
+                }
+            ))
+        }
+    }
+
+    private var restrictedReasonText: String {
+        if let cert = displayItem.certification, !cert.isEmpty {
+            return "This title is rated \(cert) and cannot be viewed in Kids Profile."
+        }
+        return "This title is not approved for Kids Profile."
     }
 }

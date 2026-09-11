@@ -54,13 +54,18 @@ struct ContinueWatchingCard: View {
     }
 
     private var activeLogoURL: URL? {
-        if let logo = item.logoURL { return logo }
-        if let logo = fetchedLogo { return logo }
-        if !TMDBEnricher.shared.hasKey {
-            if let match = item.id.range(of: "tt[0-9]+", options: .regularExpression) {
-                let imdbID = String(item.id[match])
-                return URL(string: "https://images.metahub.space/logo/medium/\(imdbID)/img")
-            }
+        if TMDBEnricher.shared.hasKey {
+            // Strictly prioritize TMDB transparent logos over Cinemeta / Metahub
+            if let logo = fetchedLogo { return logo.highQuality() }
+            if let logo = item.logoURL, logo.absoluteString.contains("tmdb.org") { return logo.highQuality() }
+            // Temporary fallback while TMDB logo fetches
+            if let logo = item.logoURL { return logo.highQuality() }
+        }
+        // Fallback to existing enriched logo or Cinemeta / Metahub (large FHD)
+        if let logo = item.logoURL { return logo.highQuality() }
+        if let match = item.id.range(of: "tt[0-9]+", options: .regularExpression) {
+            let imdbID = String(item.id[match])
+            return URL(string: "https://images.metahub.space/logo/large/\(imdbID)/img")
         }
         return nil
     }
@@ -125,6 +130,38 @@ struct ContinueWatchingCard: View {
                 endPoint: .bottom
             )
 
+            // Top Badges Overlay (e.g. NEW EPISODE)
+            if mode == .continueWatching && item.isNewEpisode == true {
+                VStack {
+                    HStack {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: 5.5, height: 5.5)
+                            Text("NEW EPISODE")
+                                .font(.system(size: 9, weight: .bold))
+                                .tracking(0.6)
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.65))
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.cyan.opacity(0.6), lineWidth: 0.8)
+                        )
+                        .shadow(color: Color.black.opacity(0.5), radius: 4, x: 0, y: 2)
+                        .padding(.top, 10)
+                        .padding(.leading, 10)
+
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+
             // Content Overlay
             VStack(alignment: .leading, spacing: 0) {
                 Spacer()
@@ -132,14 +169,14 @@ struct ContinueWatchingCard: View {
                 // Title Treatment: Transparent Logo with Typographic Fallback
                 Group {
                     if let logo = activeLogoURL {
-                        // Logos render at ~160x36; no need for the 300px default decode.
-                        CachedImage(url: logo, maxDimension: 200) { phase in
+                        // Decodes at up to 500px for sharp high-DPI Retina presentation
+                        CachedImage(url: logo, maxDimension: 500) { phase in
                             switch phase {
                             case .success(let img):
                                 img
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 160, maxHeight: 36, alignment: .leading)
+                                    .frame(maxWidth: 160, maxHeight: 38, alignment: .leading)
                                     .shadow(color: .black.opacity(0.85), radius: 4, x: 0, y: 2)
                             default:
                                 fallbackTitleText
@@ -282,15 +319,16 @@ struct ContinueWatchingCard: View {
             let type = isTV ? "tv" : "movie"
 
             var tmdbIDToUse: String? = nil
-            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: item.id)) {
-                tmdbIDToUse = item.id
+            let cleanID = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleanID)) {
+                tmdbIDToUse = cleanID
             } else if item.id.starts(with: "tt") {
                 tmdbIDToUse = await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: type)
             }
 
             if let id = tmdbIDToUse {
-                // Fetch TMDB logo if not already set
-                if fetchedLogo == nil && (item.logoURL == nil || item.logoURL?.absoluteString.contains("tmdb.org") == false) {
+                // Fetch TMDB logo if not already set or not original quality
+                if fetchedLogo == nil && (item.logoURL == nil || item.logoURL?.absoluteString.contains("tmdb.org") == false || item.logoURL?.absoluteString.contains("/original/") == false) {
                     if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
                         await MainActor.run { self.fetchedLogo = logo }
                     }

@@ -19,7 +19,7 @@ struct MediaListView: View {
         case topRatedTV
         case streamingTV
         case genre(id: Int, name: String) // TMDB genre — real ID + display name
-        case genreCategory(id: Int, name: String, category: String, categoryTitle: String)
+        case genreCategory(id: Int, name: String, category: String, categoryTitle: String, mediaType: String = "movie")
         case ott(id: String, name: String) // OTT platform — catalog code + display name
         case fixed(title: String, items: [MediaItem])
 
@@ -42,7 +42,7 @@ struct MediaListView: View {
             case .topRatedTV: return "Top Rated TV Shows"
             case .streamingTV: return "Popular on Streaming"
             case .genre(_, let name): return name
-            case .genreCategory(_, let name, _, let categoryTitle): return "\(name): \(categoryTitle)"
+            case .genreCategory(_, let name, _, let categoryTitle, _): return "\(name): \(categoryTitle)"
             case .ott(_, let name): return name
             case .fixed(let title, _): return title
             }
@@ -62,6 +62,9 @@ struct MediaListView: View {
     init(title: String? = nil, type: ListType) {
         self.type = type
         self.title = title ?? type.title
+        if case .genreCategory(_, _, _, _, let mediaType) = type {
+            self._genreMediaType = State(initialValue: mediaType)
+        }
     }
     
     let columns = [
@@ -266,7 +269,7 @@ struct MediaListView: View {
                 newItems = (try? await TMDBEnricher.shared.fetchStreamingTV(page: page)) ?? []
             case .genre(let id, _):
                 newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType, category: "popular")
-            case .genreCategory(let id, _, let category, _):
+            case .genreCategory(let id, _, let category, _, _):
                 newItems = await TMDBEnricher.shared.fetchGenrePage(tmdbGenreID: id, page: page, mediaType: genreMediaType, category: category)
             case .ott(let platformID, _):
                 let ottType = genreMediaType == "tv" ? "series" : "movie"
@@ -274,6 +277,10 @@ struct MediaListView: View {
             case .fixed(_, let fixedItems):
                 newItems = fixedItems
                 canLoadMore = false
+            }
+
+            if ProfileManager.shared.currentProfile?.isKids == true {
+                newItems = await KidsContentFilter.shared.filterSafeItems(newItems)
             }
             
             await MainActor.run {
@@ -295,23 +302,9 @@ struct MediaListView: View {
     }
     
     private var continueWatchingItems: [MediaItem] {
-        var seen = Set<String>()
-        var result: [MediaItem] = []
-        for item in userData.history {
-            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
-            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
-            let idKey = "id:\(item.id)"
-            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
-            
-            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
-                result.append(item)
-                seen.insert(idKey)
-                seen.insert(numKey)
-                if !item.title.isEmpty && item.title != "Unknown" {
-                    seen.insert(titleKey)
-                }
-            }
+        if ProfileManager.shared.currentProfile?.isKids == true {
+            return userData.continueWatching.filter { !KidsContentFilter.shared.isRestricted(item: $0) }
         }
-        return result
+        return userData.continueWatching
     }
 }

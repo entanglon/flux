@@ -16,6 +16,33 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
+## Sep 11, 2026 — COMPLETED: Continue Watching Lifecycle, Playback Tuning HUD & Lossless Logo Pipeline
+
+**Status**:
+1. **Continue Watching vs Recently Watched Separation & Monotonic Progress**:
+   - Finished media (`progress >= 0.90`) is excluded from Continue Watching and routed to a dedicated Recently Watched rail (`recentlyWatched` computed property in `UserDataService.swift`).
+   - Enforced strictly monotonic progress updates: seeking backwards or viewing earlier chapters does not regress stored progress (`monotonicProgressPreventsBackwardRegression` test passing).
+   - Implemented automatic "NEW EPISODE" release detection: when a series episode is finished and the next episode has aired, the new episode is queued in Continue Watching with a cyan `.isNewEpisode` badge.
+2. **Playback Tuning & Diagnostics HUD (`SecretPlayerHUDView.swift`)**:
+   - Created native floating tuning HUD accessible via `D` hotkey or player control bar icon.
+   - Four dedicated tabs:
+     - **Diagnostics ("Stats for Nerds")**: Video/audio codecs, hardware decoder verification (`videotoolbox`), resolution, framerate, dropped frame counts, demuxer buffer cache, and live bitrates.
+     - **Subtitles Delay & Scale**: Quick ±50ms / ±100ms / ±500ms sync buttons, vertical positioning slider, text scaling slider, and custom offset input bar with unit switcher (`sec` / `ms`).
+     - **Audio Delay Sync & Dialogue Boost**: Latency correction with custom offset input bar, volume amplifier indicator, and Dialogue Boost normalizer (amplifies quiet whispers, compresses loud sound effects).
+     - **Video Filters & Geometry**: Aspect ratio overrides (`Auto`, `16:9`, `21:9`, `4:3`), Deband filter shader, and real-time contrast, brightness, and saturation adjustments.
+   - Performance isolation: Decoupled local state from video playback clock ticks; async detached diagnostics queries eliminate frame stutters.
+   - Hit-testing overhaul: Full edge-to-edge hit testing (`.contentShape`) across all tabs, close button, reset, apply, calibration, and aspect ratio buttons, eliminating "centric clicks".
+3. **App-Wide Lossless Logo Pipeline**:
+   - **`TMDBEnricher.swift`**: `selectBestLogoURL(from:)` filters out unsupported SVG formats, prioritizes English / language-neutral PNGs, and ranks by community score + resolution, serving `https://image.tmdb.org/t/p/original...`.
+   - **`ContinueWatchingCard.swift`**: `activeLogoURL` renders lossless TMDB logos with high-resolution Metahub fallback (`/logo/large/`), decoding at up to 500px for sharp Retina display.
+   - **`PlayerView.swift`**: Buffering and mid-playback progress fill animations render transparent logos up to 340×120; `.task` fetches original PNGs.
+   - **`UserDataService.swift`**: `itemFromDict()` calls `highQuality()` on loaded history items; `enrichHistory()` resolves and persists original transparent logos into UserDefaults.
+4. **Automated Testing & Build**:
+   - 123 / 123 tests passing across all 7 test suites (`** TEST SUCCEEDED **`).
+   - Clean debug build (`** BUILD SUCCEEDED **`) and live app verified.
+
+---
+
 ## Sep 11, 2026 — S3/HF BUCKET + BACKUP VERIFICATION + SECOND DEDUP
 
 - S3 file storage (HF `event-horizon` bucket) verified connected, but it only governs file-field uploads — live `data.db` always stays local. Zero file fields in use → zero effect today.
@@ -25,23 +52,54 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
-## PLANNED (next): Stock Kids Profile with Content Blocking — AGREED WITH CONDITIONS
+## Sep 11, 2026 — COMPLETED: Kids Profile Phase 3 (Profile Data Isolation, Browse Safe Genre Gating & PocketBase Version 3 Sync)
 
-**Verdict**: yes, worth building (OTT parity, real family value) — but it's a multi-day build, not a toggle. The dangerous version is a cosmetic block a kid taps around in 5 seconds.
+**Status**:
+1. **Kids Profile Data Isolation**:
+   - Diagnosed root cause: `UserDataService.applyCloudPayload` had a fallback to `localWatchlistDataStremio` when the active profile was Kids and persisted the merged adult list into `profile.<kids-id>.watchlist`.
+   - Fixed `applyCloudPayload` to isolate Kids mode: root watchlist/history is never merged into Kids, nor does Kids fall back to legacy adult keys.
+   - Updated `cleanKidsProfileDataIfNeeded()` in `ProfileManager.swift` to purge any adult items or copied collections from the Kids profile on disk and memory.
+   - Added `migrateLegacyDataIfNeeded(for:)` so primary adult profiles preserve pre-profile libraries while Kids profiles stay clean.
+2. **Safe Browse & Genre Page Gating**:
+   - `SearchView.swift`: In Kids mode, "Browse" changes to "Browse for Kids", displaying only safe genres (`Animation`, `Adventure`, `Comedy`, `Family`, `Fantasy`, `Short Films`, `Kids`). Recently searched items omit restricted content.
+   - `GenreDetailView.swift`: Non-kid genres present a dedicated `restrictedGenreState` screen. All 4 rails (`trending`, `topRated`, `popular`, `newReleases`) are filtered via `KidsContentFilter.shared.filterSafeItems(...)`.
+   - `MediaListView.swift` & `HomeView.swift`: Continue Watching and media lists filtered in Kids mode.
+3. **Version 3 Cloud Payload & PocketBase Sync**:
+   - Upgraded payload to `version: 3` with independent per-profile `watchlist`, `history`, `collections`, and `settings` inside the `profiles` array.
+   - Base64 encoded collections `itemsData` to ensure valid JSON serialization with PocketBase.
+   - Verified live sync with PocketBase (`https://heisenbug.tailc311f6.ts.net/api`) via unified logging: pull and push succeeded.
+4. **Avatar Expansion**:
+   - Added 12 pet avatars (`avatar-pet-1` to `12`) to `AvatarItem`, bringing total avatar catalog to 32 choices across Cats, Pets, and Classics (Faces).
+5. **Automated Testing**:
+   - Added unit tests for safe genres, kids cloud payload isolation, and avatar catalog.
+   - 118 / 118 tests passing.
 
-**Why it's bigger than it looks:**
-- No PIN/lock infra exists (verified: zero matches). Without a PIN on exiting Kids mode + undeletable stock profile, blocking is theater. PIN must be local-only (never cloud-synced).
-- "Kid-suitable" can't come from genres (Animation includes Sausage Party) — needs TMDB certifications (`release_dates`/`content_ratings`, which `fetchCertification` already fetches per-item). But rails show ~300 items; per-item cert fetches per page load needs a caching + background-evaluation layer or page loads die.
-- Every surface must filter: Home/Movies/TV/Trending rails, search, genre pages, detail (block or gate?), Up Next/autoplay, addon sections, For You — plus a player-level backstop that refuses non-kid streams (the one layer that must never fail).
-- False-negative (adult slips through) vs false-positive (library so thin it feels broken) tradeoff, driven by cert-data gaps. Default-block-unknown is the only defensible policy for kids, and it will hide lots of benign cert-less titles.
+---
 
-**Phased plan:**
-1. Kids profile type (stock, non-deletable) + PIN create/verify + exit lock.
-2. Certification service (cached, background, default-block policy) + rail/search/genre filtering.
-3. Detail gate + player backstop + autoplay gating.
-4. Polish: kid-first curation (Animation/Family rails up front).
+## Sep 11, 2026 — COMPLETED: Kids Profile Phase 2 (Content Blocking Infrastructure) & PIN Boxes Redesign
 
-**Decisions needed before build:** (1) default-block vs default-allow for cert-less titles; (2) max allowed rating (G only? +PG? TV-Y7?); (3) PIN length/mode (4-digit?); (4) completed-series/leftover behavior in Kids Continue Watching.
+**Status**:
+- **Phase 1 (COMPLETED Sep 11, 2026)**: Kids profile type (`isKids`, `isStock`, non-deletable), Keychain 4-digit PIN management with rate limiting / lockout, exit lock modal (`PINEntrySheet`), and UI integration across ProfileFooter, ProfileGateView, and SettingsView.
+- **PIN Box Redesign (COMPLETED Sep 11, 2026)**: Removed on-screen numeric keypad; implemented 4 clean PIN digit input boxes with physical keyboard focus, bullet masking (`●`), active glowing focus state, shake on error, and automatic submission.
+- **Phase 2 (COMPLETED Sep 11, 2026)**: Content filtering infrastructure:
+  1. **Certification Service (`KidsContentFilter.swift`)**:
+     - Fast classification engine (`isCertificationSafe`, `isKidsSafe`, `isRestricted`).
+     - Double-layer caching (in-memory NSCache + disk cache at `flux_certifications_cache.json`).
+     - Rating ceiling: `G`, `PG`, `TV-Y`, `TV-Y7`, `TV-G`, `TV-PG`, `U`, `0`, `6`, `FSK 0`, `FSK 6`.
+     - Blocked: `PG-13`, `R`, `NC-17`, `TV-14`, `TV-MA`, `12+`, `15+`, `18+`, `M`, `MA15+`, `R18+`, `X`, `XXX`, `NR`, `Unrated`.
+     - Default-block-unknown policy with safe family genre exemption (`Animation`, `Family`, `Kids` allowed if zero adult genres present).
+  2. **Kids Discovery Rails (`TMDBEnricher.swift`)**:
+     - Dedicated kids queries: `fetchKidsTrending()`, `fetchKidsMovies()`, `fetchKidsTV()`, `fetchAnimatedAdventures()`, `fetchFamilyMovies()`.
+     - Wired into `HomeView`, `MoviesView`, `TVShowsView`, and `TrendingView` when in Kids profile mode.
+  3. **Search Index Filtering (`SearchViewModel.swift`)**:
+     - Real-time search query responses filtered through `KidsContentFilter.shared.filterSafeItems`.
+     - Instant autocomplete suggestions filtered to remove restricted titles.
+  4. **Detail Gate & Playback Backstop**:
+     - `DetailView.swift`: Content restriction overlay blocking overview, backdrop, and episodes, offering "Unlock with PIN" modal to bypass or "Go Back".
+     - `PlayerManager.swift`: In-flight guard rejecting playback of restricted items if Kids profile is active without authorization.
+  5. **Automated Tests**:
+     - Added comprehensive test suite in `KidsContentFilterTests.swift` covering whitelist, blacklist, fallback heuristics, order preservation, and cache hits.
+     - 115 / 115 tests passing.
 
 ---
 
@@ -62,17 +120,58 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
-## Sep 8, 2026 — OPEN: Genre Page Movies/TV Toggle Shows Movies for Both (UNRESOLVED)
+### Sep 11, 2026 — FIXED: Genre Page Movies/TV Toggle Shows Movies for Both
 
-- **Symptom**: On genre pages (e.g. Adventure), tapping "TV Shows" slides the toggle pill but all rails keep showing movies. Drill-down ("extend a list" → MediaListView) with its own toggle DOES show TV correctly. Screenshots confirmed identical rails under both toggle states.
-- **Exonerated (verified, not guessed)**:
-  - Toggle writes "movie"/"tv" correctly (gesture code + same component works in drill-down).
-  - `fetchGenreRails`/`fetchGenrePage` honor mediaType (code-verified; drill-down proves the TV path end-to-end on the same machine/key).
-  - `GenreNavigation` identity is stable (name + Int, no UUID) — destination remount ruled out.
-  - Glass sidebar (temporary flat-glass bisection build showed zero improvement — reverted).
-- **Contradiction**: every static path says it must work (non-throwing load chain always assigns; `.task(id:)` must relaunch), yet it doesn't. Prime suspect: the `.task(id: mediaType)` reload never runs with "tv" (vs MediaListView's proven `.task` + `.onChange` + clear-first pattern).
-- **Blocked instrumentation**: app's `.info`-level os.Logger lines NEVER persist (only `.error` does — 15 error lines vs 0 info in 12h). Future diagnostics in this app must use `.error` level or another channel. Also: always `pgrep`/kill stale processes before installing, and verify post-install process start time — a stale process served an entire test round.
-- **Next step**: add error-level trace in `loadRails`, or rewire GenreDetailView reload to MediaListView's `.onChange` + clear-first pattern and test.
+- **Symptom**: On genre pages (e.g. Adventure), tapping "TV Shows" slides the toggle pill but all rails keep showing movies.
+- **Root cause**:
+  1. `CarouselView` attaches `.id(index)` where index is an `Int`. `GlassCard` stored `displayItem` as `@State` without an `.onChange(of: item)` modifier, causing SwiftUI view recycling to preserve previous `@State` (movies) across rail data swaps.
+  2. `GenreDetailView` used `.task(id: mediaType)` which failed to cleanly flush previous `railsData` before initiating reload.
+- **Fix**:
+  1. `GlassCard.swift`: Added `.onChange(of: item) { _, newItem in self.displayItem = newItem }` ensuring cached card state updates immediately when data arrays change.
+  2. `CarouselView.swift`: Added `.onChange(of: items.first?.id)` to reset scroll offset to leading edge on item replacement.
+  3. `GenreDetailView.swift`: Rewired reload to `.task` + `.onChange(of: mediaType)` with immediate `railsData.removeAll()` and `isLoading = true` (matching `MediaListView`'s proven pattern); attached explicit `.id(item.id)` to `GlassCard`.
+  4. `MediaListView.swift`: Extended `genreCategory` list type with explicit `mediaType` propagation.
+
+---
+
+## Sep 11, 2026 — COMPLETED: Stock Kids Profile with Content Blocking — Phase 1 (PIN & Profile Infrastructure)
+
+- **Completed**:
+  - **Local Keychain PIN**: Created `ParentalLockManager.swift` (`flux.parentalPin`). SHA-256 hashed PIN with 5-attempt rate limit and 30-second lockout. Strictly local to device Keychain (never synced to cloud). Hermetically testable via in-memory store in unit tests.
+  - **Stock Kids Profile**: Added `isKids` and `isStock` properties to `UserProfile.swift`. `ProfileManager.swift` ensures a stock "Kids" profile (`face-yellow`) exists for all accounts, protects it from deletion or renaming, and handles cloud serialization cleanly.
+  - **PIN Entry UI**: Created `PINEntrySheet.swift` (Liquid Glass modal supporting `.verify` and `.setup` workflows with custom 4-digit keypad, keyboard input capture, error shake, and lockout timer).
+  - **Navigation & Gating**:
+    - `ContentView.swift`: Added "KIDS" badge pill to `ProfileFooter` and intercepts profile switching when `requiresPinToExit` is true to present the PIN sheet.
+    - `ProfileGateView.swift`: Renders "KIDS" badge; hides delete action for the stock Kids profile.
+    - `SettingsView.swift`: Renders "KIDS" badges on profile chips, blocks switching away from Kids profile without PIN.
+  - **Tests**: Added unit tests in `UserDataServiceTests.swift` (`stockKidsProfileCannotBeDeletedOrRenamed`, `parentalPinVerificationAndKeychainStorage`, `switchingFromKidsProfileRequiresPIN`) + fixed addon & profile assertions. 105 / 105 tests passing.
+
+---
+
+## Sep 11, 2026 — COMPLETED: Per-Profile PINs, First-Time Kids Setup Flow, 8 Cat Avatars & Settings UI Overhaul
+
+- **Avatar Catalog Expansion**:
+  - Resized and optimized 8 cartoon black cat images from `/Users/zainulnazir/Projects/flux/public/` to 512x512 Retina `.imageset` assets (`avatar-cat-1` through `avatar-cat-8`) with proper `Contents.json` manifests in `flux/Assets.xcassets/`.
+  - Added `AvatarItem` catalog in `UserProfile.swift` supporting categories (`.characters` ["Cats"] and `.classic` ["Faces"]) totaling 20 avatars.
+  - Updated `AvatarBadge` with image asset resolution and procedural SVG/SwiftUI fallback.
+  - Added category picker and horizontal avatar selector in `ProfileCreationView`.
+- **Per-Profile PIN Security & First-Time Kids Gating**:
+  - Stored independent 4-digit PINs in Keychain (`flux.pin.<profileId>`) via `ParentalLockManager.swift`.
+  - Removed PIN creation UI from Settings window completely.
+  - When Kids profile is selected for the first time without a PIN, the app prompts to create a 4-digit protection PIN before entering.
+  - Exiting Kids profile requires PIN. If switching to a locked adult profile, that profile's PIN is requested.
+  - Every profile can optionally configure a lock PIN in the Profile Editor.
+  - Profiles with PINs display a padlock badge on profile selection tiles.
+- **Settings UI Redesign**:
+  - Expanded Settings bounds to 620x530 with modern Liquid Glass aesthetics.
+  - Removed cluttered Parental Controls section from general settings.
+  - Streamlined Account panel: large avatar, inline name edit, email, and live PocketBase connection indicator.
+  - Rebuilt Watching Profiles list with horizontal profile chips showing active checkmarks and lock indicators.
+  - Streamlined TMDB Metadata panel: status badge, masked API key preview, inline editor sheet, and Discovery Rails toggle.
+- **Automated Tests**:
+  - Added `perProfilePinVerificationAndIsolation` and `avatarItemCatalogIncludesCatsAndClassics` to `UserDataServiceTests.swift`.
+  - All 107 / 107 unit tests passing. Build cleanly verified and running.
+
 
 ---
 

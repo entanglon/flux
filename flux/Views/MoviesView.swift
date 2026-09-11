@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MoviesView: View {
+    @ObservedObject private var profileManager = ProfileManager.shared
     @State private var heroMovies: [MediaItem] = []
     @State private var forYouMovies: [MediaItem] = []
     @State private var trendingTodayMovies: [MediaItem] = []
@@ -28,71 +29,11 @@ struct MoviesView: View {
                         .transition(.opacity)
                 }
 
-                    // For You Movies
-                    if !forYouMovies.isEmpty {
-                        renderRail(title: "For You", listType: .fixed(title: "For You Movies", items: forYouMovies), items: forYouMovies)
-                    }
-
-                    // 1. Combined Trending Movies with Liquid Glass Toggle
-                    let activeTrending = trendingWindow == "day" ? trendingTodayMovies : trendingWeekMovies
-                    if !activeTrending.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            TrendingToggleSectionHeader(
-                                title: "Trending",
-                                window: $trendingWindow,
-                                value: MediaListView.ListType.trendingMovies(window: trendingWindow)
-                            )
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
-
-                            CarouselView(items: activeTrending) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .id("trending-movies-\(trendingWindow)")
-                        }
-                        .padding(.bottom, 16)
-                        .transition(.opacity)
-                    } else if isLoading {
-                        GhostRail()
-                            .transition(.opacity)
-                    }
-
-                    // 2. Popular Movies
-                    if !popularMovies.isEmpty {
-                        renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
-                    } else if isLoading {
-                        GhostRail()
-                            .transition(.opacity)
-                    }
-
-                    // 4. Now Playing
-                    if !nowPlayingMovies.isEmpty {
-                        renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
-                    }
-
-                    // 5. Popular on Streaming
-                    if !streamingMovies.isEmpty {
-                        renderRail(title: "Popular on Streaming", listType: .streamingMovies, items: streamingMovies)
-                    }
-
-                    // 6. Upcoming
-                    if !upcomingMovies.isEmpty {
-                        renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
-                    }
-
-                    // 7. Top Rated Movies
-                    if !topRatedMovies.isEmpty {
-                        renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
-                    }
-
-                    // 8. Quick Watches (< 95 mins)
-                    if !quickWatches.isEmpty {
-                        renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
-                    }
+                if profileManager.currentProfile?.isKids == true {
+                    kidsMoviesRails
+                } else {
+                    adultMoviesRails
+                }
             }
             .padding(.bottom, 80)
         }
@@ -112,6 +53,94 @@ struct MoviesView: View {
         }
     }
     
+    @ViewBuilder private var adultMoviesRails: some View {
+        // For You Movies
+        if !forYouMovies.isEmpty {
+            renderRail(title: "For You", listType: .fixed(title: "For You Movies", items: forYouMovies), items: forYouMovies)
+        }
+
+        // 1. Combined Trending Movies with Liquid Glass Toggle
+        let activeTrending = trendingWindow == "day" ? trendingTodayMovies : trendingWeekMovies
+        if !activeTrending.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                TrendingToggleSectionHeader(
+                    title: "Trending",
+                    window: $trendingWindow,
+                    value: MediaListView.ListType.trendingMovies(window: trendingWindow)
+                )
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+
+                CarouselView(items: activeTrending) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .id("trending-movies-\(trendingWindow)")
+            }
+            .padding(.bottom, 16)
+            .transition(.opacity)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 2. Popular Movies
+        if !popularMovies.isEmpty {
+            renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 4. Now Playing
+        if !nowPlayingMovies.isEmpty {
+            renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
+        }
+
+        // 5. Popular on Streaming
+        if !streamingMovies.isEmpty {
+            renderRail(title: "Popular on Streaming", listType: .streamingMovies, items: streamingMovies)
+        }
+
+        // 6. Upcoming
+        if !upcomingMovies.isEmpty {
+            renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
+        }
+
+        // 7. Top Rated Movies
+        if !topRatedMovies.isEmpty {
+            renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
+        }
+
+        // 8. Quick Watches (< 95 mins)
+        if !quickWatches.isEmpty {
+            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+        }
+    }
+
+    @ViewBuilder private var kidsMoviesRails: some View {
+        if !popularMovies.isEmpty {
+            renderRail(title: "Kids & Family Movies", listType: .fixed(title: "Kids & Family Movies", items: popularMovies), items: popularMovies)
+        } else if isLoading {
+            GhostRail().transition(.opacity)
+        }
+
+        if !topRatedMovies.isEmpty {
+            renderRail(title: "Animated Adventures", listType: .fixed(title: "Animated Adventures", items: topRatedMovies), items: topRatedMovies)
+        }
+
+        if !streamingMovies.isEmpty {
+            renderRail(title: "Family Favorites", listType: .fixed(title: "Family Favorites", items: streamingMovies), items: streamingMovies)
+        }
+
+        if !quickWatches.isEmpty {
+            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+        }
+    }
+
     @ViewBuilder
     private func renderRail(title: String, listType: MediaListView.ListType, items: [MediaItem]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -131,6 +160,10 @@ struct MoviesView: View {
     }
     
     private func loadData() async {
+        if profileManager.currentProfile?.isKids == true {
+            await loadKidsMoviesData()
+            return
+        }
         await withTaskGroup(of: Void.self) { group in
             // 1. Trending Today, Trending Week & Curated Hero Billboard
             group.addTask {
@@ -207,6 +240,54 @@ struct MoviesView: View {
                     let (recs, _) = await TasteProfileManager.shared.forYouRecommendations()
                     let movieRecs = recs.filter { $0.category.lowercased().contains("movie") }
                     await MainActor.run { self.forYouMovies = movieRecs }
+                }
+            }
+        }
+
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
+            }
+        }
+    }
+
+    private func loadKidsMoviesData() async {
+        await MainActor.run {
+            self.popularMovies = []
+            self.heroMovies = []
+            self.topRatedMovies = []
+            self.streamingMovies = []
+            self.quickWatches = []
+            self.isLoading = true
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchKidsMovies(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run {
+                        self.popularMovies = safe
+                        self.heroMovies = Array(safe.prefix(7))
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
+                }
+            }
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchAnimatedAdventures(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.topRatedMovies = safe }
+                }
+            }
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchFamilyMovies(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.streamingMovies = safe }
+                }
+            }
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchQuickWatchMovies(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.quickWatches = safe }
                 }
             }
         }

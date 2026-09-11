@@ -54,16 +54,33 @@ final class SearchViewModel: ObservableObject {
             let local = await engine.updateQuery(newQuery) { [weak self] remote in
                 Task { @MainActor in
                     guard let self = self, self.query == newQuery else { return }
+                    let items = remote.map { $0.toMediaItem() }
+                    let finalResults: [MediaItem]
+                    if ProfileManager.shared.currentProfile?.isKids == true {
+                        finalResults = await KidsContentFilter.shared.filterSafeItems(items)
+                    } else {
+                        finalResults = items
+                    }
                     withAnimation(.easeOut(duration: 0.2)) {
-                        self.searchResults = remote.map { $0.toMediaItem() }
+                        self.searchResults = finalResults
                         self.isLoading = false
                     }
                 }
             }
 
             guard self.query == newQuery else { return }
+            let filteredSuggestions: [PrefixTrie.TrieEntry]
+            if ProfileManager.shared.currentProfile?.isKids == true {
+                filteredSuggestions = local.filter { entry in
+                    let lower = entry.title.lowercased()
+                    let blocked = ["horror", "murder", "xxx", "porn", "slasher", "erotic", "killing"]
+                    return !blocked.contains(where: { lower.contains($0) })
+                }
+            } else {
+                filteredSuggestions = local
+            }
             withAnimation(.easeOut(duration: 0.15)) {
-                self.instantSuggestions = local
+                self.instantSuggestions = filteredSuggestions
             }
         }
     }

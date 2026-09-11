@@ -8,6 +8,9 @@ struct ProfileGateView: View {
     @State private var isManaging = false
     @State private var editingProfile: UserProfile? = nil
     @State private var deletingProfile: UserProfile? = nil
+    @State private var pendingProfileToEnter: UserProfile? = nil
+    @State private var showingEnterPinSheet = false
+    @State private var showingKidsFirstTimeSetupSheet = false
 
     var body: some View {
         ZStack {
@@ -19,8 +22,10 @@ struct ProfileGateView: View {
                 if let editing = editingProfile {
                     ProfileCreationView(
                         title: "Edit Profile",
+                        profileId: editing.id,
                         initialName: editing.name,
                         initialAvatarID: editing.avatarID,
+                        isKids: editing.isKids,
                         onCreate: { _, _ in },
                         onUpdate: { name, avatar in
                             profileManager.updateProfile(editing, name: name, avatarID: avatar)
@@ -40,6 +45,36 @@ struct ProfileGateView: View {
                 }
             } else {
                 selectionView
+            }
+        }
+        .sheet(isPresented: $showingKidsFirstTimeSetupSheet) {
+            if let kidsProfile = pendingProfileToEnter {
+                PINEntrySheet(mode: .setup(
+                    title: "Protect Kids Profile",
+                    subtitle: "Create a 4-digit PIN required to exit Kids mode",
+                    profileId: kidsProfile.id,
+                    onSuccess: { _ in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            profileManager.selectProfile(kidsProfile)
+                        }
+                        pendingProfileToEnter = nil
+                    }
+                ))
+            }
+        }
+        .sheet(isPresented: $showingEnterPinSheet) {
+            if let profile = pendingProfileToEnter {
+                PINEntrySheet(mode: .verify(
+                    title: profile.name,
+                    subtitle: "Enter 4-digit PIN to access \(profile.name)",
+                    profileId: profile.id,
+                    onSuccess: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            profileManager.selectProfile(profile)
+                        }
+                        pendingProfileToEnter = nil
+                    }
+                ))
             }
         }
         .alert("Delete \"\(deletingProfile?.name ?? "")\"?", isPresented: Binding(
@@ -77,8 +112,22 @@ struct ProfileGateView: View {
                         profile: profile,
                         isManaging: isManaging,
                         onSelect: {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                profileManager.selectProfile(profile)
+                            if profile.isKids {
+                                if !ParentalLockManager.shared.hasPin(for: profile.id) && !ParentalLockManager.shared.hasPin() {
+                                    pendingProfileToEnter = profile
+                                    showingKidsFirstTimeSetupSheet = true
+                                } else {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        profileManager.selectProfile(profile)
+                                    }
+                                }
+                            } else if profileManager.requiresPinToEnter(profile: profile) {
+                                pendingProfileToEnter = profile
+                                showingEnterPinSheet = true
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    profileManager.selectProfile(profile)
+                                }
                             }
                         },
                         onEdit: { editingProfile = profile },
@@ -146,15 +195,36 @@ struct ManageableProfileTile: View {
                         }
                     }
                     .overlay(alignment: .topTrailing) {
-                        if isManaging {
+                        if isManaging && !profile.isStock && !profile.isKids {
                             manageButton("xmark") { onDelete() }
                                 .offset(x: 8, y: -8)
                         }
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        if ParentalLockManager.shared.hasPin(for: profile.id) && !isManaging {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(6)
+                                .background(Circle().fill(Color.black.opacity(0.75)))
+                                .offset(x: 4, y: 4)
+                        }
+                    }
 
-                Text(profile.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(isHovering && !isManaging ? .white : .white.opacity(0.6))
+                HStack(spacing: 6) {
+                    Text(profile.name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(isHovering && !isManaging ? .white : .white.opacity(0.6))
+
+                    if profile.isKids {
+                        Text("KIDS")
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.yellow))
+                    }
+                }
             }
         }
         .buttonStyle(.plain)
@@ -219,17 +289,25 @@ struct AvatarBadge: View {
     var isActive: Bool = false
 
     var body: some View {
-        AvatarFaceView(style: AvatarStyle.style(for: avatarID))
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
-                    .stroke(
-                        isActive ? Color.white : Color.white.opacity(0.15),
-                        lineWidth: isActive ? 3 : 1
-                    )
-            )
-            .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+        Group {
+            if avatarID.hasPrefix("avatar-cat-") || avatarID.hasPrefix("avatar-pet-") || NSImage(named: avatarID) != nil {
+                Image(avatarID)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                AvatarFaceView(style: AvatarStyle.style(for: avatarID))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
+                .stroke(
+                    isActive ? Color.white : Color.white.opacity(0.15),
+                    lineWidth: isActive ? 3 : 1
+                )
+        )
+        .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
     }
 }
 
@@ -237,15 +315,20 @@ struct AvatarBadge: View {
 
 struct ProfileCreationView: View {
     let title: String
+    var profileId: UUID? = nil
     var initialName: String? = nil
     var initialAvatarID: String? = nil
+    var isKids: Bool = false
     let onCreate: (String, String) -> Void
     var onUpdate: ((String, String) -> Void)? = nil
     var onCancel: (() -> Void)? = nil
 
     @State private var name = ""
-    @State private var selectedAvatar = AvatarStyle.all[0].id
+    @State private var selectedAvatar = AvatarItem.all[0].id
+    @State private var selectedCategory: AvatarItem.Category = .characters
     @State private var isHoveringCreate = false
+    @State private var showingSetPin = false
+    @ObservedObject private var lockManager = ParentalLockManager.shared
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -253,14 +336,14 @@ struct ProfileCreationView: View {
             Spacer()
 
             // Glass panel
-            VStack(spacing: 28) {
+            VStack(spacing: 22) {
                 Text(title)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
 
                 // Name field — glass capsule, matches the app's search bar
                 HStack(spacing: 10) {
-                    Image(systemName: "pencil")
+                    Image(systemName: isKids ? "lock.fill" : "pencil")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.55))
 
@@ -269,8 +352,9 @@ struct ProfileCreationView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white)
                         .focused($isNameFocused)
+                        .disabled(isKids)
 
-                    if !name.isEmpty {
+                    if !name.isEmpty && !isKids {
                         Button {
                             name = ""
                         } label: {
@@ -282,18 +366,47 @@ struct ProfileCreationView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .frame(width: 360, height: 46)
+                .frame(width: 380, height: 46)
                 .glassEffect(.regular.interactive(), in: .capsule)
 
-                // Pet avatar picker
+                if isKids {
+                    Text("Stock Kids profile cannot be renamed")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .offset(y: -10)
+                }
+
+                // Category selector: Cats vs Faces
+                HStack(spacing: 8) {
+                    ForEach(AvatarItem.Category.allCases, id: \.self) { cat in
+                        Button {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                                selectedCategory = cat
+                            }
+                        } label: {
+                            Text(cat.rawValue)
+                                .font(.system(size: 12, weight: selectedCategory == cat ? .bold : .medium))
+                                .foregroundStyle(selectedCategory == cat ? .white : .white.opacity(0.6))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule().fill(selectedCategory == cat ? Color.white.opacity(0.18) : Color.white.opacity(0.04))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // Avatar picker
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        ForEach(AvatarStyle.all) { style in
+                    HStack(spacing: 14) {
+                        let items = AvatarItem.all.filter { $0.category == selectedCategory }
+                        ForEach(items) { item in
                             Button {
-                                selectedAvatar = style.id
+                                selectedAvatar = item.id
                             } label: {
-                                AvatarBadge(avatarID: style.id, size: 72, isActive: selectedAvatar == style.id)
-                                    .scaleEffect(selectedAvatar == style.id ? 1.08 : 1.0)
+                                AvatarBadge(avatarID: item.id, size: 70, isActive: selectedAvatar == item.id)
+                                    .scaleEffect(selectedAvatar == item.id ? 1.08 : 1.0)
                                     .animation(.spring(response: 0.25, dampingFraction: 0.7), value: selectedAvatar)
                             }
                             .buttonStyle(.plain)
@@ -303,9 +416,49 @@ struct ProfileCreationView: View {
                         }
                     }
                     .padding(.horizontal, 24)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 6)
                 }
-                .frame(width: 460)
+                .frame(width: 480)
+
+                // PIN Protection Row (when editing profile)
+                if let pid = profileId {
+                    HStack(spacing: 12) {
+                        Image(systemName: lockManager.hasPin(for: pid) ? "lock.fill" : "lock.open")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(lockManager.hasPin(for: pid) ? Color.yellow : Color.white.opacity(0.6))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(isKids ? "Exit PIN Protection" : "Profile Lock (PIN)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Text(lockManager.hasPin(for: pid) ? "4-digit PIN is active" : (isKids ? "Kids can exit freely without PIN" : "Anyone can enter without PIN"))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+
+                        Spacer()
+
+                        if lockManager.hasPin(for: pid) {
+                            Button("Change PIN") { showingSetPin = true }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            Button("Remove") { lockManager.removePin(for: pid) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        } else {
+                            Button(isKids ? "Set Exit PIN" : "Set PIN") { showingSetPin = true }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                    )
+                    .frame(width: 440)
+                }
 
                 // Create / Save — white capsule, matches the Play button
                 Button {
@@ -316,10 +469,10 @@ struct ProfileCreationView: View {
                     }
                 } label: {
                     Text(onUpdate != nil ? "Save Changes" : "Create Profile")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(canCreate ? .black : .white.opacity(0.4))
                         .padding(.horizontal, 48)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 12)
                         .background(
                             Capsule().fill(canCreate ? Color.white : Color.white.opacity(0.12))
                         )
@@ -337,16 +490,30 @@ struct ProfileCreationView: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .padding(.horizontal, 48)
-            .padding(.vertical, 40)
+            .padding(.horizontal, 44)
+            .padding(.vertical, 36)
             .glassEffect(.regular, in: .rect(cornerRadius: 32))
 
             Spacer()
         }
+        .sheet(isPresented: $showingSetPin) {
+            if let pid = profileId {
+                PINEntrySheet(mode: .setup(
+                    title: isKids ? "Exit PIN Protection" : "Set Profile PIN",
+                    subtitle: isKids ? "Enter 4-digit PIN required to exit Kids profile" : "Enter 4-digit PIN to lock \(name.isEmpty ? "profile" : name)",
+                    profileId: pid
+                ))
+            }
+        }
         .onAppear {
             if let initialName { name = initialName }
-            if let initialAvatarID { selectedAvatar = initialAvatarID }
-            isNameFocused = true
+            if let initialAvatarID {
+                selectedAvatar = initialAvatarID
+                if let item = AvatarItem.all.first(where: { $0.id == initialAvatarID }) {
+                    selectedCategory = item.category
+                }
+            }
+            if !isKids { isNameFocused = true }
         }
     }
 

@@ -16,6 +16,7 @@ struct CatalogSection: Identifiable, Equatable {
 struct HomeView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
+    @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.openWindow) private var openWindow
     
     // Core discovery rails
@@ -86,122 +87,11 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
 
-                // 1. Combined Trending Rail with Liquid Glass Toggle
-                let activeTrending = trendingWindow == "day" ? trendingTodayItems : trendingWeekItems
-                if !activeTrending.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        TrendingToggleSectionHeader(
-                            title: "Trending",
-                            window: $trendingWindow,
-                            value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
-                        )
-                        .padding(.leading, 268)
-                        .padding(.trailing, 40)
-
-                        CarouselView(items: activeTrending) { item in
-                            NavigationLink(value: item) {
-                                GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                    .frame(width: 180)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .id("trending-home-\(trendingWindow)")
-                    }
-                    .padding(.bottom, 16)
-                    .transition(.opacity)
-                } else if isLoading {
-                    GhostRail()
-                        .transition(.opacity)
+                if profileManager.currentProfile?.isKids == true {
+                    kidsRails
+                } else {
+                    adultRails
                 }
-
-                // 2. Popular Movies
-                if !popularMovies.isEmpty {
-                    renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
-                } else if isLoading {
-                    GhostRail()
-                        .transition(.opacity)
-                }
-
-                // 4. Popular TV Shows
-                if !popularTV.isEmpty {
-                    renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
-                } else if isLoading {
-                    GhostRail()
-                        .transition(.opacity)
-                }
-
-                    // 5. Now Playing
-                    if !nowPlayingMovies.isEmpty {
-                        renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
-                    }
-
-                    // 6. Airing Today
-                    if !airingTodayTV.isEmpty {
-                        renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayTV)
-                    }
-
-                    // Explore OTT Platforms
-                    exploreOTTRow
-
-                    // 7. On TV
-                    if !onTheAirTV.isEmpty {
-                        renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirTV)
-                    }
-
-                    // 8. Top Rated Movies
-                    if !topRatedMovies.isEmpty {
-                        renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
-                    }
-
-                    // 9. Top Rated TV Shows
-                    if !topRatedTV.isEmpty {
-                        renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedTV)
-                    }
-
-                    // 10. Upcoming Movies
-                    if !upcomingMovies.isEmpty {
-                        renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
-                    }
-
-                    // 11. Quick Watches (< 95 mins)
-                    if !quickWatches.isEmpty {
-                        renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
-                    }
-
-                    // Addon Sections
-                    addonRows
-
-                    // For You / Taste Recommendations (placed at the bottom, just above Watchlist)
-                    if !forYouItems.isEmpty {
-                        let forYouTitle: String = {
-                            if let title = becauseTitle {
-                                return becauseWasLoved ? "Because you liked \(title)" : "Because you watched \(title)"
-                            }
-                            return "For You"
-                        }()
-                        
-                        VStack(alignment: .leading, spacing: 16) {
-                            ListSectionHeader(
-                                title: forYouTitle,
-                                value: MediaListView.ListType.fixed(title: forYouTitle, items: forYouItems)
-                            )
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
-
-                            CarouselView(items: forYouItems) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-
-                    watchlistRow
-                    genreRow
-                    historyRow
             }
             .padding(.bottom, 80)
         }
@@ -307,14 +197,194 @@ struct HomeView: View {
         }
     }
     
+    @ViewBuilder private var adultRails: some View {
+        // 1. Combined Trending Rail with Liquid Glass Toggle
+        let activeTrending = trendingWindow == "day" ? trendingTodayItems : trendingWeekItems
+        if !activeTrending.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                TrendingToggleSectionHeader(
+                    title: "Trending",
+                    window: $trendingWindow,
+                    value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
+                )
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+
+                CarouselView(items: activeTrending) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .id("trending-home-\(trendingWindow)")
+            }
+            .padding(.bottom, 16)
+            .transition(.opacity)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 2. Popular Movies
+        if !popularMovies.isEmpty {
+            renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 4. Popular TV Shows
+        if !popularTV.isEmpty {
+            renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 5. Now Playing
+        if !nowPlayingMovies.isEmpty {
+            renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
+        }
+
+        // 6. Airing Today
+        if !airingTodayTV.isEmpty {
+            renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayTV)
+        }
+
+        // Explore OTT Platforms
+        exploreOTTRow
+
+        // 7. On TV
+        if !onTheAirTV.isEmpty {
+            renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirTV)
+        }
+
+        // 8. Top Rated Movies
+        if !topRatedMovies.isEmpty {
+            renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
+        }
+
+        // 9. Top Rated TV Shows
+        if !topRatedTV.isEmpty {
+            renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedTV)
+        }
+
+        // 10. Upcoming Movies
+        if !upcomingMovies.isEmpty {
+            renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
+        }
+
+        // 11. Quick Watches (< 95 mins)
+        if !quickWatches.isEmpty {
+            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+        }
+
+        // Addon Sections
+        addonRows
+
+        // For You / Taste Recommendations (placed at the bottom, just above Watchlist)
+        if !forYouItems.isEmpty {
+            let forYouTitle: String = {
+                if let title = becauseTitle {
+                    return becauseWasLoved ? "Because you liked \(title)" : "Because you watched \(title)"
+                }
+                return "For You"
+            }()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                ListSectionHeader(
+                    title: forYouTitle,
+                    value: MediaListView.ListType.fixed(title: forYouTitle, items: forYouItems)
+                )
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+
+                CarouselView(items: forYouItems) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 16)
+        }
+
+        watchlistRow
+        genreRow
+        historyRow
+    }
+
+    @ViewBuilder private var kidsRails: some View {
+        // 1. Trending for Kids
+        if !trendingTodayItems.isEmpty {
+            renderRail(title: "Trending for Kids", listType: .fixed(title: "Trending for Kids", items: trendingTodayItems), items: trendingTodayItems)
+        } else if isLoading {
+            GhostRail().transition(.opacity)
+        }
+
+        // 2. Animated Adventures
+        if !popularMovies.isEmpty {
+            renderRail(title: "Animated Adventures", listType: .fixed(title: "Animated Adventures", items: popularMovies), items: popularMovies)
+        } else if isLoading {
+            GhostRail().transition(.opacity)
+        }
+
+        // 3. Kids TV Shows
+        if !popularTV.isEmpty {
+            renderRail(title: "Kids Shows", listType: .fixed(title: "Kids Shows", items: popularTV), items: popularTV)
+        } else if isLoading {
+            GhostRail().transition(.opacity)
+        }
+
+        // 4. Family Movie Night
+        if !topRatedMovies.isEmpty {
+            renderRail(title: "Family Movie Night", listType: .fixed(title: "Family Movie Night", items: topRatedMovies), items: topRatedMovies)
+        }
+
+        // 5. Quick Watches
+        if !quickWatches.isEmpty {
+            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+        }
+
+        addonRows
+
+        watchlistRow
+        genreRow
+        historyRow
+    }
+
+    private var displayGenres: [Genre] {
+        if profileManager.currentProfile?.isKids == true {
+            return genres.filter { KidsContentFilter.shared.isGenreSafeForKids($0.name) }
+        }
+        return genres
+    }
+
+    private var displayWatchlist: [MediaItem] {
+        if profileManager.currentProfile?.isKids == true {
+            return userData.watchlist.filter { !KidsContentFilter.shared.isRestricted(item: $0) }
+        }
+        return userData.watchlist
+    }
+
+    private var displayHistory: [MediaItem] {
+        if profileManager.currentProfile?.isKids == true {
+            return userData.recentlyWatched.filter { !KidsContentFilter.shared.isRestricted(item: $0) }
+        }
+        return userData.recentlyWatched
+    }
+
     @ViewBuilder private var watchlistRow: some View {
-        if !userData.watchlist.isEmpty {
+        let items = displayWatchlist
+        if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 ListSectionHeader(title: "Watchlist", value: WatchlistNavigation())
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
-                CarouselView(items: userData.watchlist) { item in
+                CarouselView(items: items) { item in
                     NavigationLink(value: item) {
                         GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
                             .frame(width: 180)
@@ -328,13 +398,13 @@ struct HomeView: View {
     
     @ViewBuilder private var genreRow: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Browse by Genre")
+            Text(profileManager.currentProfile?.isKids == true ? "Browse for Kids" : "Browse by Genre")
                 .font(.title2)
                 .fontWeight(.bold)
                 .padding(.leading, 268)
                 .padding(.trailing, 40)
             
-            CarouselView(items: genres, spacing: 16, itemWidth: 160) { genre in
+            CarouselView(items: displayGenres, spacing: 16, itemWidth: 160) { genre in
                 NavigationLink(value: GenreNavigation(name: genre.name, id: genre.id)) {
                     GenreCard(genre: genre)
                         .frame(width: 160)
@@ -346,20 +416,21 @@ struct HomeView: View {
     }
     
     @ViewBuilder private var historyRow: some View {
-        if !userData.history.isEmpty {
+        let items = displayHistory
+        if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 ListSectionHeader(title: "Recently Watched", value: HistoryNavigation(showAsContinueWatching: false))
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
-                CarouselView(items: userData.history, spacing: 16, itemWidth: 290) { item in
+                CarouselView(items: items, spacing: 16, itemWidth: 290) { item in
                     Button(action: {
                         PlayerManager.shared.play(
                             item,
                             season: item.lastSeason,
                             episode: item.lastEpisode,
                             episodeImage: item.lastEpisodeImage,
-                            fromContinueWatching: true
+                            fromContinueWatching: false
                         )
                         openWindow(id: "player", value: item.id)
                     }) {
@@ -369,12 +440,17 @@ struct HomeView: View {
                     .focusEffectDisabled()
                 }
             }
+            .padding(.bottom, 16)
         }
     }
 }
 
 extension HomeView {
     private func loadData() async {
+        if profileManager.currentProfile?.isKids == true {
+            await loadKidsData()
+            return
+        }
         // Parallel non-blocking streaming load for all discovery rails
         await withTaskGroup(of: Void.self) { group in
             // 1. Trending Today, Trending This Week & Curated Hero Billboard
@@ -549,24 +625,93 @@ extension HomeView {
     }
     
     private var continueWatchingItems: [MediaItem] {
-        var seen = Set<String>()
-        var result: [MediaItem] = []
-        for item in userData.history {
-            let strippedID = item.id.replacingOccurrences(of: "tt", with: "")
-            let titleKey = "\(item.category.lowercased()):\(item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
-            let idKey = "id:\(item.id)"
-            let numKey = strippedID.isEmpty ? idKey : "num:\(strippedID)"
-            
-            if !seen.contains(idKey) && !seen.contains(numKey) && !seen.contains(titleKey) {
-                result.append(item)
-                seen.insert(idKey)
-                seen.insert(numKey)
-                if !item.title.isEmpty && item.title != "Unknown" {
-                    seen.insert(titleKey)
+        if profileManager.currentProfile?.isKids == true {
+            return userData.continueWatching.filter { !KidsContentFilter.shared.isRestricted(item: $0) }
+        }
+        return userData.continueWatching
+    }
+
+    private func loadKidsData() async {
+        await MainActor.run {
+            self.trendingTodayItems = []
+            self.trendingWeekItems = []
+            self.heroContent = []
+            self.popularMovies = []
+            self.popularTV = []
+            self.topRatedMovies = []
+            self.quickWatches = []
+            self.addonSections = []
+            self.isLoading = true
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            // 1. Trending for Kids & Hero Billboard
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchKidsTrending(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    let heroCandidates = safe.filter { ($0.backdropURL != nil || $0.heroURL != nil) && $0.isReleased }
+                    let finalHero = Array((heroCandidates.isEmpty ? safe : heroCandidates).prefix(7))
+                    await MainActor.run {
+                        self.trendingTodayItems = safe
+                        self.trendingWeekItems = safe
+                        self.heroContent = finalHero
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
                 }
             }
+
+            // 2. Animated Adventures
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchAnimatedAdventures(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.popularMovies = safe }
+                }
+            }
+
+            // 3. Kids Shows
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchKidsTV(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.popularTV = safe }
+                }
+            }
+
+            // 4. Family Movie Night
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchFamilyMovies(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.topRatedMovies = safe }
+                }
+            }
+
+            // 5. Quick Watches (filtered for kids)
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchQuickWatchMovies(), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.quickWatches = safe }
+                }
+            }
+
+            // 6. Addon Sections (filtered for kids)
+            group.addTask {
+                await self.fetchAddonSections()
+                let currentSections = await MainActor.run { self.addonSections }
+                var safeSections: [CatalogSection] = []
+                for section in currentSections {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(section.items)
+                    if !safe.isEmpty {
+                        safeSections.append(CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: safe))
+                    }
+                }
+                await MainActor.run { self.addonSections = safeSections }
+            }
         }
-        return result
+
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
+            }
+        }
     }
 }
 

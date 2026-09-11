@@ -89,6 +89,9 @@ struct GlassCard: View {
                 hasNewEpisode = await TMDBEnricher.shared.hasAiredNewEpisode(tmdbID: displayItem.id)
             }
         }
+        .onChange(of: item) { _, newItem in
+            self.displayItem = newItem
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(displayItem.title), \(displayItem.category)\(displayItem.releaseDateYear.map { ", \($0)" } ?? "")")
         .accessibilityHint("Opens title details")

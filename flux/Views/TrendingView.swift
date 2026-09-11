@@ -82,6 +82,32 @@ struct TrendingView: View {
     }
     
     private func loadTrendingData() async {
+        if ProfileManager.shared.currentProfile?.isKids == true {
+            await MainActor.run {
+                self.movies = []
+                self.tvShows = []
+                self.isLoading = true
+            }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    if let items = try? await TMDBEnricher.shared.fetchKidsMovies() {
+                        let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                        await MainActor.run { self.movies = safe }
+                    }
+                }
+                group.addTask {
+                    if let items = try? await TMDBEnricher.shared.fetchKidsTV() {
+                        let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                        await MainActor.run { self.tvShows = safe }
+                    }
+                }
+            }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+            }
+            return
+        }
+
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 if let items = try? await TMDBEnricher.shared.fetchTrendingMovies(window: "day") {

@@ -156,9 +156,8 @@ class TMDBEnricher {
             }
             if let images = json["images"] as? [String: Any],
                let logos = images["logos"] as? [[String: Any]], !logos.isEmpty {
-                let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
-                if let path = enLogo?["file_path"] as? String {
-                    enriched.logoURL = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+                if let logo = Self.selectBestLogoURL(from: logos) {
+                    enriched.logoURL = logo
                 }
             }
             if let popularity = json["popularity"] as? Double {
@@ -440,19 +439,65 @@ class TMDBEnricher {
 
     // MARK: - Specific Asset Fetching
     func fetchEpisodeStill(tmdbID: String, season: Int, episode: Int) async -> URL? {
-        let (still, _) = await fetchEpisodeInfo(tmdbID: tmdbID, season: season, episode: episode)
-        return still
+        let info = await fetchEpisodeInfo(tmdbID: tmdbID, season: season, episode: episode)
+        return info.stillURL
     }
 
-    func fetchEpisodeInfo(tmdbID: String, season: Int, episode: Int) async -> (stillURL: URL?, runtime: String?) {
+    func fetchEpisodeInfo(tmdbID: String, season: Int, episode: Int) async -> (stillURL: URL?, runtime: String?, title: String?) {
         let urlString = "\(baseURL)/tv/\(tmdbID)/season/\(season)/episode/\(episode)?api_key=\(apiKey)"
         guard let url = URL(string: urlString), 
               let (data, _) = try? await URLSession.shared.data(from: url),
-              let response = try? JSONDecoder().decode(TMDBEpisodeDetail.self, from: data) else { return (nil, nil) }
+              let response = try? JSONDecoder().decode(TMDBEpisodeDetail.self, from: data) else { return (nil, nil, nil) }
         
         let still = adaptiveURL(path: response.still_path, quality: .backdrop)
         let rt = response.runtime.map { "\($0)m" }
-        return (still, rt)
+        let title = response.name.isEmpty ? nil : response.name
+        return (still, rt, title)
+    }
+
+    /// Selects the best transparent PNG logo from TMDB's `logos` array.
+    /// Filters out unsupported formats (e.g. .svg), prioritizes English / language-neutral,
+    /// and ranks by community score (vote_average * log2(vote_count + 1)) and resolution.
+    static func selectBestLogoURL(from logos: [[String: Any]]) -> URL? {
+        // Filter strictly for PNG files (ImageIO cannot decode SVGs)
+        let pngLogos = logos.filter { logo in
+            guard let path = logo["file_path"] as? String else { return false }
+            let lower = path.lowercased()
+            return lower.hasSuffix(".png") && !lower.hasSuffix(".svg")
+        }
+        guard !pngLogos.isEmpty else { return nil }
+
+        func score(for dict: [String: Any]) -> Double {
+            let lang = dict["iso_639_1"] as? String
+            let langScore: Double
+            if lang == "en" {
+                langScore = 100.0
+            } else if lang == nil || lang?.isEmpty == true || lang == "null" {
+                langScore = 50.0
+            } else {
+                langScore = 0.0
+            }
+
+            let voteAvg = dict["vote_average"] as? Double ?? 0.0
+            let voteCount: Double
+            if let c = dict["vote_count"] as? Double {
+                voteCount = c
+            } else if let c = dict["vote_count"] as? Int {
+                voteCount = Double(c)
+            } else {
+                voteCount = 0.0
+            }
+            let communityScore = voteAvg * log2(max(1.0, voteCount + 1.0))
+
+            let width = Double(dict["width"] as? Int ?? 0)
+            let resScore = min(width / 500.0, 10.0)
+
+            return langScore + (communityScore * 5.0) + resScore
+        }
+
+        let sorted = pngLogos.sorted { score(for: $0) > score(for: $1) }
+        guard let best = sorted.first, let path = best["file_path"] as? String else { return nil }
+        return URL(string: "https://image.tmdb.org/t/p/original\(path)")
     }
 
     func fetchLogoURL(tmdbID: String, type: String) async -> URL? {
@@ -464,9 +509,7 @@ class TMDBEnricher {
               let logos = json["logos"] as? [[String: Any]], !logos.isEmpty else {
             return nil
         }
-        let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
-        guard let path = enLogo?["file_path"] as? String else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+        return Self.selectBestLogoURL(from: logos)
     }
 
     func fetchMovieRuntime(tmdbID: String) async -> String? {
@@ -574,9 +617,7 @@ class TMDBEnricher {
                           let logos = json["logos"] as? [[String: Any]], !logos.isEmpty else {
                         return (i, nil)
                     }
-                    let enLogo = logos.first(where: { ($0["iso_639_1"] as? String) == "en" }) ?? logos.first
-                    guard let path = enLogo?["file_path"] as? String else { return (i, nil) }
-                    return (i, URL(string: "https://image.tmdb.org/t/p/w500\(path)"))
+                    return (i, Self.selectBestLogoURL(from: logos))
                 }
                 active += 1
                 if active >= 5 {
@@ -884,6 +925,149 @@ class TMDBEnricher {
             let items = filtered.map { $0.toMediaItem() }
             return allowUnreleased ? items : items.filter { $0.isReleased }
         }
+    }
+
+    // MARK: - Kids Profile Discovery Rails
+
+    func fetchKidsTrending() async throws -> [MediaItem] {
+        let cacheKey = "kids:trending"
+        if let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+
+        var results: [MediaItem] = []
+        if hasKeyForHome {
+            async let moviesTask = try? fetchKidsMovies(page: 1)
+            async let tvTask = try? fetchKidsTV(page: 1)
+            let (movies, series) = await (moviesTask ?? [], tvTask ?? [])
+
+            var interleaved: [MediaItem] = []
+            let maxCount = max(movies.count, series.count)
+            for i in 0..<maxCount {
+                if i < movies.count { interleaved.append(movies[i]) }
+                if i < series.count { interleaved.append(series[i]) }
+            }
+            results = interleaved
+        }
+
+        // Fallback when TMDB key is missing, TMDB is disabled, or discovery query failed
+        if results.isEmpty {
+            async let fallbackMovies = (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Family", preserveOrder: true)) ?? []
+            async let fallbackSeries = (try? await StremioService.shared.fetchCatalog(type: "series", id: "top", genre: "Animation", preserveOrder: true)) ?? []
+            let (movies, series) = await (fallbackMovies, fallbackSeries)
+            var interleaved: [MediaItem] = []
+            let maxCount = max(movies.count, series.count)
+            for i in 0..<maxCount {
+                if i < movies.count { interleaved.append(movies[i]) }
+                if i < series.count { interleaved.append(series[i]) }
+            }
+            results = interleaved
+        }
+
+        var safe = await KidsContentFilter.shared.filterSafeItems(results)
+        await batchEnrichLogos(&safe)
+        if !safe.isEmpty {
+            await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: safe, ttl: .trendingDay)
+        }
+        return safe
+    }
+
+    func fetchKidsMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "kids:movies:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+
+        var items: [MediaItem] = []
+        if hasKeyForHome {
+            let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_genres=10751|16&without_genres=27,53,80,10752&certification_country=US&certification.lte=PG&sort_by=popularity.desc&include_adult=false&vote_count.gte=20&page=\(page)"
+            if let fetched = try? await fetchCatalog(from: urlString, type: "movie"), !fetched.isEmpty {
+                items = fetched
+            }
+        }
+
+        if items.isEmpty {
+            let skip = (page - 1) * 20
+            items = (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Family", skip: skip, preserveOrder: true)) ?? []
+        }
+
+        var safe = await KidsContentFilter.shared.filterSafeItems(items)
+        if page == 1 { await batchEnrichLogos(&safe) }
+        if page == 1 && !safe.isEmpty {
+            await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: safe, ttl: .popular)
+        }
+        return safe
+    }
+
+    func fetchKidsTV(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "kids:tv:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+
+        var items: [MediaItem] = []
+        if hasKeyForHome {
+            let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&with_genres=10762|16&without_genres=10763,10767,10768,80,9648&sort_by=popularity.desc&include_adult=false&vote_count.gte=10&page=\(page)"
+            if let fetched = try? await fetchCatalog(from: urlString, type: "tv"), !fetched.isEmpty {
+                items = fetched
+            }
+        }
+
+        if items.isEmpty {
+            let skip = (page - 1) * 20
+            items = (try? await StremioService.shared.fetchCatalog(type: "series", id: "top", genre: "Animation", skip: skip, preserveOrder: true)) ?? []
+        }
+
+        var safe = await KidsContentFilter.shared.filterSafeItems(items)
+        if page == 1 { await batchEnrichLogos(&safe) }
+        if page == 1 && !safe.isEmpty {
+            await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: safe, ttl: .popular)
+        }
+        return safe
+    }
+
+    func fetchAnimatedAdventures(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "kids:animated:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+
+        var items: [MediaItem] = []
+        if hasKeyForHome {
+            let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_genres=16&without_genres=27,53,80,10752&certification_country=US&certification.lte=PG&sort_by=vote_average.desc&vote_count.gte=150&include_adult=false&page=\(page)"
+            if let fetched = try? await fetchCatalog(from: urlString, type: "movie"), !fetched.isEmpty {
+                items = fetched
+            }
+        }
+
+        if items.isEmpty {
+            let skip = (page - 1) * 20
+            items = (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Animation", skip: skip, preserveOrder: true)) ?? []
+        }
+
+        var safe = await KidsContentFilter.shared.filterSafeItems(items)
+        if page == 1 { await batchEnrichLogos(&safe) }
+        if page == 1 && !safe.isEmpty {
+            await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: safe, ttl: .topRated)
+        }
+        return safe
+    }
+
+    func fetchFamilyMovies(page: Int = 1) async throws -> [MediaItem] {
+        let cacheKey = "kids:family:\(page)"
+        if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
+
+        var items: [MediaItem] = []
+        if hasKeyForHome {
+            let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_genres=10751&without_genres=27,53,80,10752&certification_country=US&certification.lte=PG&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+            if let fetched = try? await fetchCatalog(from: urlString, type: "movie"), !fetched.isEmpty {
+                items = fetched
+            }
+        }
+
+        if items.isEmpty {
+            let skip = (page - 1) * 20
+            items = (try? await StremioService.shared.fetchCatalog(type: "movie", id: "top", genre: "Family", skip: skip, preserveOrder: true)) ?? []
+        }
+
+        var safe = await KidsContentFilter.shared.filterSafeItems(items)
+        if page == 1 { await batchEnrichLogos(&safe) }
+        if page == 1 && !safe.isEmpty {
+            await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: safe, ttl: .popular)
+        }
+        return safe
     }
 
     /// Translates movie genre ID to its corresponding TV genre ID on TMDB when querying TV shows.

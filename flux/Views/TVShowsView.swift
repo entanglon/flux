@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TVShowsView: View {
+    @ObservedObject private var profileManager = ProfileManager.shared
     @State private var heroShows: [MediaItem] = []
     @State private var forYouShows: [MediaItem] = []
     @State private var trendingTodayShows: [MediaItem] = []
@@ -27,65 +28,10 @@ struct TVShowsView: View {
                         .transition(.opacity)
                 }
 
-                    // For You TV Shows
-                    if !forYouShows.isEmpty {
-                        renderRail(title: "For You", listType: .fixed(title: "For You TV Shows", items: forYouShows), items: forYouShows)
-                    }
-
-                    // 1. Combined Trending TV Shows with Liquid Glass Toggle
-                    let activeTrending = trendingWindow == "day" ? trendingTodayShows : trendingWeekShows
-                    if !activeTrending.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            TrendingToggleSectionHeader(
-                                title: "Trending",
-                                window: $trendingWindow,
-                                value: MediaListView.ListType.trendingTV(window: trendingWindow)
-                            )
-                            .padding(.leading, 268)
-                            .padding(.trailing, 40)
-
-                            CarouselView(items: activeTrending) { item in
-                                NavigationLink(value: item) {
-                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
-                                        .frame(width: 180)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .id("trending-tv-\(trendingWindow)")
-                    }
-                    .padding(.bottom, 16)
-                    .transition(.opacity)
-                } else if isLoading {
-                    GhostRail()
-                        .transition(.opacity)
-                }
-
-                // 2. Popular TV Shows
-                if !popularShows.isEmpty {
-                    renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
-                } else if isLoading {
-                    GhostRail()
-                        .transition(.opacity)
-                }
-
-                // 4. Airing Today
-                if !airingTodayShows.isEmpty {
-                    renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayShows)
-                }
-
-                // 5. On TV
-                if !onTheAirShows.isEmpty {
-                    renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirShows)
-                }
-
-                // 6. Popular on Streaming
-                if !streamingShows.isEmpty {
-                    renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
-                }
-
-                // 7. Top Rated TV Shows
-                if !topRatedShows.isEmpty {
-                    renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
+                if profileManager.currentProfile?.isKids == true {
+                    kidsTVRails
+                } else {
+                    adultTVRails
                 }
             }
             .padding(.bottom, 80)
@@ -106,6 +52,81 @@ struct TVShowsView: View {
         }
     }
     
+    @ViewBuilder private var adultTVRails: some View {
+        // For You TV Shows
+        if !forYouShows.isEmpty {
+            renderRail(title: "For You", listType: .fixed(title: "For You TV Shows", items: forYouShows), items: forYouShows)
+        }
+
+        // 1. Combined Trending TV Shows with Liquid Glass Toggle
+        let activeTrending = trendingWindow == "day" ? trendingTodayShows : trendingWeekShows
+        if !activeTrending.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                TrendingToggleSectionHeader(
+                    title: "Trending",
+                    window: $trendingWindow,
+                    value: MediaListView.ListType.trendingTV(window: trendingWindow)
+                )
+                .padding(.leading, 268)
+                .padding(.trailing, 40)
+
+                CarouselView(items: activeTrending) { item in
+                    NavigationLink(value: item) {
+                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            .frame(width: 180)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .id("trending-tv-\(trendingWindow)")
+            }
+            .padding(.bottom, 16)
+            .transition(.opacity)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 2. Popular TV Shows
+        if !popularShows.isEmpty {
+            renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
+        } else if isLoading {
+            GhostRail()
+                .transition(.opacity)
+        }
+
+        // 4. Airing Today
+        if !airingTodayShows.isEmpty {
+            renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayShows)
+        }
+
+        // 5. On TV
+        if !onTheAirShows.isEmpty {
+            renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirShows)
+        }
+
+        // 6. Popular on Streaming
+        if !streamingShows.isEmpty {
+            renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
+        }
+
+        // 7. Top Rated TV Shows
+        if !topRatedShows.isEmpty {
+            renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
+        }
+    }
+
+    @ViewBuilder private var kidsTVRails: some View {
+        if !popularShows.isEmpty {
+            renderRail(title: "Kids Shows & Cartoons", listType: .fixed(title: "Kids Shows & Cartoons", items: popularShows), items: popularShows)
+        } else if isLoading {
+            GhostRail().transition(.opacity)
+        }
+
+        if !streamingShows.isEmpty {
+            renderRail(title: "Popular Animated Series", listType: .fixed(title: "Popular Animated Series", items: streamingShows), items: streamingShows)
+        }
+    }
+
     @ViewBuilder
     private func renderRail(title: String, listType: MediaListView.ListType, items: [MediaItem]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -125,6 +146,10 @@ struct TVShowsView: View {
     }
     
     private func loadData() async {
+        if profileManager.currentProfile?.isKids == true {
+            await loadKidsTVData()
+            return
+        }
         await withTaskGroup(of: Void.self) { group in
             // 1. Trending Today, Trending Week & Curated Hero Billboard
             group.addTask {
@@ -194,6 +219,40 @@ struct TVShowsView: View {
                     let (recs, _) = await TasteProfileManager.shared.forYouRecommendations()
                     let tvRecs = recs.filter { $0.category.lowercased().contains("tv") || $0.category.lowercased().contains("series") }
                     await MainActor.run { self.forYouShows = tvRecs }
+                }
+            }
+        }
+
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                self.isLoading = false
+            }
+        }
+    }
+
+    private func loadKidsTVData() async {
+        await MainActor.run {
+            self.popularShows = []
+            self.heroShows = []
+            self.streamingShows = []
+            self.isLoading = true
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchKidsTV(page: 1), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run {
+                        self.popularShows = safe
+                        self.heroShows = Array(safe.prefix(7))
+                        withAnimation(.easeOut(duration: 0.3)) { self.isLoading = false }
+                    }
+                }
+            }
+            group.addTask {
+                if let items = try? await TMDBEnricher.shared.fetchKidsTV(page: 2), !items.isEmpty {
+                    let safe = await KidsContentFilter.shared.filterSafeItems(items)
+                    await MainActor.run { self.streamingShows = safe }
                 }
             }
         }

@@ -28,7 +28,9 @@ struct GenreDetailView: View {
                 .padding(.trailing, 40)
                 .padding(.top, 48)
 
-                if isLoading && railsData.isEmpty {
+                if isKidsProfile && !KidsContentFilter.shared.isGenreSafeForKids(genre.name) {
+                    restrictedGenreState
+                } else if isLoading && railsData.isEmpty {
                     loadingRails
                 } else if railsData.isEmpty {
                     emptyState
@@ -61,8 +63,15 @@ struct GenreDetailView: View {
             Color.black
                 .ignoresSafeArea()
         )
-        .task(id: mediaType) {
+        .task {
             await loadRails()
+        }
+        .onChange(of: mediaType) { _, newType in
+            railsData = TMDBEnricher.GenreRailsData()
+            isLoading = true
+            Task {
+                await loadRails(targetType: newType)
+            }
         }
         .refreshable {
             await TMDBCatalogCacheActor.shared.clear()
@@ -74,6 +83,11 @@ struct GenreDetailView: View {
                 await loadRails()
             }
         }
+    }
+
+    // MARK: - Kids Profile Check
+    private var isKidsProfile: Bool {
+        ProfileManager.shared.currentProfile?.isKids == true
     }
 
     // MARK: - Rails Content
@@ -124,7 +138,8 @@ struct GenreDetailView: View {
                     id: genre.id,
                     name: genre.name,
                     category: category,
-                    categoryTitle: title
+                    categoryTitle: title,
+                    mediaType: mediaType
                 )
             )
             .padding(.leading, 268)
@@ -133,6 +148,7 @@ struct GenreDetailView: View {
             CarouselView(items: items) { item in
                 NavigationLink(value: item) {
                     GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                        .id(item.id)
                         .frame(width: 180)
                 }
                 .buttonStyle(.plain)
@@ -183,14 +199,56 @@ struct GenreDetailView: View {
         .padding(.trailing, 40)
     }
 
+    @ViewBuilder
+    private var restrictedGenreState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.yellow)
+            Text("\(genre.name) is restricted in Kids Profile")
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+            Text("Content in this genre is hidden to maintain family-safe viewing.")
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(.leading, 268)
+        .padding(.trailing, 40)
+    }
+
     // MARK: - Data Fetching
 
-    private func loadRails() async {
+    private func loadRails(targetType: String? = nil) async {
+        if isKidsProfile && !KidsContentFilter.shared.isGenreSafeForKids(genre.name) {
+            await MainActor.run {
+                self.isLoading = false
+            }
+            return
+        }
+
+        let typeToFetch = targetType ?? mediaType
         if railsData.isEmpty {
             isLoading = true
         }
-        let fetched = await TMDBEnricher.shared.fetchGenreRails(tmdbGenreID: genre.id, mediaType: mediaType)
+        var fetched = await TMDBEnricher.shared.fetchGenreRails(tmdbGenreID: genre.id, mediaType: typeToFetch)
+
+        if isKidsProfile {
+            let safeTrending = await KidsContentFilter.shared.filterSafeItems(fetched.trending)
+            let safeTopRated = await KidsContentFilter.shared.filterSafeItems(fetched.topRated)
+            let safePopular = await KidsContentFilter.shared.filterSafeItems(fetched.popular)
+            let safeNewReleases = await KidsContentFilter.shared.filterSafeItems(fetched.newReleases)
+            fetched = TMDBEnricher.GenreRailsData(
+                trending: safeTrending,
+                topRated: safeTopRated,
+                popular: safePopular,
+                newReleases: safeNewReleases
+            )
+        }
+
         await MainActor.run {
+            guard typeToFetch == self.mediaType else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
                 self.railsData = fetched
                 self.isLoading = false
