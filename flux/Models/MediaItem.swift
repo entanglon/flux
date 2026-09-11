@@ -192,22 +192,26 @@ struct MediaItem: Identifiable, Hashable, Codable {
         return true
     }
 
+    var localizedCategory: String {
+        category.localized
+    }
+
     var upcomingBadgeText: String {
-        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon" }
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon".localized }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: dateStr) else { return "Coming Soon" }
+        guard let date = formatter.date(from: dateStr) else { return "Coming Soon".localized }
         let cal = Calendar.current
         if cal.isDateInToday(date) {
-            return "Releasing Today"
+            return "Releasing Today".localized
         } else if cal.isDateInTomorrow(date) {
-            return "Coming Tomorrow"
+            return "Coming Tomorrow".localized
         } else {
             let days = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day ?? 0
             if days > 0 && days <= 7 {
                 let dayFormatter = DateFormatter()
                 dayFormatter.dateFormat = "EEEE"
-                return "Coming \(dayFormatter.string(from: date))"
+                return "Coming %@".localizedFormat(dayFormatter.string(from: date))
             } else {
                 let currentYear = cal.component(.year, from: Date())
                 let releaseYear = cal.component(.year, from: date)
@@ -217,26 +221,26 @@ struct MediaItem: Identifiable, Hashable, Codable {
                 } else {
                     displayFormatter.dateFormat = "MMMM d, yyyy"
                 }
-                return "In Theatres \(displayFormatter.string(from: date))"
+                return "In Theatres %@".localizedFormat(displayFormatter.string(from: date))
             }
         }
     }
 
     var cardReleaseDateBadge: String {
-        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon" }
+        guard let dateStr = releaseDate, !dateStr.isEmpty else { return "Coming Soon".localized }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         guard let date = formatter.date(from: dateStr) else {
             if dateStr.count >= 4 {
-                return "Coming \(dateStr.prefix(4))"
+                return "Coming %@".localizedFormat(String(dateStr.prefix(4)))
             }
-            return "Coming Soon"
+            return "Coming Soon".localized
         }
         let cal = Calendar.current
         if cal.isDateInToday(date) {
-            return "Today"
+            return "Today".localized
         } else if cal.isDateInTomorrow(date) {
-            return "Tomorrow"
+            return "Tomorrow".localized
         } else {
             let currentYear = cal.component(.year, from: Date())
             let releaseYear = cal.component(.year, from: date)

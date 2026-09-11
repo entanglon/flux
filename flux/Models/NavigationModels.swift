@@ -14,6 +14,10 @@ extension Notification.Name {
 struct GenreNavigation: Hashable {
     let name: String
     let id: Int
+    
+    var localizedName: String {
+        name.localized
+    }
 }
 
 /// Pushable reference to one user collection (CollectionsView → detail grid).
@@ -48,6 +52,10 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case downloads = "Downloads"
     
     var id: String { rawValue }
+    
+    var localizedTitle: String {
+        rawValue.localized
+    }
     
     var icon: String {
         switch self {

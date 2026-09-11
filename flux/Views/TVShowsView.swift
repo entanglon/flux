@@ -55,7 +55,7 @@ struct TVShowsView: View {
     @ViewBuilder private var adultTVRails: some View {
         // For You TV Shows
         if !forYouShows.isEmpty {
-            renderRail(title: "For You", listType: .fixed(title: "For You TV Shows", items: forYouShows), items: forYouShows)
+            renderRail(title: "For You".localized, listType: .fixed(title: "For You TV Shows".localized, items: forYouShows), items: forYouShows)
         }
 
         // 1. Combined Trending TV Shows with Liquid Glass Toggle
@@ -63,7 +63,7 @@ struct TVShowsView: View {
         if !activeTrending.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 TrendingToggleSectionHeader(
-                    title: "Trending",
+                    title: "Trending".localized,
                     window: $trendingWindow,
                     value: MediaListView.ListType.trendingTV(window: trendingWindow)
                 )
@@ -88,7 +88,7 @@ struct TVShowsView: View {
 
         // 2. Popular TV Shows
         if !popularShows.isEmpty {
-            renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularShows)
+            renderRail(title: "Popular TV Shows".localized, listType: .popularTV, items: popularShows)
         } else if isLoading {
             GhostRail()
                 .transition(.opacity)
@@ -96,34 +96,34 @@ struct TVShowsView: View {
 
         // 4. Airing Today
         if !airingTodayShows.isEmpty {
-            renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayShows)
+            renderRail(title: "Airing Today".localized, listType: .airingTodayTV, items: airingTodayShows)
         }
 
         // 5. On TV
         if !onTheAirShows.isEmpty {
-            renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirShows)
+            renderRail(title: "On TV".localized, listType: .onTheAirTV, items: onTheAirShows)
         }
 
         // 6. Popular on Streaming
         if !streamingShows.isEmpty {
-            renderRail(title: "Popular on Streaming", listType: .streamingTV, items: streamingShows)
+            renderRail(title: "Popular on Streaming".localized, listType: .streamingTV, items: streamingShows)
         }
 
         // 7. Top Rated TV Shows
         if !topRatedShows.isEmpty {
-            renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedShows)
+            renderRail(title: "Top Rated Shows".localized, listType: .topRatedTV, items: topRatedShows)
         }
     }
 
     @ViewBuilder private var kidsTVRails: some View {
         if !popularShows.isEmpty {
-            renderRail(title: "Kids Shows & Cartoons", listType: .fixed(title: "Kids Shows & Cartoons", items: popularShows), items: popularShows)
+            renderRail(title: "Kids Shows & Cartoons".localized, listType: .fixed(title: "Kids Shows & Cartoons".localized, items: popularShows), items: popularShows)
         } else if isLoading {
             GhostRail().transition(.opacity)
         }
 
         if !streamingShows.isEmpty {
-            renderRail(title: "Popular Animated Series", listType: .fixed(title: "Popular Animated Series", items: streamingShows), items: streamingShows)
+            renderRail(title: "Popular Animated Series".localized, listType: .fixed(title: "Popular Animated Series".localized, items: streamingShows), items: streamingShows)
         }
     }
 

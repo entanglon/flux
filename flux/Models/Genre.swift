@@ -6,6 +6,10 @@ struct Genre: Identifiable, Hashable {
     let icon: String?
     let imageURL: String? // Unsplash URL or local image
     
+    var localizedName: String {
+        name.localized
+    }
+    
     static let allGenres: [Genre] = [
         Genre(id: 28, name: "Action", icon: "bolt.fill", imageURL: nil),
         Genre(id: 12, name: "Adventure", icon: "mountain.2.fill", imageURL: nil),

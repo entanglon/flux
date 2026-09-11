@@ -4,6 +4,7 @@ import SwiftUI
 /// No sheets — sign-in and sign-up live on this one screen.
 struct AuthGateView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var isSignUp = false
     @State private var email = ""
     @State private var password = ""
@@ -34,7 +35,7 @@ struct AuthGateView: View {
                         .font(.system(size: 56, weight: .heavy))
                         .foregroundStyle(.white)
 
-                    Text("Your movies, shows, and lists — everywhere.")
+                    Text("Your movies, shows, and lists — everywhere.".localized)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.55))
                         .multilineTextAlignment(.center)
@@ -52,30 +53,30 @@ struct AuthGateView: View {
 
                         VStack(spacing: 24) {
                             // Title
-                            Text(isSignUp ? "Create Account" : "Welcome Back")
+                            Text((isSignUp ? "Create Account" : "Welcome Back").localized)
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
 
                             // Fields
                             VStack(spacing: 14) {
                                 if isSignUp {
-                                    formField(icon: "person", placeholder: "Display name (optional)", text: $displayName)
+                                    formField(icon: "person", placeholder: "Display name (optional)".localized, text: $displayName)
                                         .focused($focusedField, equals: .displayName)
                                 }
 
-                                formField(icon: "envelope", placeholder: "Email", text: $email)
+                                formField(icon: "envelope", placeholder: "Email".localized, text: $email)
                                     .focused($focusedField, equals: .email)
                                     .textContentType(.emailAddress)
                                     .autocorrectionDisabled()
 
-                                formField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                                formField(icon: "lock", placeholder: "Password".localized, text: $password, isSecure: true)
                                     .focused($focusedField, equals: .password)
                                     .textContentType(isSignUp ? .newPassword : .password)
                             }
 
                             // Error
                             if let errorMessage {
-                                Text(errorMessage)
+                                Text(errorMessage.localized)
                                     .font(.system(size: 12))
                                     .foregroundStyle(.red.opacity(0.85))
                                     .multilineTextAlignment(.center)
@@ -89,7 +90,7 @@ struct AuthGateView: View {
                                         ProgressView()
                                             .scaleEffect(0.7)
                                     } else {
-                                        Text(isSignUp ? "Create Account" : "Sign In")
+                                        Text((isSignUp ? "Create Account" : "Sign In").localized)
                                             .font(.system(size: 15, weight: .bold))
                                     }
                                 }
@@ -105,11 +106,11 @@ struct AuthGateView: View {
 
                             // Toggle sign-in / sign-up
                             HStack(spacing: 4) {
-                                Text(isSignUp ? "Already have an account?" : "New here?")
+                                Text((isSignUp ? "Already have an account?" : "New here?").localized)
                                     .font(.system(size: 13))
                                     .foregroundStyle(.white.opacity(0.5))
                                 Button(action: toggleMode) {
-                                    Text(isSignUp ? "Sign In" : "Create Account")
+                                    Text((isSignUp ? "Sign In" : "Create Account").localized)
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(.white.opacity(0.9))
                                 }
@@ -121,7 +122,7 @@ struct AuthGateView: View {
                                 .padding(.horizontal, 20)
 
                             Button(action: { authManager.continueAsGuest() }) {
-                                Text("Continue as Guest")
+                                Text("Continue as Guest".localized)
                                     .font(.system(size: 13))
                                     .foregroundStyle(.white.opacity(0.45))
                                     .frame(maxWidth: .infinity)

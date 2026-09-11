@@ -87,7 +87,7 @@ struct FeaturedCarousel: View {
                                     .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
                                     .shadow(color: .black.opacity(0.5), radius: 4)
                             } else {
-                                Text(item.category.uppercased())
+                                Text(item.localizedCategory.uppercased())
                                     .font(.system(size: 12, weight: .bold))
                                     .tracking(2.0)
                                     .foregroundStyle(.white.opacity(0.75))
@@ -110,7 +110,7 @@ struct FeaturedCarousel: View {
                                     Text("•")
                                     Text(country)
                                 }
-                                if let genres = item.genres?.prefix(2).map({ $0 }) {
+                                if let genres = item.genres?.prefix(2).map({ $0.localized }) {
                                     Text("•")
                                     Text(genres.joined(separator: ", "))
                                 }
@@ -153,7 +153,7 @@ struct FeaturedCarousel: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: userData.isInWatchlist(item) ? "checkmark" : "plus")
                                         .font(.system(size: 14, weight: .bold))
-                                    Text(userData.isInWatchlist(item) ? "In Watchlist" : "Add to Watchlist")
+                                    Text(userData.isInWatchlist(item) ? "In Watchlist".localized : "Add to Watchlist".localized)
                                         .font(.system(size: 14, weight: .bold))
                                 }
                                 .foregroundStyle(.black)
@@ -171,7 +171,7 @@ struct FeaturedCarousel: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "play.fill")
                                         .font(.system(size: 14, weight: .bold))
-                                    Text("Play")
+                                    Text("Play".localized)
                                         .font(.system(size: 14, weight: .bold))
                                 }
                                 .foregroundStyle(.black)
@@ -197,7 +197,7 @@ struct FeaturedCarousel: View {
                             }
                             .buttonStyle(.plain)
                             .contentShape(Circle())
-                            .help(userData.isInWatchlist(item) ? "Remove from Watchlist" : "Add to Watchlist")
+                            .help(userData.isInWatchlist(item) ? "In Watchlist".localized : "Add to Watchlist".localized)
                         }
                     }
                     .padding(.top, 12)

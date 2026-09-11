@@ -41,8 +41,8 @@ struct MediaListView: View {
             case .onTheAirTV: return "On TV".localized
             case .topRatedTV: return "Top Rated TV Shows".localized
             case .streamingTV: return "Popular on Streaming".localized
-            case .genre(_, let name): return name
-            case .genreCategory(_, let name, _, let categoryTitle, _): return "\(name): \(categoryTitle)"
+            case .genre(_, let name): return name.localized
+            case .genreCategory(_, let name, _, let categoryTitle, _): return "\(name.localized): \(categoryTitle.localized)"
             case .ott(_, let name): return name
             case .fixed(let title, _): return title.localized
             }
@@ -79,7 +79,7 @@ struct MediaListView: View {
             VStack(alignment: .leading, spacing: 32) {
                 // Header
                 HStack(spacing: 16) {
-                    Text(title)
+                    Text(title.localized)
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
 
@@ -155,10 +155,10 @@ struct MediaListView: View {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 48))
                         .foregroundStyle(.white.opacity(0.3))
-                    Text("No In-Progress Titles")
+                    Text("No In-Progress Titles".localized)
                         .font(.title3.bold())
                         .foregroundStyle(.white)
-                    Text("Movies and TV shows you start watching will automatically appear here.")
+                    Text("Movies and TV shows you start watching will automatically appear here.".localized)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.6))
                 }

@@ -16,7 +16,7 @@ struct GenreDetailView: View {
             VStack(alignment: .leading, spacing: 32) {
                 // Header: Genre Title + Liquid Glass Movies / TV Shows switcher
                 HStack(spacing: 20) {
-                    Text(genre.name)
+                    Text(genre.localizedName)
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
 
@@ -97,7 +97,7 @@ struct GenreDetailView: View {
         VStack(alignment: .leading, spacing: 28) {
             if !railsData.trending.isEmpty {
                 renderRail(
-                    title: "Trending in \(genre.name)",
+                    title: String.localizedFormat("Trending in %@", genre.localizedName),
                     category: "trending",
                     items: railsData.trending
                 )
@@ -105,7 +105,7 @@ struct GenreDetailView: View {
 
             if !railsData.topRated.isEmpty {
                 renderRail(
-                    title: "Top Rated",
+                    title: "Top Rated".localized,
                     category: "top_rated",
                     items: railsData.topRated
                 )
@@ -113,7 +113,7 @@ struct GenreDetailView: View {
 
             if !railsData.popular.isEmpty {
                 renderRail(
-                    title: "Popular Hits",
+                    title: "Popular Hits".localized,
                     category: "popular",
                     items: railsData.popular
                 )
@@ -121,7 +121,7 @@ struct GenreDetailView: View {
 
             if !railsData.newReleases.isEmpty {
                 renderRail(
-                    title: "New Releases",
+                    title: "New Releases".localized,
                     category: "new_releases",
                     items: railsData.newReleases
                 )
@@ -189,7 +189,7 @@ struct GenreDetailView: View {
             Image(systemName: "film.stack")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
-            Text("No \(mediaType == "tv" ? "TV shows" : "movies") found in \(genre.name)")
+            Text(String.localizedFormat("No %@ found in %@", (mediaType == "tv" ? "TV shows" : "movies").localized.lowercased(), genre.localizedName))
                 .font(.title3)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
@@ -205,11 +205,11 @@ struct GenreDetailView: View {
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.yellow)
-            Text("\(genre.name) is restricted in Kids Profile")
+            Text(String.localizedFormat("%@ is restricted in Kids Profile", genre.localizedName))
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(.white)
-            Text("Content in this genre is hidden to maintain family-safe viewing.")
+            Text("Content in this genre is hidden to maintain family-safe viewing.".localized)
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.6))
         }

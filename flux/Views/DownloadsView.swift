@@ -11,7 +11,7 @@ struct DownloadsView: View {
             if downloadManager.activeDownloads.isEmpty && downloadManager.completedDownloads.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     LibraryPageHeader(
-                        title: "Downloads"
+                        title: "Downloads".localized
                     )
 
                     Spacer()
@@ -29,14 +29,14 @@ struct DownloadsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
                         LibraryPageHeader(
-                            title: "Downloads",
+                            title: "Downloads".localized,
                             itemCount: total > 0 ? total : nil,
                             itemLabel: "ITEMS"
                         )
 
                         if !downloadManager.activeDownloads.isEmpty {
                             VStack(alignment: .leading, spacing: 16) {
-                                Text("Downloading")
+                                Text("Downloading".localized)
                                     .font(.system(size: 20, weight: .bold))
                                     .foregroundStyle(.white)
 
@@ -48,7 +48,7 @@ struct DownloadsView: View {
 
                         if !downloadManager.completedDownloads.isEmpty {
                             VStack(alignment: .leading, spacing: 16) {
-                                Text("Completed")
+                                Text("Completed".localized)
                                     .font(.system(size: 20, weight: .bold))
                                     .foregroundStyle(.white)
 
@@ -75,8 +75,8 @@ struct DownloadsView: View {
     private var emptyState: some View {
         LibraryEmptyState(
             icon: "arrow.down.circle",
-            title: "No Downloads",
-            message: "Download movies and episodes from any title's page to watch them offline."
+            title: "No Downloads".localized,
+            message: "Download movies and episodes from any title's page to watch them offline.".localized
         )
     }
 
@@ -165,7 +165,7 @@ struct DownloadsView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Circle())
-            .help("Play offline copy")
+            .help("Play offline copy".localized)
 
             Button {
                 DownloadManager.shared.removeCompleted(item)

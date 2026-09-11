@@ -75,6 +75,7 @@ struct PINEntrySheet: View {
     let mode: PINMode
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var lockManager = ParentalLockManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @StateObject private var keyCoordinator = PINKeyMonitorCoordinator()
 
     @State private var pin: String = ""
@@ -261,7 +262,7 @@ struct PINEntrySheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "hourglass")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("Locked out. Try again in \(lockManager.remainingLockoutSeconds)s")
+                    Text(String.localizedFormat("Locked out. Try again in %ds", lockManager.remainingLockoutSeconds))
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
@@ -269,7 +270,7 @@ struct PINEntrySheet: View {
                 HStack(spacing: 5) {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
-                    Text(error)
+                    Text(error.localized)
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
@@ -278,7 +279,7 @@ struct PINEntrySheet: View {
                 HStack(spacing: 5) {
                     Image(systemName: "keyboard")
                         .font(.system(size: 11))
-                    Text("Type 4-digit code on keyboard")
+                    Text("Type 4-digit code on keyboard".localized)
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(.white.opacity(0.35))
@@ -348,18 +349,18 @@ struct PINEntrySheet: View {
     private var titleText: String {
         switch mode {
         case .verify(let title, _, _, _):
-            return title ?? "Parental PIN"
+            return title?.localized ?? "Parental PIN".localized
         case .setup(let title, _, _, _):
-            return isConfirming ? "Confirm PIN" : (title ?? "Set Profile PIN")
+            return isConfirming ? "Confirm PIN".localized : (title?.localized ?? "Set Profile PIN".localized)
         }
     }
 
     private var subtitleText: String {
         switch mode {
         case .verify(_, let subtitle, _, _):
-            return subtitle ?? "Enter your 4-digit PIN to proceed"
+            return subtitle?.localized ?? "Enter your 4-digit PIN to proceed".localized
         case .setup(_, let subtitle, _, _):
-            return isConfirming ? "Re-enter the 4-digit PIN to confirm" : (subtitle ?? "Choose a 4-digit PIN to lock this profile")
+            return isConfirming ? "Re-enter the 4-digit PIN to confirm".localized : (subtitle?.localized ?? "Choose a 4-digit PIN to lock this profile".localized)
         }
     }
 

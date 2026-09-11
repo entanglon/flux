@@ -65,7 +65,7 @@ struct GenreCard: View {
 
             VStack(alignment: .leading) {
                 Spacer()
-                Text(genre.name)
+                Text(genre.localizedName)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
@@ -86,8 +86,8 @@ struct GenreCard: View {
         .shadow(color: .black.opacity(isHovering ? 0.40 : 0.16), radius: isHovering ? 12 : 4, x: 0, y: isHovering ? 6 : 2)
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(genre.name) genre")
-        .accessibilityHint("Browse all \(genre.name) titles")
+        .accessibilityLabel(String.localizedFormat("%@ genre", genre.localizedName))
+        .accessibilityHint(String.localizedFormat("Browse all %@ titles", genre.localizedName))
         .onHover { hovering in
             isHovering = hovering
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }

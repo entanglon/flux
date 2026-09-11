@@ -14,7 +14,7 @@ struct CastListView: View {
             VStack(alignment: .leading, spacing: 32) {
                 // Header
                 HStack(spacing: 16) {
-                    Text("Cast & Crew")
+                    Text("Cast & Crew".localized)
                         .font(.system(size: 44, weight: .heavy))
                         .foregroundStyle(.white)
 

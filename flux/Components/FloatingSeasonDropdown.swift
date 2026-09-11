@@ -52,7 +52,7 @@ struct FloatingSeasonPanel: View {
                             .frame(width: 16)
                             .opacity(isSelected ? 1 : 0)
 
-                        Text(season.name)
+                        Text(season.localizedName)
                             .font(.system(size: 13, weight: isSelected ? .bold : .medium))
                             .foregroundStyle(isSelected ? .white : .white.opacity(0.7))
 

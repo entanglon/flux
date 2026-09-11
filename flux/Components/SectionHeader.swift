@@ -47,7 +47,7 @@ struct ListSectionHeader<Value: Hashable>: View {
 }
 
 struct TrendingToggleSectionHeader<Value: Hashable>: View {
-    var title: String = "Trending"
+    var title: String = "Trending".localized
     @Binding var window: String // "day" or "week"
     let value: Value
 
@@ -138,12 +138,12 @@ struct LiquidGlassSegmentedToggle: View {
         ZStack(alignment: .leading) {
             // 1. Track Socket with permanently positioned labels
             HStack(spacing: 0) {
-                Text("Today")
+                Text("Today".localized)
                     .font(.system(size: 11, weight: selected == "day" ? .bold : .semibold))
                     .foregroundStyle(selected == "day" ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
 
-                Text("This Week")
+                Text("This Week".localized)
                     .font(.system(size: 11, weight: selected == "week" ? .bold : .semibold))
                     .foregroundStyle(selected == "week" ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
@@ -306,12 +306,12 @@ struct LiquidGlassMediaToggle: View {
         ZStack(alignment: .leading) {
             // 1. Track Socket with permanently positioned labels
             HStack(spacing: 0) {
-                Text("Movies")
+                Text("Movies".localized)
                     .font(.system(size: 11, weight: selected == "movie" ? .bold : .semibold))
                     .foregroundStyle(selected == "movie" ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
 
-                Text("TV Shows")
+                Text("TV Shows".localized)
                     .font(.system(size: 11, weight: selected == "tv" ? .bold : .semibold))
                     .foregroundStyle(selected == "tv" ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
@@ -473,17 +473,17 @@ struct LiquidGlassFilmographyToggle: View {
         ZStack(alignment: .leading) {
             // 1. Track Socket with permanently positioned labels
             HStack(spacing: 0) {
-                Text("All")
+                Text("All".localized)
                     .font(.system(size: 11, weight: selected == .all ? .bold : .semibold))
                     .foregroundStyle(selected == .all ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
 
-                Text("Movies")
+                Text("Movies".localized)
                     .font(.system(size: 11, weight: selected == .movies ? .bold : .semibold))
                     .foregroundStyle(selected == .movies ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)
 
-                Text("TV Shows")
+                Text("TV Shows".localized)
                     .font(.system(size: 11, weight: selected == .tv ? .bold : .semibold))
                     .foregroundStyle(selected == .tv ? Color.white : Color.white.opacity(0.50))
                     .frame(width: segmentWidth, height: height)

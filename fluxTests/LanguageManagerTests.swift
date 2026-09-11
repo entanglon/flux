@@ -219,4 +219,91 @@ struct LanguageManagerTests {
         )
         #expect(selected == "/backdrop_neutral.jpg")
     }
+
+    // MARK: - Profile & Gate Localization Tests
+
+    @Test @MainActor func profileDisplayNameTranslatesKidsAcrossAllLanguages() {
+        let kidsProfile = UserProfile(
+            id: UUID(),
+            name: "Kids",
+            avatarID: "face-lime",
+            createdAt: Date(),
+            isKids: true,
+            isStock: true
+        )
+        let adultProfile = UserProfile(
+            id: UUID(),
+            name: "Alex",
+            avatarID: "face-blue",
+            createdAt: Date(),
+            isKids: false,
+            isStock: false
+        )
+
+        // Verify that custom non-kids names remain unchanged in any language
+        LanguageManager.shared.setLanguage(.japanese)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "キッズ")
+
+        LanguageManager.shared.setLanguage(.spanish)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "Niños")
+
+        LanguageManager.shared.setLanguage(.french)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "Enfants")
+
+        LanguageManager.shared.setLanguage(.german)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "Kinder")
+
+        LanguageManager.shared.setLanguage(.italian)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "Bambini")
+
+        LanguageManager.shared.setLanguage(.korean)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "키즈")
+
+        LanguageManager.shared.setLanguage(.hindi)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "बच्चे")
+
+        LanguageManager.shared.setLanguage(.chinese)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "儿童")
+
+        LanguageManager.shared.setLanguage(.english)
+        #expect(adultProfile.displayName == "Alex")
+        #expect(kidsProfile.displayName == "Kids")
+    }
+
+    @Test func profileGateAndPinTranslationsExistAcrossAllLanguages() {
+        let keysToCheck = [
+            "Who's Watching?",
+            "Pick a profile to jump back in",
+            "Manage Profiles",
+            "Kids",
+            "KIDS",
+            "Done",
+            "Add Profile",
+            "Protect Kids Profile",
+            "Exit PIN Protection",
+            "Profile Lock (PIN)"
+        ]
+
+        for lang in AppLanguage.allCases {
+            for key in keysToCheck {
+                let translated = L10n.string(for: key, language: lang)
+                #expect(!translated.isEmpty, "Translation for key '\(key)' in \(lang.rawValue) should not be empty")
+            }
+        }
+
+        #expect(L10n.string(for: "Who's Watching?", language: .japanese) == "誰が観ていますか？")
+        #expect(L10n.string(for: "Who's Watching?", language: .spanish) == "¿Quién está viendo?")
+        #expect(L10n.string(for: "Who's Watching?", language: .french) == "Qui regarde ?")
+        #expect(L10n.string(for: "Who's Watching?", language: .german) == "Wer schaut gerade?")
+        #expect(L10n.string(for: "Who's Watching?", language: .chinese) == "谁在观看？")
+    }
 }
+

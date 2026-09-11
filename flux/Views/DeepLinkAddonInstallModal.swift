@@ -4,6 +4,7 @@ import SwiftUI
 
 struct DeepLinkAddonInstallModal: View {
     @ObservedObject var addonManager = AddonManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     
     var body: some View {
         if addonManager.showDeepLinkModal, let manifest = addonManager.pendingDeepLinkManifest {
@@ -61,7 +62,7 @@ struct DeepLinkAddonInstallModal: View {
                                 }
                             }
                             
-                            Text("External Addon Installation Request")
+                            Text("External Addon Installation Request".localized)
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.6))
                         }
@@ -87,7 +88,7 @@ struct DeepLinkAddonInstallModal: View {
                     
                     // Permissions & Requested Resources
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("REQUESTED CAPABILITIES")
+                        Text("REQUESTED CAPABILITIES".localized)
                             .font(.system(size: 10, weight: .heavy))
                             .foregroundStyle(.white.opacity(0.45))
                             .tracking(0.8)
@@ -108,7 +109,7 @@ struct DeepLinkAddonInstallModal: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 }
                             } else {
-                                Text("Standard Media Provider")
+                                Text("Standard Media Provider".localized)
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.6))
                             }
@@ -149,7 +150,7 @@ struct DeepLinkAddonInstallModal: View {
                     
                     // Action Buttons (Liquid Glass)
                     HStack(spacing: 12) {
-                        Button("Cancel") {
+                        Button("Cancel".localized) {
                             addonManager.dismissDeepLinkModal()
                         }
                         .buttonStyle(.plain)
@@ -177,7 +178,7 @@ struct DeepLinkAddonInstallModal: View {
                                     Image(systemName: "plus.circle.fill")
                                         .font(.system(size: 12.5, weight: .bold))
                                 }
-                                Text(addonManager.isInstallingDeepLink ? "Installing…" : "Install Addon")
+                                Text((addonManager.isInstallingDeepLink ? "Installing…" : "Install Addon").localized)
                                     .font(.system(size: 12.5, weight: .bold))
                             }
                             .padding(.horizontal, 18)

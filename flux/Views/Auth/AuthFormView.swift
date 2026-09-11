@@ -3,6 +3,7 @@ import SwiftUI
 /// Email + password sign-in / sign-up form, styled with the app's glassmorphism theme.
 struct AuthFormView: View {
     var onDismiss: (() -> Void)? = nil
+    @ObservedObject private var languageManager = LanguageManager.shared
 
     @State private var email = ""
     @State private var password = ""
@@ -19,28 +20,28 @@ struct AuthFormView: View {
             Spacer()
 
             VStack(spacing: 28) {
-                Text(isSignUp ? "Create Account" : "Welcome Back")
+                Text((isSignUp ? "Create Account" : "Welcome Back").localized)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
 
                 VStack(spacing: 14) {
                     if isSignUp {
-                        glassField(icon: "person", placeholder: "Display name (optional)", text: $displayName)
+                        glassField(icon: "person", placeholder: "Display name (optional)".localized, text: $displayName)
                             .focused($focusedField, equals: .displayName)
                     }
 
-                    glassField(icon: "envelope", placeholder: "Email", text: $email)
+                    glassField(icon: "envelope", placeholder: "Email".localized, text: $email)
                         .focused($focusedField, equals: .email)
                         .textContentType(.emailAddress)
                         .autocorrectionDisabled()
 
-                    glassField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                    glassField(icon: "lock", placeholder: "Password".localized, text: $password, isSecure: true)
                         .focused($focusedField, equals: .password)
                         .textContentType(isSignUp ? .newPassword : .password)
                 }
 
                 if let error = errorMessage {
-                    Text(error)
+                    Text(error.localized)
                         .font(.system(size: 12))
                         .foregroundStyle(.red.opacity(0.85))
                         .multilineTextAlignment(.center)
@@ -50,7 +51,7 @@ struct AuthFormView: View {
                 Button {
                     submit()
                 } label: {
-                    Text(isSignUp ? "Create Account" : "Sign In")
+                    Text((isSignUp ? "Create Account" : "Sign In").localized)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(canSubmit ? .black : .white.opacity(0.4))
                         .frame(maxWidth: .infinity)
@@ -67,7 +68,7 @@ struct AuthFormView: View {
                 }
 
                 HStack(spacing: 4) {
-                    Text(isSignUp ? "Already have an account?" : "Don't have an account?")
+                    Text((isSignUp ? "Already have an account?" : "Don't have an account?").localized)
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.5))
                     Button {
@@ -76,7 +77,7 @@ struct AuthFormView: View {
                             errorMessage = nil
                         }
                     } label: {
-                        Text(isSignUp ? "Sign In" : "Sign Up")
+                        Text((isSignUp ? "Sign In" : "Sign Up").localized)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
                     }
@@ -87,7 +88,7 @@ struct AuthFormView: View {
                     Divider()
                         .background(Color.white.opacity(0.1))
                         .padding(.horizontal, 20)
-                    Button("Continue as Guest") { onDismiss() }
+                    Button("Continue as Guest".localized) { onDismiss() }
                         .buttonStyle(.plain)
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.45))

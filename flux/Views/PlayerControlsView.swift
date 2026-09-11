@@ -67,8 +67,8 @@ struct PlayerControlsView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help("Picture in Picture")
-                            .accessibilityLabel("Picture in Picture")
+                            .help("Picture in Picture".localized)
+                            .accessibilityLabel("Picture in Picture".localized)
                             
                             Divider()
                                 .frame(height: 16)
@@ -96,8 +96,8 @@ struct PlayerControlsView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help(isCopiedFeedback ? "Copied to clipboard!" : "Copy playing magnet / stream link")
-                            .accessibilityLabel("Copy Stream Link")
+                            .help(isCopiedFeedback ? "Copied to clipboard!".localized : "Copy playing magnet / stream link".localized)
+                            .accessibilityLabel("Copy Stream Link".localized)
                         }
                         .glassEffect(.regular.interactive(), in: .capsule)
                         .background(Capsule().fill(Color.white.opacity(0.06)))
@@ -128,7 +128,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Skip backward 10 seconds")
+                        .accessibilityLabel("Skip backward 10 seconds".localized)
                         
                         Button(action: onPlayPause) {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -142,7 +142,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(isPlaying ? "Pause" : "Play")
+                        .accessibilityLabel(isPlaying ? "Pause".localized : "Play".localized)
                         
                         Button(action: onSkipForward) {
                             Image(systemName: "goforward.10")
@@ -156,7 +156,7 @@ struct PlayerControlsView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Skip forward 10 seconds")
+                        .accessibilityLabel("Skip forward 10 seconds".localized)
                     }
                     
                     Spacer()
@@ -194,7 +194,7 @@ struct PlayerControlsView: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("Subtitles menu")
+                                .accessibilityLabel("Subtitles menu".localized)
                                 .popover(isPresented: $showSubtitlePopover, arrowEdge: .bottom) {
                                     VStack(alignment: .leading, spacing: 0) {
                                         // Online subtitle search (OpenSubtitles addon etc.)
@@ -224,7 +224,7 @@ struct PlayerControlsView: View {
                                                             Image(systemName: "globe")
                                                                 .font(.system(size: 14, weight: .semibold))
                                                         }
-                                                        Text(isSearchingSubtitles ? "Searching…" : "Search Online Subtitles")
+                                                        Text(isSearchingSubtitles ? "Searching…".localized : "Search Online Subtitles".localized)
                                                             .font(.system(size: 13, weight: .semibold))
                                                     }
                                                     .foregroundColor(.white)
@@ -257,12 +257,12 @@ struct PlayerControlsView: View {
                                                             .background(Capsule().fill(Color.white.opacity(0.85)))
 
                                                         VStack(alignment: .leading, spacing: 1) {
-                                                            Text("Online subtitle")
+                                                            Text("Online subtitle".localized)
                                                                 .font(.system(size: 12, weight: .medium))
                                                                 .foregroundStyle(.white)
                                                                 .lineLimit(1)
                                                             if let source = sub.source {
-                                                                Text("via \(source)")
+                                                                Text("via %@".localizedFormat(source))
                                                                     .font(.system(size: 10))
                                                                     .foregroundStyle(.secondary)
                                                                     .lineLimit(1)
@@ -278,7 +278,7 @@ struct PlayerControlsView: View {
                                             }
 
                                             if subtitleSearchDone && onlineSubtitles.isEmpty {
-                                                Text("No online subtitles found")
+                                                Text("No online subtitles found".localized)
                                                     .font(.system(size: 11))
                                                     .foregroundStyle(.secondary)
                                                     .padding(.horizontal, 8)
@@ -289,7 +289,7 @@ struct PlayerControlsView: View {
                                         }
 
                                         TrackSelectionList(
-                                            title: "Subtitles",
+                                            title: "Subtitles".localized,
                                             tracks: subtitleTracks,
                                             externalTracks: externalTracks,
                                             mpv: mpv,
@@ -314,10 +314,10 @@ struct PlayerControlsView: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("Audio tracks menu")
+                                .accessibilityLabel("Audio tracks menu".localized)
                                 .popover(isPresented: $showAudioPopover, arrowEdge: .bottom) {
                                     TrackSelectionList(
-                                        title: "Audio", 
+                                        title: "Audio".localized, 
                                         tracks: audioTracks, 
                                         externalTracks: [], 
                                         mpv: mpv,
@@ -341,8 +341,8 @@ struct PlayerControlsView: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("Playback tuning and diagnostics")
-                                .help("Playback Tuning & Diagnostics (⌥D)")
+                                .accessibilityLabel("Playback tuning and diagnostics".localized)
+                                .help("Playback Tuning & Diagnostics (⌥D)".localized)
                             }
                             .glassEffect(.regular.interactive(), in: .capsule)
                             .background(Capsule().fill(Color.white.opacity(0.06)))
@@ -384,7 +384,7 @@ struct PlayerControlsView: View {
                                 }
                                 .contentShape(Rectangle())
                                 .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("Playback progress")
+                                .accessibilityLabel("Playback progress".localized)
                                 .accessibilityValue("\(Int(progress * 100)) percent, \(formatTime(currentTime)) of \(formatTime(duration))")
                                 .onHover { hovering in
                                     if hovering {
@@ -503,8 +503,8 @@ struct PlayerControlsView: View {
                     .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
-            .help(isMuted ? "Unmute" : "Mute")
-            .accessibilityLabel("Mute toggle")
+            .help(isMuted ? "Unmute".localized : "Mute".localized)
+            .accessibilityLabel("Mute toggle".localized)
 
             // Interactive Gauge Bar with 100% Divider Notch
             GeometryReader { geo in
@@ -651,7 +651,7 @@ struct TrackSelectionList: View {
     let onSelectExternal: (StremioSubtitleTrack) -> Void
     
     private var isSubtitles: Bool {
-        title.lowercased().contains("sub")
+        title.lowercased().contains("sub") || title == "Subtitles".localized
     }
     
     private var isNoneSelected: Bool {
@@ -670,7 +670,7 @@ struct TrackSelectionList: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if isSubtitles {
                         Button {
-                            onSelect(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                            onSelect(Track(id: -1, type: "sub", title: "Off".localized, lang: "", isSelected: true))
                         } label: {
                             HStack {
                                 if isNoneSelected {
@@ -680,7 +680,7 @@ struct TrackSelectionList: View {
                                     Spacer().frame(width: 16)
                                 }
                                 
-                                Text("Off")
+                                Text("Off".localized)
                                     .fontWeight(isNoneSelected ? .semibold : .regular)
                                 Spacer()
                             }
@@ -728,7 +728,7 @@ struct TrackSelectionList: View {
                         .background(Color.white.opacity(0.1))
                         .padding(.vertical, 4)
                     
-                    Text("External Sources")
+                    Text("External Sources".localized)
                         .font(.caption2)
                         .fontWeight(.bold)
                         .foregroundColor(.secondary)
@@ -771,7 +771,7 @@ struct TrackSelectionList: View {
                 if isSubtitles {
                     VStack(spacing: 8) {
                         HStack {
-                            Text("Delay")
+                            Text("Delay".localized)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -816,7 +816,7 @@ struct TrackSelectionList: View {
                         }
                         
                         HStack {
-                            Text("Size")
+                            Text("Size".localized)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -854,7 +854,7 @@ struct TrackSelectionList: View {
                 } else {
                     VStack(spacing: 8) {
                         HStack {
-                            Text("Delay")
+                            Text("Delay".localized)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -900,9 +900,9 @@ struct TrackSelectionList: View {
                         
                         HStack {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("Dialogue Boost")
+                                Text("Dialogue Boost".localized)
                                     .font(.system(size: 11, weight: .medium))
-                                Text("Night mode normalizer")
+                                Text("Night mode normalizer".localized)
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
                             }

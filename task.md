@@ -122,25 +122,24 @@
 - ✅ UI/UX performance & animation polish — detached background image decoding, carousel hover guard, smooth skeleton crossfades
 - ✅ Database & "For You" taste profile sync — automatic debounced sync, launch sync, taste signals in cloud payload
 - ✅ Genre & Subpage Navigation Stack fix — value-based NavigationLinks and instantaneous sidebar tab resets
+- ✅ Secret Player HUD / Playback Tuning dialog — Diagnostics ("Stats for Nerds"), subtitle sync/scale, audio delay/boost, video shaders & geometry
+- ✅ 100% App-Wide Multi-Language Localization — 10 languages (en, ja, es, fr, de, it, pt, ko, hi, zh), >550 keys across all views, zero hardcoded English
+- ✅ Localization-First Development Standard — permanent rule in AGENTS.md, handover.md, and ROADMAP.md
 
 ## What to test next
-- Play a video → verify skip intro / next episode appear as floating bottom-right buttons
-- Verify controls auto-hide shows the buttons, mouse movement hides them
-- Check memory: flux app ~200-250MB, FluxEngine ~25MB at idle
-- Navigate between detail pages → verify only one torrent downloads at a time
-- Search: type → dropdown → Enter → full results → type again → dropdown returns
-- **NEW:** Open detail pages, scroll, hit back → no crash (Flux mode ON)
-- **NEW:** Quit app → verify zero orphaned FluxEngine processes in Activity Monitor
+- Settings (⌘,) → General → Language: switch to Japanese, Spanish, French, German, Italian, Portuguese, Korean, Hindi, Chinese and verify instant reactive translation
+- Open Player → press 'D' hotkey or click tuning icon → verify localized tabs, sliders, and live telemetry
+- Kids profile exit PIN protection and safe genre filtering
+- Continue Watching vs Recently Watched separation and monotonic progress tracking
 
 ## Build & Run
 ```bash
 # Build
-xcodebuild -scheme flux -configuration Debug build -allowProvisioningUpdates
+xcodebuild -project flux.xcodeproj -scheme flux -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO build -quiet
 
 # Launch
 pkill -f "MacOS/flux" 2>/dev/null; pkill -f "FluxEngine" 2>/dev/null; sleep 1
-DEBUG_APP=$(xcodebuild -scheme flux -configuration Debug -showBuildSettings 2>/dev/null | grep -m1 "TARGET_BUILD_DIR" | awk '{print $3}')/flux.app
-open "$DEBUG_APP"
+open /Users/zainulnazir/Library/Developer/Xcode/DerivedData/flux-bsqlajoncxxaywbmbbeyxatsxjrp/Build/Products/Debug/flux.app
 ```
 
-*Last Updated: Aug 28, 2026*
+*Last Updated: Sep 11, 2026*

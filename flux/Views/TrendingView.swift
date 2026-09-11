@@ -34,14 +34,14 @@ struct TrendingView: View {
                     // 2. Main Trending Catalog Section
                     VStack(alignment: .leading, spacing: 24) {
                         HStack(alignment: .center, spacing: 16) {
-                            Text("Trending Now")
+                            Text("Trending Now".localized)
                                 .font(.system(size: 32, weight: .heavy))
                                 .foregroundStyle(.white)
                             
                             LiquidGlassMediaToggle(selected: $selectedType)
                             
                             if !currentItems.isEmpty {
-                                Text("\(currentItems.count) TITLES")
+                                Text(String.localizedFormat("%d TITLES", currentItems.count))
                                     .font(.system(size: 11, weight: .bold))
                                     .tracking(1.5)
                                     .foregroundStyle(.white.opacity(0.8))

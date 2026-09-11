@@ -31,6 +31,16 @@ struct UserProfile: Identifiable, Codable, Hashable {
         isKids = try container.decodeIfPresent(Bool.self, forKey: .isKids) ?? false
         isStock = try container.decodeIfPresent(Bool.self, forKey: .isStock) ?? false
     }
+
+    /// User-facing display name that automatically localizes the stock Kids profile name
+    /// while preserving custom profile names and internal identifiers.
+    @MainActor
+    public var displayName: String {
+        if isKids {
+            return "Kids".localized
+        }
+        return name
+    }
 }
 
 /// Netflix-style profile avatars: solid color tiles with minimalist drawn
@@ -70,6 +80,11 @@ public struct AvatarItem: Identifiable, Hashable {
         case characters = "Cats"
         case pets = "Pets"
         case classic = "Faces"
+
+        @MainActor
+        public var localizedName: String {
+            rawValue.localized
+        }
     }
 
     public let id: String

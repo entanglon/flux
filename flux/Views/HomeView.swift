@@ -288,9 +288,11 @@ struct HomeView: View {
         if !forYouItems.isEmpty {
             let forYouTitle: String = {
                 if let title = becauseTitle {
-                    return becauseWasLoved ? "Because you liked \(title)" : "Because you watched \(title)"
+                    return becauseWasLoved
+                        ? String.localizedFormat("Because you liked %@", title)
+                        : String.localizedFormat("Because you watched %@", title)
                 }
-                return "For You"
+                return "For You".localized
             }()
             
             VStack(alignment: .leading, spacing: 16) {

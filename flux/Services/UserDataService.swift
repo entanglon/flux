@@ -864,6 +864,7 @@ class UserDataService: ObservableObject {
 
         let tmdbKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
         let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
+        let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
 
         return [
             "version": 3,
@@ -885,7 +886,8 @@ class UserDataService: ObservableObject {
             "profiles": ProfileManager.shared.exportProfilesData(),
             "addons": AddonManager.shared.exportAddonsPayload(),
             "tmdbApiKey": tmdbKey,
-            "userDisplayName": displayName
+            "userDisplayName": displayName,
+            "appLanguage": appLang
         ]
     }
 
@@ -1044,7 +1046,21 @@ class UserDataService: ObservableObject {
             }
         }
 
-        // 4. Merge history & watchlist for the now-active profile
+        // 4. Restore App Language if present in cloud payload
+        let remoteSettings = payload["settings"] as? [String: Any]
+        let remoteLang = (payload["appLanguage"] as? String) ?? (remoteSettings?["appLanguage"] as? String)
+        if let remoteLang, !remoteLang.isEmpty {
+            UserDefaults.standard.set(remoteLang, forKey: UserDefaults.Key.appLanguage)
+            if Thread.isMainThread {
+                LanguageManager.shared.syncFromProfile(remoteLang)
+            } else {
+                DispatchQueue.main.async {
+                    LanguageManager.shared.syncFromProfile(remoteLang)
+                }
+            }
+        }
+
+        // 5. Merge history & watchlist for the now-active profile
         let remoteWatchlist = payload["watchlist"] as? [[String: Any]] ?? []
         let remoteHistory = payload["history"] as? [[String: Any]] ?? []
         let isCurrentKids = ProfileManager.shared.currentProfile?.isKids == true
@@ -1111,7 +1127,6 @@ class UserDataService: ObservableObject {
         let tasteLoved = payload["tasteLoved"] as? [[String: Any]]
         let tasteSnapshots = payload["tasteSnapshots"] as? [[String: Any]]
         let addonsData = payload["addons"] as? [[String: Any]]
-        let remoteSettings = payload["settings"] as? [String: Any]
         let remoteEpProgress = payload["episodeProgress"] as? [String: [String: Any]]
 
         // Only publish/post when the merge actually changed something. @Published

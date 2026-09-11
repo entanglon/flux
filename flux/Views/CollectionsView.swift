@@ -14,13 +14,13 @@ struct CollectionsView: View {
             if userData.collections.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     LibraryPageHeader(
-                        title: "Collections",
+                        title: "Collections".localized,
                         rightAction: {
                             Button(action: { showCreateAlert = true }) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "plus")
                                         .font(.system(size: 13, weight: .bold))
-                                    Text("New List")
+                                    Text("New List".localized)
                                         .font(.system(size: 14, weight: .bold))
                                 }
                                 .foregroundStyle(.white)
@@ -47,7 +47,7 @@ struct CollectionsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
                         LibraryPageHeader(
-                            title: "Collections",
+                            title: "Collections".localized,
                             itemCount: userData.collections.count,
                             itemLabel: "LISTS",
                             rightAction: {
@@ -55,7 +55,7 @@ struct CollectionsView: View {
                                     HStack(spacing: 8) {
                                         Image(systemName: "plus")
                                             .font(.system(size: 13, weight: .bold))
-                                        Text("New List")
+                                        Text("New List".localized)
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                     .foregroundStyle(.white)
@@ -81,8 +81,8 @@ struct CollectionsView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
-                                    Button("Rename…") { renameTarget = collection }
-                                    Button("Delete", role: .destructive) { deleteCandidate = collection }
+                                    Button("Rename…".localized) { renameTarget = collection }
+                                    Button("Delete".localized, role: .destructive) { deleteCandidate = collection }
                                 }
                             }
                         }
@@ -97,45 +97,45 @@ struct CollectionsView: View {
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
-        .alert("New Collection", isPresented: $showCreateAlert) {
-            TextField("List name", text: $newCollectionName)
-            Button("Create") {
+        .alert("New Collection".localized, isPresented: $showCreateAlert) {
+            TextField("List name".localized, text: $newCollectionName)
+            Button("Create".localized) {
                 userData.createCollection(name: newCollectionName)
                 newCollectionName = ""
             }
-            Button("Cancel", role: .cancel) { newCollectionName = "" }
+            Button("Cancel".localized, role: .cancel) { newCollectionName = "" }
         } message: {
-            Text("Group movies and shows into your own lists.")
+            Text("Group movies and shows into your own lists.".localized)
         }
-        .alert("Rename Collection", isPresented: Binding(
+        .alert("Rename Collection".localized, isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
         )) {
-            TextField("List name", text: $renameText)
-            Button("Rename") {
+            TextField("List name".localized, text: $renameText)
+            Button("Rename".localized) {
                 if let target = renameTarget {
                     userData.renameCollection(id: target.id, to: renameText)
                 }
                 renameTarget = nil
                 renameText = ""
             }
-            Button("Cancel", role: .cancel) { renameTarget = nil }
+            Button("Cancel".localized, role: .cancel) { renameTarget = nil }
         } message: {
-            Text(renameTarget.map { "Rename \"\($0.name)\"." } ?? "")
+            Text(renameTarget.map { String.localizedFormat("Rename \"%@\".", $0.name) } ?? "")
         }
-        .alert("Delete Collection?", isPresented: Binding(
+        .alert("Delete Collection?".localized, isPresented: Binding(
             get: { deleteCandidate != nil },
             set: { if !$0 { deleteCandidate = nil } }
         )) {
-            Button("Delete", role: .destructive) {
+            Button("Delete".localized, role: .destructive) {
                 if let candidate = deleteCandidate {
                     userData.deleteCollection(id: candidate.id)
                 }
                 deleteCandidate = nil
             }
-            Button("Cancel", role: .cancel) { deleteCandidate = nil }
+            Button("Cancel".localized, role: .cancel) { deleteCandidate = nil }
         } message: {
-            Text(deleteCandidate.map { "\"\($0.name)\" will be removed. Titles inside are not deleted from Flux." } ?? "")
+            Text(deleteCandidate.map { String.localizedFormat("\"%@\" will be removed. Titles inside are not deleted from Flux.", $0.name) } ?? "")
         }
     }
 
@@ -148,9 +148,9 @@ struct CollectionsView: View {
     private var emptyState: some View {
         LibraryEmptyState(
             icon: "rectangle.stack.fill",
-            title: "No Collections Yet",
-            message: "Create custom lists to organize your movies and shows any way you like.",
-            actionTitle: "Create Your First List",
+            title: "No Collections Yet".localized,
+            message: "Create custom lists to organize your movies and shows any way you like.".localized,
+            actionTitle: "Create Your First List".localized,
             actionIcon: "plus",
             action: { showCreateAlert = true }
         )
@@ -166,7 +166,7 @@ struct CollectionsView: View {
                     .frame(width: 64, height: 64)
                     .background(Circle().fill(Color.white.opacity(0.08)))
 
-                Text("New List")
+                Text("New List".localized)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
             }
@@ -241,8 +241,8 @@ private struct CollectionCard: View {
                 .lineLimit(1)
 
             Text(collection.items.isEmpty
-                 ? "Empty list"
-                 : "\(collection.items.count) \(collection.items.count == 1 ? "title" : "titles")")
+                 ? "Empty list".localized
+                 : (collection.items.count == 1 ? String.localizedFormat("%d title", 1) : String.localizedFormat("%d titles", collection.items.count)))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.55))
         }
@@ -290,7 +290,7 @@ private struct CollectionCard: View {
                         .font(.system(size: 32, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.35))
                     
-                    Text("Empty")
+                    Text("Empty".localized)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.white.opacity(0.40))
                 }
@@ -432,7 +432,7 @@ struct CollectionDetailView: View {
                                         .glassEffect(.regular.interactive(), in: .circle)
                                 }
                                 .buttonStyle(.plain)
-                                .help("Rename")
+                                .help("Rename".localized)
 
                                 Button(action: { showDeleteConfirm = true }) {
                                     Image(systemName: "trash")
@@ -442,7 +442,7 @@ struct CollectionDetailView: View {
                                         .glassEffect(.regular.interactive(), in: .circle)
                                 }
                                 .buttonStyle(.plain)
-                                .help("Delete list")
+                                .help("Delete list".localized)
                             }
                         }
                     )
@@ -478,7 +478,7 @@ struct CollectionDetailView: View {
                                             .glassEffect(.regular.interactive(), in: .circle)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Rename")
+                                    .help("Rename".localized)
 
                                     Button(action: { showDeleteConfirm = true }) {
                                         Image(systemName: "trash")
@@ -488,7 +488,7 @@ struct CollectionDetailView: View {
                                             .glassEffect(.regular.interactive(), in: .circle)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Delete list")
+                                    .help("Delete list".localized)
                                 }
                             }
                         )
@@ -514,7 +514,7 @@ struct CollectionDetailView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .padding(8)
-                                    .help("Remove from list")
+                                    .help("Remove from list".localized)
                                 }
                             }
                         }
@@ -542,29 +542,29 @@ struct CollectionDetailView: View {
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
-        .alert("Rename Collection", isPresented: $showRenameAlert) {
-            TextField("List name", text: $renameText)
-            Button("Rename") { userData.renameCollection(id: collectionID, to: renameText) }
-            Button("Cancel", role: .cancel) {}
+        .alert("Rename Collection".localized, isPresented: $showRenameAlert) {
+            TextField("List name".localized, text: $renameText)
+            Button("Rename".localized) { userData.renameCollection(id: collectionID, to: renameText) }
+            Button("Cancel".localized, role: .cancel) {}
         } message: {
-            Text(collection.map { "Rename \"\($0.name)\"." } ?? "")
+            Text(collection.map { String.localizedFormat("Rename \"%@\".", $0.name) } ?? "")
         }
-        .alert("Delete Collection?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
+        .alert("Delete Collection?".localized, isPresented: $showDeleteConfirm) {
+            Button("Delete".localized, role: .destructive) {
                 userData.deleteCollection(id: collectionID)
                 dismiss()
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel".localized, role: .cancel) {}
         } message: {
-            Text(collection.map { "\"\($0.name)\" will be removed. Titles inside are not deleted from Flux." } ?? "")
+            Text(collection.map { String.localizedFormat("\"%@\" will be removed. Titles inside are not deleted from Flux.", $0.name) } ?? "")
         }
     }
 
     private func memberEmptyState(name: String) -> some View {
         LibraryEmptyState(
             icon: "square.stack.3d.up",
-            title: "\"\(name)\" is Empty",
-            message: "Open any movie or show and use the list button to add it here."
+            title: String.localizedFormat("\"%@\" is Empty", name),
+            message: "Open any movie or show and use the list button to add it here.".localized
         )
     }
 }
@@ -581,7 +581,7 @@ struct AddToCollectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                TextField("New list name", text: $newName)
+                TextField("New list name".localized, text: $newName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .semibold))
                     .onSubmit(createAndAdd)
@@ -599,7 +599,7 @@ struct AddToCollectionView: View {
             Divider().background(Color.white.opacity(0.12))
 
             if userData.collections.isEmpty {
-                Text("No lists yet — name one above.")
+                Text("No lists yet — name one above.".localized)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)

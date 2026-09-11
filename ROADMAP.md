@@ -58,12 +58,25 @@ session's counterpart agent should read those first. Key pieces to reuse:
 
 ---
 
-## Secret Player Control Panel — PLANNED (planned 2026-08-30)
+## Secret Player Control Panel — COMPLETED (shipped Sep 11, 2026)
 
 **Goal:** Add an advanced secret HUD / control panel inside the player for power-user playback tuning.
+**Shipped in `SecretPlayerHUDView.swift`:**
+1. **Diagnostics Tab ("Stats for Nerds"):** Video/audio codecs, hardware decoder verification (`videotoolbox`), resolution, framerate, dropped frame counts, demuxer buffer cache, and live bitrates.
+2. **Subtitles Delay & Scale:** Quick ±50ms / ±100ms / ±500ms sync buttons, vertical positioning slider, text scaling slider, and custom offset input bar with unit switcher (`sec` / `ms`).
+3. **Audio Delay Sync & Dialogue Boost:** Latency correction with custom offset input bar, volume amplifier indicator, and Dialogue Boost normalizer (amplifies quiet whispers, compresses loud sound effects).
+4. **Video Filters & Geometry:** Aspect ratio overrides (`Auto`, `16:9`, `21:9`, `4:3`), Deband filter shader, and real-time contrast, brightness, and saturation adjustments.
+5. **Trigger:** Floating control bar icon and `D` hotkey with edge-to-edge hit testing.
 
-**Capabilities to include:**
-1. **Subtitle Precision Controls:** Real-time subtitle delay calibration (+/- 100ms), subtitle font sizing, custom subtitle color / outline opacity, subtitle position offset.
-2. **Audio Sync & Boost:** Audio delay calibration (+/- 50ms), custom audio equalizer presets, night mode (dialogue boost / dynamic range compression via libmpv `af` filters).
-3. **Video Stream Diagnostics & Shaders:** Real-time stream bitrate, dropped frames, cache buffer fill %, video hardware decoder backend (VideoToolbox / software), mpv video shader filters (contrast, brightness, saturation, deinterlace, deband).
-4. **Trigger:** Secret key combination (e.g. `Option + D` or `Ctrl + Shift + P`) or hidden icon in player controls.
+---
+
+## Localization-First Architecture — PERMANENT STANDARD (shipped Sep 11, 2026)
+
+**Mandatory Rule for All Future Features:**
+Whenever designing or modifying any user-facing screen, component, sheet, alert, or menu in Flux:
+1. **No Raw String Literals:** All UI labels must call `.localized` or `String.localizedFormat(...)` / `"...".localizedFormat(...)`.
+2. **10-Language Matrix:** Add corresponding keys and translations across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) in `flux/Services/LanguageManager.swift`.
+3. **Unique Dictionary Keys:** Always ensure no duplicate keys exist in dictionary literals (runtime crash hazard in Swift).
+4. **Internal English Preservation:** Keep TMDB API parameters, Stremio addon IDs, PocketBase model payloads, and system keys in canonical English.
+5. **Reactive View Updates:** Ensure views observe `LanguageManager.shared` (`@ObservedObject var languageManager = LanguageManager.shared`) so language switching in Settings updates the UI instantly.
+

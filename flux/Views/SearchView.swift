@@ -30,10 +30,10 @@ struct SearchView: View {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
                                     .foregroundStyle(.secondary)
-                                Text("No results found")
+                                Text("No results found".localized)
                                     .font(.title3)
                                     .fontWeight(.medium)
-                                Text("Try searching for something else")
+                                Text("Try searching for something else".localized)
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: 300)
@@ -72,7 +72,7 @@ struct SearchView: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(isSearchFocused ? .cyan : .white.opacity(0.75))
                         
-                        TextField("Search", text: $viewModel.query)
+                        TextField("Search".localized, text: $viewModel.query)
                             .font(.system(size: 15, weight: .medium))
                             .textFieldStyle(.plain)
                             .foregroundStyle(.white)
@@ -137,13 +137,13 @@ struct SearchView: View {
             if !recentManager.recentItems.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        Text("Recently Searched")
+                        Text("Recently Searched".localized)
                             .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(.white)
                         
                         Spacer()
                         
-                        Button("Clear") {
+                        Button("Clear".localized) {
                             recentManager.clear()
                         }
                         .buttonStyle(.plain)
@@ -167,7 +167,7 @@ struct SearchView: View {
             
             // Section 2: Browse
             VStack(alignment: .leading, spacing: 16) {
-                Text(isKidsProfile ? "Browse for Kids" : "Browse")
+                Text(isKidsProfile ? "Browse for Kids".localized : "Browse".localized)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
                 
@@ -251,7 +251,7 @@ struct RecentSearchCard: View {
     
     private var subtitleText: String {
         var parts: [String] = []
-        parts.append(item.category)
+        parts.append(item.localizedCategory)
         if let year = item.releaseDateYear, !year.isEmpty {
             parts.append(year)
         }

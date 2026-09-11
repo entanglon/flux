@@ -47,11 +47,11 @@ struct KeyboardShortcutsSheet: View {
                     .foregroundStyle(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Keyboard Shortcuts")
+                    Text("Keyboard Shortcuts".localized)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
 
-                    Text("Control playback and navigate seamlessly.")
+                    Text("Control playback and navigate seamlessly.".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -77,7 +77,7 @@ struct KeyboardShortcutsSheet: View {
             HStack(alignment: .top, spacing: 24) {
                 // Column 1: Playback
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Playback Controls", systemImage: "play.tv.fill")
+                    Label("Playback Controls".localized, systemImage: "play.tv.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.cyan)
                         .padding(.bottom, 2)
@@ -92,7 +92,7 @@ struct KeyboardShortcutsSheet: View {
 
                 // Column 2: Navigation
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Navigation & Global", systemImage: "sidebar.left")
+                    Label("Navigation & Global".localized, systemImage: "sidebar.left")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.blue)
                         .padding(.bottom, 2)
@@ -112,11 +112,11 @@ struct KeyboardShortcutsSheet: View {
 
             // Footer
             HStack {
-                Text("Press Esc or click anywhere outside to close.")
+                Text("Press Esc or click anywhere outside to close.".localized)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Done") {
+                Button("Done".localized) {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -133,7 +133,7 @@ struct KeyboardShortcutsSheet: View {
 
     private func shortcutRow(item: ShortcutItem) -> some View {
         HStack {
-            Text(item.action)
+            Text(item.action.localized)
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
 

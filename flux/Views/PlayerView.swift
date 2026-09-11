@@ -498,7 +498,7 @@ struct PlayerView: View {
             Button {
                 handleAbsoluteSeek(time: targetTime)
             } label: {
-                Text("Skip Recap")
+                Text("Skip Recap".localized)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22)
@@ -515,7 +515,7 @@ struct PlayerView: View {
             Button {
                 handleAbsoluteSeek(time: targetTime)
             } label: {
-                Text("Skip Intro")
+                Text("Skip Intro".localized)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22)
@@ -589,7 +589,7 @@ struct PlayerView: View {
     @ViewBuilder
     private var exitWarningOverlay: some View {
         if showExitWarning {
-            Text("Press Esc again to exit")
+            Text("Press Esc again to exit".localized)
                 .font(.headline)
                 .foregroundColor(.white)
                 .padding()
@@ -768,7 +768,7 @@ struct PlayerView: View {
                             Image(systemName: "forward.end.fill")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.white.opacity(0.8))
-                            Text("UP NEXT")
+                            Text("UP NEXT".localized)
                                 .font(.system(size: 11, weight: .black))
                                 .tracking(1.2)
                                 .foregroundStyle(.white.opacity(0.85))
@@ -780,7 +780,7 @@ struct PlayerView: View {
                         Spacer()
 
                         if isCountingDown {
-                            Text("in \(displaySeconds)s")
+                            Text("in %ds".localizedFormat(displaySeconds))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.75))
                         }
@@ -797,7 +797,7 @@ struct PlayerView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                         .buttonStyle(.plain)
-                        .help("Dismiss auto-play and watch credits")
+                        .help("Dismiss auto-play and watch credits".localized)
                     }
 
                     // Content Row: Episode Thumbnail + Episode Details
@@ -853,7 +853,7 @@ struct PlayerView: View {
                                 .fixedSize(horizontal: false, vertical: true)
 
                             if let runtime = nextMeta?.runtime, runtime > 0 {
-                                Text("\(runtime) min")
+                                Text("%d min".localizedFormat(runtime))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.5))
                             }
@@ -891,7 +891,7 @@ struct PlayerView: View {
                                         .foregroundStyle(.black)
                                 }
 
-                                Text(isCountingDown ? "Play Next Episode" : "Play Now")
+                                Text(isCountingDown ? "Play Next Episode".localized : "Play Now".localized)
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundStyle(.black)
                             }
@@ -906,7 +906,7 @@ struct PlayerView: View {
                                 autoPlayCancelled = true
                             }
                         } label: {
-                            Text("Credits")
+                            Text("Credits".localized)
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.8))
                                 .padding(.horizontal, 12)
@@ -914,7 +914,7 @@ struct PlayerView: View {
                                 .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         .buttonStyle(.plain)
-                        .help("Dismiss overlay and watch full end credits")
+                        .help("Dismiss overlay and watch full end credits".localized)
                     }
                 }
                 .padding(14)
@@ -1009,7 +1009,7 @@ struct PlayerView: View {
 
         // 1. Play / Pause
         menu.addItem(ClosureMenuItem(
-            title: isPlaying ? "Pause" : "Play",
+            title: isPlaying ? "Pause".localized : "Play".localized,
             systemImage: isPlaying ? "pause.fill" : "play.fill",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
@@ -1020,7 +1020,7 @@ struct PlayerView: View {
 
         // 2. Rewind / Forward
         menu.addItem(ClosureMenuItem(
-            title: "Rewind 15s",
+            title: "Rewind 15s".localized,
             systemImage: "gobackward.15",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv, weak playerManager] in
@@ -1035,7 +1035,7 @@ struct PlayerView: View {
         })
 
         menu.addItem(ClosureMenuItem(
-            title: "Forward 15s",
+            title: "Forward 15s".localized,
             systemImage: "goforward.15",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv, weak playerManager] in
@@ -1054,7 +1054,7 @@ struct PlayerView: View {
         // 3. Mute / Unmute
         let isMuted = mpv.volume <= 0.001
         menu.addItem(ClosureMenuItem(
-            title: isMuted ? "Unmute" : "Mute",
+            title: isMuted ? "Unmute".localized : "Mute".localized,
             systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
@@ -1068,19 +1068,19 @@ struct PlayerView: View {
         let extSubs = playerManager.externalSubtitles
         if !subTracks.isEmpty || !extSubs.isEmpty {
             let subMenuItem = ClosureMenuItem(
-                title: "Subtitles",
+                title: "Subtitles".localized,
                 systemImage: "captions.bubble",
                 isEnabled: isPlaybackEnabled
             )
-            let subMenu = NSMenu(title: "Subtitles")
+            let subMenu = NSMenu(title: "Subtitles".localized)
 
             let isNoneSelected = !subTracks.contains(where: { $0.isSelected })
             subMenu.addItem(ClosureMenuItem(
-                title: "Off",
+                title: "Off".localized,
                 isChecked: isNoneSelected
             ) { [weak mpv] in
                 DispatchQueue.main.async {
-                    mpv?.selectTrack(Track(id: -1, type: "sub", title: "Off", lang: "", isSelected: true))
+                    mpv?.selectTrack(Track(id: -1, type: "sub", title: "Off".localized, lang: "", isSelected: true))
                 }
             })
 
@@ -1120,11 +1120,11 @@ struct PlayerView: View {
         let audioTracks = mpv.audioTracks
         if audioTracks.count > 1 {
             let audioMenuItem = ClosureMenuItem(
-                title: "Audio Tracks",
+                title: "Audio".localized,
                 systemImage: "waveform",
                 isEnabled: isPlaybackEnabled
             )
-            let audioMenu = NSMenu(title: "Audio Tracks")
+            let audioMenu = NSMenu(title: "Audio".localized)
             for track in audioTracks {
                 audioMenu.addItem(ClosureMenuItem(
                     title: track.displayName,
@@ -1143,7 +1143,7 @@ struct PlayerView: View {
 
         // 6. Choose Stream Source… (Always active)
         menu.addItem(ClosureMenuItem(
-            title: "Choose Stream Source…",
+            title: "Select Stream Source".localized + "…",
             systemImage: "list.bullet.rectangle",
             isEnabled: true
         ) {
@@ -1159,7 +1159,7 @@ struct PlayerView: View {
 
         // 7. Picture in Picture
         menu.addItem(ClosureMenuItem(
-            title: "Picture in Picture",
+            title: "Picture in Picture".localized,
             systemImage: "pip.enter",
             isEnabled: isPlaybackEnabled
         ) { [weak mpv] in
@@ -1172,7 +1172,7 @@ struct PlayerView: View {
 
         // 8. Copy Stream / Magnet Link
         menu.addItem(ClosureMenuItem(
-            title: "Copy Stream Link",
+            title: "Copy Stream Link".localized,
             systemImage: "square.and.arrow.up",
             isEnabled: isPlaybackEnabled
         ) { [weak playerManager] in
@@ -1187,7 +1187,7 @@ struct PlayerView: View {
 
         // 9. About Stream Source…
         menu.addItem(ClosureMenuItem(
-            title: "About Stream Source…",
+            title: "About Stream Source".localized + "…",
             systemImage: "info.circle",
             isEnabled: isPlaybackEnabled || playerManager.currentStreamURL != nil
         ) {
@@ -1467,7 +1467,7 @@ struct PlayerView: View {
                 }
 
                 VStack(spacing: 8) {
-                    Text(hasStreams ? "Playback Issue" : "No Streams Available")
+                    Text(hasStreams ? "Playback Issue".localized : "No Streams Available".localized)
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
 
@@ -1486,7 +1486,7 @@ struct PlayerView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "arrow.clockwise")
-                                Text("Retry")
+                                Text("Retry".localized)
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 16)
@@ -1505,7 +1505,7 @@ struct PlayerView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "list.bullet.rectangle")
-                                Text("Choose Another Source")
+                                Text("Choose Another Source".localized)
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 16)
@@ -1520,7 +1520,7 @@ struct PlayerView: View {
                         playerManager.close()
                         dismiss()
                     } label: {
-                        Text("Close")
+                        Text("Close".localized)
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
@@ -1567,7 +1567,7 @@ struct PlayerView: View {
                     Image(systemName: "info.circle.fill")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(Color.cyan)
-                    Text("About Stream Source")
+                    Text("About Stream Source".localized)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.white)
                 }
@@ -1616,7 +1616,7 @@ struct PlayerView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 10))
-                        Text("\(seeders) seeds")
+                        Text("\(seeders) \("seeds".localized)")
                             .font(.system(size: 11, weight: .medium))
                     }
                     .padding(.horizontal, 8)
@@ -1628,7 +1628,7 @@ struct PlayerView: View {
 
             // Full Release Title
             VStack(alignment: .leading, spacing: 6) {
-                Text("RELEASE TITLE")
+                Text("RELEASE TITLE".localized)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.5))
                     .tracking(0.8)
@@ -1671,7 +1671,7 @@ struct PlayerView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.on.doc")
-                            Text("Copy Stream Link")
+                            Text("Copy Stream Link".localized)
                         }
                         .font(.system(size: 12, weight: .semibold))
                         .padding(.horizontal, 14)
@@ -1689,7 +1689,7 @@ struct PlayerView: View {
                         showAboutStreamSource = false
                     }
                 } label: {
-                    Text("Done")
+                    Text("Done".localized)
                         .font(.system(size: 12, weight: .bold))
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
@@ -1731,6 +1731,7 @@ struct PlayerView: View {
         case torrents = "Torrents"
         
         var id: String { rawValue }
+        var localizedTitle: String { rawValue.localized }
         
         var icon: String {
             switch self {
@@ -1882,7 +1883,7 @@ struct PlayerView: View {
                                 .foregroundStyle(.white)
                                 .lineLimit(1)
                         } else {
-                            Text("Select Stream Source")
+                            Text("Select Stream Source".localized)
                                 .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
@@ -1908,16 +1909,16 @@ struct PlayerView: View {
                                 let pendingList = playerManager.pendingAddonNames.prefix(2).joined(separator: ", ")
                                 let moreCount = playerManager.pendingAddonNames.count - 2
                                 let addonStr = "\(pendingList)\(moreCount > 0 ? " +\(moreCount)" : "")"
-                                Text("Loading \(playerManager.pendingAddonNames.count) addon\(playerManager.pendingAddonNames.count == 1 ? "" : "s") (\(addonStr))… • \(allStreams.count) found")
+                                Text(String.localizedFormat("Loading %d addons (%@)… • %d found", playerManager.pendingAddonNames.count, addonStr, allStreams.count))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.cyan.opacity(0.95))
                             } else {
-                                Text("Searching addons… (\(allStreams.count) found)")
+                                Text(String.localizedFormat("Searching addons… (%d found)", allStreams.count))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.75))
                             }
                         } else {
-                            Text("\(filteredStreams.count) source\(filteredStreams.count == 1 ? "" : "s") available • All addons loaded")
+                            Text(String.localizedFormat("%d sources available • All addons loaded", filteredStreams.count))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.75))
                         }
@@ -1931,7 +1932,7 @@ struct PlayerView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.45))
-                    TextField("Filter streams (/)…", text: $searchText)
+                    TextField("Filter streams (/)…".localized, text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .foregroundStyle(.white)
@@ -1969,7 +1970,7 @@ struct PlayerView: View {
                 .buttonStyle(.plain)
                 .contentShape(Circle())
                 .disabled(playerManager.isFetchingStreams)
-                .help("Refresh streams from all addons")
+                .help("Refresh streams from all addons".localized)
 
                 // Close Button
                 Button {
@@ -2008,7 +2009,7 @@ struct PlayerView: View {
                             HStack(spacing: 5) {
                                 Image(systemName: cat.icon)
                                     .font(.system(size: 10, weight: .semibold))
-                                Text(cat.rawValue)
+                                Text(cat.localizedTitle)
                                     .font(.system(size: 11, weight: isSelected ? .bold : .medium))
                                 if catCount > 0 {
                                     Text("\(catCount)")
@@ -2069,7 +2070,7 @@ struct PlayerView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .contentShape(Capsule())
-                .help(selectedQualityFilter == "All" ? "Filter by Quality (All)" : "Quality: \(selectedQualityFilter)")
+                .help(selectedQualityFilter == "All" ? "Filter by Quality (All)".localized : "Quality: %@".localizedFormat(selectedQualityFilter))
 
                 // Addon Source Dropdown Menu: Icon-only in bar
                 if !availableSources.isEmpty {
@@ -2107,7 +2108,7 @@ struct PlayerView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .contentShape(Capsule())
-                    .help(selectedSourceFilter == "All" ? "Filter by Addon (All)" : "Addon: \(selectedSourceFilter)")
+                    .help(selectedSourceFilter == "All" ? "Filter by Addon (All)".localized : "Addon: %@".localizedFormat(selectedSourceFilter))
                 }
             }
             .padding(.horizontal, 22)
@@ -2123,12 +2124,12 @@ struct PlayerView: View {
                         .tint(.cyan)
                     
                     if !playerManager.pendingAddonNames.isEmpty {
-                        Text("Loading from \(playerManager.pendingAddonNames.joined(separator: ", "))…")
+                        Text("Loading from %@…".localizedFormat(playerManager.pendingAddonNames.joined(separator: ", ")))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                     } else {
-                        Text("Querying addons for media streams…")
+                        Text("Querying addons for media streams…".localized)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.85))
                     }
@@ -2136,7 +2137,7 @@ struct PlayerView: View {
                     Spacer()
                     
                     if playerManager.totalAddonsCount > 0 {
-                        Text("\(playerManager.loadedAddonsCount) of \(playerManager.totalAddonsCount) loaded")
+                        Text("%d of %d loaded".localizedFormat(playerManager.loadedAddonsCount, playerManager.totalAddonsCount))
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundStyle(.cyan.opacity(0.9))
                     }
@@ -2157,7 +2158,7 @@ struct PlayerView: View {
                         if filteredStreams.isEmpty && isVerifyingBest {
                             VStack(spacing: 12) {
                                 ProgressView().tint(.blue)
-                                Text("Verifying best health sources…")
+                                Text("Verifying best health sources…".localized)
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.secondary)
                             }
@@ -2166,7 +2167,7 @@ struct PlayerView: View {
                             VStack(spacing: 14) {
                                 ProgressView().tint(.cyan)
                                     .scaleEffect(1.1)
-                                Text("Searching addons for available streams…")
+                                Text("Searching addons for available streams…".localized)
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.75))
                             }
@@ -2176,11 +2177,11 @@ struct PlayerView: View {
                                 Image(systemName: "film.stack")
                                     .font(.system(size: 36))
                                     .foregroundStyle(.white.opacity(0.3))
-                                Text("No streams match your filter")
+                                Text("No streams match your filter".localized)
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.8))
                                 if selectedCategoryFilter != .all || selectedQualityFilter != "All" || selectedSourceFilter != "All" || !searchText.isEmpty {
-                                    Button("Reset Filters") {
+                                    Button("Reset Filters".localized) {
                                         withAnimation {
                                             selectedCategoryFilter = .all
                                             selectedQualityFilter = "All"
@@ -2427,7 +2428,7 @@ struct StreamRowItemView: View {
             HStack(spacing: 4) {
                 Image(systemName: stream.isDirectHTTP ? "link" : "arrow.triangle.2.circlepath")
                     .font(.system(size: 8, weight: .bold))
-                Text(stream.isDirectHTTP ? "Direct HTTP" : "P2P Torrent")
+                Text(stream.isDirectHTTP ? "Direct HTTP".localized : "P2P Torrent".localized)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
             }
             .foregroundColor(stream.isDirectHTTP ? Color.cyan.opacity(0.9) : Color.orange.opacity(0.9))
@@ -2552,13 +2553,13 @@ struct StreamRowItemView: View {
                 if let seeders = stream.seeders, seeders > 0, !stream.isDirectHTTP {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 8))
-                        Text("\(seeders) seeds").font(.system(size: 10, weight: .semibold))
+                        Text(String.localizedFormat("%d seeds", seeders)).font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.green)
                 } else if stream.isDirectHTTP {
                     HStack(spacing: 3) {
                         Image(systemName: "bolt.fill").font(.system(size: 8))
-                        Text("Fast HTTP").font(.system(size: 10, weight: .semibold))
+                        Text("Fast HTTP".localized).font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.cyan)
                 }
@@ -2569,7 +2570,7 @@ struct StreamRowItemView: View {
             HStack(spacing: 5) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 9, weight: .bold))
-                Text("Play")
+                Text("Play".localized)
                     .font(.system(size: 11, weight: .bold))
             }
             .padding(.horizontal, 12)
@@ -2673,7 +2674,7 @@ struct StreamRowItemView: View {
 
             // Full Release Title (untruncated, selectable)
             VStack(alignment: .leading, spacing: 4) {
-                Text("RELEASE TITLE / FILENAME")
+                Text("RELEASE TITLE / FILENAME".localized)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.45))
                 
@@ -2687,7 +2688,7 @@ struct StreamRowItemView: View {
 
             // Technical Specs Grid
             VStack(alignment: .leading, spacing: 6) {
-                Text("SPECIFICATIONS")
+                Text("SPECIFICATIONS".localized)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.45))
 
@@ -2704,7 +2705,7 @@ struct StreamRowItemView: View {
                     if let audio = audioBadgeText {
                         specItem(label: "Audio", value: audio)
                     }
-                    specItem(label: "Type", value: stream.isDirectHTTP ? "Direct HTTP" : "P2P Torrent")
+                    specItem(label: "Type", value: stream.isDirectHTTP ? "Direct HTTP".localized : "P2P Torrent".localized)
                     if let seeders = stream.seeders, seeders > 0, !stream.isDirectHTTP {
                         specItem(label: "Seeds", value: "\(seeders)")
                     }
@@ -2726,7 +2727,7 @@ struct StreamRowItemView: View {
 
     private func specItem(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label)
+            Text(label.localized)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
             Text(value)

@@ -8,6 +8,8 @@ struct WatchlistView: View {
         case all = "All"
         case movies = "Movies"
         case shows = "TV Shows"
+
+        var localizedTitle: String { rawValue.localized }
     }
     
     @State private var activeFilter: Filter = .all
@@ -28,16 +30,16 @@ struct WatchlistView: View {
             if userData.watchlist.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     LibraryPageHeader(
-                        title: "Watchlist"
+                        title: "Watchlist".localized
                     )
                     
                     Spacer()
                     
                     LibraryEmptyState(
                         icon: "bookmark.fill",
-                        title: "Your Watchlist is Empty",
-                        message: "Save movies and TV shows to keep track of what you want to watch next.",
-                        actionTitle: "Find Something to Watch",
+                        title: "Your Watchlist is Empty".localized,
+                        message: "Save movies and TV shows to keep track of what you want to watch next.".localized,
+                        actionTitle: "Find Something to Watch".localized,
                         actionIcon: "sparkles",
                         action: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -57,7 +59,7 @@ struct WatchlistView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
                         LibraryPageHeader(
-                            title: "Watchlist",
+                            title: "Watchlist".localized,
                             itemCount: userData.watchlist.count,
                             itemLabel: "ITEMS",
                             filterChips: {
@@ -65,7 +67,7 @@ struct WatchlistView: View {
                                     ForEach(Filter.allCases, id: \.self) { filter in
                                         let count: Int = {
                                             switch filter {
-                                            case .all: return userData.watchlist.count
+                                             case .all: return userData.watchlist.count
                                             case .movies: return userData.watchlist.filter { $0.category.lowercased().contains("movie") }.count
                                             case .shows: return userData.watchlist.filter { $0.category.lowercased().contains("tv") || $0.category.lowercased().contains("series") }.count
                                             }
@@ -78,7 +80,7 @@ struct WatchlistView: View {
                                                 }
                                             } label: {
                                                 HStack(spacing: 6) {
-                                                    Text(filter.rawValue)
+                                                    Text(filter.localizedTitle)
                                                         .font(.system(size: 13, weight: activeFilter == filter ? .bold : .medium))
                                                     Text("\(count)")
                                                         .font(.system(size: 11, weight: .bold))
@@ -105,10 +107,10 @@ struct WatchlistView: View {
                         
                         if filteredItems.isEmpty {
                             VStack(spacing: 12) {
-                                Text("No \(activeFilter.rawValue) in your Watchlist")
+                                Text(String.localizedFormat("No %@ in your Watchlist", activeFilter.localizedTitle))
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.8))
-                                Button("Show All Titles") {
+                                Button("Show All Titles".localized) {
                                     withAnimation { activeFilter = .all }
                                 }
                                 .font(.system(size: 13, weight: .bold))

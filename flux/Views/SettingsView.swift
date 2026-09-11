@@ -44,7 +44,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             // MARK: Account Section
-            Section(header: Text("Account")) {
+            Section(header: Text("Account".localized)) {
                 if authManager.isAuthenticated, let user = authManager.currentUser {
                     HStack(spacing: 14) {
                         if let profile = profileManager.currentProfile {
@@ -74,14 +74,14 @@ struct GeneralSettingsView: View {
                                         .clipShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .help("Edit Display Name")
+                                .help("Edit Display Name".localized)
 
                                 if authManager.needsDisplayNamePrompt {
                                     Button(action: { showEditName = true }) {
                                         HStack(spacing: 3) {
                                             Image(systemName: "pencil.line")
                                                 .font(.system(size: 9))
-                                            Text("Add Name")
+                                            Text("Add Name".localized)
                                                 .font(.system(size: 10, weight: .semibold))
                                         }
                                         .foregroundStyle(.white.opacity(0.9))
@@ -103,15 +103,15 @@ struct GeneralSettingsView: View {
                                     .fill(authManager.isLoading ? Color.orange : Color.green)
                                     .frame(width: 6, height: 6)
                                 if authManager.isLoading {
-                                    Text("Syncing library…")
+                                    Text("Syncing library…".localized)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                 } else if let synced = authManager.lastSyncDate {
-                                    Text("Synced \(synced.formatted(date: .abbreviated, time: .shortened))")
+                                    Text("Synced %@".localizedFormat(synced.formatted(date: .abbreviated, time: .shortened)))
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                 } else {
-                                    Text("Cloud Connected")
+                                    Text("Cloud Connected".localized)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                 }
@@ -121,12 +121,12 @@ struct GeneralSettingsView: View {
                         Spacer()
 
                         HStack(spacing: 8) {
-                            Button("Sync Now") { authManager.syncNow() }
+                            Button("Sync Now".localized) { authManager.syncNow() }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .disabled(authManager.isLoading)
 
-                            Button("Sign Out") { authManager.signOut() }
+                            Button("Sign Out".localized) { authManager.signOut() }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                         }
@@ -135,14 +135,14 @@ struct GeneralSettingsView: View {
                 } else {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Cloud Sync")
+                            Text("Cloud Sync".localized)
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(authManager.isLoading ? "Connecting…" : "Sign in to sync your library, watch progress, and history.")
+                            Text(authManager.isLoading ? "Connecting…".localized : "Sign in to sync your library, watch progress, and history.".localized)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Sign In") {
+                        Button("Sign In".localized) {
                             authManager.startSignInFlow()
                         }
                         .buttonStyle(.borderedProminent)
@@ -153,7 +153,7 @@ struct GeneralSettingsView: View {
             }
 
             // MARK: Watching Profiles Section
-            Section(header: Text("Watching Profiles")) {
+            Section(header: Text("Watching Profiles".localized)) {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
@@ -176,12 +176,12 @@ struct GeneralSettingsView: View {
                                     HStack(spacing: 8) {
                                         AvatarBadge(avatarID: profile.avatarID, size: 28)
 
-                                        Text(profile.name)
+                                        Text(profile.displayName)
                                             .font(.system(size: 12, weight: isCurrent ? .bold : .medium))
                                             .foregroundStyle(isCurrent ? .white : .white.opacity(0.85))
 
                                         if profile.isKids {
-                                            Text("KIDS")
+                                            Text("KIDS".localized)
                                                 .font(.system(size: 8, weight: .heavy, design: .rounded))
                                                 .foregroundStyle(.black)
                                                 .padding(.horizontal, 4)
@@ -219,7 +219,7 @@ struct GeneralSettingsView: View {
                     }
 
                     HStack {
-                        Button("Manage Profiles…") {
+                        Button("Manage Profiles…".localized) {
                             let action = {
                                 #if os(macOS)
                                 for window in NSApp.windows {
@@ -253,7 +253,7 @@ struct GeneralSettingsView: View {
             }
 
             // MARK: Catalog & Metadata (TMDB) Section
-            Section(header: Text("Catalog & Metadata")) {
+            Section(header: Text("Catalog & Metadata".localized)) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
                         Image(systemName: "film.stack.fill")
@@ -264,9 +264,9 @@ struct GeneralSettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("The Movie Database (TMDB)")
+                            Text("The Movie Database (TMDB)".localized)
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(tmdbApiKey.isEmpty ? "Using high-speed keyless catalog" : "Personal API key active for high-rate enrichment")
+                            Text(tmdbApiKey.isEmpty ? "Using high-speed keyless catalog".localized : "Personal API key active for high-rate enrichment".localized)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
@@ -277,7 +277,7 @@ struct GeneralSettingsView: View {
                             HStack(spacing: 6) {
                                 HStack(spacing: 4) {
                                     Circle().fill(Color.green).frame(width: 6, height: 6)
-                                    Text("Active")
+                                    Text("Active".localized)
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(.green)
                                 }
@@ -298,7 +298,7 @@ struct GeneralSettingsView: View {
                                         .clipShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .help("Edit TMDB API Key")
+                                .help("Edit TMDB API Key".localized)
 
                                 Button(action: clearTmdbKey) {
                                     Image(systemName: "trash")
@@ -309,10 +309,10 @@ struct GeneralSettingsView: View {
                                         .clipShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .help("Remove TMDB API Key")
+                                .help("Remove TMDB API Key".localized)
                             }
                         } else if !isEditingKey {
-                            Button("Add Key") {
+                            Button("Add Key".localized) {
                                 draftKey = ""
                                 isEditingKey = true
                             }
@@ -324,11 +324,11 @@ struct GeneralSettingsView: View {
                     if isEditingKey {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 8) {
-                                SecureField("Enter TMDB API Key (e.g. 32-char hex)…", text: $draftKey)
+                                SecureField("Enter TMDB API Key (e.g. 32-char hex)…".localized, text: $draftKey)
                                     .textFieldStyle(.roundedBorder)
                                     .onSubmit { saveTmdbKey() }
 
-                                Button("Cancel") {
+                                Button("Cancel".localized) {
                                     draftKey = tmdbApiKey
                                     keyStatus = .idle
                                     isEditingKey = false
@@ -340,7 +340,7 @@ struct GeneralSettingsView: View {
                                     if isValidating {
                                         ProgressView().controlSize(.small)
                                     } else {
-                                        Text("Save")
+                                        Text("Save".localized)
                                     }
                                 }
                                 .buttonStyle(.borderedProminent)
@@ -350,16 +350,16 @@ struct GeneralSettingsView: View {
 
                             HStack {
                                 if keyStatus == .invalid {
-                                    Text("Invalid API key. Please check your key.")
+                                    Text("Invalid API key. Please check your key.".localized)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.red)
                                 } else {
-                                    Text("Flux works keyless out of the box. A personal key provides unlimited discovery.")
+                                    Text("Flux works keyless out of the box. A personal key provides unlimited discovery.".localized)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Link("Get Free Key ↗", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                                Link("Get Free Key ↗".localized, destination: URL(string: "https://www.themoviedb.org/settings/api")!)
                                     .font(.system(size: 11))
                             }
                         }
@@ -372,9 +372,9 @@ struct GeneralSettingsView: View {
 
                     Toggle(isOn: $enrichHomeWithTMDB) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Enrich Discovery Rails with TMDB")
+                            Text("Enrich Discovery Rails with TMDB".localized)
                                 .font(.system(size: 13, weight: .medium))
-                            Text("Overlay rich artwork, genres, and cast details on Home & OTT rows.")
+                            Text("Overlay rich artwork, genres, and cast details on Home & OTT rows.".localized)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
@@ -407,7 +407,7 @@ struct GeneralSettingsView: View {
             }
 
             // MARK: App Information Section
-            Section(header: Text("App Information")) {
+            Section(header: Text("App Information".localized)) {
                 HStack(spacing: 12) {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
@@ -419,14 +419,14 @@ struct GeneralSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Flux")
                             .font(.system(size: 13, weight: .semibold))
-                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                        Text("Version %@".localizedFormat(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Link("Project GitHub ↗", destination: URL(string: "https://github.com/entanglon/flux")!)
+                    Link("Project GitHub ↗".localized, destination: URL(string: "https://github.com/entanglon/flux")!)
                         .font(.caption)
                 }
                 .padding(.vertical, 2)
@@ -448,14 +448,14 @@ struct GeneralSettingsView: View {
             let target = pendingProfileToSelect
             let exitingKids = profileManager.requiresPinToExit
             let subtitle = exitingKids 
-                ? "Enter PIN to switch out of Kids Profile" 
-                : "Enter 4-digit PIN for \(target?.name ?? "profile")"
+                ? "Enter 4-digit PIN required to exit Kids profile".localized 
+                : "Enter 4-digit PIN to access %@".localizedFormat(target?.name ?? "profile")
             let targetId = (target != nil && profileManager.requiresPinToEnter(profile: target!)) 
                 ? target?.id 
                 : profileManager.currentProfile?.id
 
             PINEntrySheet(mode: .verify(
-                title: target?.name ?? "Parental PIN",
+                title: target?.name ?? "Parental PIN".localized,
                 subtitle: subtitle,
                 profileId: targetId,
                 onSuccess: {
@@ -522,29 +522,29 @@ struct StreamingSettingsView: View {
         Form {
             Section(header: Text(L10n.tr("Stream Sources"))) {
                 Picker(L10n.tr("Stream Filter"), selection: $streamingSourceMode) {
-                    Text("HTTP & Torrent Streams (Both)").tag("both")
-                    Text("HTTP Streams Only").tag("http")
-                    Text("Torrent Streams Only").tag("torrent")
+                    Text("HTTP & Torrent Streams (Both)".localized).tag("both")
+                    Text("HTTP Streams Only".localized).tag("http")
+                    Text("Torrent Streams Only".localized).tag("torrent")
                 }
                 .pickerStyle(.menu)
                 
-                Text("Select whether Flux should load HTTP streams, Torrent streams, or both simultaneously.")
+                Text("Select whether Flux should load HTTP streams, Torrent streams, or both simultaneously.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             
             Section(header: Text(L10n.tr("Flux Mode"))) {
                 Toggle(L10n.tr("Enable Flux Mode"), isOn: $enableFluxMode)
-                Text("Automatically find and race to play the fastest available stream.")
+                Text("Automatically find and race to play the fastest available stream.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 
                 Picker(L10n.tr("Maximum Resolution"), selection: $preferredQuality) {
-                    Text("4K (2160p)").tag("4K")
-                    Text("2K (1440p)").tag("2K")
-                    Text("1080p").tag("1080p")
-                    Text("720p").tag("720p")
-                    Text("480p").tag("480p")
+                    Text("4K (2160p)".localized).tag("4K")
+                    Text("2K (1440p)".localized).tag("2K")
+                    Text("1080p".localized).tag("1080p")
+                    Text("720p".localized).tag("720p")
+                    Text("480p".localized).tag("480p")
                 }
                 .pickerStyle(.menu)
                 .disabled(!enableFluxMode)
@@ -553,7 +553,7 @@ struct StreamingSettingsView: View {
                 Toggle(L10n.tr("Language Filter in Flux Mode"), isOn: $enableFluxLanguageFilter)
                     .disabled(!enableFluxMode)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
-                Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.")
+                Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
@@ -586,7 +586,7 @@ struct PlaybackSettingsView: View {
 
     var body: some View {
         Form {
-            Section(header: Text(L10n.tr("Video Player")), footer: Text("Hardware decoding utilizes Apple Silicon / GPU hardware acceleration for smooth 4K HDR playback.")) {
+            Section(header: Text(L10n.tr("Video Player")), footer: Text("Hardware decoding utilizes Apple Silicon / GPU hardware acceleration for smooth 4K HDR playback.".localized)) {
                 Toggle(L10n.tr("Hardware Acceleration"), isOn: $useHardwareAcceleration)
             }
 
@@ -594,16 +594,16 @@ struct PlaybackSettingsView: View {
                 Toggle(L10n.tr("Auto-play Next Episode"), isOn: $autoPlayNextEnabled)
             }
 
-            Section(header: Text(L10n.tr("Audio")), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Leave disabled when listening through Mac built-in speakers or AirPods.")) {
+            Section(header: Text(L10n.tr("Audio")), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Leave disabled when listening through Mac built-in speakers or AirPods.".localized)) {
                 Toggle(L10n.tr("Audio Passthrough (Atmos / DTS)"), isOn: $enableAudioPassthrough)
             }
             
             Section(header: Text(L10n.tr("Languages"))) {
                 Picker(L10n.tr("Default Audio"), selection: $defaultAudioLang) {
-                    ForEach(audioLanguages, id: \.self) { Text($0).tag($0) }
+                    ForEach(audioLanguages, id: \.self) { Text($0.localized).tag($0) }
                 }
                 Picker(L10n.tr("Default Subtitles"), selection: $defaultSubLang) {
-                    ForEach(subtitleLanguages, id: \.self) { Text($0).tag($0) }
+                    ForEach(subtitleLanguages, id: \.self) { Text($0.localized).tag($0) }
                 }
             }
         }
@@ -623,6 +623,7 @@ struct PlaybackSettingsView: View {
 
 // MARK: - 4. Advanced Settings
 struct AdvancedSettingsView: View {
+    @ObservedObject var languageManager = LanguageManager.shared
     @AppStorage("stremioCacheGB") private var stremioCacheGB = 2
     @State private var cacheUsage = ""
     @State private var usedBytes: Int64 = 0
@@ -642,10 +643,10 @@ struct AdvancedSettingsView: View {
     var body: some View {
         Form {
             Section(
-                header: Text("Storage"),
-                footer: Text("Torrent streams buffer to disk and the least-recently-watched titles are evicted automatically when the limit is reached. Changing the limit applies immediately.")
+                header: Text("Storage".localized),
+                footer: Text("Torrent streams buffer to disk and the least-recently-watched titles are evicted automatically when the limit is reached. Changing the limit applies immediately.".localized)
             ) {
-                Picker("Torrent Cache Limit", selection: $stremioCacheGB) {
+                Picker("Torrent Cache Limit".localized, selection: $stremioCacheGB) {
                     ForEach(cacheOptions, id: \.self) { gb in
                         Text("\(gb) GB").tag(gb)
                     }
@@ -663,10 +664,10 @@ struct AdvancedSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("Disk Cache Used", systemImage: "internaldrive.fill")
+                        Label("Disk Cache Used".localized, systemImage: "internaldrive.fill")
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
-                        Text(cacheUsage.isEmpty ? "Calculating…" : "\(cacheUsage) of \(stremioCacheGB) GB")
+                        Text(cacheUsage.isEmpty ? "Calculating…".localized : "%@ of %d GB".localizedFormat(cacheUsage, stremioCacheGB))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
@@ -701,7 +702,7 @@ struct AdvancedSettingsView: View {
                             } else {
                                 Image(systemName: "photo.badge.arrow.down")
                             }
-                            Text("Clear Images")
+                            Text("Clear Images".localized)
                         }
                     }
                     .buttonStyle(.bordered)
@@ -714,7 +715,7 @@ struct AdvancedSettingsView: View {
                             } else {
                                 Image(systemName: "trash")
                             }
-                            Text("Purge Torrent Cache")
+                            Text("Purge Torrent Cache".localized)
                         }
                     }
                     .buttonStyle(.bordered)
@@ -723,7 +724,7 @@ struct AdvancedSettingsView: View {
                 .padding(.top, 2)
             }
 
-            Section(header: Text("About")) {
+            Section(header: Text("About".localized)) {
                 HStack(spacing: 14) {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
@@ -736,7 +737,7 @@ struct AdvancedSettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Flux")
                             .font(.system(size: 15, weight: .bold))
-                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                        Text("Version %@".localizedFormat(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -746,7 +747,7 @@ struct AdvancedSettingsView: View {
                     Button(action: {
                         updateManager.checkForUpdates()
                     }) {
-                        Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Check for Updates…".localized, systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -809,6 +810,7 @@ struct AdvancedSettingsView: View {
 struct AddonsSettingsTabView: View {
     @ObservedObject var addonManager = AddonManager.shared
     @ObservedObject var authManager = AuthManager.shared
+    @ObservedObject var languageManager = LanguageManager.shared
     @State private var newAddonUrl = ""
     @State private var isAdding = false
     @State private var isSyncing = false
@@ -824,11 +826,11 @@ struct AddonsSettingsTabView: View {
                         .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.8), .cyan.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Addon Store & Directory")
+                        Text("Addon Store & Directory".localized)
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
                         
-                        Text("Explore streaming providers, platforms, and subtitle extensions.")
+                        Text("Explore streaming providers, platforms, and subtitle extensions.".localized)
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.6))
                     }
@@ -842,7 +844,7 @@ struct AddonsSettingsTabView: View {
                         HStack(spacing: 5) {
                             Image(systemName: "safari")
                                 .font(.system(size: 11, weight: .bold))
-                            Text("Web Store ↗")
+                            Text("Web Store ↗".localized)
                                 .font(.system(size: 12, weight: .semibold))
                         }
                         .padding(.horizontal, 12)
@@ -856,14 +858,14 @@ struct AddonsSettingsTabView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .help("Open Flux Addon Web Store in browser with auto-login")
+                    .help("Open Flux Addon Web Store in browser with auto-login".localized)
                 }
                 .padding(.vertical, 4)
             }
             
             // Installed Addons List
             Section(header: HStack {
-                Text("Installed Addons (\(addonManager.addons.count))")
+                Text("Installed Addons (%d)".localizedFormat(addonManager.addons.count))
                 
                 Spacer()
                 
@@ -885,7 +887,7 @@ struct AddonsSettingsTabView: View {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 11, weight: .bold))
                         }
-                        Text(isSyncing ? "Syncing…" : "Refresh")
+                        Text(isSyncing ? "Syncing…".localized : "Refresh".localized)
                             .font(.system(size: 11.5, weight: .semibold))
                     }
                     .padding(.horizontal, 9)
@@ -900,10 +902,10 @@ struct AddonsSettingsTabView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSyncing)
-                .help("Refresh installed addons from Flux Cloud")
+                .help("Refresh installed addons from Flux Cloud".localized)
             }) {
                 if addonManager.addons.isEmpty {
-                    Text("No addons installed.")
+                    Text("No addons installed.".localized)
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(addonManager.addons) { addon in
@@ -932,7 +934,7 @@ struct AddonsSettingsTabView: View {
                                         .font(.system(size: 13, weight: .semibold))
                                     
                                     if addon.isStock {
-                                        Text("STOCK")
+                                        Text("STOCK".localized)
                                             .font(.system(size: 9, weight: .heavy))
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1.5)
@@ -961,7 +963,7 @@ struct AddonsSettingsTabView: View {
                                         .foregroundColor(.red.opacity(0.85))
                                 }
                                 .buttonStyle(.borderless)
-                                .help("Uninstall addon")
+                                .help("Uninstall addon".localized)
                             }
                             
                             // Configure Gear Button (Left of Toggle)
@@ -974,7 +976,7 @@ struct AddonsSettingsTabView: View {
                                         .foregroundColor(.white.opacity(0.75))
                                 }
                                 .buttonStyle(.borderless)
-                                .help("Configure addon in browser")
+                                .help("Configure addon in browser".localized)
                             }
                             
                             // Toggle Switch (Far Right Alignment)
@@ -993,11 +995,11 @@ struct AddonsSettingsTabView: View {
             // Install from URL Section (Spacious Liquid Glass Input)
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Install Custom Addon")
+                    Text("Install Custom Addon".localized)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundColor(.white)
                     
-                    Text("Paste any manifest URL (e.g. https://domain.com/manifest.json) or stremio:// link")
+                    Text("Paste any manifest URL (e.g. https://domain.com/manifest.json) or stremio:// link".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.55))
                     
@@ -1025,7 +1027,7 @@ struct AddonsSettingsTabView: View {
                                     Image(systemName: "plus.circle.fill")
                                         .font(.system(size: 11, weight: .bold))
                                 }
-                                Text("Install")
+                                Text("Install".localized)
                                     .font(.system(size: 11.5, weight: .semibold))
                             }
                             .padding(.horizontal, 12)

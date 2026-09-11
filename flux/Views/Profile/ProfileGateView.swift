@@ -4,6 +4,7 @@ import SwiftUI
 /// glassmorphism theme (dark mesh gradient, glass panels, capsule buttons).
 struct ProfileGateView: View {
     @ObservedObject private var profileManager = ProfileManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var isCreating = false
     @State private var isManaging = false
     @State private var editingProfile: UserProfile? = nil
@@ -21,9 +22,9 @@ struct ProfileGateView: View {
             if isCreating || editingProfile != nil || profileManager.isFirstRun {
                 if let editing = editingProfile {
                     ProfileCreationView(
-                        title: "Edit Profile",
+                        title: "Edit Profile".localized,
                         profileId: editing.id,
-                        initialName: editing.name,
+                        initialName: editing.displayName,
                         initialAvatarID: editing.avatarID,
                         isKids: editing.isKids,
                         onCreate: { _, _ in },
@@ -35,7 +36,7 @@ struct ProfileGateView: View {
                     )
                 } else {
                     ProfileCreationView(
-                        title: profileManager.isFirstRun ? "Create Your Profile" : "Add a Profile",
+                        title: profileManager.isFirstRun ? "Create Your Profile".localized : "Add a Profile".localized,
                         onCreate: { name, avatar in
                             profileManager.createProfile(name: name, avatarID: avatar)
                             isCreating = false
@@ -50,8 +51,8 @@ struct ProfileGateView: View {
         .sheet(isPresented: $showingKidsFirstTimeSetupSheet) {
             if let kidsProfile = pendingProfileToEnter {
                 PINEntrySheet(mode: .setup(
-                    title: "Protect Kids Profile",
-                    subtitle: "Create a 4-digit PIN required to exit Kids mode",
+                    title: "Protect Kids Profile".localized,
+                    subtitle: "Create a 4-digit PIN required to exit Kids mode".localized,
                     profileId: kidsProfile.id,
                     onSuccess: { _ in
                         withAnimation(.easeInOut(duration: 0.25)) {
@@ -65,8 +66,8 @@ struct ProfileGateView: View {
         .sheet(isPresented: $showingEnterPinSheet) {
             if let profile = pendingProfileToEnter {
                 PINEntrySheet(mode: .verify(
-                    title: profile.name,
-                    subtitle: "Enter 4-digit PIN to access \(profile.name)",
+                    title: profile.displayName,
+                    subtitle: String.localizedFormat("Enter 4-digit PIN to access %@", profile.displayName),
                     profileId: profile.id,
                     onSuccess: {
                         withAnimation(.easeInOut(duration: 0.25)) {
@@ -77,18 +78,18 @@ struct ProfileGateView: View {
                 ))
             }
         }
-        .alert("Delete \"\(deletingProfile?.name ?? "")\"?", isPresented: Binding(
+        .alert(String.localizedFormat("Delete \"%@\"?", deletingProfile?.displayName ?? ""), isPresented: Binding(
             get: { deletingProfile != nil },
             set: { if !$0 { deletingProfile = nil } }
         )) {
-            Button("Delete", role: .destructive) {
+            Button("Delete".localized, role: .destructive) {
                 if let p = deletingProfile { profileManager.deleteProfile(p) }
                 deletingProfile = nil
                 if profileManager.profiles.isEmpty { isManaging = false }
             }
-            Button("Cancel", role: .cancel) { deletingProfile = nil }
+            Button("Cancel".localized, role: .cancel) { deletingProfile = nil }
         } message: {
-            Text("This profile's watch history, watchlist, and recommendations will be removed.")
+            Text("This profile's watch history, watchlist, and recommendations will be removed.".localized)
         }
     }
 
@@ -97,11 +98,11 @@ struct ProfileGateView: View {
             Spacer()
 
             VStack(spacing: 10) {
-                Text("Who's Watching?")
+                Text("Who's Watching?".localized)
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
 
-                Text("Pick a profile to jump back in")
+                Text("Pick a profile to jump back in".localized)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
             }
@@ -147,7 +148,7 @@ struct ProfileGateView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { isManaging.toggle() }
                 } label: {
-                    Text(isManaging ? "Done" : "Manage Profiles")
+                    Text(isManaging ? "Done".localized : "Manage Profiles".localized)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(isManaging ? 1 : 0.55))
                         .padding(.horizontal, 22)
@@ -212,12 +213,12 @@ struct ManageableProfileTile: View {
                     }
 
                 HStack(spacing: 6) {
-                    Text(profile.name)
+                    Text(profile.displayName)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(isHovering && !isManaging ? .white : .white.opacity(0.6))
 
                     if profile.isKids {
-                        Text("KIDS")
+                        Text("KIDS".localized)
                             .font(.system(size: 9, weight: .heavy, design: .rounded))
                             .foregroundStyle(.black)
                             .padding(.horizontal, 5)
@@ -265,7 +266,7 @@ struct AddProfileTile: View {
                             .foregroundStyle(.white.opacity(isHovering ? 1 : 0.45))
                     }
 
-                Text("Add Profile")
+                Text("Add Profile".localized)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(isHovering ? .white : .white.opacity(0.6))
             }
@@ -329,6 +330,7 @@ struct ProfileCreationView: View {
     @State private var isHoveringCreate = false
     @State private var showingSetPin = false
     @ObservedObject private var lockManager = ParentalLockManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -347,7 +349,7 @@ struct ProfileCreationView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.55))
 
-                    TextField("Profile name", text: $name)
+                    TextField("Profile name".localized, text: $name)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white)
@@ -370,7 +372,7 @@ struct ProfileCreationView: View {
                 .glassEffect(.regular.interactive(), in: .capsule)
 
                 if isKids {
-                    Text("Stock Kids profile cannot be renamed")
+                    Text("Stock Kids profile cannot be renamed".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.5))
                         .offset(y: -10)
@@ -384,7 +386,7 @@ struct ProfileCreationView: View {
                                 selectedCategory = cat
                             }
                         } label: {
-                            Text(cat.rawValue)
+                            Text(cat.localizedName)
                                 .font(.system(size: 12, weight: selectedCategory == cat ? .bold : .medium))
                                 .foregroundStyle(selectedCategory == cat ? .white : .white.opacity(0.6))
                                 .padding(.horizontal, 14)
@@ -428,10 +430,10 @@ struct ProfileCreationView: View {
                             .foregroundStyle(lockManager.hasPin(for: pid) ? Color.yellow : Color.white.opacity(0.6))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(isKids ? "Exit PIN Protection" : "Profile Lock (PIN)")
+                            Text(isKids ? "Exit PIN Protection".localized : "Profile Lock (PIN)".localized)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.white)
-                            Text(lockManager.hasPin(for: pid) ? "4-digit PIN is active" : (isKids ? "Kids can exit freely without PIN" : "Anyone can enter without PIN"))
+                            Text(lockManager.hasPin(for: pid) ? "4-digit PIN is active".localized : (isKids ? "Kids can exit freely without PIN".localized : "Anyone can enter without PIN".localized))
                                 .font(.system(size: 11))
                                 .foregroundStyle(.white.opacity(0.55))
                         }
@@ -439,14 +441,14 @@ struct ProfileCreationView: View {
                         Spacer()
 
                         if lockManager.hasPin(for: pid) {
-                            Button("Change PIN") { showingSetPin = true }
+                            Button("Change PIN".localized) { showingSetPin = true }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
-                            Button("Remove") { lockManager.removePin(for: pid) }
+                            Button("Remove".localized) { lockManager.removePin(for: pid) }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                         } else {
-                            Button(isKids ? "Set Exit PIN" : "Set PIN") { showingSetPin = true }
+                            Button(isKids ? "Set Exit PIN".localized : "Set PIN".localized) { showingSetPin = true }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                         }
@@ -468,7 +470,7 @@ struct ProfileCreationView: View {
                         onCreate(name, selectedAvatar)
                     }
                 } label: {
-                    Text(onUpdate != nil ? "Save Changes" : "Create Profile")
+                    Text(onUpdate != nil ? "Save Changes".localized : "Create Profile".localized)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(canCreate ? .black : .white.opacity(0.4))
                         .padding(.horizontal, 48)
@@ -484,7 +486,7 @@ struct ProfileCreationView: View {
                 .onHover { h in isHoveringCreate = h }
 
                 if let onCancel {
-                    Button("Cancel") { onCancel() }
+                    Button("Cancel".localized) { onCancel() }
                         .buttonStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.5))
@@ -499,8 +501,8 @@ struct ProfileCreationView: View {
         .sheet(isPresented: $showingSetPin) {
             if let pid = profileId {
                 PINEntrySheet(mode: .setup(
-                    title: isKids ? "Exit PIN Protection" : "Set Profile PIN",
-                    subtitle: isKids ? "Enter 4-digit PIN required to exit Kids profile" : "Enter 4-digit PIN to lock \(name.isEmpty ? "profile" : name)",
+                    title: isKids ? "Exit PIN Protection".localized : "Set Profile PIN".localized,
+                    subtitle: isKids ? "Enter 4-digit PIN required to exit Kids profile".localized : String.localizedFormat("Enter 4-digit PIN to lock %@", name.isEmpty ? "profile".localized : name),
                     profileId: pid
                 ))
             }

@@ -240,7 +240,7 @@ struct DetailView: View {
                                     .background(Capsule().fill(Color.white.opacity(0.18)))
                                     .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
                             } else if let genre = displayItem.genres?.first, !genre.isEmpty {
-                                Text(genre.uppercased())
+                                Text(genre.localized.uppercased())
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
@@ -251,7 +251,7 @@ struct DetailView: View {
                                     .frame(width: 80, height: 14)
                                     .shimmer()
                             } else {
-                                Text(displayItem.category.uppercased())
+                                Text(displayItem.localizedCategory.uppercased())
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .tracking(1.5)
@@ -268,10 +268,10 @@ struct DetailView: View {
                             
                             // Metadata Row
                             HStack(spacing: 6) {
-                                Text(displayItem.category)
+                                Text(displayItem.localizedCategory)
                                 if let genres = displayItem.genres, !genres.isEmpty {
                                     Text("•")
-                                    Text(genres.prefix(2).joined(separator: ", "))
+                                    Text(genres.prefix(2).map { $0.localized }.joined(separator: ", "))
                                 } else if isLoadingDetails {
                                     Text("•")
                                     RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -363,7 +363,7 @@ struct DetailView: View {
                                             HStack(spacing: 8) {
                                                 Image(systemName: "play.fill")
                                                     .font(.system(size: 14, weight: .bold))
-                                                Text("Play")
+                                                Text("Play".localized)
                                                     .font(.system(size: 15, weight: .bold))
                                             }
                                             .foregroundStyle(.black)
@@ -402,7 +402,7 @@ struct DetailView: View {
                                             }
                                             openWindow(id: "player", value: displayItem.id)
                                         } label: {
-                                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+                                            Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                                         }
                                     }
                                     
@@ -417,8 +417,8 @@ struct DetailView: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .help(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
-                                    .accessibilityLabel(userData.isInWatchlist(displayItem) ? "Remove from Watchlist" : "Add to Watchlist")
+                                    .help(userData.isInWatchlist(displayItem) ? "In Watchlist".localized : "Add to Watchlist".localized)
+                                    .accessibilityLabel(userData.isInWatchlist(displayItem) ? "Remove from Watchlist".localized : "Add to Watchlist".localized)
 
                                     // Mark as Watched / Unwatched toggle
                                     Button(action: {
@@ -435,8 +435,8 @@ struct DetailView: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .help(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
-                                    .accessibilityLabel(userData.isWatched(displayItem) ? "Mark as unwatched" : "Mark as watched")
+                                    .help(userData.isWatched(displayItem) ? "Mark as unwatched".localized : "Mark as watched".localized)
+                                    .accessibilityLabel(userData.isWatched(displayItem) ? "Mark as unwatched".localized : "Mark as watched".localized)
 
                                     // Love — strongest taste signal for the For You rail
                                     Button(action: {
@@ -451,7 +451,7 @@ struct DetailView: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
+                                    .help(tasteProfile.isLoved(displayItem) ? "Loved".localized : "Love this".localized)
 
                                     // Custom user lists (Collections)
                                     Button(action: { showCollectionsPopover = true }) {
@@ -466,7 +466,7 @@ struct DetailView: View {
                                     .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
                                         AddToCollectionView(item: displayItem)
                                     }
-                                    .help("Add to list")
+                                    .help("Add to list".localized)
 
                                     // Download best stream for offline viewing
                                     Button {
@@ -492,7 +492,7 @@ struct DetailView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .disabled(isDownloading)
-                                    .help("Download best stream for offline")
+                                    .help("Download best stream for offline".localized)
                                 } else {
                                     // UPCOMING CONTENT MASTER LAYOUT (Apple TV style)
                                     Button(action: {
@@ -501,7 +501,7 @@ struct DetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: userData.isInWatchlist(displayItem) ? "checkmark" : "plus")
                                                 .font(.system(size: 15, weight: .bold))
-                                            Text(userData.isInWatchlist(displayItem) ? "In Watchlist" : "Add to Watchlist")
+                                            Text(userData.isInWatchlist(displayItem) ? "In Watchlist".localized : "Add to Watchlist".localized)
                                                 .font(.system(size: 15, weight: .bold))
                                         }
                                         .foregroundStyle(.black)
@@ -526,7 +526,7 @@ struct DetailView: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
-                                    .help(tasteProfile.isLoved(displayItem) ? "Loved" : "Love this")
+                                    .help(tasteProfile.isLoved(displayItem) ? "Loved".localized : "Love this".localized)
 
                                     // Custom user lists (Collections)
                                     Button(action: { showCollectionsPopover = true }) {
@@ -541,7 +541,7 @@ struct DetailView: View {
                                     .popover(isPresented: $showCollectionsPopover, arrowEdge: .bottom) {
                                         AddToCollectionView(item: displayItem)
                                     }
-                                    .help("Add to list")
+                                    .help("Add to list".localized)
 
                                 }
                             }
@@ -559,7 +559,7 @@ struct DetailView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 if !castNames.isEmpty {
                                     (
-                                        Text("Starring ")
+                                        Text("Starring ".localized)
                                             .foregroundColor(Color(white: 0.6))
                                         + Text(castNames.joined(separator: ", "))
                                             .foregroundColor(.white)
@@ -571,7 +571,7 @@ struct DetailView: View {
                                 
                                 if hasDirector {
                                     (
-                                        Text("Director ")
+                                        Text("Director ".localized)
                                             .foregroundColor(Color(white: 0.6))
                                         + Text(directorName!)
                                             .foregroundColor(.white)
@@ -611,7 +611,7 @@ struct DetailView: View {
                                         // rail + sidebar), positioned via this frame.
                                         Button {
                                             SeasonDropdownController.shared.seasons = regularSeasons
-                                            SeasonDropdownController.shared.selectedName = selectedSeason?.name ?? regularSeasons.first?.name ?? "Season 1"
+                                            SeasonDropdownController.shared.selectedName = selectedSeason?.localizedName ?? regularSeasons.first?.localizedName ?? "Season 1".localized
                                             SeasonDropdownController.shared.onSelect = { season in
                                                 selectedSeason = season
                                                 Task { await loadEpisodes(for: season) }
@@ -630,7 +630,7 @@ struct DetailView: View {
                                             }
                                         } label: {
                                             HStack(spacing: 8) {
-                                                Text(selectedSeason?.name ?? regularSeasons.first?.name ?? "Season 1")
+                                                Text(selectedSeason?.localizedName ?? regularSeasons.first?.localizedName ?? "Season 1".localized)
                                                     .font(.headline)
                                                     .fontWeight(.bold)
                                                     .foregroundStyle(.white)
@@ -702,7 +702,7 @@ struct DetailView: View {
                         
                         if !bonusContent.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Bonus Content")
+                                Text("Bonus Content".localized)
                                     .font(.title2)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.white)
@@ -722,7 +722,7 @@ struct DetailView: View {
 
                         if !trailers.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Trailers")
+                                Text("Trailers".localized)
                                     .font(.title2)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.white)
@@ -742,7 +742,7 @@ struct DetailView: View {
                         
                         if !relatedItems.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
-                                ListSectionHeader(title: "Related", value: MediaListView.ListType.fixed(title: "Related", items: relatedItems))
+                                ListSectionHeader(title: "Related".localized, value: MediaListView.ListType.fixed(title: "Related".localized, items: relatedItems))
                                     .padding(.leading, 268)
                                     .padding(.trailing, 60)
                                 
@@ -862,7 +862,7 @@ struct DetailView: View {
     @ViewBuilder
     private func castSection(cast: [CastMember]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ListSectionHeader(title: "Cast & Crew", value: CastListNavigation(cast: cast))
+            ListSectionHeader(title: "Cast & Crew".localized, value: CastListNavigation(cast: cast))
                 .padding(.leading, 268)
                 .padding(.trailing, 60)
 
@@ -898,7 +898,7 @@ struct DetailView: View {
     private var whereToWatchSection: some View {
         if let providers = displayItem.watchProviders, !providers.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Where to Watch")
+                Text("Where to Watch".localized)
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
@@ -939,7 +939,7 @@ struct DetailView: View {
             .padding(.trailing, 60)
         } else {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Where to Watch")
+                Text("Where to Watch".localized)
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
@@ -951,10 +951,10 @@ struct DetailView: View {
                             .foregroundStyle(.blue)
                         
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Find on JustWatch")
+                            Text("Find on JustWatch".localized)
                                 .font(.headline)
                                 .foregroundStyle(.white)
-                            Text("Check region-specific availability and providers")
+                            Text("Check region-specific availability and providers".localized)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -977,7 +977,7 @@ struct DetailView: View {
     @ViewBuilder
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("About")
+            Text("About".localized)
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(.white)
@@ -988,7 +988,7 @@ struct DetailView: View {
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
                 
-                Text(displayItem.genres?.joined(separator: ", ").uppercased() ?? "DRAMA")
+                Text(displayItem.genres?.map { $0.localized }.joined(separator: ", ").uppercased() ?? "DRAMA".localized)
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
@@ -1011,25 +1011,25 @@ struct DetailView: View {
     @ViewBuilder
     private var informationSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Information")
+            Text("Information".localized)
                 .font(.headline).fontWeight(.semibold)
                 .foregroundStyle(.white)
             
             VStack(alignment: .leading, spacing: 16) {
-                InfoDetailRow(label: "Released", value: displayItem.displayReleaseDate ?? "N/A")
+                InfoDetailRow(label: "Released".localized, value: displayItem.displayReleaseDate ?? "N/A")
                 if let cert = displayItem.certification, !cert.isEmpty {
-                    InfoDetailRow(label: "Rated", value: cert)
+                    InfoDetailRow(label: "Rated".localized, value: cert)
                 }
                 if let adv = displayItem.contentAdvisories, !adv.isEmpty {
-                    InfoDetailRow(label: "Content Advisories", value: adv.joined(separator: ", "))
+                    InfoDetailRow(label: "Content Advisories".localized, value: adv.joined(separator: ", "))
                 }
                 if let director = displayItem.director, !director.isEmpty && director != "N/A" {
-                    InfoDetailRow(label: "Director", value: director)
+                    InfoDetailRow(label: "Director".localized, value: director)
                 }
                 if displayItem.category != "TV Show", let runtime = displayItem.runtime, !runtime.isEmpty {
-                    InfoDetailRow(label: "Runtime", value: runtime)
+                    InfoDetailRow(label: "Runtime".localized, value: runtime)
                 }
-                InfoDetailRow(label: displayItem.displayOriginCountryTitle, value: displayItem.displayOriginCountry ?? "N/A")
+                InfoDetailRow(label: displayItem.displayOriginCountryTitle.localized, value: displayItem.displayOriginCountry ?? "N/A")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1038,14 +1038,14 @@ struct DetailView: View {
     @ViewBuilder
     private var languagesSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Languages")
+            Text("Languages".localized)
                 .font(.headline).fontWeight(.semibold)
                 .foregroundStyle(.white)
             
             VStack(alignment: .leading, spacing: 16) {
-                InfoDetailRow(label: "Original Audio", value: displayItem.displayOriginalLanguage ?? "English")
+                InfoDetailRow(label: "Original Audio".localized, value: displayItem.displayOriginalLanguage?.localized ?? "English".localized)
                 LanguagesExpandableRow(
-                    title: "Audio",
+                    title: "Audio".localized,
                     items: displayItem.displayAudioTracks,
                     onMore: {
                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -1061,13 +1061,13 @@ struct DetailView: View {
     @ViewBuilder
     private var accessibilitySection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Accessibility")
+            Text("Accessibility".localized)
                 .font(.headline).fontWeight(.semibold)
                 .foregroundStyle(.white)
             
             VStack(alignment: .leading, spacing: 16) {
-                InfoDetailBlock(label: "SDH", value: "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information.")
-                InfoDetailBlock(label: "AD", value: "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision.")
+                InfoDetailBlock(label: "SDH", value: "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information.".localized)
+                InfoDetailBlock(label: "AD", value: "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision.".localized)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1347,7 +1347,7 @@ enum LanguageModalType: Identifiable {
     case audio
     
     var id: String { "audio" }
-    var title: String { "Audio" }
+    var title: String { "Audio".localized }
 }
 
 struct LanguagesExpandableRow: View {
@@ -1365,7 +1365,7 @@ struct LanguagesExpandableRow: View {
             let isLong = fullText.count > 95 || items.count > 4
             
             if !isLong {
-                Text(fullText.isEmpty ? "None" : fullText)
+                Text(fullText.isEmpty ? "None".localized : fullText)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.85))
             } else {
@@ -1373,7 +1373,7 @@ struct LanguagesExpandableRow: View {
                 Button(action: onMore) {
                     (Text(truncated + "... ")
                         .foregroundStyle(.white.opacity(0.85))
-                     + Text("more")
+                     + Text("more".localized)
                         .foregroundStyle(.secondary)
                         .fontWeight(.medium))
                     .font(.subheadline)
@@ -1423,7 +1423,7 @@ struct LanguageTracksModalView: View {
             HStack {
                 Spacer()
                 Button(action: onDismiss) {
-                    Text("Done")
+                    Text("Done".localized)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 22)
@@ -1518,7 +1518,7 @@ struct LiquidEpisodeCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Spacer()
                 
-                Text("EPISODE \(episode.episodeNumber)")
+                Text(String.localizedFormat("EPISODE %d", episode.episodeNumber))
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white.opacity(0.8))
                     .tracking(1)
@@ -1572,7 +1572,7 @@ struct LiquidEpisodeCard: View {
                                 openWindow(id: "player", value: item.id)
                             }
                         } label: {
-                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+                            Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                         }
 
                         Button {
@@ -1586,7 +1586,7 @@ struct LiquidEpisodeCard: View {
                                 )
                             }
                         } label: {
-                            Label("Mark as Watched", systemImage: "checkmark.circle")
+                            Label("Mark as Watched".localized, systemImage: "checkmark.circle")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -1886,7 +1886,7 @@ extension DetailView {
                 }
 
                 VStack(spacing: 8) {
-                    Text("Content Restricted")
+                    Text("Content Restricted".localized)
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
 
@@ -1901,7 +1901,7 @@ extension DetailView {
                     Button(action: {
                         dismiss()
                     }) {
-                        Text("Go Back")
+                        Text("Go Back".localized)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20)
@@ -1919,7 +1919,7 @@ extension DetailView {
                         HStack(spacing: 6) {
                             Image(systemName: "lock.open.fill")
                                 .font(.system(size: 12))
-                            Text("Unlock with PIN")
+                            Text("Unlock with PIN".localized)
                                 .font(.system(size: 13, weight: .semibold))
                         }
                         .foregroundStyle(.black)
@@ -1948,8 +1948,8 @@ extension DetailView {
         }
         .sheet(isPresented: $showingPinToSwitch) {
             PINEntrySheet(mode: .verify(
-                title: "Parental Unlock",
-                subtitle: "Enter PIN to switch to an adult profile",
+                title: "Parental Unlock".localized,
+                subtitle: "Enter PIN to switch to an adult profile".localized,
                 profileId: profileManager.currentProfile?.id,
                 onSuccess: {
                     profileManager.switchToProfileSelection()
@@ -1960,8 +1960,8 @@ extension DetailView {
 
     private var restrictedReasonText: String {
         if let cert = displayItem.certification, !cert.isEmpty {
-            return "This title is rated \(cert) and cannot be viewed in Kids Profile."
+            return String.localizedFormat("This title is rated %@ and cannot be viewed in Kids Profile.", cert)
         }
-        return "This title is not approved for Kids Profile."
+        return "This title is not approved for Kids Profile.".localized
     }
 }

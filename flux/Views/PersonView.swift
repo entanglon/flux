@@ -9,6 +9,8 @@ struct PersonView: View {
         case all = "All"
         case movies = "Movies"
         case tv = "TV Shows"
+
+        var localizedTitle: String { rawValue.localized }
     }
 
     @State private var details: TMDBPersonDetail?
@@ -154,7 +156,7 @@ struct PersonView: View {
                         .lineLimit(2)
 
                     if let dept = details?.knownForDepartment, !dept.isEmpty {
-                        Text("Known for \(dept)")
+                        Text(String.localizedFormat("Known for %@", dept.localized))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.7))
                     }
@@ -188,7 +190,7 @@ struct PersonView: View {
     private var biographySection: some View {
         if let bio = details?.biography, !bio.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Biography")
+                Text("Biography".localized)
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
@@ -202,7 +204,7 @@ struct PersonView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { bioExpanded.toggle() }
                 } label: {
-                    Text(bioExpanded ? "Show Less" : "Read More")
+                    Text(bioExpanded ? "Show Less".localized : "Read More".localized)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.blue)
                 }
@@ -223,13 +225,13 @@ struct PersonView: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .center) {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
-                    Text("Filmography")
+                    Text("Filmography".localized)
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundStyle(.white)
 
                     if !filteredCredits.isEmpty {
-                        Text("\(filteredCredits.count) CREDITS")
+                        Text(String.localizedFormat("%d CREDITS", filteredCredits.count))
                             .font(.system(size: 11, weight: .bold))
                             .tracking(1.5)
                             .foregroundStyle(.white.opacity(0.6))
@@ -250,7 +252,7 @@ struct PersonView: View {
                     Image(systemName: "film.stack")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary)
-                    Text("No \(selectedTab.rawValue.lowercased()) found")
+                    Text(String.localizedFormat("No %@ found", selectedTab.localizedTitle.lowercased()))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 160)

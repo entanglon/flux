@@ -4,6 +4,7 @@ import SwiftUI
 struct EditDisplayNameSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var authManager = AuthManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var nameDraft: String = ""
     @State private var isSaving: Bool = false
     @FocusState private var isFocused: Bool
@@ -17,11 +18,11 @@ struct EditDisplayNameSheet: View {
                     .foregroundStyle(.blue.gradient)
                     .padding(.bottom, 2)
 
-                Text("Display Name")
+                Text("Display Name".localized)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
 
-                Text("Choose how your name appears across profiles and library sync.")
+                Text("Choose how your name appears across profiles and library sync.".localized)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -34,7 +35,7 @@ struct EditDisplayNameSheet: View {
                     Image(systemName: "person.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
-                    TextField("Enter your name…", text: $nameDraft)
+                    TextField("Enter your name…".localized, text: $nameDraft)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .focused($isFocused)
@@ -52,7 +53,7 @@ struct EditDisplayNameSheet: View {
 
             // Action Buttons
             HStack(spacing: 12) {
-                Button("Cancel") {
+                Button("Cancel".localized) {
                     authManager.markDisplayNameAsCustomized()
                     dismiss()
                 }
@@ -66,7 +67,7 @@ struct EditDisplayNameSheet: View {
                             .controlSize(.small)
                             .padding(.horizontal, 12)
                     } else {
-                        Text("Save Name")
+                        Text("Save Name".localized)
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 8)
                     }

@@ -14,6 +14,41 @@ When the user asks for a change, DO NOT implement blindly. First:
 - User said "hero carousel only shows one image" — I rewrote the entire timer without first verifying. The real cause was likely the dual-source data conflict (Cinemeta + TMDB fighting), not the timer itself.
 - User said "rails aren't showing up-to-date data" — I halved cache TTLs without asking. The staleness might have been caused by the data source conflict, not cache duration.
 
+### Localization-First Development (Added Sep 11, 2026)
+Whenever building or modifying any user-facing feature for Flux (new views, sheets, alerts, settings, navigation items, buttons, badges, diagnostic overlays, or error messages), always implement localization from the outset:
+1. **Zero Hardcoded English in UI**: Every user-facing string must use `.localized` or `String.localizedFormat(...)` / `"...".localizedFormat(...)`. No raw English string literals should be rendered directly in SwiftUI views.
+2. **Comprehensive 10-Language Matrix**: Whenever introducing a new key, add corresponding translations across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) to `LanguageManager.swift`.
+3. **Guard Against Swift Dictionary Literal Duplicates**: Swift does not detect duplicate keys in dictionary literals at compile time, but throws a fatal crash at runtime during initialization (`Fatal error: Dictionary literal contains duplicate keys`). Always verify keys are unique before committing.
+4. **Preserve Internal Keys in Canonical English**: TMDB API parameters/genres, Stremio addon IDs/types (`movie`, `series`, `channel`), PocketBase schema fields, and UserDefaults system keys must remain canonical English. Only user-facing display text is localized.
+5. **Dynamic Language Observation**: Views must observe `LanguageManager.shared` (e.g., `@ObservedObject var languageManager = LanguageManager.shared`) so changing language in Settings (`⌘,`) dynamically updates the view in real-time without app restart.
+
+---
+
+## Sep 11, 2026 — COMPLETED: 100% App-Wide Multi-Language Localization Matrix (10 Languages)
+
+**Status**:
+1. **Complete Multi-Language Coverage**:
+   - Expanded `LanguageManager.swift` with over 550 localization keys across all 10 supported languages: English (`en`), Japanese (`ja`), Spanish (`es`), French (`fr`), German (`de`), Italian (`it`), Portuguese (`pt`), Korean (`ko`), Hindi (`hi`), and Chinese (`zh`).
+   - Eliminated all hardcoded English strings across all application surfaces:
+     - Navigation sidebar, tab labels, search placeholder, instant suggestion chips, and genre browse buttons.
+     - Home, Movies, TV Shows, and Trending discovery rails, section headers, badges, and empty/error states.
+     - Detail view hero, metadata chips, synopsis, seasons/episodes selectors, and "Mark as Watched" toggles.
+     - Cast & crew list, character role formatting, person biography views, and known-for rails.
+     - Full video player controls, volume/mute toggles, playback rate, chapter sheets, audio/subtitle dialogs, and stream discovery search statuses.
+     - Stream card badges (`%d seeds`, `Fast HTTP`, `Play`), technical specifications float (`RELEASE TITLE / FILENAME`, `Container`, `Codec`, `Dynamic Range`, `Audio`, `Direct HTTP`, `P2P Torrent`).
+     - Secret Player HUD / Playback Tuning dialog: all tabs (Diagnostics, Subtitles, Audio, Video), telemetry rows (`Video Codec / Format`, `Video Resolution`, `Framerate`, `Hardware Decoder`, `Dropped Video Frames`, `Demuxer Buffer Cache`, etc.), sliders, sync adjustment buttons, and reset options.
+     - Authentication gate & form: branding tagline, sign in/sign up toggles, text fields, action buttons, and error dialogs.
+     - Profile switcher, first-time setup flows, PIN entry keypad, error shakes, lockout timer (`Locked out. Try again in %ds`), and name editing sheet.
+     - Addon management, deep link installation modal (`DeepLinkAddonInstallModal.swift`), and permissions breakdown.
+     - Keyboard shortcuts sheet, settings window tabs, cache management, and account connection statuses.
+2. **Formatting & Deduplication**:
+   - Added dual signature support in `extension String` (`"...".localizedFormat(...)` and static `String.localizedFormat("...", ...)`).
+   - Validated and eliminated duplicate dictionary keys to prevent Swift runtime initialization crashes.
+   - Enforced canonical English for internal protocols, TMDB API parameters, and PocketBase schema payloads.
+3. **Verification**:
+   - Clean Xcode build (`** BUILD SUCCEEDED **`) with zero warnings or errors.
+   - Verified live running app in background with FluxEngine streaming server on ports 11470 and 12470.
+
 ---
 
 ## Sep 11, 2026 — COMPLETED: Continue Watching Lifecycle, Playback Tuning HUD & Lossless Logo Pipeline

@@ -297,13 +297,13 @@ struct ProfileFooter: View {
                     if let profile = profileManager.currentProfile {
                         AvatarBadge(avatarID: profile.avatarID, size: 28)
 
-                        Text(profile.name)
+                        Text(profile.displayName)
                             .font(.system(size: 13, weight: .semibold))
                             .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.9))
 
                         if profile.isKids {
-                            Text("KIDS")
+                            Text("KIDS".localized)
                                 .font(.system(size: 8, weight: .heavy, design: .rounded))
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 4)
@@ -321,11 +321,11 @@ struct ProfileFooter: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Switch profile")
+            .help("Switch profile".localized)
             .sheet(isPresented: $showingPinPrompt) {
                 PINEntrySheet(mode: .verify(
-                    title: "Parental PIN",
-                    subtitle: "Enter the 4-digit PIN to exit Kids Profile",
+                    title: "Parental PIN".localized,
+                    subtitle: "Enter the 4-digit PIN to exit Kids Profile".localized,
                     profileId: profileManager.currentProfile?.id,
                     onSuccess: {
                         profileManager.switchToProfileSelection()
@@ -341,7 +341,7 @@ struct ProfileFooter: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Settings (⌘,)")
+            .help("Settings (⌘,)".localized)
         }
     }
 }

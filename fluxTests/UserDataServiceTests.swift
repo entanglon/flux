@@ -671,5 +671,31 @@ struct UserDataServiceTests {
         // Clean up
         UserDefaults.standard.removeObject(forKey: histKey)
     }
+
+    @Test @MainActor func cloudPayloadExportsAndRestoresAppLanguage() {
+        let originalLanguage = LanguageManager.shared.currentLanguage
+        defer {
+            LanguageManager.shared.setLanguage(originalLanguage)
+        }
+
+        // 1. Set language to Japanese and verify export
+        LanguageManager.shared.setLanguage(.japanese)
+        #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) == "ja")
+
+        let payload = UserDataService.shared.exportCloudPayload()
+        #expect(payload["appLanguage"] as? String == "ja")
+
+        // 2. Change language locally to English
+        LanguageManager.shared.setLanguage(.english)
+        #expect(LanguageManager.shared.currentLanguage == .english)
+
+        // 3. Apply cloud payload containing Spanish
+        var spanishPayload = payload
+        spanishPayload["appLanguage"] = "es"
+        UserDataService.shared.applyCloudPayload(spanishPayload)
+
+        #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) == "es")
+        #expect(LanguageManager.shared.currentLanguage == .spanish)
+    }
 }
 

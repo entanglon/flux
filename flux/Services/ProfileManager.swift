@@ -409,7 +409,18 @@ final class ProfileManager: ObservableObject {
                 "isKids": p.isKids,
                 "isStock": p.isStock
             ]
-            if let snap = UserDefaults.standard.dictionary(forKey: prefix + "settings") {
+            var snap = UserDefaults.standard.dictionary(forKey: prefix + "settings") ?? [:]
+            if p.id == currentProfile?.id {
+                for key in playbackSettingKeys {
+                    if let v = UserDefaults.standard.object(forKey: key) {
+                        snap[key] = v
+                    }
+                }
+            }
+            if snap["appLanguage"] == nil, let curLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) {
+                snap["appLanguage"] = curLang
+            }
+            if !snap.isEmpty {
                 dict["settings"] = snap
             }
             if let hist = UserDefaults.standard.array(forKey: prefix + "history") as? [[String: Any]] {
@@ -515,11 +526,15 @@ final class ProfileManager: ObservableObject {
             self.profiles = sanitized
             self.ensureKidsProfile()
             self.saveProfiles()
-            if let cur = self.currentProfile, !sanitized.contains(where: { $0.id == cur.id }) {
-                if let first = sanitized.first {
-                    self.selectProfile(first)
+            if let cur = self.currentProfile {
+                if !sanitized.contains(where: { $0.id == cur.id }) {
+                    if let first = sanitized.first {
+                        self.selectProfile(first)
+                    } else {
+                        self.currentProfile = nil
+                    }
                 } else {
-                    self.currentProfile = nil
+                    self.restoreSettings(for: cur.id)
                 }
             }
         }

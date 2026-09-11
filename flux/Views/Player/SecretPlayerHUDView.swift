@@ -8,6 +8,7 @@ enum DelayUnit: String, CaseIterable {
 struct SecretPlayerHUDView: View {
     var mpv: MPVController
     var onClose: () -> Void
+    @ObservedObject private var languageManager = LanguageManager.shared
 
     enum Section: String, CaseIterable, Identifiable {
         case diagnostics = "Stats"
@@ -19,19 +20,19 @@ struct SecretPlayerHUDView: View {
 
         var title: String {
             switch self {
-            case .diagnostics: return "Stats for Nerds"
-            case .subtitles: return "Subtitles Calibration"
-            case .audio: return "Audio Sync & Boost"
-            case .video: return "Video Filters & Shaders"
+            case .diagnostics: return "Stats for Nerds".localized
+            case .subtitles: return "Subtitles Calibration".localized
+            case .audio: return "Audio Sync & Boost".localized
+            case .video: return "Video Filters & Shaders".localized
             }
         }
 
         var subtitle: String {
             switch self {
-            case .diagnostics: return "Live stream telemetry, hardware decoder & demuxer cache"
-            case .subtitles: return "Timing offset sync, font sizing & screen position"
-            case .audio: return "Audio-video sync, dialogue normalization & dynamic range"
-            case .video: return "Aspect ratio override, deband shader & color grading"
+            case .diagnostics: return "Live stream telemetry, hardware decoder & demuxer cache".localized
+            case .subtitles: return "Timing offset sync, font sizing & screen position".localized
+            case .audio: return "Audio-video sync, dialogue normalization & dynamic range".localized
+            case .video: return "Aspect ratio override, deband shader & color grading".localized
             }
         }
 
@@ -156,7 +157,7 @@ struct SecretPlayerHUDView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.cyan)
 
-                Text("Playback Tuning")
+                Text("Playback Tuning".localized)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
             }
@@ -175,7 +176,7 @@ struct SecretPlayerHUDView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Circle())
-            .help("Close (Esc)")
+            .help("Close (Esc)".localized)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -316,7 +317,7 @@ struct SecretPlayerHUDView: View {
 
     private func diagnosticRow(label: String, value: String, badgeColor: Color? = nil) -> some View {
         HStack {
-            Text(label)
+            Text(label.localized)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
 
@@ -341,15 +342,15 @@ struct SecretPlayerHUDView: View {
             // Delay Calibration
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Subtitle Delay Sync")
+                    Text("Subtitle Delay Sync".localized)
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
-                    Text(String(format: "%+.2f seconds", subtitleDelay))
+                    Text(String.localizedFormat("%+.2f seconds", subtitleDelay))
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(abs(subtitleDelay) > 0.01 ? .cyan : .white.opacity(0.6))
                 }
 
-                Text("Adjust when dialogue and subtitles are out of synchronization")
+                Text("Adjust when dialogue and subtitles are out of synchronization".localized)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
@@ -361,7 +362,7 @@ struct SecretPlayerHUDView: View {
                     Button {
                         setSubtitleOffset(0.0)
                     } label: {
-                        Text("Reset")
+                        Text("Reset".localized)
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white.opacity(0.85))
                             .frame(maxWidth: .infinity)
@@ -380,7 +381,7 @@ struct SecretPlayerHUDView: View {
 
                 // Custom Subtitle Delay Input Bar
                 HStack(spacing: 10) {
-                    Text("Custom Offset:")
+                    Text("Custom Offset:".localized)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
 
@@ -412,7 +413,7 @@ struct SecretPlayerHUDView: View {
                         Button {
                             applyCustomSubtitleDelay()
                         } label: {
-                            Text("Apply")
+                            Text("Apply".localized)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 12)
@@ -433,7 +434,7 @@ struct SecretPlayerHUDView: View {
             // Subtitle Scale
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Subtitle Size")
+                    Text("Subtitle Size".localized)
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
                     Text("\(Int(subtitleScale * 100))%")
@@ -463,7 +464,7 @@ struct SecretPlayerHUDView: View {
             // Subtitle Position
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Vertical Position")
+                    Text("Vertical Position".localized)
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
                     Text("\(Int(subtitlePos))%")
@@ -519,15 +520,15 @@ struct SecretPlayerHUDView: View {
             // Audio Delay Sync
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Audio Delay Sync")
+                    Text("Audio Delay Sync".localized)
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
-                    Text(String(format: "%+.2f seconds", audioDelay))
+                    Text(String.localizedFormat("%+.2f seconds", audioDelay))
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(abs(audioDelay) > 0.01 ? .cyan : .white.opacity(0.6))
                 }
 
-                Text("Fix Bluetooth latency or audio-video desync")
+                Text("Fix Bluetooth latency or audio-video desync".localized)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
@@ -539,7 +540,7 @@ struct SecretPlayerHUDView: View {
                     Button {
                         setAudioOffset(0.0)
                     } label: {
-                        Text("Reset")
+                        Text("Reset".localized)
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white.opacity(0.85))
                             .frame(maxWidth: .infinity)
@@ -558,7 +559,7 @@ struct SecretPlayerHUDView: View {
 
                 // Custom Audio Delay Input Bar
                 HStack(spacing: 10) {
-                    Text("Custom Offset:")
+                    Text("Custom Offset:".localized)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
 
@@ -590,7 +591,7 @@ struct SecretPlayerHUDView: View {
                         Button {
                             applyCustomAudioDelay()
                         } label: {
-                            Text("Apply")
+                            Text("Apply".localized)
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.black)
                                 .padding(.horizontal, 12)
@@ -611,9 +612,9 @@ struct SecretPlayerHUDView: View {
             // Dialogue Boost
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Dialogue Boost / Night Mode")
+                    Text("Dialogue Boost / Night Mode".localized)
                         .font(.system(size: 14, weight: .bold))
-                    Text("Dynamic range normalizer: boosts soft whisper dialogue and compresses loud explosions")
+                    Text("Dynamic range normalizer: boosts soft whisper dialogue and compresses loud explosions".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -635,9 +636,9 @@ struct SecretPlayerHUDView: View {
             // Volume Boost status
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Volume Level")
+                    Text("Volume Level".localized)
                         .font(.system(size: 14, weight: .bold))
-                    Text("Boosted audio amplifier up to 200%")
+                    Text("Boosted audio amplifier up to 200%".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -680,7 +681,7 @@ struct SecretPlayerHUDView: View {
         VStack(alignment: .leading, spacing: 20) {
             // Aspect Ratio Override
             VStack(alignment: .leading, spacing: 8) {
-                Text("Aspect Ratio Override")
+                Text("Aspect Ratio Override".localized)
                     .font(.system(size: 14, weight: .bold))
 
                 HStack(spacing: 8) {
@@ -696,9 +697,9 @@ struct SecretPlayerHUDView: View {
             // Deband Shader
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Deband Filter")
+                    Text("Deband Filter".localized)
                         .font(.system(size: 14, weight: .bold))
-                    Text("Smooths color banding artifacts in dark shadows and gradient skies")
+                    Text("Smooths color banding artifacts in dark shadows and gradient skies".localized)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -740,7 +741,7 @@ struct SecretPlayerHUDView: View {
                         mpv.setBrightness(0)
                         mpv.setSaturation(0)
                     } label: {
-                        Text("Reset Color Filters")
+                        Text("Reset Color Filters".localized)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.cyan)
                             .padding(.vertical, 4)
@@ -763,7 +764,7 @@ struct SecretPlayerHUDView: View {
             videoAspect = value
             mpv.setVideoAspect(value)
         } label: {
-            Text(label)
+            Text(label.localized)
                 .font(.system(size: 12, weight: isSelected ? .bold : .medium))
                 .foregroundStyle(isSelected ? .white : .white.opacity(0.8))
                 .frame(maxWidth: .infinity)
@@ -785,7 +786,7 @@ struct SecretPlayerHUDView: View {
     private func sliderAdjustment(label: String, value: Binding<Double>, onCommit: @escaping (Double) -> Void) -> some View {
         VStack(spacing: 4) {
             HStack {
-                Text(label)
+                Text(label.localized)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.85))
                 Spacer()

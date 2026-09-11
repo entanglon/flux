@@ -46,7 +46,7 @@ struct LibraryPageHeader<RightContent: View, BottomContent: View>: View {
                     .foregroundStyle(.white)
                 
                 if let count = itemCount, count > 0 {
-                    Text("\(count) \(itemLabel)")
+                    Text("\(count) \(itemLabel.localized)")
                         .font(.system(size: 11, weight: .bold))
                         .tracking(1.5)
                         .foregroundStyle(.white.opacity(0.8))

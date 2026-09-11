@@ -9,10 +9,10 @@ struct ProfileView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("Account")
+                Text("Account".localized)
                     .font(.headline)
                 Spacer()
-                Button("Done") {
+                Button("Done".localized) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -50,7 +50,7 @@ struct ProfileView: View {
                             }
                             
                             VStack(spacing: 4) {
-                                Text(user.displayName ?? "Flux User")
+                                Text(user.displayName ?? "Flux User".localized)
                                     .font(.title3)
                                     .fontWeight(.semibold)
                                 Text(user.email ?? "")
@@ -63,14 +63,14 @@ struct ProfileView: View {
                         // Menu Items (Real Data)
                         VStack(spacing: 1) { // 1px spacing for separators
                             Button(action: { showEditName = true }) {
-                                buildRow(title: "Name", value: user.displayName ?? "Not Set")
+                                buildRow(title: "Name".localized, value: user.displayName ?? "Not Set".localized)
                             }
                             .buttonStyle(.plain)
 
-                            buildRow(title: "Email", value: user.email ?? "Not Set")
+                            buildRow(title: "Email".localized, value: user.email ?? "Not Set".localized)
                             
                             if let creationDate = user.creationDate {
-                                buildRow(title: "Joined", value: creationDate.formatted(date: .abbreviated, time: .omitted))
+                                buildRow(title: "Joined".localized, value: creationDate.formatted(date: .abbreviated, time: .omitted))
                             }
                         }
                         .background(Color.white.opacity(0.05))
@@ -83,7 +83,7 @@ struct ProfileView: View {
                                 dismiss()
                             }) {
                                 HStack {
-                                    Text("Sign Out")
+                                    Text("Sign Out".localized)
                                         .foregroundStyle(.red)
                                     Spacer()
                                 }

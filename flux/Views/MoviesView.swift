@@ -56,7 +56,7 @@ struct MoviesView: View {
     @ViewBuilder private var adultMoviesRails: some View {
         // For You Movies
         if !forYouMovies.isEmpty {
-            renderRail(title: "For You", listType: .fixed(title: "For You Movies", items: forYouMovies), items: forYouMovies)
+            renderRail(title: "For You".localized, listType: .fixed(title: "For You Movies".localized, items: forYouMovies), items: forYouMovies)
         }
 
         // 1. Combined Trending Movies with Liquid Glass Toggle
@@ -64,7 +64,7 @@ struct MoviesView: View {
         if !activeTrending.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 TrendingToggleSectionHeader(
-                    title: "Trending",
+                    title: "Trending".localized,
                     window: $trendingWindow,
                     value: MediaListView.ListType.trendingMovies(window: trendingWindow)
                 )
@@ -89,7 +89,7 @@ struct MoviesView: View {
 
         // 2. Popular Movies
         if !popularMovies.isEmpty {
-            renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+            renderRail(title: "Popular Movies".localized, listType: .popularMovies, items: popularMovies)
         } else if isLoading {
             GhostRail()
                 .transition(.opacity)
@@ -97,47 +97,47 @@ struct MoviesView: View {
 
         // 4. Now Playing
         if !nowPlayingMovies.isEmpty {
-            renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
+            renderRail(title: "Now Playing".localized, listType: .nowPlayingMovies, items: nowPlayingMovies)
         }
 
         // 5. Popular on Streaming
         if !streamingMovies.isEmpty {
-            renderRail(title: "Popular on Streaming", listType: .streamingMovies, items: streamingMovies)
+            renderRail(title: "Popular on Streaming".localized, listType: .streamingMovies, items: streamingMovies)
         }
 
         // 6. Upcoming
         if !upcomingMovies.isEmpty {
-            renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
+            renderRail(title: "Upcoming".localized, listType: .upcomingMovies, items: upcomingMovies)
         }
 
         // 7. Top Rated Movies
         if !topRatedMovies.isEmpty {
-            renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
+            renderRail(title: "Top Rated Movies".localized, listType: .topRatedMovies, items: topRatedMovies)
         }
 
         // 8. Quick Watches (< 95 mins)
         if !quickWatches.isEmpty {
-            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+            renderRail(title: "Quick Watches".localized, listType: .quickWatches, items: quickWatches)
         }
     }
 
     @ViewBuilder private var kidsMoviesRails: some View {
         if !popularMovies.isEmpty {
-            renderRail(title: "Kids & Family Movies", listType: .fixed(title: "Kids & Family Movies", items: popularMovies), items: popularMovies)
+            renderRail(title: "Kids & Family Movies".localized, listType: .fixed(title: "Kids & Family Movies".localized, items: popularMovies), items: popularMovies)
         } else if isLoading {
             GhostRail().transition(.opacity)
         }
 
         if !topRatedMovies.isEmpty {
-            renderRail(title: "Animated Adventures", listType: .fixed(title: "Animated Adventures", items: topRatedMovies), items: topRatedMovies)
+            renderRail(title: "Animated Adventures".localized, listType: .fixed(title: "Animated Adventures".localized, items: topRatedMovies), items: topRatedMovies)
         }
 
         if !streamingMovies.isEmpty {
-            renderRail(title: "Family Favorites", listType: .fixed(title: "Family Favorites", items: streamingMovies), items: streamingMovies)
+            renderRail(title: "Family Favorites".localized, listType: .fixed(title: "Family Favorites".localized, items: streamingMovies), items: streamingMovies)
         }
 
         if !quickWatches.isEmpty {
-            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+            renderRail(title: "Quick Watches".localized, listType: .quickWatches, items: quickWatches)
         }
     }
 

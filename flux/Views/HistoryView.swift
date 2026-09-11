@@ -11,6 +11,8 @@ struct HistoryView: View {
         case all = "All"
         case inProgress = "In Progress"
         case completed = "Watched"
+
+        var localizedTitle: String { rawValue.localized }
     }
     
     @State private var activeFilter: Filter
@@ -40,15 +42,15 @@ struct HistoryView: View {
             if userData.history.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     LibraryPageHeader(
-                        title: showAsContinueWatching ? "Continue Watching" : "Recently Watched"
+                        title: showAsContinueWatching ? "Continue Watching".localized : "Recently Watched".localized
                     )
 
                     Spacer()
 
                     LibraryEmptyState(
                         icon: "clock.arrow.circlepath",
-                        title: showAsContinueWatching ? "No In-Progress Titles" : "No Watch History",
-                        message: "Movies and TV shows you start watching will automatically appear here."
+                        title: showAsContinueWatching ? "No In-Progress Titles".localized : "No Watch History".localized,
+                        message: "Movies and TV shows you start watching will automatically appear here.".localized
                     )
 
                     Spacer()
@@ -62,7 +64,7 @@ struct HistoryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LibraryScheme.headerBottomSpacing) {
                         LibraryPageHeader(
-                            title: showAsContinueWatching ? "Continue Watching" : "Recently Watched",
+                            title: showAsContinueWatching ? "Continue Watching".localized : "Recently Watched".localized,
                             itemCount: userData.history.count,
                             itemLabel: "ITEMS",
                             rightAction: {
@@ -72,7 +74,7 @@ struct HistoryView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "trash")
                                             .font(.system(size: 12, weight: .bold))
-                                        Text("Clear")
+                                        Text("Clear".localized)
                                             .font(.system(size: 13, weight: .bold))
                                     }
                                     .foregroundStyle(.white.opacity(0.75))
@@ -100,7 +102,7 @@ struct HistoryView: View {
                                              }
                                          } label: {
                                              HStack(spacing: 6) {
-                                                 Text(filter.rawValue)
+                                                 Text(filter.localizedTitle)
                                                      .font(.system(size: 13, weight: activeFilter == filter ? .bold : .medium))
                                                  Text("\(count)")
                                                      .font(.system(size: 11, weight: .bold))
@@ -126,10 +128,10 @@ struct HistoryView: View {
                          
                          if filteredItems.isEmpty {
                              VStack(spacing: 12) {
-                                 Text("No \(activeFilter.rawValue.lowercased()) titles in your history")
+                                 Text(String.localizedFormat("No %@ titles in your history", activeFilter.localizedTitle.lowercased()))
                                      .font(.system(size: 18, weight: .semibold))
                                      .foregroundStyle(.white.opacity(0.8))
-                                 Button("Show All History") {
+                                 Button("Show All History".localized) {
                                      withAnimation { activeFilter = .all }
                                  }
                                  .font(.system(size: 13, weight: .bold))
@@ -170,15 +172,15 @@ struct HistoryView: View {
         .background(Color.clear)
         .navigationBarBackButtonHidden(true)
         .toolbarVisibility(.hidden, for: .windowToolbar)
-        .alert("Clear Watch History?", isPresented: $showClearConfirm) {
-            Button("Clear All", role: .destructive) {
+        .alert("Clear Watch History?".localized, isPresented: $showClearConfirm) {
+            Button("Clear All".localized, role: .destructive) {
                 for item in userData.history {
                     userData.removeFromHistory(item)
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel".localized, role: .cancel) {}
         } message: {
-            Text("This will remove all titles from your recently watched history.")
+            Text("This will remove all titles from your recently watched history.".localized)
         }
     }
 }

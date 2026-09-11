@@ -7,13 +7,14 @@ struct CenteredSearchField: NSViewRepresentable {
     
     func makeNSView(context: Context) -> NSSearchField {
         let searchField = NSSearchField()
-        searchField.placeholderString = "Search movies, shows, genres..."
+        searchField.placeholderString = "Search movies, shows, genres...".localized
         searchField.delegate = context.coordinator
         searchField.bezelStyle = .roundedBezel
         return searchField
     }
     
     func updateNSView(_ nsView: NSSearchField, context: Context) {
+        nsView.placeholderString = "Search movies, shows, genres...".localized
         if nsView.stringValue != text {
             nsView.stringValue = text
         }
