@@ -56,7 +56,7 @@ struct GlassCard: View {
             if showTitle {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(displayItem.title)
-                        .font(.system(size: 15, weight: isHovering ? .bold : .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     

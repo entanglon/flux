@@ -200,12 +200,10 @@ struct fluxApp: App {
 
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
+                    NotificationCenter.default.post(name: .fluxRefresh, object: nil)
                     Task {
                         await TMDBCatalogCacheActor.shared.clear()
                         await AuthManager.shared.syncNowAsync(forcePull: true)
-                        await MainActor.run {
-                            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
-                        }
                     }
                 }
                 .keyboardShortcut("r", modifiers: .command)

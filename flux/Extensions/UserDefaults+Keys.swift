@@ -5,6 +5,7 @@ import Foundation
 extension UserDefaults {
     enum Key {
         // MARK: - App & General Settings
+        static let appLanguage = "appLanguage"
         static let tmdbApiKey = "tmdbApiKey"
         static let cloudLastSyncAt = "cloudLastSyncAt"
         static let stremioCacheGB = "stremioCacheGB"

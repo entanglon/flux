@@ -17,6 +17,7 @@ struct HomeView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var userData = UserDataService.shared
     @ObservedObject private var profileManager = ProfileManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @Environment(\.openWindow) private var openWindow
     
     // Core discovery rails
@@ -59,7 +60,7 @@ struct HomeView: View {
                 let itemsToDisplay = continueWatchingItems
                 if !itemsToDisplay.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
-                        ListSectionHeader(title: "Continue Watching", value: MediaListView.ListType.continueWatching)
+                        ListSectionHeader(title: "Continue Watching".localized, value: MediaListView.ListType.continueWatching)
                             .padding(.leading, 268)
                             .padding(.trailing, 40)
                         
@@ -161,7 +162,7 @@ struct HomeView: View {
     
     @ViewBuilder private var exploreOTTRow: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Explore")
+            Text("Explore".localized)
                 .font(.title2)
                 .fontWeight(.bold)
                 .padding(.leading, 268)
@@ -203,7 +204,7 @@ struct HomeView: View {
         if !activeTrending.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 TrendingToggleSectionHeader(
-                    title: "Trending",
+                    title: "Trending".localized,
                     window: $trendingWindow,
                     value: trendingWindow == "day" ? MediaListView.ListType.trendingAllDay : MediaListView.ListType.trendingAllWeek
                 )
@@ -228,7 +229,7 @@ struct HomeView: View {
 
         // 2. Popular Movies
         if !popularMovies.isEmpty {
-            renderRail(title: "Popular Movies", listType: .popularMovies, items: popularMovies)
+            renderRail(title: "Popular Movies".localized, listType: .popularMovies, items: popularMovies)
         } else if isLoading {
             GhostRail()
                 .transition(.opacity)
@@ -236,7 +237,7 @@ struct HomeView: View {
 
         // 4. Popular TV Shows
         if !popularTV.isEmpty {
-            renderRail(title: "Popular TV Shows", listType: .popularTV, items: popularTV)
+            renderRail(title: "Popular TV Shows".localized, listType: .popularTV, items: popularTV)
         } else if isLoading {
             GhostRail()
                 .transition(.opacity)
@@ -244,12 +245,12 @@ struct HomeView: View {
 
         // 5. Now Playing
         if !nowPlayingMovies.isEmpty {
-            renderRail(title: "Now Playing", listType: .nowPlayingMovies, items: nowPlayingMovies)
+            renderRail(title: "Now Playing".localized, listType: .nowPlayingMovies, items: nowPlayingMovies)
         }
 
         // 6. Airing Today
         if !airingTodayTV.isEmpty {
-            renderRail(title: "Airing Today", listType: .airingTodayTV, items: airingTodayTV)
+            renderRail(title: "Airing Today".localized, listType: .airingTodayTV, items: airingTodayTV)
         }
 
         // Explore OTT Platforms
@@ -257,27 +258,27 @@ struct HomeView: View {
 
         // 7. On TV
         if !onTheAirTV.isEmpty {
-            renderRail(title: "On TV", listType: .onTheAirTV, items: onTheAirTV)
+            renderRail(title: "On TV".localized, listType: .onTheAirTV, items: onTheAirTV)
         }
 
         // 8. Top Rated Movies
         if !topRatedMovies.isEmpty {
-            renderRail(title: "Top Rated Movies", listType: .topRatedMovies, items: topRatedMovies)
+            renderRail(title: "Top Rated Movies".localized, listType: .topRatedMovies, items: topRatedMovies)
         }
 
         // 9. Top Rated TV Shows
         if !topRatedTV.isEmpty {
-            renderRail(title: "Top Rated Shows", listType: .topRatedTV, items: topRatedTV)
+            renderRail(title: "Top Rated Shows".localized, listType: .topRatedTV, items: topRatedTV)
         }
 
         // 10. Upcoming Movies
         if !upcomingMovies.isEmpty {
-            renderRail(title: "Upcoming", listType: .upcomingMovies, items: upcomingMovies)
+            renderRail(title: "Upcoming".localized, listType: .upcomingMovies, items: upcomingMovies)
         }
 
         // 11. Quick Watches (< 95 mins)
         if !quickWatches.isEmpty {
-            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+            renderRail(title: "Quick Watches".localized, listType: .quickWatches, items: quickWatches)
         }
 
         // Addon Sections
@@ -319,33 +320,33 @@ struct HomeView: View {
     @ViewBuilder private var kidsRails: some View {
         // 1. Trending for Kids
         if !trendingTodayItems.isEmpty {
-            renderRail(title: "Trending for Kids", listType: .fixed(title: "Trending for Kids", items: trendingTodayItems), items: trendingTodayItems)
+            renderRail(title: "Trending for Kids".localized, listType: .fixed(title: "Trending for Kids".localized, items: trendingTodayItems), items: trendingTodayItems)
         } else if isLoading {
             GhostRail().transition(.opacity)
         }
 
         // 2. Animated Adventures
         if !popularMovies.isEmpty {
-            renderRail(title: "Animated Adventures", listType: .fixed(title: "Animated Adventures", items: popularMovies), items: popularMovies)
+            renderRail(title: "Animated Adventures".localized, listType: .fixed(title: "Animated Adventures".localized, items: popularMovies), items: popularMovies)
         } else if isLoading {
             GhostRail().transition(.opacity)
         }
 
         // 3. Kids TV Shows
         if !popularTV.isEmpty {
-            renderRail(title: "Kids Shows", listType: .fixed(title: "Kids Shows", items: popularTV), items: popularTV)
+            renderRail(title: "Kids Shows".localized, listType: .fixed(title: "Kids Shows".localized, items: popularTV), items: popularTV)
         } else if isLoading {
             GhostRail().transition(.opacity)
         }
 
         // 4. Family Movie Night
         if !topRatedMovies.isEmpty {
-            renderRail(title: "Family Movie Night", listType: .fixed(title: "Family Movie Night", items: topRatedMovies), items: topRatedMovies)
+            renderRail(title: "Family Movie Night".localized, listType: .fixed(title: "Family Movie Night".localized, items: topRatedMovies), items: topRatedMovies)
         }
 
         // 5. Quick Watches
         if !quickWatches.isEmpty {
-            renderRail(title: "Quick Watches", listType: .quickWatches, items: quickWatches)
+            renderRail(title: "Quick Watches".localized, listType: .quickWatches, items: quickWatches)
         }
 
         addonRows
@@ -380,7 +381,7 @@ struct HomeView: View {
         let items = displayWatchlist
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                ListSectionHeader(title: "Watchlist", value: WatchlistNavigation())
+                ListSectionHeader(title: "Watchlist".localized, value: WatchlistNavigation())
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 
@@ -398,7 +399,7 @@ struct HomeView: View {
     
     @ViewBuilder private var genreRow: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(profileManager.currentProfile?.isKids == true ? "Browse for Kids" : "Browse by Genre")
+            Text(profileManager.currentProfile?.isKids == true ? "Browse for Kids".localized : "Browse by Genre".localized)
                 .font(.title2)
                 .fontWeight(.bold)
                 .padding(.leading, 268)
@@ -419,7 +420,7 @@ struct HomeView: View {
         let items = displayHistory
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                ListSectionHeader(title: "Recently Watched", value: HistoryNavigation(showAsContinueWatching: false))
+                ListSectionHeader(title: "Recently Watched".localized, value: HistoryNavigation(showAsContinueWatching: false))
                     .padding(.leading, 268)
                     .padding(.trailing, 40)
                 

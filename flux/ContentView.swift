@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var selectedCategory: SidebarItem? = .home
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @StateObject private var playerManager = PlayerManager.shared
@@ -217,27 +218,27 @@ struct ContentView: View {
 
     private var browseSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            sidebarRow(.search, title: "Search", icon: "magnifyingglass", fillIcon: "magnifyingglass")
-            sidebarRow(.home, title: "Home", icon: "house", fillIcon: "house.fill")
-            sidebarRow(.movies, title: "Movies", icon: "film", fillIcon: "film.fill")
-            sidebarRow(.tvShows, title: "TV Shows", icon: "tv", fillIcon: "tv.fill")
-            sidebarRow(.trending, title: "Trending", icon: "chart.line.uptrend.xyaxis", fillIcon: "chart.line.uptrend.xyaxis")
+            sidebarRow(.search, title: L10n.tr("Search"), icon: "magnifyingglass", fillIcon: "magnifyingglass")
+            sidebarRow(.home, title: L10n.tr("Home"), icon: "house", fillIcon: "house.fill")
+            sidebarRow(.movies, title: L10n.tr("Movies"), icon: "film", fillIcon: "film.fill")
+            sidebarRow(.tvShows, title: L10n.tr("TV Shows"), icon: "tv", fillIcon: "tv.fill")
+            sidebarRow(.trending, title: L10n.tr("Trending"), icon: "chart.line.uptrend.xyaxis", fillIcon: "chart.line.uptrend.xyaxis")
         }
     }
     
     private var librarySection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Library")
+            Text(L10n.tr("Library"))
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white.opacity(0.45))
                 .padding(.leading, 10)
                 .padding(.bottom, 2)
                 .padding(.top, 4)
             
-            sidebarRow(.watchlist, title: "Watchlist", icon: "bookmark", fillIcon: "bookmark.fill")
-            sidebarRow(.collections, title: "Collections", icon: "rectangle.stack", fillIcon: "rectangle.stack.fill")
-            sidebarRow(.history, title: "Recently Watched", icon: "clock", fillIcon: "clock.fill")
-            sidebarRow(.downloads, title: "Downloads", icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
+            sidebarRow(.watchlist, title: L10n.tr("Watchlist"), icon: "bookmark", fillIcon: "bookmark.fill")
+            sidebarRow(.collections, title: L10n.tr("Collections"), icon: "rectangle.stack", fillIcon: "rectangle.stack.fill")
+            sidebarRow(.history, title: L10n.tr("History"), icon: "clock", fillIcon: "clock.fill")
+            sidebarRow(.downloads, title: L10n.tr("Downloads"), icon: "arrow.down.circle", fillIcon: "arrow.down.circle.fill")
         }
     }
     

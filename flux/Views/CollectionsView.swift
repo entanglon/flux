@@ -158,27 +158,35 @@ struct CollectionsView: View {
 
     /// Dashed "+ New" tile that leads the grid.
     private var newCollectionCard: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "plus")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white.opacity(0.75))
-                .frame(width: 64, height: 64)
-                .background(Circle().fill(Color.white.opacity(0.08)))
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 14) {
+                Image(systemName: "plus")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .frame(width: 64, height: 64)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
 
-            Text("New List")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white.opacity(0.85))
+                Text("New List")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .frame(width: 160, height: 240)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            )
+            .contentShape(Rectangle())
+
+            // Align baseline with CollectionCard's 2-line title and subtitle
+            Text(" ")
+                .font(.system(size: 14, weight: .semibold))
+            Text(" ")
+                .font(.system(size: 11, weight: .medium))
         }
-        .frame(width: 160, height: 240)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-        )
-        .contentShape(Rectangle())
     }
 }
 
@@ -189,6 +197,17 @@ private struct CollectionCard: View {
     var onRename: () -> Void = {}
     var onDelete: () -> Void = {}
     @State private var isHovered = false
+    @State private var previewURLs: [URL] = []
+
+    private var strokeGradient: LinearGradient {
+        LinearGradient(
+            colors: isHovered
+                ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
+                : [Color.white.opacity(0.18), Color.white.opacity(0.04)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -200,22 +219,24 @@ private struct CollectionCard: View {
                             hoverAction(icon: "pencil", action: onRename)
                             hoverAction(icon: "trash", action: onDelete)
                         }
+                        .padding(8)
                         .transition(.opacity)
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    Text("\(collection.items.count)")
-                        .font(.system(size: 10, weight: .heavy))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.white.opacity(0.9)))
-                        .padding(8)
-                        .opacity(collection.items.isEmpty ? 0 : 1)
+                    if !collection.items.isEmpty {
+                        Text("\(collection.items.count)")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.white.opacity(0.9)))
+                            .padding(8)
+                    }
                 }
 
             Text(collection.name)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
 
@@ -225,71 +246,144 @@ private struct CollectionCard: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.55))
         }
+        .contentShape(Rectangle())
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.18)) { isHovered = hovering }
+            withAnimation(.easeInOut(duration: 0.2)) { isHovered = hovering }
+        }
+        .onAppear { loadPreviewURLs() }
+        .onChange(of: collection.items) { _, _ in loadPreviewURLs() }
+        .task(id: collection.id) {
+            var resolved: [URL] = []
+            for item in collection.items.prefix(3) {
+                if let u = item.posterURL ?? item.imageURL ?? item.backdropURL {
+                    resolved.append(u)
+                } else {
+                    let enriched = await TMDBEnricher.shared.quickEnrich(item)
+                    if let u = enriched.posterURL ?? enriched.imageURL ?? enriched.backdropURL {
+                        resolved.append(u)
+                    }
+                }
+            }
+            if !resolved.isEmpty {
+                await MainActor.run {
+                    self.previewURLs = resolved
+                }
+            }
         }
     }
 
+    private func loadPreviewURLs() {
+        let urls = collection.previewPosters.compactMap { $0 }
+        self.previewURLs = urls
+    }
+
+    @ViewBuilder
     private var posterStack: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
-
-            let posters = collection.previewPosters.compactMap { $0 }
-            ForEach(Array(posters.dropFirst().enumerated().reversed()), id: \.offset) { index, url in
-                stackPoster(url: url)
-                    .rotationEffect(.degrees(index == 0 ? -5 : 4))
-                    .offset(x: index == 0 ? -10 : 9, y: index == 0 ? -2 : 3)
+        if collection.items.isEmpty {
+            // Empty placeholder card
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+                
+                VStack(spacing: 8) {
+                    Image(systemName: "rectangle.stack")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.35))
+                    
+                    Text("Empty")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.40))
+                }
             }
+            .frame(width: 160, height: 240)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(isHovered ? 0.30 : 0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.20), radius: 6, y: 3)
+        } else if collection.items.count == 1 {
+            // Single poster card
+            ZStack {
+                singlePoster(url: previewURLs.first, width: 160, height: 240, cornerRadius: 16)
 
-            if let front = posters.first {
-                stackPoster(url: front)
-                    .rotationEffect(.degrees(-1))
-            } else {
-                Image(systemName: "rectangle.stack")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(strokeGradient, lineWidth: isHovered ? 1.5 : 0.75)
             }
+            .frame(width: 160, height: 240)
+            .shadow(color: .black.opacity(isHovered ? 0.45 : 0.25), radius: isHovered ? 14 : 7, y: isHovered ? 8 : 4)
+        } else {
+            // Stacked cards for multiple items (2 or 3+ items)
+            ZStack {
+                // Card 3 (back-most, only if count >= 3)
+                if collection.items.count >= 3 {
+                    ZStack {
+                        singlePoster(url: previewURLs.count > 2 ? previewURLs[2] : nil, width: 154, height: 232, cornerRadius: 14)
+
+                        Color.black.opacity(0.30)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    }
+                    .frame(width: 154, height: 232)
+                    .rotationEffect(.degrees(isHovered ? -5.5 : -3.5))
+                    .offset(x: isHovered ? -10 : -6, y: isHovered ? -6 : -4)
+                    .shadow(color: .black.opacity(0.30), radius: 6, y: 3)
+                }
+
+                // Card 2 (middle card)
+                ZStack {
+                    singlePoster(url: previewURLs.count > 1 ? previewURLs[1] : nil, width: 156, height: 236, cornerRadius: 15)
+
+                    Color.black.opacity(0.16)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                }
+                .frame(width: 156, height: 236)
+                .rotationEffect(.degrees(isHovered ? 5.5 : 3.5))
+                .offset(x: isHovered ? 10 : 6, y: isHovered ? -4 : -2)
+                .shadow(color: .black.opacity(0.38), radius: 8, y: 4)
+
+                // Card 1 (front card)
+                ZStack {
+                    singlePoster(url: previewURLs.first, width: 160, height: 240, cornerRadius: 16)
+
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(strokeGradient, lineWidth: isHovered ? 1.5 : 0.75)
+                }
+                .frame(width: 160, height: 240)
+                .shadow(color: .black.opacity(isHovered ? 0.50 : 0.28), radius: isHovered ? 14 : 7, y: isHovered ? 8 : 4)
+            }
+            .frame(width: 160, height: 240)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: isHovered
-                            ? [Color.white.opacity(0.70), Color.white.opacity(0.20), Color.blue.opacity(0.15)]
-                            : [Color.white.opacity(0.15), Color.white.opacity(0.03)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: isHovered ? 1.5 : 0.75
-                )
-        )
-        .scaleEffect(isHovered ? 1.03 : 1.0)
-        .shadow(color: .black.opacity(isHovered ? 0.50 : 0.25), radius: isHovered ? 16 : 8, y: 6)
-        .shadow(color: isHovered ? Color.white.opacity(0.08) : Color.clear, radius: 10, x: 0, y: 0)
     }
 
-    private func stackPoster(url: URL) -> some View {
-        CachedImage(url: url, maxDimension: 600) { phase in
-            if let img = phase.image {
-                img.resizable()
-                    .aspectRatio(contentMode: .fill)
+    private func singlePoster(url: URL?, width: CGFloat, height: CGFloat, cornerRadius: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.12))
+
+            if let url = url {
+                CachedImage(url: url, maxDimension: 480) { phase in
+                    if let img = phase.image {
+                        img.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: width, height: height)
+                            .clipped()
+                    } else {
+                        Rectangle().fill(Color.white.opacity(0.06))
+                    }
+                }
             } else {
-                Rectangle().fill(Color.white.opacity(0.08))
+                Image(systemName: "film")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.30))
             }
         }
-        .frame(width: 132, height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.black.opacity(0.35), lineWidth: 2)
-        )
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private func hoverAction(icon: String, action: @escaping () -> Void) -> some View {
@@ -299,6 +393,7 @@ private struct CollectionCard: View {
                 .foregroundStyle(.white)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(Color.black.opacity(0.65)))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }
@@ -400,22 +495,27 @@ struct CollectionDetailView: View {
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 24)], spacing: 40) {
                             ForEach(collection.items) { item in
-                                GlassCard(item: item, aspectRatio: .portrait)
-                                    .overlay(alignment: .topTrailing) {
-                                        Button {
-                                            userData.removeFromCollection(collectionID: collectionID, item: item)
-                                        } label: {
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 9, weight: .heavy))
-                                                .foregroundStyle(.white)
-                                                .frame(width: 22, height: 22)
-                                                .background(Circle().fill(Color.black.opacity(0.7)))
-                                                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .padding(8)
-                                        .help("Remove from list")
+                                ZStack(alignment: .topTrailing) {
+                                    NavigationLink(value: item) {
+                                        GlassCard(item: item, aspectRatio: .portrait)
                                     }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        userData.removeFromCollection(collectionID: collectionID, item: item)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 9, weight: .heavy))
+                                            .foregroundStyle(.white)
+                                            .frame(width: 22, height: 22)
+                                            .background(Circle().fill(Color.black.opacity(0.75)))
+                                            .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                                            .contentShape(Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(8)
+                                    .help("Remove from list")
+                                }
                             }
                         }
                     }

@@ -84,7 +84,11 @@ struct TMDBEnricherTests {
         #expect(showItem.genres == ["Crime", "Drama"])
     }
 
-    @Test func mediaListTypeTitlesAreAccurate() {
+    @Test @MainActor func mediaListTypeTitlesAreAccurate() {
+        let prev = LanguageManager.shared.currentLanguage
+        defer { LanguageManager.shared.setLanguage(prev) }
+        LanguageManager.shared.setLanguage(.english)
+
         #expect(MediaListView.ListType.trendingAllDay.title == "Trending Today")
         #expect(MediaListView.ListType.trendingAllWeek.title == "Trending This Week")
         #expect(MediaListView.ListType.popularMovies.title == "Popular Movies")

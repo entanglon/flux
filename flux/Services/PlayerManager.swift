@@ -1064,7 +1064,8 @@ class PlayerManager: ObservableObject {
             enableLanguageFilter: enableLanguageFilter,
             probeStatus: self.probeStatus,
             targetSeason: currentSeason,
-            targetEpisode: currentEpisode
+            targetEpisode: currentEpisode,
+            targetTitle: currentItem?.title
         )
 
         guard let winnerCandidate = primary else { return nil }
@@ -1518,7 +1519,7 @@ class PlayerManager: ObservableObject {
         }
     }
     
-    func updateWatchProgress(time: Double, duration: Double) {
+    func updateWatchProgress(time: Double, duration: Double, isLightweightTick: Bool = false) {
         guard var item = currentItem, duration > 0 else { return }
         let progress = time / duration
         if item.runtime == nil || item.runtime?.isEmpty == true {
@@ -1561,10 +1562,13 @@ class PlayerManager: ObservableObject {
                 playbackDuration: duration,
                 streamURL: currentStreamURL,
                 torrentInfoHash: activeTorrentHash,
-                fileIndex: nil
+                fileIndex: nil,
+                isLightweightTick: isLightweightTick
             )
         }
-        TasteProfileManager.shared.recordWatch(item, progress: progress)
+        if !isLightweightTick || progress >= 0.90 {
+            TasteProfileManager.shared.recordWatch(item, progress: progress)
+        }
     }
 
     /// High-water mark tracking per playback session to prevent Continue Watching regress
@@ -1893,7 +1897,8 @@ class PlayerManager: ObservableObject {
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: await MainActor.run { self.probeStatus },
                 targetSeason: next.season,
-                targetEpisode: next.episode
+                targetEpisode: next.episode,
+                targetTitle: item.title
             )
 
             guard let winner = bestNext else { return }

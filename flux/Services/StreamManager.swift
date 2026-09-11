@@ -830,7 +830,8 @@ class StreamManager {
         enableLanguageFilter: Bool = false,
         probeStatus: [String: StreamProbeResult] = [:],
         targetSeason: Int? = nil,
-        targetEpisode: Int? = nil
+        targetEpisode: Int? = nil,
+        targetTitle: String? = nil
     ) -> (primary: Stream?, fallbacks: [Stream]) {
         let healthy = streams.filter { stream in
             if probeStatus[stream.stableKey]?.ok == false { return false }
@@ -865,7 +866,8 @@ class StreamManager {
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: probeStatus,
                 targetSeason: targetSeason,
-                targetEpisode: targetEpisode
+                targetEpisode: targetEpisode,
+                targetTitle: targetTitle
             )
             let score2 = computeCompositeRank(
                 s2,
@@ -874,7 +876,8 @@ class StreamManager {
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: probeStatus,
                 targetSeason: targetSeason,
-                targetEpisode: targetEpisode
+                targetEpisode: targetEpisode,
+                targetTitle: targetTitle
             )
             if score1 != score2 {
                 return score1 > score2
@@ -894,9 +897,15 @@ class StreamManager {
         enableLanguageFilter: Bool = false,
         probeStatus: [String: StreamProbeResult],
         targetSeason: Int? = nil,
-        targetEpisode: Int? = nil
+        targetEpisode: Int? = nil,
+        targetTitle: String? = nil
     ) -> Double {
         var score = 0.0
+
+        // Target title match & mismatch penalty (cross-validates underlying URL/Referer)
+        if let title = targetTitle, !title.isEmpty {
+            score += evaluateTitleMatch(stream: stream, targetTitle: title)
+        }
 
         // Episode match & Season Pack gating for TV shows
         if targetEpisode != nil {
@@ -1011,6 +1020,158 @@ class StreamManager {
         // Often a show trailer, promo, or unparsed season dump.
         if !stream.isTorrent {
             return -5000.0
+        }
+
+        return 0.0
+    }
+
+    /// Evaluates title consistency between the target media and the underlying stream URL / Referer header.
+    /// Returns a strong bonus if target title is confirmed, or a severe disqualifying penalty (-30,000.0)
+    /// if the stream's URL or Referer explicitly points to a different, conflicting title (e.g. "Head Over Heels" for "Overflow").
+    func evaluateTitleMatch(stream: Stream, targetTitle: String?) -> Double {
+        guard let rawTarget = targetTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !rawTarget.isEmpty else {
+            return 0.0
+        }
+
+        let stopwords: Set<String> = [
+            "the", "a", "an", "and", "or", "of", "in", "on", "at", "to", "for", "with",
+            "by", "from", "up", "about", "into", "over", "after", "is", "it", "this", "that"
+        ]
+
+        func extractMeaningfulTokens(_ text: String) -> [String] {
+            let lower = text.lowercased()
+            let cleaned = lower.replacingOccurrences(of: "[^a-z0-9]", with: " ", options: .regularExpression)
+            return cleaned.components(separatedBy: .whitespacesAndNewlines)
+                .filter { $0.count >= 2 && !stopwords.contains($0) && Int($0) == nil }
+        }
+
+        let targetTokens = extractMeaningfulTokens(rawTarget)
+        guard !targetTokens.isEmpty else { return 0.0 }
+
+        // Gather candidate filenames/slugs from media filename in URL and path slug in Referer header
+        var candidateStrings: [String] = []
+
+        func extractFilenameOrSlug(from urlString: String) {
+            guard let url = URL(string: urlString) else {
+                if let lastSlash = urlString.components(separatedBy: "/").last, !lastSlash.isEmpty {
+                    candidateStrings.append(lastSlash.components(separatedBy: "?").first ?? lastSlash)
+                }
+                return
+            }
+
+            // Magnet URIs: extract display name 'dn' parameter
+            if urlString.hasPrefix("magnet:") {
+                if let components = URLComponents(string: urlString),
+                   let dn = components.queryItems?.first(where: { $0.name == "dn" })?.value {
+                    candidateStrings.append(dn)
+                }
+                return
+            }
+
+            // Proxied URLs: unwrap underlying target url
+            if url.path.contains("/proxy") {
+                if let components = URLComponents(string: urlString),
+                   let rawTargetURL = components.queryItems?.first(where: { $0.name == "url" })?.value {
+                    extractFilenameOrSlug(from: rawTargetURL)
+                }
+                return
+            }
+
+            let lastComponent = url.lastPathComponent
+            if !lastComponent.isEmpty && lastComponent != "/" {
+                candidateStrings.append(lastComponent)
+            }
+        }
+
+        extractFilenameOrSlug(from: stream.url.absoluteString)
+
+        if let ref = stream.proxyHeaders?["Referer"] ?? stream.proxyHeaders?["referer"] {
+            if let refURL = URL(string: ref) {
+                let slug = refURL.lastPathComponent
+                if !slug.isEmpty && slug != "/" {
+                    candidateStrings.append(slug)
+                }
+            } else {
+                if let lastSlash = ref.components(separatedBy: "/").last, !lastSlash.isEmpty {
+                    candidateStrings.append(lastSlash)
+                }
+            }
+        }
+
+        // Noise tokens (file extensions, codecs, release groups, resolutions, quality tags, common release tags)
+        let noiseTokens: Set<String> = [
+            "mkv", "mp4", "avi", "mov", "webm", "ts", "m3u8",
+            "1080p", "720p", "2160p", "480p", "360p", "4k", "2k", "uhd", "fhd", "hd", "sd",
+            "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "aac", "ac3", "eac3", "dts", "flac", "ddp", "atmos",
+            "webdl", "webrip", "bluray", "brrip", "bdrip", "hdtv", "dvdrip", "remux", "hdr", "dv", "sdr",
+            "hindi", "english", "dual", "audio", "dub", "dubbed", "esub", "sub", "subs", "multisubs",
+            "cinefreak", "cinefreaktop", "top", "yts", "psa", "rartv", "eztv", "galaxy", "tgx", "ettv",
+            "amazon", "netflix", "hotstar", "zee5", "gdrive", "download", "watch", "online", "series", "web", "korean", "anime",
+            "tv", "original", "repack", "proper", "internal", "complete", "season", "episode", "ep", "part", "vol", "volume"
+        ]
+
+        var sawExplicitConflict = false
+        var sawTargetConfirmation = false
+
+        for text in candidateStrings {
+            // Unescape percent-encoding and separators
+            let unescaped = text
+                .removingPercentEncoding?
+                .replacingOccurrences(of: "-20-", with: " ")
+                .replacingOccurrences(of: "%20", with: " ") ?? text
+
+            // In release filenames/slugs, the media title is located BEFORE the season/episode pattern,
+            // year, or resolution tag (e.g. "CINEFREAK.TOP - Head Over Heels - S01E02..." -> "CINEFREAK.TOP - Head Over Heels")
+            var titlePortion = unescaped
+            let boundaryPatterns = [
+                #"(?i)[\._\s-](s\d{1,2}[\._\s-]?e\d{1,3}|\d{1,2}x\d{1,3}|ep?\d{1,3}|season[\._\s-]?\d{1,2})"#,
+                #"(?i)[\._\s-](19\d\d|20\d\d)(?!p|\d)"#,
+                #"(?i)[\._\s-](2160p|1080p|720p|480p|4k|2k|uhd|fhd)"#
+            ]
+            for pattern in boundaryPatterns {
+                if let range = titlePortion.range(of: pattern, options: .regularExpression) {
+                    titlePortion = String(titlePortion[..<range.lowerBound])
+                    break
+                }
+            }
+
+            let normalized = titlePortion
+                .replacingOccurrences(of: "[-_\\.\\+\\/\\?&=#]", with: " ", options: .regularExpression)
+                .lowercased()
+
+            let rawWords = normalized.components(separatedBy: .whitespacesAndNewlines)
+                .filter { word in
+                    guard word.count >= 2, !stopwords.contains(word), !noiseTokens.contains(word), Int(word) == nil else { return false }
+                    if word.range(of: #"^(s\d+e\d+|\d+x\d+|e\d+|ep\d+)$"#, options: .regularExpression) != nil { return false }
+                    return true
+                }
+
+            guard !rawWords.isEmpty else { continue }
+
+            // Check if any target token is present in the title portion
+            let matchesTarget = targetTokens.contains { tToken in
+                rawWords.contains(where: { $0 == tToken })
+            }
+
+            if matchesTarget {
+                sawTargetConfirmation = true
+            } else {
+                // If the title portion has 2 or more distinct words (e.g. ["head", "heels"])
+                // and none of the target keywords are present, this candidate is an explicitly different show!
+                let distinctWords = Set(rawWords)
+                if distinctWords.count >= 2 {
+                    sawExplicitConflict = true
+                }
+            }
+        }
+
+        if sawExplicitConflict && !sawTargetConfirmation {
+            // Severe disqualification penalty: the underlying stream/referer explicitly points to another show!
+            return -30000.0
+        }
+
+        if sawTargetConfirmation {
+            return 1500.0
         }
 
         return 0.0

@@ -1,18 +1,20 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var languageManager = LanguageManager.shared
+
     var body: some View {
         TabView {
             GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gear") }
+                .tabItem { Label(L10n.tr("General"), systemImage: "gear") }
             StreamingSettingsView()
-                .tabItem { Label("Streaming", systemImage: "antenna.radiowaves.left.and.right") }
+                .tabItem { Label(L10n.tr("Streaming"), systemImage: "antenna.radiowaves.left.and.right") }
             AddonsSettingsTabView()
-                .tabItem { Label("Addons", systemImage: "puzzlepiece.extension") }
+                .tabItem { Label(L10n.tr("Addons"), systemImage: "puzzlepiece.extension") }
             PlaybackSettingsView()
-                .tabItem { Label("Playback", systemImage: "play.tv") }
+                .tabItem { Label(L10n.tr("Playback"), systemImage: "play.tv") }
             AdvancedSettingsView()
-                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+                .tabItem { Label(L10n.tr("Advanced"), systemImage: "slider.horizontal.3") }
         }
         .frame(width: 620, height: 530)
         .padding()
@@ -24,6 +26,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @ObservedObject var authManager = AuthManager.shared
     @ObservedObject var profileManager = ProfileManager.shared
+    @ObservedObject var languageManager = LanguageManager.shared
     @AppStorage("syncEnabled") private var syncEnabled = true
     @AppStorage("enrichHomeWithTMDB") private var enrichHomeWithTMDB = true
     @AppStorage("tmdbApiKey") private var tmdbApiKey = ""
@@ -383,6 +386,26 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 3)
             }
 
+            // MARK: Language Section
+            Section(header: Text(L10n.tr("App Language"))) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker(L10n.tr("App Language"), selection: Binding(
+                        get: { languageManager.currentLanguage },
+                        set: { newLang in languageManager.setLanguage(newLang) }
+                    )) {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Text(lang.displayName).tag(lang)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(L10n.tr("Select Interface Language"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+
             // MARK: App Information Section
             Section(header: Text("App Information")) {
                 HStack(spacing: 12) {
@@ -489,6 +512,7 @@ struct GeneralSettingsView: View {
 
 // MARK: - 2. Streaming Settings
 struct StreamingSettingsView: View {
+    @ObservedObject var languageManager = LanguageManager.shared
     @AppStorage("enableFluxMode") private var enableFluxMode = true
     @AppStorage("preferredQuality") private var preferredQuality = "4K"
     @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
@@ -496,8 +520,8 @@ struct StreamingSettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: Text("Stream Sources")) {
-                Picker("Stream Filter", selection: $streamingSourceMode) {
+            Section(header: Text(L10n.tr("Stream Sources"))) {
+                Picker(L10n.tr("Stream Filter"), selection: $streamingSourceMode) {
                     Text("HTTP & Torrent Streams (Both)").tag("both")
                     Text("HTTP Streams Only").tag("http")
                     Text("Torrent Streams Only").tag("torrent")
@@ -509,13 +533,13 @@ struct StreamingSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             
-            Section(header: Text("Flux Mode")) {
-                Toggle("Enable Flux Mode", isOn: $enableFluxMode)
+            Section(header: Text(L10n.tr("Flux Mode"))) {
+                Toggle(L10n.tr("Enable Flux Mode"), isOn: $enableFluxMode)
                 Text("Automatically find and race to play the fastest available stream.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 
-                Picker("Maximum Resolution", selection: $preferredQuality) {
+                Picker(L10n.tr("Maximum Resolution"), selection: $preferredQuality) {
                     Text("4K (2160p)").tag("4K")
                     Text("2K (1440p)").tag("2K")
                     Text("1080p").tag("1080p")
@@ -526,7 +550,7 @@ struct StreamingSettingsView: View {
                 .disabled(!enableFluxMode)
                 .opacity(enableFluxMode ? 1.0 : 0.6)
 
-                Toggle("Language Filter in Flux Mode", isOn: $enableFluxLanguageFilter)
+                Toggle(L10n.tr("Language Filter in Flux Mode"), isOn: $enableFluxLanguageFilter)
                     .disabled(!enableFluxMode)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
                 Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.")
@@ -550,34 +574,35 @@ struct StreamingSettingsView: View {
 
 // MARK: - 3. Playback Settings
 struct PlaybackSettingsView: View {
+    @ObservedObject var languageManager = LanguageManager.shared
     @AppStorage("useHardwareAcceleration") private var useHardwareAcceleration = true
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
     @AppStorage("enableAudioPassthrough") private var enableAudioPassthrough = false
     @AppStorage("defaultAudioLang") private var defaultAudioLang = "English"
     @AppStorage("defaultSubLang") private var defaultSubLang = "English"
 
-    let audioLanguages = ["English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
-    let subtitleLanguages = ["Off", "English", "Spanish", "French", "German", "Japanese", "Korean", "Hindi"]
+    let audioLanguages = ["English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese", "Korean", "Hindi", "Chinese"]
+    let subtitleLanguages = ["Off", "English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese", "Korean", "Hindi", "Chinese"]
 
     var body: some View {
         Form {
-            Section(header: Text("Video Player"), footer: Text("Hardware decoding utilizes Apple Silicon / GPU hardware acceleration for smooth 4K HDR playback.")) {
-                Toggle("Hardware Acceleration", isOn: $useHardwareAcceleration)
+            Section(header: Text(L10n.tr("Video Player")), footer: Text("Hardware decoding utilizes Apple Silicon / GPU hardware acceleration for smooth 4K HDR playback.")) {
+                Toggle(L10n.tr("Hardware Acceleration"), isOn: $useHardwareAcceleration)
             }
 
-            Section(header: Text("Playback Behavior")) {
-                Toggle("Auto-play Next Episode", isOn: $autoPlayNextEnabled)
+            Section(header: Text(L10n.tr("Playback Behavior"))) {
+                Toggle(L10n.tr("Auto-play Next Episode"), isOn: $autoPlayNextEnabled)
             }
 
-            Section(header: Text("Audio"), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Leave disabled when listening through Mac built-in speakers or AirPods.")) {
-                Toggle("Audio Passthrough (Atmos / DTS)", isOn: $enableAudioPassthrough)
+            Section(header: Text(L10n.tr("Audio")), footer: Text("Bitstream Dolby Atmos (E-AC-3 JOC / TrueHD) and DTS to an AVR or soundbar over HDMI. Leave disabled when listening through Mac built-in speakers or AirPods.")) {
+                Toggle(L10n.tr("Audio Passthrough (Atmos / DTS)"), isOn: $enableAudioPassthrough)
             }
             
-            Section(header: Text("Languages")) {
-                Picker("Default Audio", selection: $defaultAudioLang) {
+            Section(header: Text(L10n.tr("Languages"))) {
+                Picker(L10n.tr("Default Audio"), selection: $defaultAudioLang) {
                     ForEach(audioLanguages, id: \.self) { Text($0).tag($0) }
                 }
-                Picker("Default Subtitles", selection: $defaultSubLang) {
+                Picker(L10n.tr("Default Subtitles"), selection: $defaultSubLang) {
                     ForEach(subtitleLanguages, id: \.self) { Text($0).tag($0) }
                 }
             }

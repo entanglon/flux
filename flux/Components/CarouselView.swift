@@ -32,7 +32,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                 LazyHStack(spacing: spacing) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         content(item, index)
-                            .id(index)
+                            .id(item.id)
                             .onAppear {
                                 prefetchAhead(from: index)
                             }
@@ -73,7 +73,9 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
             }
             .onChange(of: items.first?.id) { _, _ in
                 scrollTargetIndex = 0
-                proxy.scrollTo(0, anchor: .leading)
+                if let first = items.first {
+                    proxy.scrollTo(first.id, anchor: .leading)
+                }
             }
         }
     }
@@ -89,16 +91,18 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
     private func scrollRight(proxy: ScrollViewProxy) {
         guard !items.isEmpty else { return }
         scrollTargetIndex = min(scrollTargetIndex + scrollStep, items.count - 1)
+        let targetID = items[scrollTargetIndex].id
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            proxy.scrollTo(scrollTargetIndex, anchor: .leading)
+            proxy.scrollTo(targetID, anchor: .leading)
         }
     }
     
     private func scrollLeft(proxy: ScrollViewProxy) {
         guard !items.isEmpty else { return }
         scrollTargetIndex = max(scrollTargetIndex - scrollStep, 0)
+        let targetID = items[scrollTargetIndex].id
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            proxy.scrollTo(scrollTargetIndex, anchor: .leading)
+            proxy.scrollTo(targetID, anchor: .leading)
         }
     }
 

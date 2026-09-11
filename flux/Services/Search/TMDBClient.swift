@@ -64,11 +64,15 @@ actor TMDBClient {
         let key = apiKeyProvider()
         guard !key.isEmpty else { return [] }
         
+        let tmdbLang = await MainActor.run {
+            let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
+            return AppLanguage(rawValue: appLang)?.tmdbCode ?? "en-US"
+        }
         var components = URLComponents(string: "https://api.themoviedb.org/3/search/multi")
         components?.queryItems = [
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "include_adult", value: "false"),
-            URLQueryItem(name: "language", value: "en-US"),
+            URLQueryItem(name: "language", value: tmdbLang),
             URLQueryItem(name: "api_key", value: key)
         ]
 

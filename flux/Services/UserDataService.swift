@@ -206,7 +206,7 @@ class UserDataService: ObservableObject {
                 if needsTMDBLogo {
                     let cleanID = enriched.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
                     let tmdbID = enriched.id.starts(with: "tt") ? await TMDBEnricher.shared.resolveTmdbID(imdbID: enriched.id, type: type) : cleanID
-                    if let id = tmdbID, let tmdbLogo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                    if let id = tmdbID, let tmdbLogo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type, originalLanguage: enriched.originalLanguage) {
                         enriched.logoURL = tmdbLogo
                         didChange = true
                     }
@@ -292,7 +292,7 @@ class UserDataService: ObservableObject {
                 genres: nil,
                 popularity: nil,
                 releaseDate: nil,
-                originalLanguage: nil,
+                originalLanguage: dict["originalLanguage"] as? String,
                 spokenLanguages: nil,
                 originCountry: nil,
                 voteAverage: nil,
@@ -433,7 +433,7 @@ class UserDataService: ObservableObject {
         return result
     }
 
-    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
+    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, isLightweightTick: Bool = false, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
         let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
@@ -504,6 +504,7 @@ class UserDataService: ObservableObject {
         if let ei = episodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
         if let r = item.runtime { finalItem["runtime"] = r }
         if let l = item.logoURL?.absoluteString { finalItem["logo"] = l }
+        if let ol = item.originalLanguage { finalItem["originalLanguage"] = ol }
         if let pos = playbackPosition ?? item.lastPlaybackPosition ?? (existingEntry?["lastPlaybackPosition"] as? Double) { finalItem["lastPlaybackPosition"] = pos }
         if let dur = playbackDuration ?? item.lastPlaybackDuration ?? (existingEntry?["lastPlaybackDuration"] as? Double) { finalItem["lastPlaybackDuration"] = dur }
         if let su = streamURL ?? item.lastStreamURL { finalItem["lastStreamURL"] = su.absoluteString }
@@ -517,7 +518,19 @@ class UserDataService: ObservableObject {
         
         currentData.append(finalItem)
         UserDefaults.standard.set(currentData, forKey: key)
-        UserDefaults.standard.synchronize()
+        if !isLightweightTick {
+            UserDefaults.standard.synchronize()
+        }
+
+        // Lightweight tick throttling: during continuous 5s playback ticks, avoid re-parsing
+        // and re-publishing the full history array unless progress changed by at least 2%.
+        if isLightweightTick {
+            let prevProg = (existingEntry?["progress"] as? Double) ?? 0.0
+            let currentProg = finalProgress ?? 0.0
+            if abs(currentProg - prevProg) < 0.02 {
+                return
+            }
+        }
         
         let newItems = parseItems(currentData)
         if Thread.isMainThread {
@@ -527,7 +540,9 @@ class UserDataService: ObservableObject {
                 self[keyPath: target] = newItems
             }
         }
-        AuthManager.shared.scheduleAutoSync()
+        if !isLightweightTick {
+            AuthManager.shared.scheduleAutoSync()
+        }
     }
     
     /// Returns true only when the media is genuinely completed (progress >= 90% or marked 100%).
@@ -603,7 +618,7 @@ class UserDataService: ObservableObject {
         return (progress, position, duration)
     }
 
-    func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double, isRestart: Bool = false) {
+    func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double, isRestart: Bool = false, isLightweightTick: Bool = false) {
         guard duration > 0 else { return }
         let key = "\(itemID)_s\(season)e\(episode)"
         var allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
@@ -622,10 +637,12 @@ class UserDataService: ObservableObject {
             "timestamp": Date().timeIntervalSince1970
         ]
         UserDefaults.standard.set(allProgress, forKey: episodeProgressKey)
-        UserDefaults.standard.synchronize()
+        if !isLightweightTick {
+            UserDefaults.standard.synchronize()
+        }
     }
 
-    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false) {
+    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, isLightweightTick: Bool = false) {
         let effProgress = progress ?? item.progress
         let effSeason = season ?? item.lastSeason
         let effEpisode = episode ?? item.lastEpisode
@@ -633,7 +650,7 @@ class UserDataService: ObservableObject {
         let effDur = playbackDuration ?? item.lastPlaybackDuration
 
         if let s = effSeason, let e = effEpisode, let pos = effPos, let dur = effDur {
-            saveEpisodeProgress(for: item.id, season: s, episode: e, position: pos, duration: dur, isRestart: isRestart)
+            saveEpisodeProgress(for: item.id, season: s, episode: e, position: pos, duration: dur, isRestart: isRestart, isLightweightTick: isLightweightTick)
         }
         addToList(
             key: historyKey,
@@ -649,6 +666,7 @@ class UserDataService: ObservableObject {
             torrentInfoHash: torrentInfoHash ?? item.lastTorrentInfoHash,
             fileIndex: fileIndex ?? item.lastFileIndex,
             isRestart: isRestart,
+            isLightweightTick: isLightweightTick,
             target: \.history
         )
     }
@@ -738,6 +756,7 @@ class UserDataService: ObservableObject {
         if let hash = item.lastTorrentInfoHash { dict["lastTorrentInfoHash"] = hash }
         if let fi = item.lastFileIndex { dict["lastFileIndex"] = fi }
         if let ne = item.isNewEpisode { dict["isNewEpisode"] = ne }
+        if let ol = item.originalLanguage { dict["originalLanguage"] = ol }
         return dict
     }
     

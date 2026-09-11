@@ -313,7 +313,7 @@ struct ContinueWatchingCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(mode == .continueWatching ? "Continue watching" : "Recently watched"), \(subtitleText)")
         .accessibilityHint("Resumes playback")
-        .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)")
+        .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)-\(Int((item.progress ?? 0) * 100))-\(item.isNewEpisode == true)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
             let isTV = item.category == "TV Show" || item.lastSeason != nil
             let type = isTV ? "tv" : "movie"
@@ -329,7 +329,7 @@ struct ContinueWatchingCard: View {
             if let id = tmdbIDToUse {
                 // Fetch TMDB logo if not already set or not original quality
                 if fetchedLogo == nil && (item.logoURL == nil || item.logoURL?.absoluteString.contains("tmdb.org") == false || item.logoURL?.absoluteString.contains("/original/") == false) {
-                    if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+                    if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type, originalLanguage: item.originalLanguage) {
                         await MainActor.run { self.fetchedLogo = logo }
                     }
                 }

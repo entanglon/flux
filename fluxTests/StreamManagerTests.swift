@@ -919,5 +919,87 @@ struct StreamManagerTests {
         #expect(stream.containerType == "MKV")
         #expect(stream.cleanTitle == "PixelDrain • WEB-DL")
     }
+
+    @Test func titleMismatchPenalizesDeceptiveScrapedStream() {
+        let manager = StreamManager.shared
+        let deceptiveStream = Stream(
+            title: "📡 Overflow - The Dreaming Girl Next to Me (2020) • S01E02 • 🎞️ 1080p • MKV",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://pengu.uk/direct/external/abc/CINEFREAK.TOP-20--20Head-20Over-20Heels-20-S01E02-20WEB-DL-20-Hindi-English-2010")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            proxyHeaders: [
+                "Referer": "https://cinefreak.net/head-over-heels-2025-season-1-korean-web-series-download-watch-online-hindi-dubbed-english-480p-720p-1080p-amazon-gdrive-esub-cinefreak"
+            ]
+        )
+
+        let score = manager.evaluateTitleMatch(stream: deceptiveStream, targetTitle: "Overflow")
+        #expect(score <= -25000.0)
+    }
+
+    @Test func titleMatchConfirmsMatchingStreamURL() {
+        let manager = StreamManager.shared
+        let matchingStream = Stream(
+            title: "Overflow.S01E02.1080p.mkv",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://cdn.example.com/videos/Overflow.S01E02.1080p.mkv")!,
+            source: "WebStreamrMBG",
+            quality: "1080p"
+        )
+
+        let score = manager.evaluateTitleMatch(stream: matchingStream, targetTitle: "Overflow")
+        #expect(score > 0.0)
+    }
+
+    @Test func titleMatchIsNeutralForOpaqueHashURL() {
+        let manager = StreamManager.shared
+        let opaqueStream = Stream(
+            title: "📡 Overflow S01E02 (2020) • S01E02",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://pengu.uk/direct/external/xyz/tv.18447.S1E2.original.2655808.20220628021028.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        let score = manager.evaluateTitleMatch(stream: opaqueStream, targetTitle: "Overflow")
+        #expect(score == 0.0)
+    }
+
+    @Test func selectFastStartCandidatePrefersGenuineStreamOverDeceptiveMismatchedTitleStream() {
+        let manager = StreamManager.shared
+        let deceptiveStream = Stream(
+            title: "📡 Overflow - The Dreaming Girl Next to Me (2020) • S01E02 • 🎞️ 1080p • MKV • ~26.1 Mbps",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://pengu.uk/direct/external/abc/CINEFREAK.TOP-20--20Head-20Over-20Heels-20-S01E02-20WEB-DL-20-Hindi-English-2010")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            bitrate: "~26.1 Mbps",
+            proxyHeaders: [
+                "Referer": "https://cinefreak.net/head-over-heels-2025-season-1-korean-web-series-download"
+            ]
+        )
+
+        let genuineStream = Stream(
+            title: "📡 Overflow S01E02 (2020) • S01E02 • 🎞️ 1080p • MKV • ~15.2 Mbps",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://pengu.uk/direct/external/xyz/tv.18447.S1E2.original.2655808.20220628021028.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            bitrate: "~15.2 Mbps"
+        )
+
+        let (primary, _) = manager.selectFastStartCandidate(
+            from: [deceptiveStream, genuineStream],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "English",
+            targetSeason: 1,
+            targetEpisode: 2,
+            targetTitle: "Overflow"
+        )
+
+        #expect(primary?.stableKey == genuineStream.stableKey)
+    }
 }
+
 

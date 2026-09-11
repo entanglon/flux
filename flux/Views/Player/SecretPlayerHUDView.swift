@@ -170,9 +170,11 @@ struct SecretPlayerHUDView: View {
                     .font(.system(size: 18))
                     .foregroundStyle(.white.opacity(0.75))
                     .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
+                    .background(Circle().fill(Color.white.opacity(0.001)))
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .contentShape(Circle())
             .help("Close (Esc)")
         }
         .padding(.horizontal, 18)
@@ -191,7 +193,7 @@ struct SecretPlayerHUDView: View {
                         .frame(width: 34, height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(activeSection == sec ? Color.cyan.opacity(0.35) : Color.clear)
+                                .fill(activeSection == sec ? Color.cyan.opacity(0.35) : Color.white.opacity(0.001))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -201,7 +203,8 @@ struct SecretPlayerHUDView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .animation(.easeInOut(duration: 0.15), value: activeSection)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .animation(.easeInOut(duration: 0.10), value: activeSection)
                 .help(sec.title)
             }
         }
@@ -254,7 +257,7 @@ struct SecretPlayerHUDView: View {
             }
             .padding(20)
         }
-        .animation(.easeInOut(duration: 0.12), value: activeSection)
+        .animation(.easeInOut(duration: 0.08), value: activeSection)
     }
 
     private func refreshDiagnostics() {
@@ -368,6 +371,7 @@ struct SecretPlayerHUDView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
 
                     calibrationButton("+50ms") { setSubtitleOffset(subtitleDelay + 0.05) }
                     calibrationButton("+100ms") { setSubtitleOffset(subtitleDelay + 0.1) }
@@ -418,6 +422,7 @@ struct SecretPlayerHUDView: View {
                                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
                 .padding(.top, 4)
@@ -544,6 +549,7 @@ struct SecretPlayerHUDView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
 
                     calibrationButton("+50ms") { setAudioOffset(audioDelay + 0.05) }
                     calibrationButton("+100ms") { setAudioOffset(audioDelay + 0.1) }
@@ -594,6 +600,7 @@ struct SecretPlayerHUDView: View {
                                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
                 .padding(.top, 4)
@@ -743,6 +750,7 @@ struct SecretPlayerHUDView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
@@ -771,6 +779,7 @@ struct SecretPlayerHUDView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func sliderAdjustment(label: String, value: Binding<Double>, onCommit: @escaping (Double) -> Void) -> some View {
@@ -809,10 +818,14 @@ struct SecretPlayerHUDView: View {
                 .foregroundStyle(.white.opacity(0.9))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(Color.white.opacity(0.10))
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.10))
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }

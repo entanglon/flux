@@ -308,7 +308,8 @@ final class ProfileManager: ObservableObject {
     var playbackSettingKeys: [String] {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
-         "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB"]
+         "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB",
+         "appLanguage"]
     }
 
     /// Persists current UserDefaults into the active profile's settings snapshot.
@@ -343,6 +344,9 @@ final class ProfileManager: ObservableObject {
         if let snap = UserDefaults.standard.dictionary(forKey: "profile.\(profileID.uuidString).settings") {
             for (key, value) in snap {
                 UserDefaults.standard.set(value, forKey: key)
+            }
+            if let lang = snap["appLanguage"] as? String {
+                LanguageManager.shared.syncFromProfile(lang)
             }
         } else {
             // First time loading this profile: snapshot current settings so active preferences persist

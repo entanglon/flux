@@ -25,26 +25,26 @@ struct MediaListView: View {
 
         var title: String {
             switch self {
-            case .continueWatching: return "Continue Watching"
-            case .trendingAllDay: return "Trending Today"
-            case .trendingAllWeek: return "Trending This Week"
-            case .trendingMovies(let window): return window == "day" ? "Trending Movies Today" : "Trending Movies This Week"
-            case .popularMovies: return "Popular Movies"
-            case .nowPlayingMovies: return "Now Playing"
-            case .upcomingMovies: return "Upcoming"
-            case .topRatedMovies: return "Top Rated Movies"
-            case .streamingMovies: return "Popular on Streaming"
-            case .quickWatches: return "Quick Watches (< 95m)"
-            case .trendingTV(let window): return window == "day" ? "Trending Shows Today" : "Trending Shows This Week"
-            case .popularTV: return "Popular TV Shows"
-            case .airingTodayTV: return "Airing Today"
-            case .onTheAirTV: return "On TV"
-            case .topRatedTV: return "Top Rated TV Shows"
-            case .streamingTV: return "Popular on Streaming"
+            case .continueWatching: return "Continue Watching".localized
+            case .trendingAllDay: return "Trending Today".localized
+            case .trendingAllWeek: return "Trending This Week".localized
+            case .trendingMovies(let window): return window == "day" ? "Trending Movies Today".localized : "Trending Movies This Week".localized
+            case .popularMovies: return "Popular Movies".localized
+            case .nowPlayingMovies: return "Now Playing".localized
+            case .upcomingMovies: return "Upcoming".localized
+            case .topRatedMovies: return "Top Rated Movies".localized
+            case .streamingMovies: return "Popular on Streaming".localized
+            case .quickWatches: return "Quick Watches (< 95m)".localized
+            case .trendingTV(let window): return window == "day" ? "Trending Shows Today".localized : "Trending Shows This Week".localized
+            case .popularTV: return "Popular TV Shows".localized
+            case .airingTodayTV: return "Airing Today".localized
+            case .onTheAirTV: return "On TV".localized
+            case .topRatedTV: return "Top Rated TV Shows".localized
+            case .streamingTV: return "Popular on Streaming".localized
             case .genre(_, let name): return name
             case .genreCategory(_, let name, _, let categoryTitle, _): return "\(name): \(categoryTitle)"
             case .ott(_, let name): return name
-            case .fixed(let title, _): return title
+            case .fixed(let title, _): return title.localized
             }
         }
     }
@@ -52,6 +52,7 @@ struct MediaListView: View {
     let title: String
     let type: ListType
     @ObservedObject private var userData = UserDataService.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @Environment(\.openWindow) private var openWindow
     @State private var genreMediaType = "movie" // genre pages: Movies/TV toggle
     @State private var items: [MediaItem] = []

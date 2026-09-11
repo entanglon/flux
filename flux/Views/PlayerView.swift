@@ -142,7 +142,7 @@ struct PlayerView: View {
                     tmdbID = clean
                 }
             }
-            if let id = tmdbID, let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type) {
+            if let id = tmdbID, let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: id, type: type, originalLanguage: media.originalLanguage) {
                 await MainActor.run { self.fetchedLogo = logo }
             }
         }
@@ -284,10 +284,11 @@ struct PlayerView: View {
             // mpv here would kill playback mid-handoff.
             guard !PiPManager.shared.isHandingOffCore else { return }
             SleepAssertionManager.shared.playerDidClose()
-            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
             mpv.pause()
             mpv.stop()
             playerManager.close()
+            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
         }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             handleStreamURLChange(newURL)
@@ -419,10 +420,10 @@ struct PlayerView: View {
         if t >= 1.0 && mpv.isPlaying {
             playerManager.confirmPlaybackSuccess()
         }
-        // Continuous autosave during playback
+        // Continuous autosave during playback (lightweight: no synchronize, no cloud sync, throttled re-render)
         if hasStartedPlayback && mpv.duration > 0 && Date().timeIntervalSince(lastProgressSaveTime) >= 5.0 {
             lastProgressSaveTime = Date()
-            playerManager.updateWatchProgress(time: t, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: t, duration: mpv.duration, isLightweightTick: true)
         }
 
         // Automatically preload next episode when reaching the final stretch (> 80% progress or < 2 min remaining)
@@ -447,14 +448,14 @@ struct PlayerView: View {
         }
         if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
             lastProgressSaveTime = Date()
-            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
         }
     }
 
     private func handleSeekEnd(wasSeeking: Bool, isSeeking: Bool) {
         if wasSeeking && !isSeeking && hasStartedPlayback && mpv.duration > 0 {
             lastProgressSaveTime = Date()
-            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
         }
     }
 
@@ -472,7 +473,7 @@ struct PlayerView: View {
         mpv.seek(relative: delta)
         if mpv.duration > 0 {
             lastProgressSaveTime = Date()
-            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: targetTime, duration: mpv.duration, isLightweightTick: false)
         }
     }
 
@@ -480,7 +481,7 @@ struct PlayerView: View {
         mpv.seek(absolute: time)
         if mpv.duration > 0 {
             lastProgressSaveTime = Date()
-            playerManager.updateWatchProgress(time: time, duration: mpv.duration)
+            playerManager.updateWatchProgress(time: time, duration: mpv.duration, isLightweightTick: false)
         }
     }
 
@@ -1959,11 +1960,14 @@ struct PlayerView: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.white.opacity(0.001)))
                         .glassEffect(.clear.interactive(), in: .circle)
-                        .contentShape(.circle)
+                        .clipShape(Circle())
+                        .contentShape(Circle())
                         .opacity(playerManager.isFetchingStreams ? 0.5 : 1.0)
                 }
                 .buttonStyle(.plain)
+                .contentShape(Circle())
                 .disabled(playerManager.isFetchingStreams)
                 .help("Refresh streams from all addons")
 
@@ -1977,10 +1981,13 @@ struct PlayerView: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.white.opacity(0.001)))
                         .glassEffect(.clear.interactive(), in: .circle)
-                        .contentShape(.circle)
+                        .clipShape(Circle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .contentShape(Circle())
             }
             .padding(.horizontal, 22)
             .padding(.top, 20)
@@ -2015,12 +2022,15 @@ struct PlayerView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.65))
-                            .background(isSelected ? Color.white.opacity(0.22) : Color.clear)
+                            .background(
+                                Capsule().fill(isSelected ? Color.white.opacity(0.22) : Color.white.opacity(0.001))
+                            )
                             .glassEffect(isSelected ? .regular.interactive() : .clear.interactive(), in: .capsule)
                             .clipShape(Capsule())
-                            .contentShape(.capsule)
+                            .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Capsule())
                     }
                 }
 
@@ -2050,12 +2060,15 @@ struct PlayerView: View {
                     .padding(.horizontal, 9)
                     .padding(.vertical, 6)
                     .foregroundStyle(selectedQualityFilter != "All" ? Color.cyan : Color.white.opacity(0.75))
-                    .background(selectedQualityFilter != "All" ? Color.cyan.opacity(0.2) : Color.clear)
+                    .background(
+                        Capsule().fill(selectedQualityFilter != "All" ? Color.cyan.opacity(0.2) : Color.white.opacity(0.001))
+                    )
                     .glassEffect(.clear.interactive(), in: .capsule)
                     .clipShape(Capsule())
-                    .contentShape(.capsule)
+                    .contentShape(Capsule())
                 }
                 .menuStyle(.borderlessButton)
+                .contentShape(Capsule())
                 .help(selectedQualityFilter == "All" ? "Filter by Quality (All)" : "Quality: \(selectedQualityFilter)")
 
                 // Addon Source Dropdown Menu: Icon-only in bar
@@ -2085,12 +2098,15 @@ struct PlayerView: View {
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
                         .foregroundStyle(selectedSourceFilter != "All" ? Color.cyan : Color.white.opacity(0.75))
-                        .background(selectedSourceFilter != "All" ? Color.cyan.opacity(0.2) : Color.clear)
+                        .background(
+                            Capsule().fill(selectedSourceFilter != "All" ? Color.cyan.opacity(0.2) : Color.white.opacity(0.001))
+                        )
                         .glassEffect(.clear.interactive(), in: .capsule)
                         .clipShape(Capsule())
-                        .contentShape(.capsule)
+                        .contentShape(Capsule())
                     }
                     .menuStyle(.borderlessButton)
+                    .contentShape(Capsule())
                     .help(selectedSourceFilter == "All" ? "Filter by Addon (All)" : "Addon: \(selectedSourceFilter)")
                 }
             }
@@ -2592,9 +2608,10 @@ struct StreamRowItemView: View {
                     .stroke(rowStrokeColor, lineWidth: isSelected ? 1.0 : 0.6)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(.rect(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) {
                 isHovered = hovering
