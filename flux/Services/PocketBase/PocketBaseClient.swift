@@ -139,7 +139,28 @@ struct PocketBaseClient {
 
         var recordID = existingRecordID
         if recordID == nil {
-            recordID = try? await fetchData(token: token, userID: userID)?.id
+            // Resolve-or-abort: a failed lookup must NEVER fall through to a
+            // blind POST (that's how Sep-9 duplicate was born). Distinguish
+            // "verified absent" (POST is correct) from "lookup failed" (abort;
+            // a later sync retries — a skipped push self-heals, a dupe doesn't).
+            var lookupFailed = false
+            do {
+                recordID = try await fetchData(token: token, userID: userID)?.id
+            } catch {
+                lookupFailed = true
+            }
+            if lookupFailed {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                do {
+                    recordID = try await fetchData(token: token, userID: userID)?.id
+                    lookupFailed = false
+                } catch {
+                    lookupFailed = true
+                }
+            }
+            if lookupFailed {
+                throw PocketBaseError.network
+            }
         }
 
         var req: URLRequest

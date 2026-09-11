@@ -16,6 +16,35 @@ When the user asks for a change, DO NOT implement blindly. First:
 
 ---
 
+## Sep 11, 2026 — S3/HF BUCKET + BACKUP VERIFICATION + SECOND DEDUP
+
+- S3 file storage (HF `event-horizon` bucket) verified connected, but it only governs file-field uploads — live `data.db` always stays local. Zero file fields in use → zero effect today.
+- Backups verified: daily midnight UTC cron, keep 3, S3 upload on; fresh 2.6MB backup present. User test-restored from admin panel OK.
+- Restore exposed a NEW Sep-9 dupe (`r41e`, live) beside the stale merged keeper: app had tracked the dupe since creation. Residual hole found: `pushData` fell through to blind POST on lookup failure. Fixed (resolve-or-abort: one retry, then throw; verified-absent still POSTs). Re-merged to single `r41e`, keeper deleted, backups kept (`dupes_backup3.json`).
+- OPEN liability: backup zips contain plaintext TMDB key + emails — keep bucket private. Restore still untested end-to-end into a scratch instance.
+
+---
+
+## PLANNED (next): Stock Kids Profile with Content Blocking — AGREED WITH CONDITIONS
+
+**Verdict**: yes, worth building (OTT parity, real family value) — but it's a multi-day build, not a toggle. The dangerous version is a cosmetic block a kid taps around in 5 seconds.
+
+**Why it's bigger than it looks:**
+- No PIN/lock infra exists (verified: zero matches). Without a PIN on exiting Kids mode + undeletable stock profile, blocking is theater. PIN must be local-only (never cloud-synced).
+- "Kid-suitable" can't come from genres (Animation includes Sausage Party) — needs TMDB certifications (`release_dates`/`content_ratings`, which `fetchCertification` already fetches per-item). But rails show ~300 items; per-item cert fetches per page load needs a caching + background-evaluation layer or page loads die.
+- Every surface must filter: Home/Movies/TV/Trending rails, search, genre pages, detail (block or gate?), Up Next/autoplay, addon sections, For You — plus a player-level backstop that refuses non-kid streams (the one layer that must never fail).
+- False-negative (adult slips through) vs false-positive (library so thin it feels broken) tradeoff, driven by cert-data gaps. Default-block-unknown is the only defensible policy for kids, and it will hide lots of benign cert-less titles.
+
+**Phased plan:**
+1. Kids profile type (stock, non-deletable) + PIN create/verify + exit lock.
+2. Certification service (cached, background, default-block policy) + rail/search/genre filtering.
+3. Detail gate + player backstop + autoplay gating.
+4. Polish: kid-first curation (Animation/Family rails up front).
+
+**Decisions needed before build:** (1) default-block vs default-allow for cert-less titles; (2) max allowed rating (G only? +PG? TV-Y7?); (3) PIN length/mode (4-digit?); (4) completed-series/leftover behavior in Kids Continue Watching.
+
+---
+
 ## Sep 9, 2026 — FIXED: Search Page Cmd+F + Capsule Hit-Testing
 
 - **Symptom 1**: Cmd+F on the Search page did nothing (worked elsewhere). Root cause: Cmd+F is bound to the *Search* menu item (navigate), not a focus command — other pages only *appeared* to focus because a fresh SearchView mounts (`.onAppear` focuses). Already-there → no remount → no focus. Also pointlessly reset the nav stack.
