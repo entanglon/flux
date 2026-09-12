@@ -243,6 +243,8 @@ class AuthManager: ObservableObject {
     }
 
     func syncOnLaunch() {
+        // TEMP-DIAGNOSTIC (missing profiles): trace sync gating on error channel.
+        Logger.auth.error("DIAG syncOnLaunch: authed=\(self.isAuthenticated, privacy: .public) configured=\(Self.isConfigured, privacy: .public) hasToken=\(KeychainManager.getToken() != nil, privacy: .public) hasUserID=\(KeychainManager.getUserID() != nil, privacy: .public) profiles=\(ProfileManager.shared.profiles.count)")
         guard isAuthenticated, Self.isConfigured else { return }
         Task { await syncNowInternal(pullFirst: true) }
     }
@@ -260,17 +262,44 @@ class AuthManager: ObservableObject {
     }
 
     private func syncNowInternal(pullFirst: Bool, forcePull: Bool = false) async {
+        // TEMP-DIAGNOSTIC (missing profiles).
+        Logger.auth.error("DIAG syncNowInternal: pullFirst=\(pullFirst, privacy: .public) forcePull=\(forcePull, privacy: .public) hasToken=\(KeychainManager.getToken() != nil, privacy: .public)")
         guard let token = KeychainManager.getToken(),
-              let userID = KeychainManager.getUserID() else { return }
+              let userID = KeychainManager.getUserID() else {
+            Logger.auth.error("DIAG syncNowInternal: ABORTED (no token/userID)")
+            return
+        }
+        // Mixed-session guard: concurrent processes/sign-ins can interleave
+        // Keychain writes, pairing one account's token with another's userID.
+        // Syncing (and especially POSTing) under a mismatched identity creates
+        // duplicates under the wrong filter and applies foreign payloads. Abort;
+        // a clean sign-out/in heals it. Never auto-sign-out (destructive).
+        guard PocketBaseClient.recordID(in: token) == userID else {
+            Logger.auth.error("DIAG syncNowInternal: ABORTED (token identity does not match stored userID — sign out/in to heal)")
+            return
+        }
         do {
             var pulledNewer = false
             var hasLocalAdditionsToPush = false
 
-            if pullFirst, let remote = try await client.fetchData(token: token, userID: userID) {
+            // TEMP-DIAGNOSTIC (missing profiles): distinguish fetch-miss vs throw.
+            var remote: (id: String, payload: [String: Any], updatedAt: Double)?
+            var fetchError: String?
+            if pullFirst {
+                do {
+                    remote = try await client.fetchData(token: token, userID: userID)
+                } catch {
+                    fetchError = error.localizedDescription
+                }
+                Logger.auth.error("DIAG pull: found=\(remote != nil, privacy: .public) err=\(fetchError ?? "none", privacy: .public) cloudProfiles=\((remote?.payload["profiles"] as? [[String: Any]])?.count ?? -1) localProfiles=\(ProfileManager.shared.profiles.count)")
+            }
+            if pullFirst, let remote = remote {
                 self.userDataRecordID = remote.id
                 let lastSync = UserDefaults.standard.double(forKey: UserDefaults.Key.cloudLastSyncAt)
                 if forcePull || remote.updatedAt > lastSync {
-                    hasLocalAdditionsToPush = UserDataService.shared.applyCloudPayload(remote.payload)
+                    // Fresh-enough remote: safe to adopt its profiles list.
+                    // Stale pulls still merge library data but never replace profiles.
+                    hasLocalAdditionsToPush = UserDataService.shared.applyCloudPayload(remote.payload, replaceProfiles: forcePull || remote.updatedAt > lastSync)
                     UserDefaults.standard.set(remote.updatedAt, forKey: UserDefaults.Key.cloudLastSyncAt)
                     Logger.auth.info("Cloud library pulled (\(remote.updatedAt))")
                     pulledNewer = true

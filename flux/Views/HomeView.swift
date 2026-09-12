@@ -2,14 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct CatalogSection: Identifiable, Equatable {
-    let id = UUID()
+    var id: String { "\(addonName):\(type):\(title)" }
     let addonName: String
     let title: String
     let type: String
     let items: [MediaItem]
     
     static func == (lhs: CatalogSection, rhs: CatalogSection) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id && lhs.items.map(\.id) == rhs.items.map(\.id)
     }
 }
 
@@ -99,6 +99,8 @@ struct HomeView: View {
         .ignoresSafeArea(.all, edges: .top)
         .refreshable {
             await TMDBCatalogCacheActor.shared.clear()
+            await TMDBEnricher.shared.clearMemoryCache()
+            ImageInMemoryCache.purgeMemoryCache()
             await loadData()
         }
         .task {
@@ -107,6 +109,8 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
             Task {
                 await TMDBCatalogCacheActor.shared.clear()
+                await TMDBEnricher.shared.clearMemoryCache()
+                ImageInMemoryCache.purgeMemoryCache()
                 await loadData()
             }
         }
@@ -589,38 +593,63 @@ extension HomeView {
     
     private func fetchAddonSections() async {
         let addons = AddonManager.shared.enabledAddons
-        var sections: [CatalogSection] = []
         
-        await withTaskGroup(of: CatalogSection?.self) { group in
-            for addon in addons {
-                guard let catalogs = addon.catalogs else { continue }
-                for catalog in catalogs {
-                    // Only fetch first 2 catalogs per addon to keep home page snappy
-                    if catalogs.firstIndex(where: { $0.id == catalog.id }) ?? 0 > 1 { continue }
-                    
-                    group.addTask {
-                        do {
-                            let items = try await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url)
-                            if !items.isEmpty {
-                                let categoryName = catalog.type == "series" ? "Series" : "Movies"
-                                let catalogTitle = catalog.name ?? addon.name
-                                return CatalogSection(addonName: addon.name, title: "\(catalogTitle) \(categoryName)", type: catalog.type, items: items)
+        // Build an ordered list of candidate catalogs across enabled addons.
+        // We preserve the exact definition order so rail positions are 100% deterministic across refreshes.
+        var candidates: [(index: Int, addon: StremioAddon, catalog: StremioCatalog)] = []
+        var nextIndex = 0
+        for addon in addons {
+            guard let catalogs = addon.catalogs else { continue }
+            // Include up to 4 catalogs per addon (e.g. Cinemeta Top Movies, Top Rated Movies, Top Series, Top Rated Series)
+            for catalog in catalogs.prefix(4) {
+                candidates.append((nextIndex, addon, catalog))
+                nextIndex += 1
+            }
+        }
+        guard !candidates.isEmpty else {
+            await MainActor.run { self.addonSections = [] }
+            return
+        }
+        
+        var indexedSections: [(Int, CatalogSection)] = []
+        await withTaskGroup(of: (Int, CatalogSection?).self) { group in
+            for (idx, addon, catalog) in candidates {
+                group.addTask {
+                    do {
+                        let items = try await StremioService.shared.fetchCatalog(type: catalog.type, id: catalog.id, baseURL: addon.url)
+                        if !items.isEmpty {
+                            let rawCatalogTitle = catalog.name ?? addon.name
+                            let categoryLocalized = catalog.type == "series" ? "Series".localized : "Movies".localized
+                            let sectionTitle: String
+                            if rawCatalogTitle.localizedCaseInsensitiveContains("series") ||
+                               rawCatalogTitle.localizedCaseInsensitiveContains("movie") ||
+                               rawCatalogTitle.localizedCaseInsensitiveContains("movies") ||
+                               rawCatalogTitle.localizedCaseInsensitiveContains(categoryLocalized) {
+                                sectionTitle = rawCatalogTitle.localized
+                            } else {
+                                sectionTitle = "\(rawCatalogTitle.localized) \(categoryLocalized)"
                             }
-                        } catch {
-                            print("Error fetching addon catalog: \(error)")
+                            return (idx, CatalogSection(addonName: addon.name, title: sectionTitle, type: catalog.type, items: items))
                         }
-                        return nil
+                    } catch {
+                        print("Error fetching addon catalog: \(error)")
                     }
+                    return (idx, nil)
                 }
             }
             
-            for await section in group {
-                if let s = section { sections.append(s) }
+            for await (idx, section) in group {
+                if let s = section {
+                    indexedSections.append((idx, s))
+                }
             }
         }
         
+        // Deterministic sort by original catalog declaration index so rails never shuffle on Cmd+R
+        let sortedSections = indexedSections.sorted { $0.0 < $1.0 }.map { $0.1 }
+        
         await MainActor.run {
-            self.addonSections = sections.map { section in
+            self.addonSections = sortedSections.map { section in
                 CatalogSection(addonName: section.addonName, title: section.title, type: section.type, items: section.items.filter { $0.isReleased })
             }
             .filter { !$0.items.isEmpty }

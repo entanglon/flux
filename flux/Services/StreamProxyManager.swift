@@ -275,6 +275,29 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     /// socket completion. This is the actual memory budget for the pipe.
     private var queuedBytes = 0
     private var upstreamSuspended = false
+    // MARK: - Transparent resume state (mid-stream upstream blips must not kill downstream)
+    /// Media byte offset this pipe started at (parsed from the initial Range, else 0).
+    private var baseOffset: Int64 = 0
+    /// Template upstream request (URL + custom headers + UA) reused for silent retries.
+    private var initialUpstreamRequest: URLRequest?
+    /// Cumulative MEDIA bytes fully sent downstream (excludes response headers).
+    private var totalForwardedBytes: Int64 = 0
+    /// Byte length of the downstream response headers (excluded from resume math).
+    private var responseHeaderLength = 0
+    /// Attempt bookkeeping: expected/delivered body bytes for the CURRENT upstream attempt.
+    private var attemptIndex = 0
+    private var attemptExpectedBytes: Int64?
+    private var attemptDeliveredBytes: Int64 = 0
+    /// True while a retry response (not the initial one) is expected.
+    private var expectingRetryResponse = false
+    /// Silent-retry budget per connection (then legacy finish → mpv reconnects itself).
+    private var upstreamRetryCount = 0
+    private let maxUpstreamRetries = 3
+    private let retryBackoffs: [TimeInterval] = [0.5, 1.5, 3.0]
+    private var pendingRetry: DispatchWorkItem?
+    /// Set when a retry was requested mid-send; launch runs after the in-flight
+    /// send completes so resume offsets stay exact (no gaps, no duplicates).
+    private var retryDeferredUntilSendCompletes = false
 
     init(id: UUID, connection: NWConnection, configuration: URLSessionConfiguration, onComplete: @escaping (UUID) -> Void) {
         self.id = id
@@ -285,6 +308,13 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     }
 
     func start(request: URLRequest) {
+        // Snapshot the request template + base offset for transparent retries.
+        initialUpstreamRequest = request
+        if let range = request.value(forHTTPHeaderField: "Range")?.trimmingCharacters(in: .whitespaces),
+           range.lowercased().hasPrefix("bytes=") {
+            let rest = String(range.dropFirst(6)).components(separatedBy: "-").first ?? ""
+            baseOffset = Int64(rest.trimmingCharacters(in: .whitespaces)) ?? 0
+        }
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed, .cancelled:
@@ -309,8 +339,44 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
             return
         }
 
+        // Silent-retry response: validate resume, never re-send headers downstream.
+        var isRetryResponse = false
+        stateLock.lock()
+        isRetryResponse = expectingRetryResponse
+        if isRetryResponse { expectingRetryResponse = false }
+        stateLock.unlock()
+        if isRetryResponse {
+            // Only an exact-range resume continues transparently. Anything else
+            // (200-full, 416, redirect) would corrupt the byte stream → legacy path.
+            guard httpResponse.statusCode == 206 else {
+                print("[StreamProxy] Retry rejected (status \(httpResponse.statusCode)): falling back to full reconnect")
+                completionHandler(.cancel)
+                finish(cancelConnection: true)
+                return
+            }
+            stateLock.lock()
+            if let cl = httpResponse.value(forHTTPHeaderField: "Content-Length"), let n = Int64(cl) {
+                attemptExpectedBytes = n
+            } else {
+                attemptExpectedBytes = nil
+            }
+            attemptDeliveredBytes = 0
+            stateLock.unlock()
+            completionHandler(.allow)
+            return
+        }
+
         let headerData = makeResponseHeaders(from: httpResponse).data(using: .utf8)
         didSendResponseHeaders = true
+        stateLock.lock()
+        responseHeaderLength = headerData?.count ?? 0
+        if let cl = httpResponse.value(forHTTPHeaderField: "Content-Length"), let n = Int64(cl) {
+            attemptExpectedBytes = n
+        } else {
+            attemptExpectedBytes = nil
+        }
+        attemptDeliveredBytes = 0
+        stateLock.unlock()
         if let headerData {
             enqueue(headerData, from: dataTask)
         }
@@ -326,6 +392,14 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // Transparent resume: a mid-stream upstream blip re-fetches silently via
+        // Range instead of killing the downstream connection (which forces a full
+        // mpv reconnect + visible stall). Only when we actually forwarded media;
+        // pre-first-byte failures keep the legacy fail-fast path below.
+        if silentlyResumeIfPossible(after: error) {
+            return
+        }
+
         if let error, !isCompleted {
             print("[StreamProxy] Upstream stream ended with error: \(error.localizedDescription)")
             if !didSendResponseHeaders {
@@ -335,6 +409,71 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         }
 
         finish(cancelConnection: true)
+    }
+
+    /// Decides whether an upstream completion can be recovered transparently.
+    /// Returns true when a silent retry was scheduled (caller must return).
+    /// Error case: retry when media already flowed. Clean-completion case: retry
+    /// only when upstream promised MORE than it delivered (else it's true EOF).
+    private func silentlyResumeIfPossible(after error: Error?) -> Bool {
+        stateLock.lock()
+        guard !isCompleted else { stateLock.unlock(); return false }
+        let mediaForwarded = max(Int64(0), totalForwardedBytes - Int64(responseHeaderLength))
+        let deliveredThisAttempt = attemptDeliveredBytes - (attemptIndex == 0 ? Int64(responseHeaderLength) : 0)
+        if let error {
+            guard didSendResponseHeaders, mediaForwarded > 0, upstreamRetryCount < maxUpstreamRetries else {
+                stateLock.unlock()
+                return false
+            }
+            print("[StreamProxy] Upstream error after \(mediaForwarded) media bytes (\(error.localizedDescription)): silent resume scheduled")
+        } else {
+            guard didSendResponseHeaders, mediaForwarded > 0,
+                  let expected = attemptExpectedBytes, deliveredThisAttempt < expected,
+                  upstreamRetryCount < maxUpstreamRetries else {
+                stateLock.unlock()
+                return false
+            }
+            print("[StreamProxy] Upstream ended early (\(deliveredThisAttempt)/\(expected) bytes): silent resume scheduled")
+        }
+        upstreamRetryCount += 1
+        let delay = retryBackoffs[min(upstreamRetryCount - 1, retryBackoffs.count - 1)]
+        pendingRetry?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.startUpstreamRetry() }
+        pendingRetry = work
+        stateLock.unlock()
+        sendQueue.asyncAfter(deadline: .now() + delay, execute: work)
+        return true
+    }
+
+    /// Launches a replacement upstream task resuming exactly where forwarding
+    /// stopped. Runs on sendQueue; defers past any in-flight send so offsets
+    /// stay exact (no gaps, no duplicate bytes downstream).
+    private func startUpstreamRetry() {
+        // Must run on sendQueue (callers: work item + completeSend).
+        if isSending {
+            retryDeferredUntilSendCompletes = true
+            return
+        }
+        stateLock.lock()
+        guard !isCompleted, let template = initialUpstreamRequest else { stateLock.unlock(); return }
+        // Drop anything still queued from the dead task; it will be re-fetched
+        // from the resume offset below.
+        pendingSends.removeAll()
+        queuedBytes = 0
+        upstreamSuspended = false
+        let resumeAt = baseOffset + max(Int64(0), totalForwardedBytes - Int64(responseHeaderLength))
+        var request = template
+        request.setValue("bytes=\(resumeAt)-", forHTTPHeaderField: "Range")
+        guard let session else { stateLock.unlock(); return }
+        let retryTask = session.dataTask(with: request)
+        self.task = retryTask
+        expectingRetryResponse = true
+        attemptIndex += 1
+        attemptExpectedBytes = nil
+        attemptDeliveredBytes = 0
+        stateLock.unlock()
+        print("[StreamProxy] Resuming upstream at byte \(resumeAt) (attempt \(upstreamRetryCount)/\(maxUpstreamRetries))")
+        retryTask.resume()
     }
 
     private func makeResponseHeaders(from httpResponse: HTTPURLResponse) -> String {
@@ -411,14 +550,25 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
 
     private func completeSend(byteCount: Int) {
         var taskToResume: URLSessionDataTask?
+        var launchDeferredRetry = false
         stateLock.lock()
         queuedBytes = max(0, queuedBytes - byteCount)
+        totalForwardedBytes += Int64(byteCount)
+        attemptDeliveredBytes += Int64(byteCount)
         if upstreamSuspended, queuedBytes <= Self.lowWaterMark, !isCompleted {
             upstreamSuspended = false
             taskToResume = task
         }
+        if retryDeferredUntilSendCompletes, !isCompleted {
+            retryDeferredUntilSendCompletes = false
+            launchDeferredRetry = true
+        }
         stateLock.unlock()
         taskToResume?.resume()
+        if launchDeferredRetry {
+            // completeSend runs on sendQueue (caller guarantee) so offsets stay exact.
+            startUpstreamRetry()
+        }
     }
 
     private func sendError(status: Int, message: String) {
@@ -446,6 +596,9 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         isCompleted = true
         queuedBytes = 0
         upstreamSuspended = false
+        pendingRetry?.cancel()
+        pendingRetry = nil
+        retryDeferredUntilSendCompletes = false
         let task = task
         let session = session
         stateLock.unlock()

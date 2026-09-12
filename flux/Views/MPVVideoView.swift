@@ -179,6 +179,8 @@ class MPVController: ObservableObject {
     @Published var isBuffering = false
     /// When the current cache stall began (nil while flowing). Telemetry only.
     private var stallStartDate: Date?
+    /// frame-drop-count at stall begin, for delta computation at stall end.
+    private var stallStartDrops = -1
     @Published var demuxerCacheTime: Double = 0.0
     @Published var isSeeking = false
     @Published var isUserPaused = false
@@ -396,17 +398,21 @@ class MPVController: ObservableObject {
                 }
             case "paused-for-cache":
                 if let buff = value as? Bool {
-                    // Persisted stall telemetry: sub-second freezes leave no
-                    // other trace, so log transitions with cache level + position.
-                    // (Numbers are marked public — os.Logger redacts interpolations by default.)
+                    // Stall telemetry on the ERROR channel: .info lines from this
+                    // app never reach the persisted store. Values marked public
+                    // (os.Logger redacts interpolations by default).
                     if buff && !self.isBuffering {
                         self.stallStartDate = Date()
+                        self.stallStartDrops = self.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
                         let cache = String(format: "%.1f", self.demuxerCacheTime)
                         let pos = String(format: "%.0f", self.timePos)
-                        Logger.player.info("Cache stall began (demuxer cache: \(cache, privacy: .public)s, at \(pos, privacy: .public)s)")
+                        let af = self.playerView?.playerView?.getPropertyString("af") ?? "?"
+                        Logger.player.error("Cache stall began (cache: \(cache, privacy: .public)s, at \(pos, privacy: .public)s, drops: \(self.stallStartDrops, privacy: .public), af: \(af, privacy: .public))")
                     } else if !buff && self.isBuffering {
                         let duration = self.stallStartDate.map { Date().timeIntervalSince($0) } ?? 0
-                        Logger.player.info("Cache stall ended after \(String(format: "%.2f", duration), privacy: .public)s")
+                        let drops = self.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
+                        let delta = (drops >= 0 && self.stallStartDrops >= 0) ? drops - self.stallStartDrops : -1
+                        Logger.player.error("Cache stall ended after \(String(format: "%.2f", duration), privacy: .public)s (dropped delta: \(delta, privacy: .public))")
                         self.stallStartDate = nil
                     }
                     self.isBuffering = buff
@@ -810,6 +816,8 @@ final class MPVLayerView: NSView {
     var onEndOfFile: (() -> Void)?
     private var isEventLoopRunning = false
     private let eventLoopLock = NSLock()
+    /// Last forwarded mpv log line (consecutive-dedupe key for diagnostics).
+    private var lastForwardedMPVLog = ""
     private var isCleaningUp = false
     private var lastTimePosDispatchTime: Double = 0
     private var lastTelemetryLogTime: Double = 0
@@ -1054,7 +1062,11 @@ final class MPVLayerView: NSView {
         
         mpv_set_property_string(mpv, "cache", "yes")
         mpv_set_property_string(mpv, "cache-secs", "60")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "268435456")     // 256 MB demuxer buffer: the 64 MB cap held only ~6s of 4K-remux-grade bitrates, so any swarm/server dip showed as a split-second freeze. 256 MB ≈ 25s at 80 Mbps; trivial on unified memory.
+        // DIAGNOSTIC A/B (8/31 rhythmic lags, see agent-chat.md): reverted 256MB
+        // back to 64MB to test whether the byte cap sets the reconnect/idle
+        // metronome. If lags vanish at 64MB, the cap (not the content) drives the
+        // cycle; if they persist unchanged, the cap is exonerated. Revisit after.
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "67108864")
         mpv_set_property_string(mpv, "demuxer-max-back-bytes", "15728640") // 15 MB backward seek buffer
         mpv_set_property_string(mpv, "demuxer-readahead-secs", "12")
         mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
@@ -1407,6 +1419,19 @@ final class MPVLayerView: NSView {
                     let prefix = String(cString: logMsg.pointee.prefix)
                     let text = String(cString: logMsg.pointee.text)
                     print("[MPV LOG] \(prefix): \(text)")
+                    // Diagnostic forwarding (8/31 lags): only warn+ arrives here
+                    // (requested level), so volume is inherently sparse. Forward
+                    // audio/video/demuxer/stream lines + any underrun mention to
+                    // the persisted channel; deduped consecutively.
+                    let lowerText = text.lowercased()
+                    if prefix.hasPrefix("ao") || prefix.hasPrefix("vo") || prefix.hasPrefix("ffmpeg") || prefix.hasPrefix("demux") || prefix.hasPrefix("stream") || lowerText.contains("underrun") {
+                        let key = "\(prefix):\(text.prefix(60))"
+                        if key != self.lastForwardedMPVLog {
+                            self.lastForwardedMPVLog = key
+                            let trimmed = String(text.prefix(160)).trimmingCharacters(in: .whitespacesAndNewlines)
+                            Logger.player.error("mpv[\(prefix, privacy: .public)]: \(trimmed, privacy: .public)")
+                        }
+                    }
                 default:
                     break
                 }

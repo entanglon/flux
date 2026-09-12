@@ -18,8 +18,8 @@ actor TMDBMemoryCacheActor {
     private let idCacheTTL: TimeInterval
 
     init(
-        itemCacheLimit: Int = 150,
-        idCacheLimit: Int = 500,
+        itemCacheLimit: Int = 500,
+        idCacheLimit: Int = 1000,
         itemCacheTTL: TimeInterval = 2 * 60 * 60,
         idCacheTTL: TimeInterval = 24 * 60 * 60
     ) {

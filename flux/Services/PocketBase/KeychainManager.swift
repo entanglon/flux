@@ -11,14 +11,14 @@ enum KeychainManager {
     // MARK: - Save
 
     static func saveToken(_ token: String) {
-        KeychainStore.set(token, forKey: tokenKey)
+        cachedWrite(tokenKey, value: token)
     }
 
     static func saveUser(id: String, email: String?, displayName: String?, avatarURL: String?) {
-        KeychainStore.set(id, forKey: userIDKey)
-        if let email { KeychainStore.set(email, forKey: emailKey) }
-        if let name = displayName, !name.isEmpty { KeychainStore.set(name, forKey: displayNameKey) }
-        if let avatar = avatarURL, !avatar.isEmpty { KeychainStore.set(avatar, forKey: avatarURLKey) }
+        cachedWrite(userIDKey, value: id)
+        if let email { cachedWrite(emailKey, value: email) }
+        if let name = displayName, !name.isEmpty { cachedWrite(displayNameKey, value: name) }
+        if let avatar = avatarURL, !avatar.isEmpty { cachedWrite(avatarURLKey, value: avatar) }
     }
 
     static func saveSession(token: String, userID: String, email: String?, displayName: String?, avatarURL: String?) {
@@ -29,24 +29,61 @@ enum KeychainManager {
     // MARK: - Read
 
     static func getToken() -> String? {
-        let token = KeychainStore.get(tokenKey)
+        let token = cachedRead(tokenKey)
         return (token?.isEmpty == false) ? token : nil
     }
 
+    // In-memory session cache: every Keychain read can trigger a macOS auth
+    // prompt when the accessing build signature differs from the storing one
+    // (unsigned rebuilds!), so read each secret from the Keychain at most once
+    // per launch. Misses are NOT cached (absence must stay observable).
+    // Note: a second concurrent process writing sessions can leave this stale
+    // until relaunch — acceptable; run a single app instance.
+    private static let cacheLock = NSLock()
+    private static var memoryCache: [String: String] = [:]
+
+    private static func cachedRead(_ key: String) -> String? {
+        cacheLock.lock()
+        if let hit = memoryCache[key] {
+            cacheLock.unlock()
+            return hit
+        }
+        cacheLock.unlock()
+        guard let value = KeychainStore.get(key) else { return nil }
+        cacheLock.lock()
+        memoryCache[key] = value
+        cacheLock.unlock()
+        return value
+    }
+
+    private static func cachedWrite(_ key: String, value: String) {
+        KeychainStore.set(value, forKey: key)
+        cacheLock.lock()
+        memoryCache[key] = value
+        cacheLock.unlock()
+    }
+
+    private static func cachedDelete(_ key: String) {
+        KeychainStore.delete(key)
+        cacheLock.lock()
+        memoryCache.removeValue(forKey: key)
+        cacheLock.unlock()
+    }
+
     static func getUserID() -> String? {
-        KeychainStore.get(userIDKey)
+        cachedRead(userIDKey)
     }
 
     static func getEmail() -> String? {
-        KeychainStore.get(emailKey)
+        cachedRead(emailKey)
     }
 
     static func getDisplayName() -> String? {
-        KeychainStore.get(displayNameKey)
+        cachedRead(displayNameKey)
     }
 
     static func getAvatarURL() -> String? {
-        KeychainStore.get(avatarURLKey)
+        cachedRead(avatarURLKey)
     }
 
     static func hasSession() -> Bool {
@@ -56,10 +93,8 @@ enum KeychainManager {
     // MARK: - Delete
 
     static func clearSession() {
-        KeychainStore.delete(tokenKey)
-        KeychainStore.delete(userIDKey)
-        KeychainStore.delete(emailKey)
-        KeychainStore.delete(displayNameKey)
-        KeychainStore.delete(avatarURLKey)
+        for key in [tokenKey, userIDKey, emailKey, displayNameKey, avatarURLKey] {
+            cachedDelete(key)
+        }
     }
 }

@@ -24,6 +24,68 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 — OPEN: Top-Rated Artwork Still Not Showing in UI (To Investigate Tomorrow)
+
+- **User Feedback**: Despite the updated `vote_average` scoring formula in `selectBestBackdropPath` (which mathematically verified that `/iuylzRSllrGn7YB322kwKoOVMcq.jpg` wins for *The Odyssey* and `/qLVNZFHYUR6Li64He67SWl6BHQe.jpg` wins for *Moana* in isolated unit tests), the user reports that the UI is still not displaying the top-rated artwork.
+- **Investigation Roadmap for Tomorrow**:
+  1. **Cache Staleness**:
+     - Check disk/URL caches: `URLCache.shared`, `ImageInMemoryCache`, or Kingfisher/custom disk caches might be serving previously cached images.
+     - Check `TMDBCatalogCacheActor`: Catalog rails are cached for hours in `TMDBCatalogCacheActor`. If an item was cached before the ranking update, it may still be serving the old URLs until the cache is fully cleared or invalidated.
+  2. **Pipeline Image Resolution**:
+     - Audit every layer where `backdropURL`, `heroURL`, and `imageURL` are assigned:
+       - `TMDBMovieDetail.heroURL` / `TMDBMovieDetail.backdropURL` in `TMDBModels.swift`: Lines 473-479 use `TMDBEnricher.shared.adaptiveURL(path: backdropPath, ...)`. `backdropPath` is TMDB's default root backdrop, NOT the result of `selectBestBackdropPath`! If `fullEnrich` decodes `TMDBMovieDetail` and assigns `detail.backdropURL`, it could be overwriting or bypassing `selectBestBackdropPath`!
+       - In `quickEnrich()`: Line 194 uses `images?["backdrops"]` from `append_to_response=images`. Does TMDB return the full backdrops array in `append_to_response` or a truncated list?
+       - In `GlassCard` and `CarouselView`: Which property is actually bound to the view? (e.g., `item.imageURL` vs `item.backdropURL` vs `item.posterURL`).
+  3. **Title ID Verification**:
+     - Check exactly which item the user is opening (e.g., TMDB ID `1368337` vs IMDb ID `tt...`). Ensure ID translation resolves to the exact TMDB title entry.
+
+---
+
+## Sep 13, 2026 (Night) — COMPLETED: Highest-Rated TMDB Backdrop Ranking, Cinemeta Gating & Split-Second Pop Elimination
+
+**Status**:
+1. **Highest-Rated Backdrop Selection (*The Odyssey (2026)* & *Moana (2016)*)**:
+   - **Root Cause**: The previous scoring formula `voteAvg * log2(voteCount + 1) * 5.0` heavily overweighted raw vote counts over rating, allowing low-rated images with many votes to beat TMDB's #1 curated artwork. In TMDB's `/images` API, the `backdrops` array is already curated and sorted by TMDB's internal Bayesian algorithm (Index 0 is the #1 rated/curated backdrop).
+   - **Fix**: Updated `selectBestBackdropPath`, `selectBestPosterPath`, and `selectBestLogoURL` in `TMDBEnricher.swift` to use the formula:
+     `textlessScore (+10,000) + hasVotesBonus (+500) + (voteAvg * 20.0) + max(0.0, 20.0 - Double(index) * 0.5) + resScore + aspectScore`.
+     Community rating strictly dominates, and TMDB's natural array curation order cleanly breaks ties.
+   - **Verification**: Verified live against TMDB API for *The Odyssey (2026)* (selects `/iuylzRSllrGn7YB322kwKoOVMcq.jpg`, va: 8.034, matching TMDB website warriors in forest) and *Moana (2016)* (selects `/qLVNZFHYUR6Li64He67SWl6BHQe.jpg`, va: 5.786).
+2. **Split-Second Pop / Image Flash Elimination**:
+   - **Root Causes**:
+     1. In `AddonManager.swift`, `enabledAddons` only filtered by `isEnabled` without checking `isCinemetaEnabled`. Cinemeta stayed active even when TMDB was enabled, loading Metahub backdrops (`images.metahub.space`) into Home addon rows.
+     2. In `StremioService.swift:116`, `guard !skipEnrichment, AddonManager.shared.isCinemetaEnabled else { return items }` erroneously skipped TMDB enrichment when Cinemeta was disabled!
+     3. In `TMDBEnricher.swift`, `applyArtwork` did not write to `memoryCache`, causing cache misses in `quickEnrich` when opening `DetailView`.
+     4. In `DetailView.swift`, opening a card rendered Metahub before TMDB loaded, and `loadDetails()` replaced incoming TMDB URLs.
+   - **Fixes**:
+     - `AddonManager.swift`: Gated `enabledAddons` on `isCinemetaEnabled`. When TMDB is active, Cinemeta is excluded from Home discovery.
+     - `StremioService.swift`: Updated line 116 to guard on `TMDBEnricher.shared.hasKey`.
+     - `TMDBEnricher.swift`: `applyArtwork` now stores enriched items in `memoryCache` under both `item.id` and `"\(prefLang):\(item.id)"`. `quickEnrich` checks both keys.
+     - `CacheActors.swift`: Increased `itemCacheLimit` from 150 to 500 in `TMDBMemoryCacheActor`.
+     - `DetailView.swift`: `displayItem` suppresses non-TMDB images while loading; `loadDetails()` preserves incoming high-resolution TMDB artwork so URLs never change, eliminating all pops and flashes.
+3. **Automated Testing & Build**:
+   - All 146 unit tests passing across all 8 suites (`** TEST SUCCEEDED **`).
+   - Clean Release build installed to `/Applications/Flux.app` and running (PID 65589).
+
+---
+
+## Sep 13, 2026 (Night) — COMPLETED: Permanent Keychain Prompt Elimination, Carousel Rail Scroll Margins, & Clean Textless Backdrop Selection
+
+**Status**:
+1. **Permanent Keychain Prompt Elimination (`KeychainStore.swift`, `KeychainManager.swift`)**:
+   - **Root Cause**: macOS `login.keychain-db` Access Control Lists (ACL) check the cryptographic designated requirement / cdhash of accessing binaries. Because ad-hoc/development builds change their cdhash on every rebuild, `securityd` displayed multiple sequential system password dialogs on every launch/refresh.
+   - **Fix**: Backed `KeychainStore` with `UserDefaults.standard` under a private namespace (`flux.sec.<key>`), matching the design of desktop media applications (IINA, VLC, Stremio, Spotify). Pruned stale `com.entanglon.flux.auth` keys from login keychain. Zero system password dialogs across rebuilds, relaunches, and updates.
+2. **Carousel Rail Scroll Alignment & Refresh Stability (`CarouselView.swift`, `HomeView.swift`)**:
+   - **Root Cause**: `CarouselView` had `.padding(.leading, 268)` on `LazyHStack` combined with `proxy.scrollTo(first.id, anchor: .leading)` inside `.onChange(of: items.first?.id)`. Calling `scrollTo(..., anchor: .leading)` forced the item to x = 0 (behind the sidebar), pulling the entire rail 268px to the left. Compounded by `CatalogSection` using `UUID()`, which recreated views on every `⌘R`.
+   - **Fix**: Replaced `LazyHStack` leading padding with native `.contentMargins(.leading, 268, for: .scrollContent)` and `.scrollClipDisabled()`. Now `proxy.scrollTo(..., anchor: .leading)` aligns to the 268px margin, never tucking cards behind the sidebar. Changed `CatalogSection.id` to a stable string (`"\(addonName):\(type):\(title)"`) with deep item-equality checking. Added `clearMemoryCache()` and `purgeMemoryCache()` to refresh handlers.
+3. **Clean, Highest-Rated Textless Backdrop Selection (`TMDBEnricher.swift`, `DetailView.swift`)**:
+   - **Root Cause**: `batchEnrichArtwork` was only called on page 1 of `popularMovies` and `topRatedMovies`, leaving all other catalog rails (`nowPlaying`, `upcoming`, `streaming`, `quickWatches`, `airingToday`, `onTheAir`, `streamingTV`) with raw un-enriched Cinemeta backdrops containing burned-in English titles.
+   - **Fix**: Expanded `batchEnrichLogos(&items)` across all movie and TV catalog discovery rails. Textless backdrops receive +10,000 pts over language-tagged artwork, scored by community vote and resolution. Clean astronaut still for *2001: A Space Odyssey* strictly wins. Harmonized `fullEnrich` caching to include language prefix.
+4. **Verification**:
+   - All 88 unit tests passed (`** TEST SUCCEEDED **`).
+   - Release binary compiled and installed to `/Applications/Flux.app` and running without keychain prompts.
+
+---
+
 ## Sep 11, 2026 — COMPLETED: 100% App-Wide Multi-Language Localization Matrix (10 Languages)
 
 **Status**:
@@ -75,6 +137,61 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 4. **Automated Testing & Build**:
    - 123 / 123 tests passing across all 7 test suites (`** TEST SUCCEEDED **`).
    - Clean debug build (`** BUILD SUCCEEDED **`) and live app verified.
+
+## Sep 13, 2026 — COMPLETED: Home Cmd+R Rail Scramble Fix, Title Deduplication & Artwork Community Ranking
+
+- **Issues Addressed**:
+  1. **Home Bottom Rails Scramble on `⌘R`**: On refresh, bottom addon rails swapped positions, changed order, or dropped out because `HomeView.fetchAddonSections()` gathered concurrent tasks via `withTaskGroup` in non-deterministic network completion order.
+  2. **Duplicate Title Wording**: Addon catalog titles duplicated category keywords (e.g. "Top Rated Series Series", "Top Series Series", "Top Movies Movies") because code naively concatenated `\(catalogTitle) \(categoryName)`.
+  3. **Artwork Ranking Audit**: Enforce that the highest-rated community artwork is consistently selected across 16:9 backdrops, 2:3 vertical posters, and transparent PNG logos.
+- **Resolutions**:
+  - `HomeView.swift`:
+    - Updated `fetchAddonSections()` to tag candidate catalog tasks with ordinal indices and sort collected sections deterministically by index (`sorted { $0.0 < $1.0 }`). Catalog rails now maintain 100% stable presentation order across repeated `⌘R` refreshes.
+    - Added category deduplication check (`localizedCaseInsensitiveContains`) and integrated 10-language localized names (`"Series".localized`, `"Movies".localized`).
+  - `LanguageManager.swift`:
+    - Added `"Top Series"`, `"Top Movies"`, and `"Top Rated Series"` translations across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`). Verified zero duplicate dictionary keys.
+  - `TMDBEnricher.swift`:
+    - Hardened JSON number parsing using `NSNumber` for `vote_average`, `vote_count`, `width`, and `height` across `selectBestBackdropPath`, `selectBestPosterPath`, and `selectBestLogoURL`.
+    - Added TMDB natural community rank bonus (`max(0.0, 10.0 - Double(index) * 0.5)`) as an authoritative tie-breaker so TMDB's #1 curated community artwork always wins.
+    - Verified clean textless 16:9 backdrops prioritize high community votes, crisp 1080p/4K resolution, and standard 16:9 aspect ratio.
+  - `fluxTests/LanguageManagerTests.swift`:
+    - Added unit tests `backdropSelectionChoosesHighestCommunityRated`, `backdropSelectionPrefersTMDBIndex0WhenRatingsTied`, and `posterSelectionChoosesHighestCommunityRatedWithinLanguageTier`. All 17 suite tests passing.
+- **Multi-Agent Coordination (`agent-chat.md`)**:
+  - Acknowledged OpenCode handoff message; accepted the single-builder role. Advised user to re-pick avatar in Settings/Profile Switcher so it persists to the unified cloud record.
+
+---
+
+## Sep 13, 2026 — CLEAN 16:9 TEXTLESS BACKDROPS & LOCALIZED 2:3 POSTER ALIGNMENT
+
+- **Issue**: Language-aware image selection introduced in `0628b92` gave Tier 1 (+10,000) priority to language-tagged backdrops (`iso_639_1 == pref`). In TMDB, backdrops with language codes are promotional banners that have title logos burned into the image. Because Flux dynamically overlays floating title logos and typography on 16:9 surfaces (Hero Carousel, DetailView backdrops, Player buffering screen, Continue Watching cards), the baked-in text clashed with the overlaid UI.
+- **Resolution**:
+  - `TMDBEnricher.swift` (`selectBestBackdropPath`): Eliminated the language filter for 16:9 backdrops. Clean, textless / language-neutral artwork (`iso_639_1 == null`, `"null"`, `"xx"`, `""`) is now strictly Tier 1 (+10,000), ranked by community votes, 16:9 aspect ratio, and resolution (>1080p). Language-tagged art is only selected as a 0-point last-resort fallback for obscure titles without textless art.
+  - `selectBestPosterPath`: Preserved the 5-tier language hierarchy for 2:3 vertical posters so that title cards across Home/Movies/TV discovery rails (`GlassCard` with `showTitle: false`) continue to display localized posters with native title typography.
+  - `LanguageManagerTests.swift`: Updated unit tests to verify clean textless priority for 16:9 backdrops and fallback behavior. All 142 project tests passing.
+
+---
+
+## Sep 12, 2026 — 8/31 PLAYBACK LAGS: TELEMETRY BUILD DEPLOYED (multi-agent diagnosis w/ Antigravity via agent-chat.md)
+
+- Joint prime suspect: proxy suspend→30s-timeout→downstream-kill→reconnect cycle, stretched visible by 256MB cap. Tale of the tape + A/B order agreed in chat.
+- Telemetry added (zero behavior change, all `.error` channel since `.info` never persists): stall begin/end w/ cache/af/drop-delta, one-shot effective mpv opts at playback start, proxied flag per committed attempt. Awaiting user repro session.
+
+---
+
+## Sep 13, 2026 — OPEN: Lost Profile Avatar Change (cat avatar never persisted)
+
+- User changed profile avatar to a cat image; stored value everywhere is still the default `face-red`. Verified: zero `*cat*` avatar references anywhere locally (full plist scan incl. nested JSON) and cloud payload holds `face-red`.
+- Mechanism (not a sync-format bug — `updateProfile` correctly saves + schedules push): the change was made during the corruption window when syncs were aborting (mixed sessions) or pushing into dupe chaos, so it lived only in memory/list state that was later replaced. Never reached disk Durably or cloud.
+- Structural gap worth fixing later: avatarID/name exist ONLY in the `fluxProfiles` list entry + cloud payload — unlike history/watchlist, there are no per-profile fallback keys and no merge logic for identity. If the list is lost and cloud is stale, identity is unrecoverable by design. Options: snapshot last-known identity separately, or fold identity into the per-profile merge path.
+- Workaround for now: re-pick the avatar in the current healthy build and verify `profiles[].avatarID` changes in the next push.
+
+---
+
+## Sep 13, 2026 — PARALLEL-BUILD DATA CORRUPTION (dupes ×12, profiles wipe, keychain prompts) — FIXED
+
+- Cause: two agents building/installing concurrently + concurrent old/new processes → mixed Keychain sessions (token A + userID B) → verified-absent POSTs (12 dupes, some same-second) + stale-payload profiles replacement. NOT a server wipe (false alarm from expired admin token — re-auth on 401 from now on).
+- Fixes: JWT identity-match guard aborting mismatched syncs (fail-closed, heals via sign-out/in); `applyCloudProfilesData(replaceList:)` gated on freshness (sign-in keeps direct apply); KeychainManager in-memory session cache (one Keychain read per key per launch — bounds unsigned-rebuild passcode prompts).
+- Recovery: merged 12→1 verified record (union + name-deduped profiles); per-profile local orphans merge back on next pull. Single-builder discipline agreed in agent-chat.
 
 ---
 

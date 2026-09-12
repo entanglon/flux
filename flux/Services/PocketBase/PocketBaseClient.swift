@@ -24,6 +24,22 @@ struct PocketBaseClient {
 
     private var base: URL { AppConfig.baseURL }
 
+    /// Record id embedded in a PocketBase auth JWT (unverified decode — routing
+    /// guard only, never trust it for authorization). Returns nil when malformed.
+    static func recordID(in token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var b64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let pad = b64.count % 4
+        if pad > 0 { b64 += String(repeating: "=", count: 4 - pad) }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = obj["id"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
+
     // MARK: - Email/Password Auth
 
     /// Sign in with email and password.

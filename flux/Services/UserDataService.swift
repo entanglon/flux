@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import OSLog
 
 class UserDataService: ObservableObject {
     static let shared = UserDataService()
@@ -1015,11 +1016,16 @@ class UserDataService: ObservableObject {
 
     /// Applies a cloud payload to the CURRENT profile with two-way smart merging
     /// to guarantee local watching progress or recent adds are never discarded by older cloud snapshots.
+    /// - Parameter replaceProfiles: when false (stale background pull), per-profile
+    ///   history merges still run, but the profiles LIST is never replaced — a stale
+    ///   remote list must not wipe the local one. Sign-in always passes true.
     @discardableResult
-    func applyCloudPayload(_ payload: [String: Any]) -> Bool {
+    func applyCloudPayload(_ payload: [String: Any], replaceProfiles: Bool = true) -> Bool {
         // 1. Restore remote profiles FIRST so the active profile matches the cloud profile
         let profilesData = payload["profiles"] as? [[String: Any]]
-        ProfileManager.shared.applyCloudProfilesData(profilesData)
+        ProfileManager.shared.applyCloudProfilesData(profilesData, replaceList: replaceProfiles)
+        // TEMP-DIAGNOSTIC (missing profiles).
+        Logger.sync.error("DIAG apply: remoteProfiles=\(profilesData?.count ?? -1) localProfilesNow=\(ProfileManager.shared.profiles.count) names=\(ProfileManager.shared.profiles.map { $0.name }.joined(separator: ","), privacy: .public)")
         ProfileManager.shared.cleanKidsProfileDataIfNeeded()
 
         // 2. Restore TMDB API Key if present in cloud payload and unset locally

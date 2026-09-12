@@ -38,10 +38,11 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                             }
                     }
                 }
-                .padding(.leading, 268)
-                .padding(.trailing, 40)
                 .padding(.bottom, 20)
             }
+            .contentMargins(.leading, 268, for: .scrollContent)
+            .contentMargins(.trailing, 40, for: .scrollContent)
+            .scrollClipDisabled()
             // Left Arrow
             .overlay(alignment: .leading) {
                 if isHovering && scrollTargetIndex > 0 {

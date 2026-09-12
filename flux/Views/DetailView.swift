@@ -29,7 +29,29 @@ struct DetailView: View {
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
     // Computed
-    var displayItem: MediaItem { fullItem ?? item }
+    var displayItem: MediaItem {
+        if let full = fullItem {
+            return full
+        }
+        var it = item
+        if TMDBEnricher.shared.hasKey {
+            // Suppress non-TMDB backdrops/posters (e.g. Cinemeta / Metahub) while full TMDB metadata is loading
+            // to avoid a split-second pop / switch from Metahub to TMDB.
+            if let h = it.heroURL, h.host?.contains("tmdb.org") != true {
+                it.heroURL = nil
+            }
+            if let b = it.backdropURL, b.host?.contains("tmdb.org") != true {
+                it.backdropURL = nil
+            }
+            if let i = it.imageURL, i.host?.contains("tmdb.org") != true {
+                it.imageURL = nil
+            }
+            if let p = it.posterURL, p.host?.contains("tmdb.org") != true {
+                it.posterURL = nil
+            }
+        }
+        return it
+    }
     
     /// The active history item for this title (if any).
     private var activeHistoryItem: MediaItem? {
@@ -1179,9 +1201,31 @@ struct DetailView: View {
             if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && (item.releaseDate != nil && !item.releaseDate!.isEmpty) {
                 merged.releaseDate = item.releaseDate
             }
-            if merged.heroURL == nil { merged.heroURL = item.heroURL }
-            if merged.backdropURL == nil { merged.backdropURL = item.backdropURL }
-            if merged.posterURL == nil { merged.posterURL = item.posterURL }
+            // If the incoming card already has high-resolution TMDB artwork, preserve it to prevent
+            // visual pops / flashes from redundant URL reloads
+            if let existingHero = item.heroURL, existingHero.host?.contains("tmdb.org") == true {
+                merged.heroURL = existingHero
+            } else if merged.heroURL == nil {
+                merged.heroURL = item.heroURL
+            }
+
+            if let existingBackdrop = item.backdropURL, existingBackdrop.host?.contains("tmdb.org") == true {
+                merged.backdropURL = existingBackdrop
+            } else if merged.backdropURL == nil {
+                merged.backdropURL = item.backdropURL ?? merged.heroURL
+            }
+
+            if let existingPoster = item.posterURL, existingPoster.host?.contains("tmdb.org") == true {
+                merged.posterURL = existingPoster
+            } else if merged.posterURL == nil {
+                merged.posterURL = item.posterURL
+            }
+
+            if let existingLogo = item.logoURL, existingLogo.host?.contains("tmdb.org") == true {
+                merged.logoURL = existingLogo
+            } else if merged.logoURL == nil {
+                merged.logoURL = item.logoURL
+            }
             
             await MainActor.run {
                 self.fullItem = merged

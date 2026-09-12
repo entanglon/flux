@@ -150,7 +150,11 @@ class TMDBEnricher {
     func quickEnrich(_ item: MediaItem) async -> MediaItem {
         guard hasKey else { return item }
         let itemCacheKey = "\(currentAppLanguage):\(item.id)"
-        if var cached = await memoryCache.getItem(for: itemCacheKey) {
+        var cachedItem = await memoryCache.getItem(for: itemCacheKey)
+        if cachedItem == nil {
+            cachedItem = await memoryCache.getItem(for: item.id)
+        }
+        if var cached = cachedItem {
             // Strictly preserve the episode-specific watch session state from the incoming item
             cached.lastSeason = item.lastSeason ?? cached.lastSeason
             cached.lastEpisode = item.lastEpisode ?? cached.lastEpisode
@@ -398,6 +402,7 @@ class TMDBEnricher {
         }
         
         await memoryCache.storeItem(enriched, for: item.id)
+        await memoryCache.storeItem(enriched, for: "\(currentAppLanguage):\(item.id)")
         return enriched
     }
 
@@ -521,7 +526,7 @@ class TMDBEnricher {
         }
         guard !pngLogos.isEmpty else { return nil }
 
-        func score(for dict: [String: Any]) -> Double {
+        func score(for dict: [String: Any], index: Int) -> Double {
             let lang = (dict["iso_639_1"] as? String)?.lowercased()
             let pref = activePreferred
             let orig = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -537,25 +542,24 @@ class TMDBEnricher {
                 langScore = 500.0   // Tier 4: Other Languages
             }
 
-            let voteAvg = dict["vote_average"] as? Double ?? 0.0
-            let voteCount: Double
-            if let c = dict["vote_count"] as? Double {
-                voteCount = c
-            } else if let c = dict["vote_count"] as? Int {
-                voteCount = Double(c)
-            } else {
-                voteCount = 0.0
-            }
-            let communityScore = voteAvg * log2(max(1.0, voteCount + 1.0))
+            let voteAvg = (dict["vote_average"] as? NSNumber)?.doubleValue ?? (dict["vote_average"] as? Double ?? 0.0)
+            let voteCount = (dict["vote_count"] as? NSNumber)?.doubleValue ?? (dict["vote_count"] as? Double ?? 0.0)
 
-            let width = Double(dict["width"] as? Int ?? 0)
+            let hasVotesBonus = (voteAvg > 0.0 && voteCount > 0.0) ? 500.0 : 0.0
+            let voteScore = voteAvg * 20.0
+
+            // TMDB's natural community array index is an authoritative tie-breaker (index 0 is #1 curated)
+            let tmdbIndexBonus = max(0.0, 20.0 - Double(index) * 0.5)
+
+            let width = (dict["width"] as? NSNumber)?.doubleValue ?? (dict["width"] as? Double ?? 0.0)
             let resScore = min(width / 500.0, 10.0)
 
-            return langScore + (communityScore * 5.0) + resScore
+            return langScore + hasVotesBonus + voteScore + tmdbIndexBonus + resScore
         }
 
-        let sorted = pngLogos.sorted { score(for: $0) > score(for: $1) }
-        guard let best = sorted.first, let path = best["file_path"] as? String else { return nil }
+        let indexed = pngLogos.enumerated().map { (index: $0.offset, dict: $0.element) }
+        let sorted = indexed.sorted { score(for: $0.dict, index: $0.index) > score(for: $1.dict, index: $1.index) }
+        guard let best = sorted.first, let path = best.dict["file_path"] as? String else { return nil }
         return URL(string: "https://image.tmdb.org/t/p/original\(path)")
     }
 
@@ -577,7 +581,7 @@ class TMDBEnricher {
         }
         guard !validPosters.isEmpty else { return nil }
 
-        func score(for dict: [String: Any]) -> Double {
+        func score(for dict: [String: Any], index: Int) -> Double {
             let lang = (dict["iso_639_1"] as? String)?.lowercased()
             let pref = activePreferred
             let orig = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -595,19 +599,17 @@ class TMDBEnricher {
                 langScore = 500.0   // Tier 5: Other Languages
             }
 
-            let voteAvg = dict["vote_average"] as? Double ?? 0.0
-            let voteCount: Double
-            if let c = dict["vote_count"] as? Double {
-                voteCount = c
-            } else if let c = dict["vote_count"] as? Int {
-                voteCount = Double(c)
-            } else {
-                voteCount = 0.0
-            }
-            let communityScore = voteAvg * log2(max(1.0, voteCount + 1.0))
+            let voteAvg = (dict["vote_average"] as? NSNumber)?.doubleValue ?? (dict["vote_average"] as? Double ?? 0.0)
+            let voteCount = (dict["vote_count"] as? NSNumber)?.doubleValue ?? (dict["vote_count"] as? Double ?? 0.0)
 
-            let width = Double(dict["width"] as? Int ?? 0)
-            let height = Double(dict["height"] as? Int ?? 0)
+            let hasVotesBonus = (voteAvg > 0.0 && voteCount > 0.0) ? 500.0 : 0.0
+            let voteScore = voteAvg * 20.0
+
+            // TMDB's natural community array index is an authoritative tie-breaker (index 0 is #1 curated)
+            let tmdbIndexBonus = max(0.0, 20.0 - Double(index) * 0.5)
+
+            let width = (dict["width"] as? NSNumber)?.doubleValue ?? (dict["width"] as? Double ?? 0.0)
+            let height = (dict["height"] as? NSNumber)?.doubleValue ?? (dict["height"] as? Double ?? 0.0)
             let resScore = min(width / 500.0, 10.0)
             var aspectScore = 0.0
             if height > 0 {
@@ -617,11 +619,12 @@ class TMDBEnricher {
                 }
             }
 
-            return langScore + (communityScore * 5.0) + resScore + aspectScore
+            return langScore + hasVotesBonus + voteScore + tmdbIndexBonus + resScore + aspectScore
         }
 
-        let sorted = validPosters.sorted { score(for: $0) > score(for: $1) }
-        return sorted.first?["file_path"] as? String
+        let indexed = validPosters.enumerated().map { (index: $0.offset, dict: $0.element) }
+        let sorted = indexed.sorted { score(for: $0.dict, index: $0.index) > score(for: $1.dict, index: $1.index) }
+        return sorted.first?.dict["file_path"] as? String
     }
 
     static func selectBestPosterURL(
@@ -633,16 +636,17 @@ class TMDBEnricher {
         return TMDBEnricher.shared.adaptiveURL(path: path, quality: .poster)
     }
 
-    /// Selects the best backdrop / banner image from TMDB's `backdrops` array.
-    /// Prioritizes user's active App Language (Tier 1: +10,000), textless cinematic artwork (Tier 2: +7,500, ideal for
-    /// backdrop with title/logo overlay), original studio language (Tier 3: +5,000), English fallback (Tier 4: +2,500),
-    /// and other languages (Tier 5: +500).
+    /// Selects the best 16:9 backdrop / banner image from TMDB's `backdrops` array.
+    /// Strictly prioritizes clean, textless cinematic artwork (Tier 1: +10,000) because Flux dynamically
+    /// overlays titles, logos, and progress meters on 16:9 surfaces (Hero Carousel, Detail View,
+    /// Player buffering screen, Continue Watching, Recently Watched).
+    /// Eliminates the language filter for 16:9 aspect ratios so language-tagged title banners are never
+    /// chosen over clean photography. Falls back to language-tagged art only if zero textless backdrops exist.
     static func selectBestBackdropPath(
         from backdrops: [[String: Any]],
         preferredLanguage: String? = nil,
         originalLanguage: String? = nil
     ) -> String? {
-        let activePreferred = (preferredLanguage ?? UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en").lowercased()
         let validBackdrops = backdrops.filter { item in
             guard let path = item["file_path"] as? String else { return false }
             let lower = path.lowercased()
@@ -650,37 +654,30 @@ class TMDBEnricher {
         }
         guard !validBackdrops.isEmpty else { return nil }
 
-        func score(for dict: [String: Any]) -> Double {
+        func score(for dict: [String: Any], index: Int) -> Double {
             let lang = (dict["iso_639_1"] as? String)?.lowercased()
-            let pref = activePreferred
-            let orig = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-            let langScore: Double
-            if let l = lang, !l.isEmpty, l == pref {
-                langScore = 10000.0 // Tier 1: Active App Language
-            } else if lang == nil || lang?.isEmpty == true || lang == "null" || lang == "xx" {
-                langScore = 7500.0  // Tier 2: Textless / Language-Neutral Artwork (clean for overlaid UI)
-            } else if let l = lang, let o = orig, !l.isEmpty, !o.isEmpty, l == o {
-                langScore = 5000.0  // Tier 3: Authentic Original Studio Language
-            } else if pref != "en" && orig != "en" && lang == "en" {
-                langScore = 2500.0  // Tier 4: English Fallback
+            // 16:9 Backdrops: Clean & textless artwork is Tier 1 (+10,000).
+            // Language-tagged backdrops contain baked-in title logos that clash with Flux's overlaid UI,
+            // and are given 0.0 so they serve only as last-resort fallbacks for obscure titles without textless art.
+            let textlessScore: Double
+            if lang == nil || lang?.isEmpty == true || lang == "null" || lang == "xx" {
+                textlessScore = 10000.0
             } else {
-                langScore = 500.0   // Tier 5: Other Languages
+                textlessScore = 0.0
             }
 
-            let voteAvg = dict["vote_average"] as? Double ?? 0.0
-            let voteCount: Double
-            if let c = dict["vote_count"] as? Double {
-                voteCount = c
-            } else if let c = dict["vote_count"] as? Int {
-                voteCount = Double(c)
-            } else {
-                voteCount = 0.0
-            }
-            let communityScore = voteAvg * log2(max(1.0, voteCount + 1.0))
+            let voteAvg = (dict["vote_average"] as? NSNumber)?.doubleValue ?? (dict["vote_average"] as? Double ?? 0.0)
+            let voteCount = (dict["vote_count"] as? NSNumber)?.doubleValue ?? (dict["vote_count"] as? Double ?? 0.0)
 
-            let width = Double(dict["width"] as? Int ?? 0)
-            let height = Double(dict["height"] as? Int ?? 0)
+            let hasVotesBonus = (voteAvg > 0.0 && voteCount > 0.0) ? 500.0 : 0.0
+            let voteScore = voteAvg * 20.0
+
+            // TMDB's natural community array index is an authoritative tie-breaker (index 0 is #1 curated)
+            let tmdbIndexBonus = max(0.0, 20.0 - Double(index) * 0.5)
+
+            let width = (dict["width"] as? NSNumber)?.doubleValue ?? (dict["width"] as? Double ?? 0.0)
+            let height = (dict["height"] as? NSNumber)?.doubleValue ?? (dict["height"] as? Double ?? 0.0)
             let resScore = min(width / 1000.0, 10.0)
             var aspectScore = 0.0
             if height > 0 {
@@ -690,11 +687,12 @@ class TMDBEnricher {
                 }
             }
 
-            return langScore + (communityScore * 5.0) + resScore + aspectScore
+            return textlessScore + hasVotesBonus + voteScore + tmdbIndexBonus + resScore + aspectScore
         }
 
-        let sorted = validBackdrops.sorted { score(for: $0) > score(for: $1) }
-        return sorted.first?["file_path"] as? String
+        let indexed = validBackdrops.enumerated().map { (index: $0.offset, dict: $0.element) }
+        let sorted = indexed.sorted { score(for: $0.dict, index: $0.index) > score(for: $1.dict, index: $1.index) }
+        return sorted.first?.dict["file_path"] as? String
     }
 
     static func selectBestBackdropURL(
@@ -838,18 +836,18 @@ class TMDBEnricher {
                 active += 1
                 if active >= 5 {
                     if let (idx, logo, posterPath, backdropPath) = await group.next() {
-                        applyArtwork(idx: idx, logo: logo, posterPath: posterPath, backdropPath: backdropPath, in: &items)
+                        await applyArtwork(idx: idx, logo: logo, posterPath: posterPath, backdropPath: backdropPath, in: &items, prefLang: prefLang)
                         active -= 1
                     }
                 }
             }
             for await (idx, logo, posterPath, backdropPath) in group {
-                applyArtwork(idx: idx, logo: logo, posterPath: posterPath, backdropPath: backdropPath, in: &items)
+                await applyArtwork(idx: idx, logo: logo, posterPath: posterPath, backdropPath: backdropPath, in: &items, prefLang: prefLang)
             }
         }
     }
 
-    private func applyArtwork(idx: Int, logo: URL?, posterPath: String?, backdropPath: String?, in items: inout [MediaItem]) {
+    private func applyArtwork(idx: Int, logo: URL?, posterPath: String?, backdropPath: String?, in items: inout [MediaItem], prefLang: String) async {
         guard idx < items.count else { return }
         if let logo {
             items[idx].logoURL = logo
@@ -862,6 +860,8 @@ class TMDBEnricher {
             items[idx].heroURL = adaptiveURL(path: backdropPath, quality: .automatic)
         }
         items[idx].imageURL = items[idx].backdropURL ?? items[idx].posterURL ?? items[idx].imageURL
+        await memoryCache.storeItem(items[idx], for: items[idx].id)
+        await memoryCache.storeItem(items[idx], for: "\(prefLang):\(items[idx].id)")
     }
 
     private func batchEnrichLogos(_ items: inout [MediaItem], preferredLanguage: String? = nil) async {
@@ -990,7 +990,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        var items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .nowPlaying) }
         return items
     }
@@ -1002,7 +1003,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/movie/upcoming?api_key=\(apiKey)&region=\(currentRegion)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        var items = try await fetchCatalog(from: urlString, type: "movie", allowUnreleased: true)
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .upcoming) }
         return items
     }
@@ -1036,7 +1038,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie")
+        var items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
         return items
     }
@@ -1053,7 +1056,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/discover/movie?api_key=\(apiKey)&with_runtime.lte=95&sort_by=popularity.desc&include_adult=false&vote_count.gte=50&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "movie")
+        var items = try await fetchCatalog(from: urlString, type: "movie")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
         return items
     }
@@ -1083,7 +1087,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/tv/airing_today?api_key=\(apiKey)&timezone=\(currentTimeZone)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        var items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .airingToday) }
         return items
     }
@@ -1095,7 +1100,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)&timezone=\(currentTimeZone)&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        var items = try await fetchCatalog(from: urlString, type: "tv", allowUnreleased: true)
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .nowPlaying) }
         return items
     }
@@ -1129,7 +1135,8 @@ class TMDBEnricher {
         if page == 1, let cached = await TMDBCatalogCacheActor.shared.get(key: cacheKey) { return cached }
         
         let urlString = "\(baseURL)/discover/tv?api_key=\(apiKey)&with_watch_monetization_types=flatrate&watch_region=\(currentRegion)&sort_by=popularity.desc&without_genres=10763,10767&include_adult=false&vote_count.gte=30&page=\(page)"
-        let items = try await fetchCatalog(from: urlString, type: "tv")
+        var items = try await fetchCatalog(from: urlString, type: "tv")
+        if page == 1 { await batchEnrichLogos(&items) }
         if page == 1 { await TMDBCatalogCacheActor.shared.set(key: cacheKey, items: items, ttl: .discover) }
         return items
     }

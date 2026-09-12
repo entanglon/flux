@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import _Concurrency
+import OSLog
 
 typealias AsyncTask = _Concurrency.Task
 
@@ -1288,6 +1289,10 @@ class PlayerManager: ObservableObject {
     /// then the URL is handed to mpv. Dead sources fail and fall through to next candidate.
     private func attemptStream(_ stream: Stream) {
         self.currentSelectedStream = stream
+        // Single telemetry line per committed attempt (error channel persists;
+        // per-candidate logging would spam). Proxied = loopback routing intent.
+        let routedViaProxy = (stream.proxyHeaders?.isEmpty == false) && !stream.isTorrent && StreamProxyManager.shared.isRunning
+        Logger.stream.error("Attempting stream (proxied=\(routedViaProxy, privacy: .public)) from \(stream.source, privacy: .public)")
         let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
 
         // Cancel any existing startup watchdog

@@ -38,7 +38,12 @@ class AddonManager: ObservableObject {
     }
     
     var enabledAddons: [StremioAddon] {
-        return addons.filter { $0.isEnabled }
+        return addons.filter { addon in
+            if addon.id == "cinemeta" || addon.url.contains("cinemeta") {
+                return isCinemetaEnabled
+            }
+            return addon.isEnabled
+        }
     }
     
     func isAddonInstalled(id: String) -> Bool {

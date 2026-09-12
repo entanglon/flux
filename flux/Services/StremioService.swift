@@ -111,9 +111,8 @@ class StremioService {
         let catalogResponse = try JSONDecoder().decode(StremioCatalogResponse.self, from: data)
         let items = catalogResponse.metas.map { $0.toMediaItem() }
         
-        // Skip TMDB enrichment when explicitly requested (Cinemeta-only mode)
-        // or when the Cinemeta addon is disabled (user chose TMDB exclusively)
-        guard !skipEnrichment, AddonManager.shared.isCinemetaEnabled else {
+        // Skip TMDB enrichment when explicitly requested or when no TMDB key is available
+        guard !skipEnrichment, TMDBEnricher.shared.hasKey else {
             return items
         }
         

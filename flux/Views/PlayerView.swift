@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import AppKit
+import OSLog
 
 struct PlayerView: View {
     // Acquired at init: adopts the detail-page prefetch's warm mpv core when
@@ -20,6 +21,11 @@ struct PlayerView: View {
     @State private var didReachEnd = false
     /// Delayed first-frame-aware flip of hasStartedPlayback (see confirmPlaybackStarted).
     @State private var playbackStartTask: Task<Void, Never>? = nil
+    /// Last observed frame-drop-count; deltas are logged (diagnostic A/B).
+    @State private var lastDropCount = -1
+    /// Last observed vo-delayed-frame-count / total-avsync-change baselines.
+    @State private var lastVoDelayed = -1
+    @State private var lastAvsyncChange = -1.0
     /// Mid-playback overlay/controls gate with grace: brief seeks (<0.6s) never
     /// unmount the controls layer, so ±10/15s skips don't flicker the UI.
     @State private var sustainedBuffering = false
@@ -348,6 +354,9 @@ struct PlayerView: View {
         print("PlayerView: URL changed to \(url), playing...")
         autoPlayCancelled = false
         hasStartedPlayback = false
+        lastDropCount = -1
+        lastVoDelayed = -1
+        lastAvsyncChange = -1.0
         didReachEnd = false
         sustainedBuffering = false
         playbackStartTask?.cancel()
@@ -379,6 +388,20 @@ struct PlayerView: View {
                 if mpv.isPlaying {
                     SleepAssertionManager.shared.enableSleepPrevention()
                 }
+                // One-shot effective-config snapshot on the error channel (see
+                // stall telemetry: .info never persists). Settles the
+                // cache-secs/readahead alias dispute + records af state.
+                // src host is ground truth for proxied-vs-direct: loopback
+                // means proxy (or local torrent server); fires on EVERY path
+                // including warm-core adoption that bypasses attemptStream.
+                let rh = mpv.playerView?.playerView?.getPropertyString("demuxer-readahead-secs") ?? "?"
+                let mb = mpv.playerView?.playerView?.getPropertyString("demuxer-max-bytes") ?? "?"
+                let cs = mpv.playerView?.playerView?.getPropertyString("cache-secs") ?? "?"
+                let af = mpv.playerView?.playerView?.getPropertyString("af") ?? "?"
+                let sof = mpv.playerView?.playerView?.getPropertyString("stream-open-filename") ?? "?"
+                let srcHost = URL(string: sof)?.host ?? "?"
+                let drops0 = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
+                Logger.player.error("Playback start opts: readahead=\(rh, privacy: .public) maxbytes=\(mb, privacy: .public) cachesecs=\(cs, privacy: .public) af=\(af, privacy: .public) src=\(srcHost, privacy: .public) drops0=\(drops0, privacy: .public)")
                 playbackStartTask = nil
             }
         }
@@ -1430,6 +1453,38 @@ struct PlayerView: View {
                    playerManager.nextReleasedEpisodeInfo != nil,
                    mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
                     playerManager.playNextEpisode()
+                }
+                // Diagnostic hitch sampling (8/31 investigation, error channel):
+                // log ONLY on increment, with position + cache level, so each
+                // hitch gets a timestamped fingerprint to correlate against
+                // user-reported lag instants. Covers decoder drops, VO delays,
+                // and A/V sync corrections in one combined line per tick.
+                let drops = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
+                let voDelayed = mpv.playerView?.playerView?.getPropertyInt("vo-delayed-frame-count") ?? -1
+                let avsync = mpv.playerView?.playerView?.getPropertyDouble("total-avsync-change") ?? -1.0
+                if lastDropCount < 0 {
+                    lastDropCount = drops
+                    lastVoDelayed = voDelayed
+                    lastAvsyncChange = avsync
+                } else {
+                    var parts: [String] = []
+                    if drops > lastDropCount {
+                        parts.append("drop +\(drops - lastDropCount) (total \(drops))")
+                        lastDropCount = drops
+                    }
+                    if voDelayed > lastVoDelayed {
+                        parts.append("vodelay +\(voDelayed - lastVoDelayed) (total \(voDelayed))")
+                        lastVoDelayed = voDelayed
+                    }
+                    if avsync > lastAvsyncChange + 0.0005 {
+                        parts.append(String(format: "avsync +%.3fs (total %.3fs)", avsync - lastAvsyncChange, avsync))
+                        lastAvsyncChange = avsync
+                    }
+                    if !parts.isEmpty {
+                        let cache = String(format: "%.1f", mpv.demuxerCacheTime)
+                        let pos = String(format: "%.1f", mpv.timePos)
+                        Logger.player.error("Hitch \(parts.joined(separator: ", "), privacy: .public) at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s")
+                    }
                 }
                 return
             }

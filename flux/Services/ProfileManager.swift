@@ -449,7 +449,11 @@ final class ProfileManager: ObservableObject {
         }
     }
 
-    func applyCloudProfilesData(_ raw: [[String: Any]]?) {
+    /// Applies a remote profiles payload. Per-profile history/watchlist merges
+    /// always run (recency-safe unions). The profiles LIST itself is replaced
+    /// only when `replaceList` is true — callers pass false for stale background
+    /// pulls so an outdated remote list can never wipe the local one.
+    func applyCloudProfilesData(_ raw: [[String: Any]]?, replaceList: Bool = true) {
         guard let raw, !raw.isEmpty else { return }
         var imported: [UserProfile] = []
         for dict in raw {
@@ -491,6 +495,7 @@ final class ProfileManager: ObservableObject {
         guard !imported.isEmpty else { return }
 
         let applyBlock = {
+            guard replaceList else { return }
             // Clean up any local profiles being replaced by the cloud profiles,
             // but preserve any local history/watchlist by carrying it into the primary imported profile!
             if let targetPrimary = imported.first(where: { !$0.isKids }) ?? imported.first {

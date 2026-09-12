@@ -190,10 +190,13 @@ struct LanguageManagerTests {
 
     // MARK: - Backdrop / Banner Language Selection Tests
 
-    @Test func backdropSelectionPrefersActiveAppLanguage() {
+    @Test func backdropSelectionPrefersCleanTextlessOverLanguageTagged() {
+        // 16:9 backdrops (Hero Carousel, Detail View, Continue Watching, Player buffering)
+        // must be clean and textless because Flux overlays title logos dynamically.
+        // Even when an active app language backdrop exists, the clean textless neutral backdrop is prioritized.
         let backdrops: [[String: Any]] = [
             ["file_path": "/backdrop_neutral.jpg", "vote_average": 8.0, "vote_count": 100, "width": 3840, "height": 2160],
-            ["file_path": "/backdrop_ja.jpg", "iso_639_1": "ja", "vote_average": 7.0, "vote_count": 10, "width": 3840, "height": 2160]
+            ["file_path": "/backdrop_ja.jpg", "iso_639_1": "ja", "vote_average": 9.0, "vote_count": 500, "width": 3840, "height": 2160]
         ]
 
         let selectedJa = TMDBEnricher.selectBestBackdropPath(
@@ -201,15 +204,13 @@ struct LanguageManagerTests {
             preferredLanguage: "ja",
             originalLanguage: "en"
         )
-        #expect(selectedJa == "/backdrop_ja.jpg")
+        #expect(selectedJa == "/backdrop_neutral.jpg")
     }
 
-    @Test func backdropSelectionPrefersTextlessWhenNoAppLanguageMatch() {
-        // When no active app language backdrop exists, clean textless neutral backdrop is prioritized
-        // over foreign languages with text (ideal for overlaying Flux's title logo)
+    @Test func backdropSelectionFallsBackToLanguageTaggedWhenNoTextlessExists() {
+        // Obscure titles with zero textless backdrops gracefully fall back to language-tagged backdrops.
         let backdrops: [[String: Any]] = [
-            ["file_path": "/backdrop_de.jpg", "iso_639_1": "de", "vote_average": 7.5, "vote_count": 20, "width": 3840, "height": 2160],
-            ["file_path": "/backdrop_neutral.jpg", "vote_average": 7.0, "vote_count": 50, "width": 3840, "height": 2160]
+            ["file_path": "/backdrop_de.jpg", "iso_639_1": "de", "vote_average": 7.5, "vote_count": 20, "width": 3840, "height": 2160]
         ]
 
         let selected = TMDBEnricher.selectBestBackdropPath(
@@ -217,7 +218,62 @@ struct LanguageManagerTests {
             preferredLanguage: "es",
             originalLanguage: "ja"
         )
-        #expect(selected == "/backdrop_neutral.jpg")
+        #expect(selected == "/backdrop_de.jpg")
+    }
+
+    @Test func backdropSelectionChoosesHighestCommunityRated() {
+        // Among textless backdrops, the one with higher community score / rating wins
+        let backdrops: [[String: Any]] = [
+            ["file_path": "/low_rated.jpg", "vote_average": 4.0, "vote_count": 2, "width": 3840, "height": 2160],
+            ["file_path": "/top_rated.jpg", "vote_average": 8.8, "vote_count": 150, "width": 3840, "height": 2160],
+            ["file_path": "/unrated.jpg", "vote_average": 0.0, "vote_count": 0, "width": 3840, "height": 2160]
+        ]
+
+        let selected = TMDBEnricher.selectBestBackdropPath(from: backdrops)
+        #expect(selected == "/top_rated.jpg")
+    }
+
+    @Test func backdropSelectionPrefersTMDBIndex0WhenRatingsTied() {
+        // When community ratings are unvoted (0), TMDB's natural array index (index 0 = top curated) wins
+        let backdrops: [[String: Any]] = [
+            ["file_path": "/curated_index0.jpg", "vote_average": 0.0, "vote_count": 0, "width": 3840, "height": 2160],
+            ["file_path": "/curated_index1.jpg", "vote_average": 0.0, "vote_count": 0, "width": 3840, "height": 2160]
+        ]
+
+        let selected = TMDBEnricher.selectBestBackdropPath(from: backdrops)
+        #expect(selected == "/curated_index0.jpg")
+    }
+
+    @Test func posterSelectionChoosesHighestCommunityRatedWithinLanguageTier() {
+        let posters: [[String: Any]] = [
+            ["file_path": "/poster_low.jpg", "iso_639_1": "en", "vote_average": 4.5, "vote_count": 5, "width": 2000, "height": 3000],
+            ["file_path": "/poster_high.jpg", "iso_639_1": "en", "vote_average": 9.2, "vote_count": 400, "width": 2000, "height": 3000]
+        ]
+
+        let selected = TMDBEnricher.selectBestPosterPath(from: posters, preferredLanguage: "en")
+        #expect(selected == "/poster_high.jpg")
+    }
+
+    @Test func backdropSelectionSelectsHighestVoteAverageEvenWithFewerVotes() {
+        // Models The Odyssey (2026) where index 0 has 8.034 va with 5 votes,
+        // while index 2 has 6.024 va with 43 votes. Higher vote_average must win!
+        let odysseyBackdrops: [[String: Any]] = [
+            ["file_path": "/odyssey_winner.jpg", "vote_average": 8.034, "vote_count": 5, "width": 3840, "height": 2160],
+            ["file_path": "/odyssey_runnerup.jpg", "vote_average": 6.042, "vote_count": 24, "width": 3840, "height": 2160],
+            ["file_path": "/odyssey_more_votes.jpg", "vote_average": 6.024, "vote_count": 43, "width": 3840, "height": 2160]
+        ]
+        let selectedOdyssey = TMDBEnricher.selectBestBackdropPath(from: odysseyBackdrops)
+        #expect(selectedOdyssey == "/odyssey_winner.jpg")
+
+        // Models Moana (2016) where index 0 has 5.786 va with 8 votes,
+        // while index 3 has 5.25 va with 15 votes.
+        let moanaBackdrops: [[String: Any]] = [
+            ["file_path": "/moana_winner.jpg", "vote_average": 5.786, "vote_count": 8, "width": 3840, "height": 2160],
+            ["file_path": "/moana_runnerup.jpg", "vote_average": 5.682, "vote_count": 11, "width": 3840, "height": 2160],
+            ["file_path": "/moana_more_votes.jpg", "vote_average": 5.25, "vote_count": 15, "width": 1920, "height": 1080]
+        ]
+        let selectedMoana = TMDBEnricher.selectBestBackdropPath(from: moanaBackdrops)
+        #expect(selectedMoana == "/moana_winner.jpg")
     }
 
     // MARK: - Profile & Gate Localization Tests
