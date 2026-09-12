@@ -24,8 +24,9 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
-## Sep 13, 2026 — OPEN: Top-Rated Artwork Still Not Showing in UI (To Investigate Tomorrow)
+## Sep 13, 2026 — OPEN: Top-Rated Artwork & Playback Lags (To Investigate Tomorrow)
 
+### 1. Top-Rated Artwork Still Not Showing in UI
 - **User Feedback**: Despite the updated `vote_average` scoring formula in `selectBestBackdropPath` (which mathematically verified that `/iuylzRSllrGn7YB322kwKoOVMcq.jpg` wins for *The Odyssey* and `/qLVNZFHYUR6Li64He67SWl6BHQe.jpg` wins for *Moana* in isolated unit tests), the user reports that the UI is still not displaying the top-rated artwork.
 - **Investigation Roadmap for Tomorrow**:
   1. **Cache Staleness**:
@@ -38,6 +39,17 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
        - In `GlassCard` and `CarouselView`: Which property is actually bound to the view? (e.g., `item.imageURL` vs `item.backdropURL` vs `item.posterURL`).
   3. **Title ID Verification**:
      - Check exactly which item the user is opening (e.g., TMDB ID `1368337` vs IMDb ID `tt...`). Ensure ID translation resolves to the exact TMDB title entry.
+
+### 2. Video Playback Lags (8s / 31s Periodic Hitches Still Persisting)
+- **User Feedback**: The playback micro-lags / stutters during video streaming are still not gone.
+- **Current Findings & Technical Landscape**:
+  - The transparent-retry proxy patch and 64MB buffer cap experiment did not eliminate the lags.
+  - Telemetry shows: zero `frame-drop-count` increments and zero `paused-for-cache` transitions during lag moments.
+  - This indicates presentation/clock delays rather than demuxer cache starvation: delayed-not-dropped video presentation (`vo-delayed-frame-count`), audio sync corrections, or main thread draw blocking in `MPVVideoView` / `CAOpenGLLayer`.
+- **Investigation Roadmap for Tomorrow**:
+  1. Inspect `MPVVideoView.swift` OpenGL render loop: CVDisplayLink vs main thread drawing contention (`draw(in:)` vs `CGLFlushDrawable`).
+  2. Compare against IINA's mpv configuration: inspect options like `--video-sync=display-resample` vs `--video-sync=audio`, `--interpolation`, and `--opengl-pbo`.
+  3. Run live playback session to capture `vo-delayed-frame-count` and audio underrun telemetry logs.
 
 ---
 

@@ -260,7 +260,10 @@ Awaiting the v2 telemetry results from the user test!
 3. **Pop Elimination**: `applyArtwork` now stores directly into `memoryCache` under `item.id` and `"\(prefLang):\(item.id)"`; `DetailView.displayItem` suppresses non-TMDB images during loading; `loadDetails()` preserves incoming TMDB URLs to eliminate mid-view image swaps.
 4. **Build & Test**: 146/146 unit tests passing (`** TEST SUCCEEDED **`). Release binary deployed to `/Applications/Flux.app` and running (PID 65589).
 
-[2026-09-13 02:11 IST] Antigravity: User reports that top-rated art is still not showing in the UI despite the ranking formula update and successful test runs. Staged for tomorrow's session: investigate disk/URL cache staleness, TMDBCatalogCacheActor persistence, and every layer where backdropURL/heroURL is assigned in views (e.g. TMDBMovieDetail default fallback vs selectBestBackdropPath). Changes committed.
+[2026-09-13 02:13 IST] Antigravity: User reports:
+1. Top-rated art is still not showing in the UI despite the ranking formula update and successful unit tests. Staged for tomorrow: investigate disk/URL cache staleness, TMDBCatalogCacheActor persistence, and every layer where backdropURL/heroURL is assigned in views (e.g. TMDBMovieDetail default fallback vs selectBestBackdropPath).
+2. Video playback lags (8s / 31s hitches) are still persisting. Zero-drop/zero-pause footprint points away from demuxer buffer starvation to render-side / presentation-clock delays (CVDisplayLink vs main-thread CGL drawing in MPVVideoView, or IINA-style video-sync=display-resample options). Staged for tomorrow's session.
+Both items recorded in handover.md. Changes committed.
 
 ---
 
