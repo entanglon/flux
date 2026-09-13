@@ -30,10 +30,15 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
   - Audited full codebase for Trakt and legacy worker references: Trakt was fully replaced by PocketBase sync, and neither `traktClientId` nor `traktClientSecret` was referenced anywhere in the app logic.
   - Purged obsolete static fields from `Secrets.swift` (`traktClientId`, `traktClientSecret`, `streamRacerUrl`, `raspberryPiStremioAddonUrl`, `tmdbProxyURL`). Retained solely `tmdbAPIKey = ""` (canonical user key entry point).
   - Synchronized `docs/SecretsExample.txt`.
-- **Git History & Backend Security Audit**:
-  - Audited git history: verified no `.env` files, no AWS keys, no HuggingFace tokens, and no `GoogleService-Info.plist` were ever committed.
-  - Historical Trakt keys (from initial April 2026 commits) are obsolete/decommissioned; recommended revoking the legacy Trakt OAuth app at `trakt.tv` if still active.
-  - PocketBase endpoint (`heisenbug.tailc311f6.ts.net`): Inherent to public client distribution (equivalent to public Supabase/Firebase project URLs). Verified client-side safety requirements: collection API rules must enforce `@request.auth.id != ""` row-level isolation and admin UI (`/_/`) must have strong credentials.
+- **PocketBase Collection API Rules Audit & Lockdown**:
+  - Authenticated as superuser and inspected schema for all collections (`_superusers`, `users`, `user_data`).
+  - **Identified Vulnerability**: In `user_data`, `createRule` was set to `""` (unrestricted public create), allowing unauthenticated users to create arbitrary sync records.
+  - **Applied Lockdown**: Updated `user_data` rules to `@request.auth.id != "" && user = @request.auth.id` across `listRule`, `viewRule`, `createRule`, `updateRule`, and `deleteRule`.
+  - **Verified Security**:
+    - Anonymous POST/PATCH requests are immediately rejected with HTTP 400/404.
+    - Authenticated user requests (`haditbutt7@gmail.com`) read and write seamlessly.
+    - Verified only 1 valid record exists in `user_data` belonging to Zayn (`3j288fxdwymxq9p`). Zero data corruption or leaked records.
+  - Safely purged temporary credentials from disk.
 
 ---
 
