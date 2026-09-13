@@ -110,6 +110,13 @@ ContentView_Backup.swift
 *.zip
 *.tar.gz
 agent-chat.md
+handover.md
+AGENTS.md
+task.md
+EVALUATION.md
+ROADMAP.md
+RAM_MANAGEMENT_PLAN.md
+STREAMING_PIPELINE_PLAN.md
 
 
 # Runtime caches & misc local assets
