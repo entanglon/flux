@@ -1,11 +1,21 @@
-# Legal Disclaimer
+# Legal Notice & Disclaimer
 
-**This project is for educational and research purposes only.**
+Flux is an open-source, client-side media player and metadata browser developed for macOS.
 
-Flux does not host, upload, or store any video files or copyrighted media on its servers. It is a client-side application that aggregates metadata from public APIs (like TMDB) and streams content from third-party sources available on the public internet.
+## 1. Legal Basis & Nature of the Application
+Flux is designed and distributed as a general-purpose media player, functioning in the same legal category as applications such as VLC, Kodi, Plex, and BitTorrent clients:
+- **Substantial Non-Infringing Uses**: Flux is built to stream and organize legal, non-infringing media—including open-source videos, public domain cinema, creative commons material, authorized IPTV streams, and personal media libraries.
+- **Client-Side Architecture**: Flux does not own, operate, host, scrape, cache, or distribute any media files, video streams, or torrent trackers. It functions as an empty player and interface until configured by the user.
+- **Open Metadata APIs**: All catalog information, artwork, and descriptions shown by default are fetched directly from publicly accessible APIs (such as The Movie Database and Cinemeta) via open web protocols.
 
--   The developers of Flux do not have control over the media content available through third-party streams.
--   Accessing copyrighted content without authorization may be illegal in your jurisdiction.
--   Users are responsible for ensuring their use of this software complies with local laws and regulations.
+## 2. Third-Party Addons & User Responsibility
+- Flux provides compatibility with the open Stremio Addon protocol (an open HTTP/JSON specification).
+- Flux does **not** pre-install, package, or endorse any third-party piracy scrapers or unauthorized stream providers.
+- Any third-party addons installed via `stremio://` deep links or manifest URLs are chosen, installed, and operated solely at the discretion and direction of the end-user.
+- Users are solely responsible for ensuring that their access to external media sources complies with applicable local, national, and international copyright laws and licensing terms in their jurisdiction.
 
-By using or contributing to this software, you agree that the developers are not liable for any misuse of the application or any copyright infringements caused by end-users.
+## 3. Limitation of Liability
+The developers and contributors of Flux:
+- Do not monitor, control, or have custody over third-party streams or external servers.
+- Expressly disclaim liability for any misuse of the software by third parties or end-users.
+- Distribute this software in good faith under the principles of open-source software and substantial non-infringing use.
