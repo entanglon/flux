@@ -24,6 +24,21 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 (14:38 IST) — REPO HYGIENE: Full Duplicate Sweep & Legacy Backend Relocated
+
+- **Duplicate Files Purged from Git**:
+  - `OTTs/` (7.4 MB): 9 redundant platform logo duplicates purged from git. All logos are already bundled inside `flux/Assets.xcassets/ott-*.imageset/`.
+  - `scripts/mpvkit-legacy/`: Removed redundant copies of `create_moltenvk_xcframework.sh` and `create_xcframeworks.sh`.
+  - `flux/Components/Top10Card.swift`: Removed unreferenced early duplicate superseded by `TopTenCard.swift`.
+- **Legacy Cloudflare Backend Relocated (`/Users/zainulnazir/Projects/flux-backend`)**:
+  - Safely moved `backend/` (`README.md`, `schema.sql`, `src/index.js`, `wrangler.toml`) to a dedicated sibling project folder `/Users/zainulnazir/Projects/flux-backend`.
+  - Removed `backend/` from git tracking in the main application repository and added `backend/` and `OTTs/` to `.gitignore`.
+- **Automated Verification**:
+  - Ran SHA-256 and basename uniqueness script: confirmed zero non-canonical duplicate files remain in git tracking.
+  - `xcodebuild` clean build succeeded with code 0.
+
+---
+
 ## Sep 13, 2026 (14:32 IST) — REPO HYGIENE: Wrangler Cache & Marketing Assets Purged
 
 - **Purged Cloudflare Wrangler Cache**:
