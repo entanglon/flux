@@ -23,6 +23,10 @@
 
 ---
 
+> 📖 **User Documentation**: Explore the [**Flux Official Wiki**](https://github.com/entanglon/flux/wiki) for an in-depth walkthrough of all settings, autonomous stream racing, addons, and keyboard shortcuts.
+
+---
+
 ## 📥 Download & Installation
 
 ### Direct Download
