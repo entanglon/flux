@@ -10,9 +10,9 @@
             <title>Flux 1.0 (macOS 26+ Liquid Glass)</title>
             <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <pubDate>Fri, 04 Sep 2026 12:00:00 +0000</pubDate>
+            <pubDate>Sun, 13 Sep 2026 09:20:00 +0000</pubDate>
             <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux.dmg"
-                       length="44384334"
+                       length="45813524"
                        sparkle:version="1"
                        sparkle:shortVersionString="1.0"
                        type="application/octet-stream" />
@@ -22,9 +22,9 @@
             <title>Flux 1.0 (macOS 15 Legacy)</title>
             <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <pubDate>Fri, 04 Sep 2026 12:00:00 +0000</pubDate>
+            <pubDate>Sun, 13 Sep 2026 09:20:00 +0000</pubDate>
             <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux-macOS15.dmg"
-                       length="44528422"
+                       length="45962338"
                        sparkle:version="1"
                        sparkle:shortVersionString="1.0"
                        type="application/octet-stream" />
