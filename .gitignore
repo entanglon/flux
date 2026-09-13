@@ -79,6 +79,8 @@ node_modules/
 out/
 docs/
 website/
+.wrangler/
+*.wrangler
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -24,6 +24,19 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 (14:32 IST) — REPO HYGIENE: Wrangler Cache & Marketing Assets Purged
+
+- **Purged Cloudflare Wrangler Cache**:
+  - Removed `.wrangler/cache/wrangler-account.json` and `backend/.wrangler/cache/wrangler-account.json` from git and disk.
+  - Added `.wrangler/` and `*.wrangler` to `.gitignore`.
+- **Marketing Assets Preserved & Purged (`ui.png`, `appstore.png`)**:
+  - Copied `ui.png` (5.8 MB) and `appstore.png` to `/Users/zainulnazir/Projects/flux-website/public/` for use in the new website.
+  - Deleted `ui.png` and `appstore.png` from the `flux` git repository.
+- **Verification**:
+  - `xcodebuild` clean build succeeded with code 0.
+
+---
+
 ## Sep 13, 2026 (14:27 IST) — REPO HYGIENE: Website Extracted, Secrets Relocated & Documentation Cleaned
 
 - **Website Extracted to Standalone Directory (`/Users/zainulnazir/Projects/flux-website`)**:
