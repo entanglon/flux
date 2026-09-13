@@ -89,7 +89,6 @@ Flux features full compatibility with the Stremio Addon ecosystem. Any community
 ### How to Install Addons
 1. **One-Click Deep Links**: Clicking any `stremio://` addon link in your browser will automatically launch Flux and prompt you to install it with one click.
 2. **Settings Menu**: Navigate to **Settings** (`Cmd + ,`) → **Addons**, paste any addon manifest URL (`manifest.json`), and click **Install**.
-3. **Stremio Account Sync**: Sign in with your Stremio credentials in Settings to instantly sync your entire existing addon collection.
 
 ---
 
