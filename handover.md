@@ -24,6 +24,19 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 (13:45 IST) — RELEASE READINESS: Stale Secrets Purged & Security Audit
+
+- **Stale Secrets Purged (`Secrets.swift`, `docs/SecretsExample.txt`)**:
+  - Audited full codebase for Trakt and legacy worker references: Trakt was fully replaced by PocketBase sync, and neither `traktClientId` nor `traktClientSecret` was referenced anywhere in the app logic.
+  - Purged obsolete static fields from `Secrets.swift` (`traktClientId`, `traktClientSecret`, `streamRacerUrl`, `raspberryPiStremioAddonUrl`, `tmdbProxyURL`). Retained solely `tmdbAPIKey = ""` (canonical user key entry point).
+  - Synchronized `docs/SecretsExample.txt`.
+- **Git History & Backend Security Audit**:
+  - Audited git history: verified no `.env` files, no AWS keys, no HuggingFace tokens, and no `GoogleService-Info.plist` were ever committed.
+  - Historical Trakt keys (from initial April 2026 commits) are obsolete/decommissioned; recommended revoking the legacy Trakt OAuth app at `trakt.tv` if still active.
+  - PocketBase endpoint (`heisenbug.tailc311f6.ts.net`): Inherent to public client distribution (equivalent to public Supabase/Firebase project URLs). Verified client-side safety requirements: collection API rules must enforce `@request.auth.id != ""` row-level isolation and admin UI (`/_/`) must have strong credentials.
+
+---
+
 ## Sep 13, 2026 (13:35 IST) — RELEASE READINESS: Hardened Runtime, Entitlements, README & Repository Hygiene
 
 - **Hardened Runtime Enabled (`ENABLE_HARDENED_RUNTIME = YES`)**:
