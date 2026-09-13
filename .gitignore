@@ -70,12 +70,15 @@ __MACOSX
 flux/Services/Secrets.swift
 flux/GoogleService-Info.plist
 !flux/Services/Secrets.example.swift
+!flux/Services/SecretsExample.txt
 
-# Node / Next.js
+# Node / Next.js / Documentation Website
 #
 node_modules/
 .next/
 out/
+docs/
+website/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -24,6 +24,23 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 (14:27 IST) — REPO HYGIENE: Website Extracted, Secrets Relocated & Documentation Cleaned
+
+- **Website Extracted to Standalone Directory (`/Users/zainulnazir/Projects/flux-website`)**:
+  - Safely extracted the Nextra documentation and landing website from `docs/` into a dedicated sibling workspace `/Users/zainulnazir/Projects/flux-website`.
+  - Removed Nextra website files from git tracking in the main application repository.
+  - Added `docs/` and `website/` to `.gitignore`.
+- **Secrets Template Relocated (`flux/Services/SecretsExample.txt`)**:
+  - Moved `docs/SecretsExample.txt` directly to `flux/Services/SecretsExample.txt` (tracked in git as un-ignored template).
+  - Matches `CONTRIBUTING.md` and Xcode project group definitions.
+- **Documentation Accuracy (`README.md`)**:
+  - Removed false claim regarding Stremio Account Sync from `README.md`.
+  - Verified and confirmed legality breakdown and absence of bundled unauthorized streams.
+- **Build Verification**:
+  - Verified macOS project build with `xcodebuild` succeeds cleanly (exit code 0).
+
+---
+
 ## Sep 13, 2026 (14:15 IST) — RELEASE SHIPPED: Pushed to GitHub & Dual-Release DMG Packaging
 
 - **Repository Pushed to GitHub**:
