@@ -24,6 +24,24 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
+## Sep 13, 2026 (14:15 IST) — RELEASE SHIPPED: Pushed to GitHub & Dual-Release DMG Packaging
+
+- **Repository Pushed to GitHub**:
+  - Pushed all 10 commits (`204c347`) to `origin/main` (`https://github.com/entanglon/flux.git`). Working tree clean and synchronized.
+  - Confirmed repository visibility can now safely be flipped to Public.
+- **Packaging Hardened Runtime Dual DMGs (`scripts/build-releases.sh --all`)**:
+  - Updated `scripts/build-releases.sh` with `--options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements"` to ensure both built DMGs enforce macOS Hardened Runtime with required JIT and unsigned executable memory entitlements.
+  - Generating dual DMG artifacts:
+    1. `Flux.dmg`: macOS 26.1+ (Liquid Glass Edition)
+    2. `Flux-macOS15.dmg`: macOS 15.0+ (Legacy Vibrancy Fallback)
+- **Architecture & Universal Binary Findings (Push Back on Intel Binary)**:
+  - Researched Stremio vs Flux: Stremio is built on C++ / Qt6 with embedded web components, while Flux is 100% native SwiftUI and AppKit with native Liquid Glass and hardware-accelerated `libmpv`.
+  - Audited `FluxEngine` (`flux/Engine/FluxEngine`, the embedded Go streaming server): It is built strictly as a `Mach-O 64-bit arm64` binary.
+  - While `libmpv` is universal (`arm64` + `x86_64`), running Flux on Intel (`x86_64`) will fail because `FluxEngine` cannot execute on Intel CPUs (`Bad CPU type in executable`).
+  - Standardized release distribution to Apple Silicon (`arm64`).
+
+---
+
 ## Sep 13, 2026 (13:45 IST) — RELEASE READINESS: Stale Secrets Purged & Security Audit
 
 - **Stale Secrets Purged (`Secrets.swift`, `docs/SecretsExample.txt`)**:
