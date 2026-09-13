@@ -651,7 +651,7 @@ struct StreamManagerTests {
             seeders: 200
         )
         let moderateEnglishStream = Stream(
-            title: "Movie.1080p.WEBRip.x264",
+            title: "Movie.1080p.x264",
             cleanTitle: "Movie",
             url: URL(string: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222")!,
             source: "Torrentio",
@@ -999,6 +999,112 @@ struct StreamManagerTests {
         )
 
         #expect(primary?.stableKey == genuineStream.stableKey)
+    }
+
+    @Test func hostHealthTrackerDemotesCutHappyHosts() {
+        let tracker = HostHealthTracker()
+        tracker.defaults = UserDefaults(suiteName: "fluxTests.HostHealth")!
+        tracker.defaults.removePersistentDomain(forName: "fluxTests.HostHealth")
+        let host = "cutty-\(UUID().uuidString).example"
+
+        #expect(tracker.penalty(for: host) == 0)
+        tracker.recordFailure(host: host)
+        #expect(tracker.penalty(for: host) == 1500.0)
+        tracker.recordFailure(host: host)
+        #expect(tracker.penalty(for: host) == 3000.0)
+        // Loopback (our own proxy) never counts.
+        tracker.recordFailure(host: "127.0.0.1")
+        #expect(tracker.penalty(for: "127.0.0.1") == 0)
+        // Stale failures (>24h) decay away.
+        let old = Date().timeIntervalSince1970 - 25 * 3600
+        tracker.defaults.set([host: [old, old]], forKey: "flux.hostFailures.v1")
+        #expect(tracker.penalty(for: host) == 0)
+        tracker.defaults.removePersistentDomain(forName: "fluxTests.HostHealth")
+    }
+
+    @Test func healthScoreAppliesHostPenaltyToDirectStreams() {
+        let tracker = HostHealthTracker.shared
+        let saved = tracker.defaults
+        tracker.defaults = UserDefaults(suiteName: "fluxTests.HostHealth2")!
+        tracker.defaults.removePersistentDomain(forName: "fluxTests.HostHealth2")
+        defer {
+            tracker.defaults.removePersistentDomain(forName: "fluxTests.HostHealth2")
+            tracker.defaults = saved
+        }
+        let manager = StreamManager.shared
+        func direct(_ host: String) -> flux.Stream {
+            Stream(title: "T", cleanTitle: "T", url: URL(string: "https://\(host)/f.mkv")!,
+                   source: "WebStreamr", quality: "1080p")
+        }
+        let badHost = "bad-\(UUID().uuidString).example"
+        #expect(manager.healthScore(for: direct(badHost)) == 3000.0)
+        tracker.recordFailure(host: badHost)
+        tracker.recordFailure(host: badHost)
+        // Two recent failures sink unverified direct below healthy direct.
+        #expect(manager.healthScore(for: direct(badHost)) == 0.0)
+        #expect(manager.healthScore(for: direct("good.example")) == 3000.0)
+        // Verified-responsive survives capped (10000 - 4000 floor).
+        tracker.recordFailure(host: badHost)
+        #expect(manager.healthScore(for: direct(badHost), probeOk: true) == 6000.0)
+    }
+
+    @Test func sourceFidelityAdjustmentTiers() {
+        let manager = StreamManager.shared
+        func stream(_ title: String) -> flux.Stream {
+            flux.Stream(title: title, cleanTitle: title,
+                        url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+                        source: "Torrentio", quality: "1080p", seeders: 100)
+        }
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.WEB-DL.DDP5.1.x264")) == 2500.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.Bluray.x264")) == 3000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.REMUX")) == 3000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.WEBRip.x264")) == 2000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.HDRip.x264")) == 1000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.HDCAM.x264")) == -4000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.HDTS.x264")) == -4000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.HDTV.x264")) == 1000.0)
+        // Pristine wins over title words: Cam (2018) via genuine WEB-DL tag.
+        #expect(manager.sourceFidelityAdjustment(stream("Cam.2018.1080p.WEB-DL.x264")) == 2500.0)
+        // Word boundaries: CAMERA / SCENERY must not match CAM / SCR.
+        #expect(manager.sourceFidelityAdjustment(stream("Camera.Shots.2024.1080p.x264")) == 0.0)
+        // Separator variants: dots, spaces, hyphens, underscores all parse.
+        #expect(manager.sourceFidelityAdjustment(stream("Movie 2024 1080p WEB DL DDP5 1 x264")) == 2500.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie_2024_1080p_WEB_DL_x264")) == 2500.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.Blu-Ray.x264")) == 3000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.Blu Ray x264")) == 3000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.BRRip.x264")) == 2000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.DVDScr.x264")) == -4000.0)
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.BDSCR.x264")) == -4000.0)
+        // German DL track tag must NOT read as WEB-DL (only separators allowed
+        // between WEB and DL, never codec words).
+        #expect(manager.sourceFidelityAdjustment(stream("Movie.2024.1080p.WEB.H264.GERMAN.DL.DUBBED")) == 0.0)
+        // Lowercase scene names still match (case-insensitive).
+        #expect(manager.sourceFidelityAdjustment(stream("movie.2024.1080p.web-dl.x264")) == 2500.0)
+        #expect(manager.sourceFidelityAdjustment(stream("movie.2024.1080p.hdcam.x264")) == -4000.0)
+        // Viability gate: sluggish-giant REMUX (15 seeds) earns no pristine bonus.
+        let giant = flux.Stream(title: "Movie.2160p.REMUX", cleanTitle: "Movie",
+            url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+            source: "Torrentio", quality: "4K", size: "45.0 GB", seeders: 15)
+        #expect(manager.sourceFidelityAdjustment(giant) == 0.0)
+    }
+
+    @Test func autoplayPrefersWebDlOverHighSeedCam() {
+        let manager = StreamManager.shared
+        let cam = flux.Stream(
+            title: "Movie.2024.1080p.HDCAM.x264", cleanTitle: "Movie (2024)",
+            url: URL(string: "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")!,
+            source: "Torrentio", quality: "1080p", size: "2.0 GB", seeders: 500
+        )
+        let webdl = flux.Stream(
+            title: "Movie.2024.1080p.WEB-DL.DDP5.1.x264", cleanTitle: "Movie (2024)",
+            url: URL(string: "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")!,
+            source: "Torrentio", quality: "1080p", size: "2.5 GB", seeders: 50
+        )
+        let (primary, _) = manager.selectFastStartCandidate(
+            from: [cam, webdl], sourceMode: "both", preferredQuality: "4K",
+            preferredLang: "English", targetTitle: "Movie"
+        )
+        #expect(primary?.stableKey == webdl.stableKey)
     }
 }
 

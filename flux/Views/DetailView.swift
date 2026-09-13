@@ -4,6 +4,10 @@ struct DetailView: View {
     let item: MediaItem
     @Environment(\.dismiss) private var dismiss
     @State private var fullItem: MediaItem?
+    /// Parallel hero-logo prefetch (see .task below): same TMDB logo the
+    /// details pass resolves, fetched immediately instead of behind fullEnrich.
+    @State private var prefetchedLogoURL: URL? = nil
+
     @State private var selectedSeason: Season?
     @State private var showSeasonDropdown = false
     @State private var episodes: [Episode] = []
@@ -29,8 +33,7 @@ struct DetailView: View {
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 230
     
     // Computed
-    var displayItem: MediaItem {
-        if let full = fullItem {
+    var displayItem: MediaItem {        if let full = fullItem {
             return full
         }
         var it = item
@@ -51,6 +54,52 @@ struct DetailView: View {
             }
         }
         return it
+    }
+
+    /// Hero title artwork: language-specific top-rated TMDB logo when present.
+    /// While full details load with TMDB active, non-TMDB logos are suppressed
+    /// (same anti-pop rule as hero/backdrop/poster above) so the hero upgrades
+    /// text -> logo exactly once instead of flashing Metahub -> TMDB.
+    /// Falls back to the parallel prefetch (always TMDB-origin) when the card
+    /// itself carries no usable logo yet.
+    private var heroLogoURL: URL? {
+        let logo = displayItem.logoURL
+        if let l = logo {
+            if TMDBEnricher.shared.hasKey, fullItem == nil,
+               let h = l.host, h.contains("tmdb.org") != true {
+                // Suppressed pre-load non-TMDB logo: try prefetch instead.
+            } else {
+                return l
+            }
+        }
+        return prefetchedLogoURL
+    }
+
+    /// Drives the title crossfade animation (logo / blank / text faces).
+    private var titleFaceKey: String {
+        if heroLogoURL != nil { return "logo" }
+        if TMDBEnricher.shared.hasKey && isLoadingDetails { return "blank" }
+        return "text"
+    }
+
+    @ViewBuilder
+    private var heroTitleText: some View {
+        Text(displayItem.title)
+            .font(.system(size: 64, weight: .heavy, design: .default))
+            .foregroundStyle(.white)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .shadow(radius: 10)
+    }
+
+    /// Blank title slot: reserves the hero title area while a logo may still
+    /// arrive, so neither shimmer nor the textual name flashes first. Fixed
+    /// minimum height matches the logo cap to avoid layout jumps.
+    @ViewBuilder
+    private var heroTitleSlot: some View {
+        Color.clear
+            .frame(height: 140)
+            .frame(maxWidth: 520, alignment: .leading)
     }
     
     /// The active history item for this title (if any).
@@ -213,7 +262,7 @@ struct DetailView: View {
                             // We use a single CachedImage that tracks displayItem.heroURL.
                             // Since displayItem defaults to fullItem ?? item, this handles the transition
                             // from initial metadata to enriched metadata seamlessly without a view swap.
-                            CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? item.imageURL, maxDimension: 1920) { phase in
+                            CachedImage(url: displayItem.heroURL ?? displayItem.backdropURL ?? displayItem.imageURL, maxDimension: 1920) { phase in
                                 if let image = phase.image {
                                     HeroBackdrop.banner(
                                         image: image,
@@ -221,11 +270,13 @@ struct DetailView: View {
                                         height: geo.size.height * 0.80,
                                         sidebarWidth: sidebarWidth
                                     )
-                                    .transition(.opacity.animation(.easeInOut(duration: 0.5)))
+                                    .id(displayItem.heroURL?.absoluteString ?? displayItem.backdropURL?.absoluteString ?? "")
+                                    .transition(.opacity)
                                 } else {
                                     Rectangle().fill(Color(white: 0.1))
                                 }
                             }
+                            .animation(.easeInOut(duration: 0.5), value: displayItem.heroURL)
                         }
                         .frame(width: geo.size.width, height: geo.size.height * 0.80)
                         .clipped()
@@ -280,13 +331,36 @@ struct DetailView: View {
                                     .foregroundStyle(.white.opacity(0.7))
                             }
                             
-                            // Title
-                            Text(displayItem.title)
-                                .font(.system(size: 64, weight: .heavy, design: .default))
-                                .foregroundStyle(.white)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .shadow(radius: 10)
+                            // Title faces: disk-cached logo > blank slot > text.
+                            // While a logo may still arrive the slot stays empty
+                            // (never text, never shimmer); text renders only once
+                            // loading finished with no logo anywhere.
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let logoURL = heroLogoURL {
+                                    CachedImage(url: logoURL, maxDimension: 600) { phase in
+                                        switch phase {
+                                        case .success(let img):
+                                            img.resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(maxWidth: 520, maxHeight: 140, alignment: .leading)
+                                                .shadow(radius: 10)
+                                        case .failure:
+                                            heroTitleText
+                                        default:
+                                            heroTitleSlot
+                                        }
+                                    }
+                                    .accessibilityLabel(displayItem.title)
+                                    .transition(.opacity)
+                                } else if TMDBEnricher.shared.hasKey && isLoadingDetails {
+                                    heroTitleSlot
+                                        .transition(.opacity)
+                                } else {
+                                    heroTitleText
+                                        .transition(.opacity)
+                                }
+                            }
+                            .animation(.easeOut(duration: 0.25), value: titleFaceKey)
                             
                             // Metadata Row
                             HStack(spacing: 6) {
@@ -859,6 +933,29 @@ struct DetailView: View {
                 await checkKidsRestriction()
             }
         }
+        .task(id: item.id) {
+            // Parallel hero-logo prefetch: resolves + fetches the TMDB title
+            // logo immediately instead of waiting behind fullEnrich, shortening
+            // (often eliminating) the ghost window. Same selector as the
+            // on-demand block in loadDetails; whichever lands first wins, and
+            // identical URLs never flash (AsyncImage keeps loaded bytes).
+            // Reset first: without this a previous title's logo stamps over
+            // the next while its own fetch is in flight.
+            await MainActor.run { self.prefetchedLogoURL = nil }
+            guard TMDBEnricher.shared.hasKey else { return }
+            if item.logoURL?.host?.contains("tmdb.org") == true { return }
+            let isTV = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series")
+            let logoType = isTV ? "tv" : "movie"
+            let clean = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+            let lid: String? = item.id.starts(with: "tt")
+                ? await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: logoType)
+                : (CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: clean)) ? clean : nil)
+            guard let lid = lid else { return }
+            if displayItem.logoURL != nil { return }
+            if let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: lid, type: logoType, originalLanguage: item.originalLanguage) {
+                await MainActor.run { self.prefetchedLogoURL = logo }
+            }
+        }
         .onChange(of: displayItem.certification) { _, _ in
             Task { await checkKidsRestriction() }
         }
@@ -1201,30 +1298,36 @@ struct DetailView: View {
             if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && (item.releaseDate != nil && !item.releaseDate!.isEmpty) {
                 merged.releaseDate = item.releaseDate
             }
-            // If the incoming card already has high-resolution TMDB artwork, preserve it to prevent
-            // visual pops / flashes from redundant URL reloads
-            if let existingHero = item.heroURL, existingHero.host?.contains("tmdb.org") == true {
-                merged.heroURL = existingHero
-            } else if merged.heroURL == nil {
+            // Preserve incoming card artwork only when full enrichment did not resolve a URL,
+            // ensuring the #1 community-rated artwork from fullEnrich is never overwritten.
+            if merged.heroURL == nil {
                 merged.heroURL = item.heroURL
             }
 
-            if let existingBackdrop = item.backdropURL, existingBackdrop.host?.contains("tmdb.org") == true {
-                merged.backdropURL = existingBackdrop
-            } else if merged.backdropURL == nil {
+            if merged.backdropURL == nil {
                 merged.backdropURL = item.backdropURL ?? merged.heroURL
             }
 
-            if let existingPoster = item.posterURL, existingPoster.host?.contains("tmdb.org") == true {
-                merged.posterURL = existingPoster
-            } else if merged.posterURL == nil {
+            if merged.posterURL == nil {
                 merged.posterURL = item.posterURL
             }
 
-            if let existingLogo = item.logoURL, existingLogo.host?.contains("tmdb.org") == true {
-                merged.logoURL = existingLogo
-            } else if merged.logoURL == nil {
+            if merged.logoURL == nil {
                 merged.logoURL = item.logoURL
+            }
+
+            // On-demand hero logo: when neither the card nor enrichment carried
+            // one, fetch the language-specific top-rated TMDB logo directly so
+            // the hero treatment isn't limited to pre-enriched rails.
+            if merged.logoURL == nil, TMDBEnricher.shared.hasKey {
+                let logoType = (type == "series") ? "tv" : "movie"
+                let logoTmdbID: String? = item.id.starts(with: "tt")
+                    ? await TMDBEnricher.shared.resolveTmdbID(imdbID: item.id, type: logoType)
+                    : (CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleanTmdbId)) ? cleanTmdbId : nil)
+                if let lid = logoTmdbID,
+                   let logo = await TMDBEnricher.shared.fetchLogoURL(tmdbID: lid, type: logoType, originalLanguage: merged.originalLanguage) {
+                    merged.logoURL = logo
+                }
             }
             
             await MainActor.run {

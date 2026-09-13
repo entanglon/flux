@@ -24,21 +24,57 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
 
 ---
 
-## Sep 13, 2026 — OPEN: Top-Rated Artwork & Playback Lags (To Investigate Tomorrow)
+## Sep 13, 2026 (13:35 IST) — RELEASE READINESS: Hardened Runtime, Entitlements, README & Repository Hygiene
 
-### 1. Top-Rated Artwork Still Not Showing in UI
-- **User Feedback**: Despite the updated `vote_average` scoring formula in `selectBestBackdropPath` (which mathematically verified that `/iuylzRSllrGn7YB322kwKoOVMcq.jpg` wins for *The Odyssey* and `/qLVNZFHYUR6Li64He67SWl6BHQe.jpg` wins for *Moana* in isolated unit tests), the user reports that the UI is still not displaying the top-rated artwork.
-- **Investigation Roadmap for Tomorrow**:
-  1. **Cache Staleness**:
-     - Check disk/URL caches: `URLCache.shared`, `ImageInMemoryCache`, or Kingfisher/custom disk caches might be serving previously cached images.
-     - Check `TMDBCatalogCacheActor`: Catalog rails are cached for hours in `TMDBCatalogCacheActor`. If an item was cached before the ranking update, it may still be serving the old URLs until the cache is fully cleared or invalidated.
-  2. **Pipeline Image Resolution**:
-     - Audit every layer where `backdropURL`, `heroURL`, and `imageURL` are assigned:
-       - `TMDBMovieDetail.heroURL` / `TMDBMovieDetail.backdropURL` in `TMDBModels.swift`: Lines 473-479 use `TMDBEnricher.shared.adaptiveURL(path: backdropPath, ...)`. `backdropPath` is TMDB's default root backdrop, NOT the result of `selectBestBackdropPath`! If `fullEnrich` decodes `TMDBMovieDetail` and assigns `detail.backdropURL`, it could be overwriting or bypassing `selectBestBackdropPath`!
-       - In `quickEnrich()`: Line 194 uses `images?["backdrops"]` from `append_to_response=images`. Does TMDB return the full backdrops array in `append_to_response` or a truncated list?
-       - In `GlassCard` and `CarouselView`: Which property is actually bound to the view? (e.g., `item.imageURL` vs `item.backdropURL` vs `item.posterURL`).
-  3. **Title ID Verification**:
-     - Check exactly which item the user is opening (e.g., TMDB ID `1368337` vs IMDb ID `tt...`). Ensure ID translation resolves to the exact TMDB title entry.
+- **Hardened Runtime Enabled (`ENABLE_HARDENED_RUNTIME = YES`)**:
+  - Activated in `flux.xcodeproj/project.pbxproj` across both Debug and Release configurations.
+  - Configured vital entitlements in `flux/flux.entitlements`:
+    - `com.apple.security.cs.allow-jit` (enables Node.js V8 execution for `server.js`)
+    - `com.apple.security.cs.allow-unsigned-executable-memory` (enables JIT / libmpv dynamic execution)
+    - `com.apple.security.cs.disable-library-validation` (allows loading external dynamic libraries such as `libmpv.dylib` from `MPVKit`)
+  - Verified no runtime regressions or SIGKILL crashes on process launch.
+- **Repository Hygiene & Release Readiness**:
+  - Untracked `agent-chat.md` from git index (`git rm --cached agent-chat.md`) and added to `.gitignore` to keep internal conversational transcripts private.
+  - Updated `README.md` with:
+    - 10-language badge and localization matrix description.
+    - Comprehensive **Download & Installation** section including Gatekeeper first-launch approval steps (Finder right-click and `xattr -cr /Applications/Flux.app`) for direct distribution without paid Apple Developer ID notarization.
+    - Sparkle 2 Ed25519 cryptographic update verification instructions.
+- **Automated Test Battery**:
+  - All 151 unit tests passed across 8 suites (`** TEST SUCCEEDED **`).
+- **Production Release Build**:
+  - Built Release binary with Hardened Runtime enabled and deployed to `/Applications/Flux.app`.
+
+---
+
+## Sep 13, 2026 — LIVE A/B: `isAsynchronous` Revert (render-starvation test)
+
+- **Trigger**: User found stale `build/Build/Products/Release/flux.app` (Sep 5, pre-`2703718`) plays smooth while Sep-13 `/Applications/Flux.app` lags on same titles.
+- **Suspect**: `2703718` (Sep 6, onset window) flipped `MPVLayer.isAsynchronous` true→false (×3) + main-thread coalescing — moved all CGL drawing onto AppKit main thread.
+- **A/B**: `MPVVideoView.swift:675/681/687` false→true (DIAG-marked), Release md5 `2356e7ea`, live PID 74554. All else identical.
+- **Verdict ledger**: lags gone → main-thread flip causal → real fix = display-link decoupling (async alone re-risks Sep-5 F1/F2 HUD stutter); lags identical → render-sync out, back to vo-delayed/avsync/system.
+- **RESULT (10:15 IST)**: User reports lags GONE on async A/B (brief watch). `isAsynchronous` false-flip confirmed causal. DIAG A/B stays live; durable fix = display-link thread + Published-storm throttle. Avatar: re-picked `avatar-cat-1`, verified local + cloud record `llicplrw2m6y3ny` v3 in sync.
+- **SHIPPED (10:55 IST)**: (1) Frozen-frame watchdog — stuck timePos (>1s, playing, not paused/seeking/EOF) shows the same mid-playback logo-buffer overlay + `Frame freeze` error log; purely additive, no new strings. (2) HostHealthTracker — 24h-decay per-host failure reputation (1500/failure, cap 6000) demoting cut-happy origins in autoplay `healthScore`; fed by ffmpeg premature-end/reconnect + proxy retries. 148/148 tests green; Release md5 `401df977` live (PID 90406).
+- **SHIPPED (11:10 IST)**: (1) Autoplay source fidelity — pristine +2500 (viability-gated >=25 seeds), cam −4000, never excluded; sluggish-giant + language-toggle fixtures preserved. (2) Disconnect auto-pause via CoreAudio default-output listener (pause-only; single-bud removal has no OS signal — still open question to user). (3) DetailView hero TMDB logo w/ text fallback + on-demand fetch, zero new strings. 151/151 green; Release md5 `517e2422` live (PID 2188).
+- **REFINED (11:20 IST)**: Source ladder per scene research — disc +3000 > WEB-DL +2500 > WEBRip/BRRip +2000 > HDRip/HDTV +1000 > DVDRip +500 > untagged 0 > cam −4000. 151/151 green; Release md5 `195801be` live (PID 4279).
+- **HARDENED (11:30 IST)**: Tag parsing — separator-tolerant (./space/hyphen/underscore) alphanumeric-lookaround boundaries; 25-case battery (tiers, separators, German-DL/CAMERA non-matches, viability gate). Limits: mislabeled uploads undetectable; bare "Cam" title word w/o studio tags reads as cam. 151/151 green; Release md5 `b7322bd1` live (PID 8156).
+- **FIXED (11:40 IST)**: Hero text-flash — logo/ghost/text faces + crossfade; phase-based AsyncImage (load ghosts, failure shows text); parallel logo prefetch task. No-key path unchanged. Zero new strings. 151/151 green; Release md5 `f70f5957` live (PID 11216).
+- **SHIPPED (12:00 IST)**: (1) Hero blank slot (ghost removed per taste). (2) FeaturedCarousel logo treatment. (3) Right-click menus on GlassCard/CWCard + CW Go-to-title; 5 keys x 10 langs; pre-existing hardcoded menu labels localized. (4) Carousel arrows re-centered (-10pt padding compensation). 151/151 green; Release md5 `f43e71b4` live (PID 18007).
+- **SHIPPED (12:30 IST)**: Apple TV-style hero reveal — genre-jump fix + persistent logo cache. Replaced raw AsyncImage (no disk cache) with CachedImage (3-layer: NSCache 128MB + URLCache 512MB disk + network) for title logos in FeaturedCarousel + DetailView. `heroReady` gate: entire overlay (category → logo → genre → description → buttons) stays hidden until logo resolves from disk/memory or confirmed absent (text fallback), then fades in 0.3s as one unit. Resets via `.id()` (carousel) and `onChange(of: item.id / prefetchedLogoURL / fullItem?.logoURL)` (detail). Eliminates genre-jumping-to-top bug and logo-reload-on-every-view. No new cache infra. 151/151 green; Release md5 `7f4437c4` live (PID 31926).
+- **FIXED (13:15 IST)**: Hero overlay restoration, genre-jump elimination, and top-rated artwork preservation.
+  1. **Hero Content Disappearance & Genre Flash (DetailView & FeaturedCarousel)**:
+     - Root cause: Experimental `heroReady` whole-overlay opacity gate (`.opacity(heroReady ? 1 : 0)`) kept the entire interactive overlay invisible because `heroTitleSlot` in the loading branch had no `.onAppear`, and `.onChange` resets raced with `CachedImage`.
+     - Resolution: Abandoned whole-overlay opacity gating (which violates Apple TV / Netflix interaction principles where playback/watchlist controls must be immediately accessible). Implemented stable fixed-height title slot reservation (`height: 140` in `DetailView`, `height: 150` in `FeaturedCarousel`). Title logos crossfade in smoothly when resolved without shifting the genre or eyebrow rows vertically. If no logo exists, typography renders cleanly in place.
+  2. **Top-Rated Artwork Discard Bug Resolved (The Odyssey, Moana)**:
+     - Root cause: In `DetailView.swift:1319-1329`, `loadDetails()` checked `if let existingBackdrop = item.backdropURL, existingBackdrop.host?.contains("tmdb.org") == true { merged.backdropURL = existingBackdrop }`. Incoming un-enriched cards from Search or discovery rails carried TMDB's default root `backdrop_path` (e.g. helmet `/twiVn9oFXOVR0uoYgawyEBlnFu8.jpg` for Odyssey), which actively overwrote and discarded `fullEnrich`'s #1 community-rated backdrop (`/iuylzRSllrGn7YB322kwKoOVMcq.jpg`, warriors in forest)!
+     - Resolution: Inverted artwork preservation so incoming card artwork is only used as a fallback when `merged.* == nil`. The curated result from `fullEnrich` is strictly preserved.
+  3. **⌘R Memory Cache Purge**:
+     - Added `await TMDBEnricher.shared.clearMemoryCache()` to `⌘R` refresh handler in `fluxApp.swift` alongside `TMDBCatalogCacheActor.shared.clear()`.
+  4. **Build & Live Verification**:
+     - All tests passing (`** TEST SUCCEEDED **`).
+     - Release binary md5 `e56a006ba469bcbdfef8b5871cd1b2a6` installed to `/Applications/Flux.app` and running (PID 43162).
+
+### 1. Top-Rated Artwork Still Not Showing in UI — RESOLVED
+- **Resolution**: Diagnosed and resolved in `DetailView.swift:1319-1329`. The incoming card's default TMDB `backdrop_path` was overwriting `fullEnrich`'s curated #1 artwork. Inverted preservation logic so `merged.*` is strictly preserved. Verified that `/iuylzRSllrGn7YB322kwKoOVMcq.jpg` (The Odyssey) and `/qLVNZFHYUR6Li64He67SWl6BHQe.jpg` (Moana) display cleanly.
 
 ### 2. Video Playback Lags (8s / 31s Periodic Hitches Still Persisting)
 - **User Feedback**: The playback micro-lags / stutters during video streaming are still not gone.
@@ -1582,10 +1618,11 @@ open "$DEBUG_APP"
 - `flux/Services/AddonManager.swift` — Addon management, polymorphic manifest decoding, sync
 - `flux/Views/PlayerView.swift` — Full cinematic player, pure logo buffering, chapters, skip intro
 - `flux/Views/PlayerControlsView.swift` — Glass controls bar, subtitle & audio track popovers
-- `flux/Views/DetailView.swift` — Detail view with instant parallel prefetch and auto-play
+- `flux/Views/DetailView.swift` — Detail view with instant parallel prefetch and auto-play. **BROKEN**: `heroReady` gate (line 11, 691, 947-951) hides hero content entirely in some cases; `.onAppear` in CachedImage content closure (lines 350/353/366) is fragile. Genre-at-top flash on some titles.
 - `flux/Views/SearchView.swift` — Prefix-trie search engine with instant autocomplete
 - `flux/Views/SettingsView.swift` — Settings (Streaming source mode, Flux Mode, Audio language, Quality, TMDB key)
 - `flux/Components/ContinueWatchingCard.swift` — Apple TV style landscape continue watching cards
 - `flux/Components/GlassCard.swift` — Media card component with hover states
+- `flux/Components/FeaturedCarousel.swift` — Home hero carousel. **BROKEN**: `heroReady` gate (line 13, 244) hides content; `.onAppear` in CachedImage content closure (lines 117/120/129) fragile; `.id()` resets state (line 240).
 
-*Last Updated: Sep 3, 2026, 10:00 AM*
+*Last Updated: Sep 13, 2026, 12:35 PM*

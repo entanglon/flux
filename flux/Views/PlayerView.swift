@@ -30,6 +30,15 @@ struct PlayerView: View {
     /// unmount the controls layer, so ±10/15s skips don't flicker the UI.
     @State private var sustainedBuffering = false
     @State private var bufferingGraceTask: Task<Void, Never>? = nil
+    /// Frozen-frame watchdog: picture stuck while mpv claims to be playing.
+    /// The reconnect-inside-readahead stall class never raises paused-for-cache,
+    /// so without this the mid-playback overlay would stay hidden and the stop
+    /// reads as a mystery lag. Set when timePos advances <0.15s over 1.0s of
+    /// claimed playback; cleared on any advance. No user-facing strings involved.
+    @State private var frameFrozen = false
+    @State private var lastAdvancingTimePos = -1.0
+    @State private var lastAdvanceDate = Date()
+    @State private var freezeLoggedAtPos = -1.0
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
     @State private var showAboutStreamSource = false
@@ -359,6 +368,9 @@ struct PlayerView: View {
         lastAvsyncChange = -1.0
         didReachEnd = false
         sustainedBuffering = false
+        frameFrozen = false
+        lastAdvancingTimePos = -1.0
+        freezeLoggedAtPos = -1.0
         playbackStartTask?.cancel()
         playbackStartTask = nil
         bufferingGraceTask?.cancel()
@@ -463,11 +475,50 @@ struct PlayerView: View {
         }
     }
 
+    /// Frozen-frame watchdog tick (runs on the existing 0.5s loadingTimer while
+    /// mpv claims to be playing). Catches the stall class that never raises
+    /// paused-for-cache: decoder starved by a demuxer-lock-blocking reconnect
+    /// while cache stays non-zero. Fires the same overlay + one error-channel
+    /// log line per stuck position so future stops are visible AND fingerprinted.
+    private func updateFrozenWatchdog() {
+        let t = mpv.timePos
+        let eligible = hasStartedPlayback && !didReachEnd && t >= 3.0
+            && !mpv.isBuffering && !mpv.isSeeking && !mpv.isUserPaused
+        guard eligible else {
+            if frameFrozen { frameFrozen = false }
+            lastAdvancingTimePos = t
+            lastAdvanceDate = Date()
+            return
+        }
+        if abs(t - lastAdvancingTimePos) > 0.15 {
+            lastAdvancingTimePos = t
+            lastAdvanceDate = Date()
+            if frameFrozen { frameFrozen = false }
+            return
+        }
+        if !frameFrozen && Date().timeIntervalSince(lastAdvanceDate) >= 1.0 {
+            frameFrozen = true
+            if abs(t - freezeLoggedAtPos) > 2.0 {
+                freezeLoggedAtPos = t
+                let cache = String(format: "%.1f", mpv.demuxerCacheTime)
+                let pos = String(format: "%.1f", t)
+                Logger.player.error("Frame freeze (timePos stuck at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s)")
+            }
+        }
+    }
+
     private func handleIsPlayingChange(_ isPlaying: Bool) {
         if isPlaying && hasStartedPlayback {
             SleepAssertionManager.shared.enableSleepPrevention()
         } else {
             SleepAssertionManager.shared.disableSleepPrevention()
+        }
+        if !isPlaying {
+            // Paused or stalled at the mpv level: watchdog state must not leak
+            // into the next play stretch (overlay is separately gated on pause).
+            frameFrozen = false
+            lastAdvancingTimePos = mpv.timePos
+            lastAdvanceDate = Date()
         }
         if !isPlaying && hasStartedPlayback && mpv.duration > 0 {
             lastProgressSaveTime = Date()
@@ -1229,7 +1280,7 @@ struct PlayerView: View {
     }
 
     private var isMidPlaybackBuffering: Bool {
-        return hasStartedPlayback && mpv.timePos >= 3.0 && (mpv.isBuffering || mpv.isSeeking) && !mpv.isUserPaused
+        return hasStartedPlayback && mpv.timePos >= 3.0 && (mpv.isBuffering || mpv.isSeeking || frameFrozen) && !mpv.isUserPaused
     }
 
     private var isBufferingOverlayActive: Bool {
@@ -1442,6 +1493,10 @@ struct PlayerView: View {
         }
         .onReceive(loadingTimer) { _ in
             if mpv.isPlaying && mpv.timePos >= 0.05 {
+                // Frozen-frame watchdog (see state decl): stuck picture with
+                // healthy cache never trips isBuffering, so detect it here and
+                // surface the same mid-playback overlay instead of a bare stall.
+                updateFrozenWatchdog()
                 // First-frame-aware delayed flip (buffering screen fades over
                 // rendered video, never over the first frames).
                 self.confirmPlaybackStarted()

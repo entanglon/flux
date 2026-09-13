@@ -92,6 +92,21 @@ struct GlassCard: View {
         .onChange(of: item) { _, newItem in
             self.displayItem = newItem
         }
+        .contextMenu {
+            // Right-click parity with the hover ellipsis menu (macOS
+            // right-click opens contextMenu natively; hover-only left the
+            // card menu undiscoverable for trackpad users).
+            NavigationLink(value: item) {
+                Label((item.category == "Movie" ? "Go to Movie" : "Go to Show").localized, systemImage: "info.circle")
+            }
+            Button(action: {
+                userData.toggleWatchlist(item)
+            }) {
+                let isInWatchlist = userData.watchlist.contains { $0.id == item.id }
+                Label((isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist").localized,
+                      systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(displayItem.title), \(displayItem.category)\(displayItem.releaseDateYear.map { ", \($0)" } ?? "")")
         .accessibilityHint("Opens title details")
@@ -216,14 +231,14 @@ struct GlassCard: View {
         if isHovering {
             Menu {
                 NavigationLink(value: item) {
-                    Label(item.category == "Movie" ? "Go to Movie" : "Go to Show", systemImage: "info.circle")
+                    Label((item.category == "Movie" ? "Go to Movie" : "Go to Show").localized, systemImage: "info.circle")
                 }
                 
                 Button(action: {
                     userData.toggleWatchlist(item)
                 }) {
                     let isInWatchlist = userData.watchlist.contains { $0.id == item.id }
-                    Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
+                    Label((isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist").localized,
                           systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
                 }
             } label: {

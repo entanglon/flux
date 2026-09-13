@@ -43,7 +43,9 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
             .contentMargins(.leading, 268, for: .scrollContent)
             .contentMargins(.trailing, 40, for: .scrollContent)
             .scrollClipDisabled()
-            // Left Arrow
+            // Left Arrow (offset -10: overlays center on the padded scrollview,
+            // whose 20pt bottom padding sits arrows 10pt below card content —
+            // most visible on the short 163pt Continue Watching cards)
             .overlay(alignment: .leading) {
                 if isHovering && scrollTargetIndex > 0 {
                     Button(action: {
@@ -53,6 +55,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, 268)
+                    .offset(y: -10)
                     .transition(.opacity)
                 }
             }
@@ -66,6 +69,7 @@ struct CarouselView<Item, Content>: View where Item: Identifiable, Content: View
                     }
                     .buttonStyle(.plain)
                     .padding(.trailing, 20)
+                    .offset(y: -10)
                     .transition(.opacity)
                 }
             }

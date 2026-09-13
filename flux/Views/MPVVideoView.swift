@@ -5,6 +5,43 @@ import Libmpv
 import Combine
 import Darwin
 import OSLog
+import CoreAudio
+
+/// Pauses playback when the macOS default audio output device changes
+/// mid-playback (AirPods cased / Bluetooth dropped / HDMI unplugged) —
+/// IINA parity. Pause-only, never auto-resume; the pause is marked as
+/// user-initiated so overlays and controls treat it exactly like Space.
+/// NOTE: removing a SINGLE bud usually fires no system signal at all (audio
+/// keeps playing in the other bud, device stays alive), so that case is
+/// undetectable without private APIs. Full disconnects are covered.
+final class AudioOutputRouteMonitor {
+    static let shared = AudioOutputRouteMonitor()
+    var onRouteChanged: (() -> Void)?
+    private let lock = NSLock()
+    private var started = false
+
+    /// Pure decision logic, hermetically unit-testable.
+    static func shouldAutoPause(hasLoadedMedia: Bool, isPlaying: Bool, isUserPaused: Bool) -> Bool {
+        hasLoadedMedia && isPlaying && !isUserPaused
+    }
+
+    func start() {
+        lock.lock(); defer { lock.unlock() }
+        guard !started else { return }
+        started = true
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &addr, audioRouteListener, nil)
+    }
+}
+
+private func audioRouteListener(_ inObjectID: AudioObjectID, _ inNumberAddresses: UInt32, _ inAddresses: UnsafePointer<AudioObjectPropertyAddress>, _ inClientData: UnsafeMutableRawPointer?) -> OSStatus {
+    // CoreAudio fires on its own thread; hop to main for controller state.
+    DispatchQueue.main.async { AudioOutputRouteMonitor.shared.onRouteChanged?() }
+    return noErr
+}
 // MARK: - SwiftUI View
 struct MPVVideoView: NSViewControllerRepresentable {
     @ObservedObject var controller: MPVController
@@ -298,6 +335,15 @@ class MPVController: ObservableObject {
         self.loadedURL = url
         self.hasAutoSelectedTracksForCurrentMedia = false
         resetVolumeBoostIfNeeded()
+        // IINA-parity auto-pause: output device vanishing mid-playback pauses.
+        AudioOutputRouteMonitor.shared.start()
+        AudioOutputRouteMonitor.shared.onRouteChanged = { [weak self] in
+            guard let self = self else { return }
+            if AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: self.hasLoadedMedia, isPlaying: self.isPlaying, isUserPaused: self.isUserPaused) {
+                print("[MPV] Audio output route changed mid-playback — auto-pausing")
+                self.pause()
+            }
+        }
         playerView?.play(url)
     }
 
@@ -672,19 +718,19 @@ final class MPVLayer: CAOpenGLLayer {
     
     override init() {
         super.init()
-        self.isAsynchronous = false
+        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
         self.contentsFormat = .RGBA8Uint
     }
     
     override init(layer: Any) {
         super.init(layer: layer)
-        self.isAsynchronous = false
+        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
         self.contentsFormat = .RGBA8Uint
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        self.isAsynchronous = false
+        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
         self.contentsFormat = .RGBA8Uint
     }
     
@@ -1430,6 +1476,19 @@ final class MPVLayerView: NSView {
                             self.lastForwardedMPVLog = key
                             let trimmed = String(text.prefix(160)).trimmingCharacters(in: .whitespacesAndNewlines)
                             Logger.player.error("mpv[\(prefix, privacy: .public)]: \(trimmed, privacy: .public)")
+                        }
+                    }
+                    // Delivery-reputation feed: origin mid-stream cuts (the
+                    // premature-end / reconnect storm class) demote the host in
+                    // autoplay ranking via HostHealthTracker. Runs off-thread;
+                    // mpv_get_property is thread-safe, callback must not block.
+                    if lowerText.contains("prematurely") || (lowerText.contains("reconnect") && prefix.hasPrefix("ffmpeg")) {
+                        DispatchQueue.global(qos: .utility).async { [weak self] in
+                            guard let self = self else { return }
+                            let sof = self.getPropertyString("stream-open-filename") ?? ""
+                            if let host = URL(string: sof)?.host {
+                                HostHealthTracker.shared.recordFailure(host: host)
+                            }
                         }
                     }
                 default:

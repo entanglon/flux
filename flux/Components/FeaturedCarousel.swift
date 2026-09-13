@@ -74,34 +74,54 @@ struct FeaturedCarousel: View {
                 .ignoresSafeArea()
                 
                 // 3. Content
-                VStack(alignment: .leading, spacing: 14) {
-                    NavigationLink(value: item) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if !item.isReleased {
-                                Text(item.upcomingBadgeText)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 5)
-                                    .background(Capsule().fill(Color.white.opacity(0.2)))
-                                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                                    .shadow(color: .black.opacity(0.5), radius: 4)
-                            } else {
-                                Text(item.localizedCategory.uppercased())
-                                    .font(.system(size: 12, weight: .bold))
-                                    .tracking(2.0)
-                                    .foregroundStyle(.white.opacity(0.75))
-                                    .shadow(color: .black.opacity(0.5), radius: 4)
-                            }
-                            
-                            Text(item.title)
-                                .font(.system(size: 56, weight: .heavy))
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                            
-                            HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        NavigationLink(value: item) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                if !item.isReleased {
+                                    Text(item.upcomingBadgeText)
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 5)
+                                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                                        .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                                        .shadow(color: .black.opacity(0.5), radius: 4)
+                                } else {
+                                    Text(item.localizedCategory.uppercased())
+                                        .font(.system(size: 12, weight: .bold))
+                                        .tracking(2.0)
+                                        .foregroundStyle(.white.opacity(0.75))
+                                        .shadow(color: .black.opacity(0.5), radius: 4)
+                                }
+                                
+                                // Title treatment: disk-cached TMDB title logo when
+                                // the rail item carries one; typographic fallback
+                                // when no logo exists at all. Fixed slot height prevents
+                                // vertical jumping of the genre row below.
+                                if let logoURL = item.logoURL {
+                                    CachedImage(url: logoURL, maxDimension: 600) { phase in
+                                        switch phase {
+                                        case .success(let img):
+                                            img.resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(maxWidth: 560, maxHeight: 150, alignment: .leading)
+                                                .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
+                                        case .failure:
+                                            carouselTitleText(item)
+                                        default:
+                                            Color.clear
+                                                .frame(height: 150)
+                                                .frame(maxWidth: 560, alignment: .leading)
+                                        }
+                                    }
+                                    .accessibilityLabel(item.title)
+                                    .transition(.opacity)
+                                } else {
+                                    carouselTitleText(item)
+                                        .transition(.opacity)
+                                }
+                                
+                                HStack(spacing: 10) {
                                 if let year = item.releaseDateYear {
                                     Text(year)
                                         .fontWeight(.bold)
@@ -284,8 +304,17 @@ struct FeaturedCarousel: View {
         }
     }
     
-    private func arrowButton(direction: String) -> some View {
-        Image(systemName: "chevron.\(direction)")
+    @ViewBuilder
+    private func carouselTitleText(_ item: MediaItem) -> some View {
+        Text(item.title)
+            .font(.system(size: 56, weight: .heavy))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func arrowButton(direction: String) -> some View {        Image(systemName: "chevron.\(direction)")
             .font(.system(size: 16, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 44, height: 44)

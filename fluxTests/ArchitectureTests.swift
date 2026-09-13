@@ -4,6 +4,15 @@ import Foundation
 
 struct ArchitectureTests {
 
+    @Test func audioRouteAutoPauseDecision() {
+        // Pauses only on genuine mid-playback route loss: loaded + playing +
+        // not already paused. Never pauses when idle, paused, or pre-start.
+        #expect(AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: true, isUserPaused: false))
+        #expect(!AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: true, isUserPaused: true))
+        #expect(!AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: false, isUserPaused: false))
+        #expect(!AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: false, isPlaying: false, isUserPaused: false))
+    }
+
     @Test func fluxErrorDescriptionsAreMeaningful() {
         let streamErr = FluxError.streaming(.noStreamsFound)
         #expect(streamErr.localizedDescription.contains("No playable streams found"))

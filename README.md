@@ -9,6 +9,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.0%2B-blue?style=flat-square&logo=apple)](https://apple.com)
 [![Swift](https://img.shields.io/badge/Swift-5.0-orange?style=flat-square&logo=swift)](https://swift.org)
 [![Engine](https://img.shields.io/badge/player-libmpv-purple?style=flat-square)](https://mpv.io)
+[![Languages](https://img.shields.io/badge/languages-10%20Supported-brightgreen?style=flat-square)](flux/Services/LanguageManager.swift)
 [![Updates](https://img.shields.io/badge/OTA%20Updates-Sparkle%202-green?style=flat-square)](https://sparkle-project.org)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 
@@ -19,6 +20,27 @@
 </div>
 
 **Flux** is a high-performance, modular media center designed exclusively for macOS. Built with pure SwiftUI and powered by the industry-grade `libmpv` engine, Flux delivers fluid animations, Apple TV-style glassmorphism, instant local stream racing, and hardware-accelerated 4K HDR playback.
+
+---
+
+## 📥 Download & Installation
+
+### Direct Download
+Grab the latest release (`.dmg` or `.zip`) from the [Releases](https://github.com/entanglon/flux/releases) page. Drag `Flux.app` to your `/Applications` folder.
+
+### First Launch on macOS (Gatekeeper)
+Because Flux is distributed independently outside the Mac App Store without an Apple Developer ID notarization certificate, macOS Gatekeeper may present a security alert on first launch (*"Flux cannot be opened because Apple cannot check it for malicious software"*).
+
+To launch Flux for the first time:
+1. **Finder**: Open `/Applications` in Finder. Right-click (or Control-click) `Flux.app`, click **Open**, then click **Open** in the confirmation alert.
+2. **Terminal (Alternative)**: Remove the quarantine extended attribute:
+   ```bash
+   xattr -cr /Applications/Flux.app
+   ```
+After this one-time approval, Flux opens instantly with full macOS Hardened Runtime protections enabled.
+
+### 🔄 Automatic Updates
+Flux features seamless Over-The-Air (OTA) updates via Sparkle 2. Updates are checked periodically in the background and verified using Ed25519 cryptographic signatures.
 
 ---
 
@@ -41,6 +63,7 @@
 ### 🌐 Smart Language & Subtitles
 - **Intelligent Track Selection**: Automatically pairs your preferred audio language with matching subtitles. If foreign audio is detected, English subtitles are auto-engaged.
 - **OpenSubtitles v3 & Embedded Subtitles**: First-class subtitle lookup alongside instant embedded track switching.
+- **10-Language UI Matrix**: Seamless native interface localization in English, Japanese (日本語), Spanish (Español), French (Français), German (Deutsch), Italian (Italiano), Portuguese (Português), Korean (한국어), Hindi (हिन्दी), and Simplified Chinese (简体中文). Switch languages live in **Settings (`⌘,`) → General** with zero app restarts required.
 
 ### 📊 Stream Inspector HUD
 - **Real-Time Technical Overlay**: Right-click the player anytime to reveal stream diagnostics: active video/audio codecs, hardware decoder state, resolution, bitrate, and live demuxer buffer telemetry.

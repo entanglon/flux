@@ -473,6 +473,11 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         attemptDeliveredBytes = 0
         stateLock.unlock()
         print("[StreamProxy] Resuming upstream at byte \(resumeAt) (attempt \(upstreamRetryCount)/\(maxUpstreamRetries))")
+        // Delivery-reputation feed: an upstream cut that forced a silent retry
+        // demotes the origin host in autoplay ranking (HostHealthTracker).
+        if let host = template.url?.host {
+            HostHealthTracker.shared.recordFailure(host: host)
+        }
         retryTask.resume()
     }
 

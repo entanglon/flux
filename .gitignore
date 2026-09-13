@@ -104,6 +104,8 @@ ContentView_Backup.swift
 *.bak
 *.zip
 *.tar.gz
+agent-chat.md
+
 
 # Runtime caches & misc local assets
 #

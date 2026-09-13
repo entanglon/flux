@@ -1,5 +1,55 @@
 import Foundation
 
+/// Persistent per-host delivery reputation for autoplay ranking.
+/// Origins that repeatedly cut mid-stream (ffmpeg premature-end / reconnect)
+/// or force proxy upstream retries get demoted so healthy hosts win
+/// automatically. Failures decay after 24h. Tiny footprint: host -> recent
+/// failure epochs, capped per host. Loopback (our own proxy) never counts.
+final class HostHealthTracker {
+    static let shared = HostHealthTracker()
+    /// Injectable for hermetic unit tests (default: standard).
+    var defaults: UserDefaults = .standard
+    private let storeKey = "flux.hostFailures.v1"
+    private let lock = NSLock()
+    private let window: TimeInterval = 24 * 3600
+    private let perFailure = 1500.0
+    private let maxPenalty = 6000.0
+
+    private func readMap() -> [String: [Double]] {
+        var map: [String: [Double]] = [:]
+        for (k, v) in defaults.dictionary(forKey: storeKey) ?? [:] {
+            if let arr = v as? [Double] { map[k] = arr }
+            else if let arr = v as? [NSNumber] { map[k] = arr.map { $0.doubleValue } }
+        }
+        return map
+    }
+
+    func recordFailure(host: String) {
+        let h = host.lowercased()
+        guard !h.isEmpty, h != "127.0.0.1", h != "localhost" else { return }
+        lock.lock(); defer { lock.unlock() }
+        var map = readMap()
+        let now = Date().timeIntervalSince1970
+        var list = (map[h] ?? []).filter { now - $0 < window }
+        list.append(now)
+        map[h] = Array(list.suffix(20))
+        defaults.set(map, forKey: storeKey)
+    }
+
+    /// Ranking penalty for a host: 1500 per failure in the last 24h, cap 6000.
+    /// Calibrated against healthScore tiers: one failure drops an unverified
+    /// direct stream 3000->1500 (still above typical swarms); 2+ sink it below
+    /// decent torrents; verified-responsive (10000) always survives capped.
+    func penalty(for host: String) -> Double {
+        let h = host.lowercased()
+        guard !h.isEmpty else { return 0 }
+        lock.lock(); defer { lock.unlock() }
+        let now = Date().timeIntervalSince1970
+        let recent = (readMap()[h] ?? []).filter { now - $0 < window }.count
+        return min(maxPenalty, Double(recent) * perFailure)
+    }
+}
+
 enum StartupSpeedTier: String, CaseIterable {
     case instant = "Instant"
     case fast = "Fast"
@@ -766,10 +816,14 @@ class StreamManager {
     /// by swarm seed count and health ratio.
     func healthScore(for stream: Stream, probeOk: Bool? = nil) -> Double {
         if stream.isDirectHTTP {
+            // Delivery-reputation demotion (HostHealthTracker): origins that
+            // recently cut mid-stream sink below healthy ones without any
+            // manual host lists. Failures decay after 24h.
+            let hostPenalty = HostHealthTracker.shared.penalty(for: stream.url.host ?? "")
             if probeOk == true {
-                return 10000.0 // Verified responsive direct stream
+                return 10000.0 - min(hostPenalty, 4000.0) // Verified responsive direct stream
             }
-            return 3000.0 // General direct HTTP
+            return max(0, 3000.0 - hostPenalty) // General direct HTTP
         }
         
         let seeds = Double(stream.seeders ?? 0)
@@ -947,7 +1001,60 @@ class StreamManager {
             score -= 5000.0
         }
 
+        // Source fidelity tiers (Flux-mode autoplay): pristine studio sources
+        // (BluRay/REMUX/WEB-DL/WEBRip) outrank broadcast rips; cams /
+        // telesyncs / screeners sink but are never excluded (early releases
+        // often exist ONLY as cams and must stay playable).
+        score += sourceFidelityAdjustment(stream)
+
         return score
+    }
+
+    /// Source fidelity adjustment from scene provenance tags.
+    /// Provenance ladder (researched scene consensus, best -> worst):
+    /// REMUX/BluRay/BDRip (disc-sourced) > WEB-DL (lossless stream rip) >
+    /// WEBRip/BRRip (re-encoded, 2nd-gen) > HDRip/HDTV/PDTV (broadcast
+    /// captures/transcodes) > DVDRip > untagged > CAM/TS/TC/SCR (cams).
+    /// Pristine checked FIRST so a title word like "Cam" (2018) can never
+    /// demote a genuine WEB-DL (true cams never carry studio-source tags).
+    /// Boundaries are alphanumeric lookarounds rather than \b (underscores
+    /// are word chars, so \b never fires inside Movie_2024_WEB_DL_x264).
+    /// Viability gate on all positive tiers: tags alone must not elect a
+    /// sluggish giant (e.g. a 45GB REMUX on 15 seeds). Direct HTTP is always
+    /// viable; torrents need a healthy swarm (>= 25 seeds, the codebase's own
+    /// Fast-Start health threshold). Cams are demoted unconditionally but
+    /// never excluded, so cam-only early releases stay playable.
+    func sourceFidelityAdjustment(_ stream: Stream) -> Double {
+        let text = "\(stream.title) \(stream.cleanTitle)"
+        // Custom boundaries (not \b): underscores are word chars, so \b never
+        // fires inside Movie_2024_WEB_DL_x264. Alphanumeric lookarounds treat
+        // dots/spaces/hyphens/underscores/parens uniformly as separators.
+        func has(_ core: String) -> Bool {
+            let pattern = "(?<![A-Za-z0-9])" + core + "(?![A-Za-z0-9])"
+            return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        // SEP matches the separators scene/P2P names actually use between tag
+        // parts: dots (Movie.1080p.WEB-DL), spaces, hyphens, underscores.
+        // Only separator chars may sit between parts, so "WEB.H264.DL" (German
+        // DL track tag) can never match while "WEB DL"/"WEB_DL" still do.
+        let viable = !stream.isTorrent || (stream.seeders ?? 0) >= 25
+        let disc = [#"REMUX"#, #"BLU[\s.\-_]*RAY"#, #"BDREMUX"#, #"BDRIP"#]
+        if disc.contains(where: has) { return viable ? 3000.0 : 0.0 }
+        let webdl = [#"WEB[\s.\-_]*DL"#]
+        if webdl.contains(where: has) { return viable ? 2500.0 : 0.0 }
+        let webrip = [#"WEBRIP"#, #"BRRIP"#]
+        if webrip.contains(where: has) { return viable ? 2000.0 : 0.0 }
+        let broadcast = [#"HDRIP"#, #"HDTV"#, #"PDTV"#, #"DSRIP"#,
+                         #"SATRIP"#, #"TVRIP"#, #"DVBRIP"#, #"WEBCAP"#]
+        if broadcast.contains(where: has) { return viable ? 1000.0 : 0.0 }
+        if has(#"DVDRIP"#) { return viable ? 500.0 : 0.0 }
+        let cam = [#"CAM(RIP)?"#, #"HDCAM"#, #"HQCAM"#, #"HDTS"#,
+                   #"HDTC"#, #"HDCINEMA"#, #"TELESYNC"#, #"TELECINE"#,
+                   #"DVD[\s.\-_]*SCR"#, #"BDSCR"#, #"SCREENER"#,
+                   #"WEBSCREENER"#, #"SCR"#, #"R5"#,
+                   #"TS"#, #"TC"#]
+        if cam.contains(where: has) { return -4000.0 }
+        return 0.0
     }
 
     /// Evaluates how well a stream matches an episodic query (targetSeason, targetEpisode).

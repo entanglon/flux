@@ -203,6 +203,7 @@ struct fluxApp: App {
                     NotificationCenter.default.post(name: .fluxRefresh, object: nil)
                     Task {
                         await TMDBCatalogCacheActor.shared.clear()
+                        await TMDBEnricher.shared.clearMemoryCache()
                         await AuthManager.shared.syncNowAsync(forcePull: true)
                     }
                 }

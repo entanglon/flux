@@ -238,7 +238,7 @@ struct ContinueWatchingCard: View {
                             )
                             openWindow(id: "player", value: item.id)
                         } label: {
-                            Label(mode == .continueWatching ? "Resume" : "Play Again",
+                            Label((mode == .continueWatching ? "Resume" : "Play Again").localized,
                                   systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
                         }
 
@@ -253,14 +253,14 @@ struct ContinueWatchingCard: View {
                             )
                             openWindow(id: "player", value: item.id)
                         } label: {
-                            Label("Choose Stream Source…", systemImage: "list.bullet.rectangle")
+                            Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                         }
 
                         Button {
                             userData.toggleWatchlist(item)
                         } label: {
                             let isInWatchlist = userData.isInWatchlist(item)
-                            Label(isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist",
+                            Label((isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist").localized,
                                   systemImage: isInWatchlist ? "bookmark.slash" : "bookmark")
                         }
 
@@ -269,7 +269,7 @@ struct ContinueWatchingCard: View {
                         Button(role: .destructive) {
                             userData.removeFromHistory(item)
                         } label: {
-                            Label(mode == .continueWatching ? "Remove from Continue Watching" : "Remove from History",
+                            Label((mode == .continueWatching ? "Remove from Continue Watching" : "Remove from History").localized,
                                   systemImage: "xmark.circle")
                         }
                     } label: {
@@ -310,6 +310,53 @@ struct ContinueWatchingCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }
+        .contextMenu {
+            // Right-click parity with the ellipsis menu, plus the missing
+            // Go-to-title entry title cards have.
+            NavigationLink(value: item) {
+                Label((item.category == "Movie" ? "Go to Movie" : "Go to Show").localized, systemImage: "info.circle")
+            }
+            Button {
+                PlayerManager.shared.play(
+                    item,
+                    season: item.lastSeason,
+                    episode: item.lastEpisode,
+                    episodeImage: item.lastEpisodeImage,
+                    fromContinueWatching: true
+                )
+                openWindow(id: "player", value: item.id)
+            } label: {
+                Label((mode == .continueWatching ? "Resume" : "Play Again").localized,
+                      systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
+            }
+            Button {
+                PlayerManager.shared.play(
+                    item,
+                    season: item.lastSeason,
+                    episode: item.lastEpisode,
+                    episodeImage: item.lastEpisodeImage,
+                    fromContinueWatching: false,
+                    forceStreamPicker: true
+                )
+                openWindow(id: "player", value: item.id)
+            } label: {
+                Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
+            }
+            Button {
+                userData.toggleWatchlist(item)
+            } label: {
+                let isInWatchlist = userData.isInWatchlist(item)
+                Label((isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist").localized,
+                      systemImage: isInWatchlist ? "bookmark.slash" : "bookmark")
+            }
+            Divider()
+            Button(role: .destructive) {
+                userData.removeFromHistory(item)
+            } label: {
+                Label((mode == .continueWatching ? "Remove from Continue Watching" : "Remove from History").localized,
+                      systemImage: "xmark.circle")
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(mode == .continueWatching ? "Continue watching" : "Recently watched"), \(subtitleText)")
         .accessibilityHint("Resumes playback")
