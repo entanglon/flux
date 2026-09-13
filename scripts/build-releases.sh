@@ -46,7 +46,7 @@ build_macos26() {
   /usr/libexec/PlistBuddy -c "Set :CFBundleName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
   xattr -cr "$STAGING_DIR/Flux.app"
-  codesign --force --deep --sign - "$STAGING_DIR/Flux.app"
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/Flux.app"
 
   # Also update /Applications/Flux.app for local testing
   echo "==> Updating /Applications/Flux.app..."
@@ -54,7 +54,7 @@ build_macos26() {
   rm -rf /Applications/Flux.app
   cp -R "$STAGING_DIR/Flux.app" /Applications/Flux.app
   xattr -cr /Applications/Flux.app
-  codesign --force --deep --sign - /Applications/Flux.app
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - /Applications/Flux.app
 
   "$CREATE_DMG" \
     --volname "Flux" \
@@ -103,7 +103,7 @@ build_macos15() {
   /usr/libexec/PlistBuddy -c "Set :CFBundleName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Flux" "$STAGING_DIR/Flux.app/Contents/Info.plist"
   xattr -cr "$STAGING_DIR/Flux.app"
-  codesign --force --deep --sign - "$STAGING_DIR/Flux.app"
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/Flux.app"
 
   "$CREATE_DMG" \
     --volname "Flux" \
