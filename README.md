@@ -12,6 +12,7 @@
 [![Languages](https://img.shields.io/badge/languages-10%20Supported-brightgreen?style=flat-square)](flux/Services/LanguageManager.swift)
 [![Updates](https://img.shields.io/badge/OTA%20Updates-Sparkle%202-green?style=flat-square)](https://sparkle-project.org)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![Beta](https://img.shields.io/badge/status-beta-yellow?style=flat-square)](https://github.com/entanglon/flux/releases)
 
 *Crafted by [Entanglon](https://entanglon.pages.dev)*
 
@@ -20,6 +21,8 @@
 </div>
 
 **Flux** is a high-performance, modular media center designed exclusively for macOS. Built with pure SwiftUI and powered by the industry-grade `libmpv` engine, Flux delivers fluid animations, Apple TV-style glassmorphism, instant local stream racing, and hardware-accelerated 4K HDR playback.
+
+> ⚠️ **Beta Status**: Flux is currently in **beta**. While the core functionality is stable, there may be bugs, performance issues, or incomplete features. Please report any issues on the [Issue Tracker](https://github.com/entanglon/flux/issues).
 
 ---
 
@@ -30,7 +33,14 @@
 ## 📥 Download & Installation
 
 ### Direct Download
-Grab the latest release (`.dmg` or `.zip`) from the [Releases](https://github.com/entanglon/flux/releases) page. Drag `Flux.app` to your `/Applications` folder.
+Grab the latest **beta release** (`.dmg`) from the [Releases](https://github.com/entanglon/flux/releases) page. Drag `Flux.app` to your `/Applications` folder.
+
+### 📦 Which File Should I Download?
+
+| Asset | Target OS | Description |
+| :--- | :--- | :--- |
+| **`Flux-1.0.0-macOS26+.dmg`** | **macOS 26.1+** | Flagship edition featuring modern Liquid Glass UI. |
+| **`Flux-1.0.0-macOS15+.dmg`** | **macOS 15.0+** | Legacy vibrancy fallback edition for macOS Sequoia and earlier. |
 
 ### First Launch on macOS (Gatekeeper)
 Because Flux is distributed independently outside the Mac App Store without an Apple Developer ID notarization certificate, macOS Gatekeeper may present a security alert on first launch (*"Flux cannot be opened because Apple cannot check it for malicious software"*).
@@ -129,6 +139,20 @@ Flux features full compatibility with the Stremio Addon ecosystem. Any community
    - Xcode will automatically resolve the Swift Package Manager dependencies (`MPVKit-GPL` and `Sparkle`).
    - Select the `flux` scheme and destination **My Mac**.
    - Press `Cmd + R` to build and run.
+
+---
+
+## ⚠️ Known Issues (Beta)
+
+Flux is currently in beta. The following issues are known and being worked on:
+
+- **Playback**: Occasional stuttering on high-bitrate 4K content over slow networks
+- **UI**: Some animations may feel choppy on older Intel Macs
+- **Sync**: Cloud sync may occasionally fail to merge watch history correctly
+- **Addons**: Some community addons may not work as expected
+- **Subtitles**: OpenSubtitles v3 integration may timeout on slow connections
+
+If you encounter any issues, please report them on the [Issue Tracker](https://github.com/entanglon/flux/issues).
 
 ---
 
