@@ -68,13 +68,8 @@ build_macos26() {
   xattr -cr "$STAGING_DIR/$APP_NAME.app"
   codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/$APP_NAME.app"
 
-  # Also update /Applications/ for local testing
-  echo "==> Updating /Applications/$APP_NAME.app..."
-  pkill -x "flux" || pkill -x "Flux" || true
-  rm -rf "/Applications/$APP_NAME.app"
-  cp -R "$STAGING_DIR/$APP_NAME.app" "/Applications/$APP_NAME.app"
-  xattr -cr "/Applications/$APP_NAME.app"
-  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "/Applications/$APP_NAME.app"
+  # NOTE: Removed auto-install to /Applications for OTA testing
+  # Use: cp -R "$STAGING_DIR/$APP_NAME.app" "/Applications/$APP_NAME.app" to install manually
 
   "$CREATE_DMG" \
     --volname "$VOL_NAME" \
