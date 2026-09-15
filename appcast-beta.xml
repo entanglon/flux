@@ -19,10 +19,10 @@
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <pubDate>Mon, 16 Sep 2026 00:00:00 +0000</pubDate>
             <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.3/Flux-beta-1.0.0-beta.3-macOS26+.dmg"
-                       length="45959059"
+                       length="45743345"
                        sparkle:version="3"
                        sparkle:shortVersionString="1.0.0-beta.3"
-                       sparkle:edSignature="ImR34iFZP7107dFfeZ8/o9rNi1QY2SltzAjZPm6cQGetugIo7hGyPOEEZCiLGME7Pwd4w7zGgsEK9+2Ms3nkDQ=="
+                       sparkle:edSignature="dmeJssPtEMTHkHNLhoVHNMMHWVVNDPM05GiGBvMvsX4jZoqwlfoq8JCw0g7sPLK0o8Ptg/TYwaUSU1dX1hZUDA=="
                        type="application/octet-stream" />
         </item>
     </channel>
