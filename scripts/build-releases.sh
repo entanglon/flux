@@ -35,7 +35,7 @@ build_macos26() {
 
   local APP_PATH="$SYMROOT/Release/flux.app"
   local STAGING_DIR="/tmp/flux-dmg-staging-26"
-  local OUTPUT_DMG="$PROJECT_ROOT/Flux-1.0.0-macOS26+.dmg"
+  local OUTPUT_DMG="$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS26+.dmg"
 
   echo "==> Packaging $OUTPUT_DMG..."
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
@@ -92,7 +92,7 @@ build_macos15() {
 
   local APP_PATH="$SYMROOT/Release/flux.app"
   local STAGING_DIR="/tmp/flux-dmg-staging-15"
-  local OUTPUT_DMG="$PROJECT_ROOT/Flux-1.0.0-macOS15+.dmg"
+  local OUTPUT_DMG="$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS15+.dmg"
 
   echo "==> Packaging $OUTPUT_DMG..."
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
@@ -144,12 +144,12 @@ esac
 echo ""
 echo "=================================================="
 echo "Artifacts Built Successfully:"
-if [ -f "$PROJECT_ROOT/Flux-1.0.0-macOS26+.dmg" ]; then
-  echo "  - Flagship (macOS 26+):  $PROJECT_ROOT/Flux-1.0.0-macOS26+.dmg ($(du -h "$PROJECT_ROOT/Flux-1.0.0-macOS26+.dmg" | cut -f1))"
-  shasum -a 256 "$PROJECT_ROOT/Flux-1.0.0-macOS26+.dmg"
+if [ -f "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS26+.dmg" ]; then
+  echo "  - Flagship (macOS 26+):  $PROJECT_ROOT/Flux-1.0.0-beta.1-macOS26+.dmg ($(du -h "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS26+.dmg" | cut -f1))"
+  shasum -a 256 "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS26+.dmg"
 fi
-if [ -f "$PROJECT_ROOT/Flux-1.0.0-macOS15+.dmg" ]; then
-  echo "  - Legacy (macOS 15+):    $PROJECT_ROOT/Flux-1.0.0-macOS15+.dmg ($(du -h "$PROJECT_ROOT/Flux-1.0.0-macOS15+.dmg" | cut -f1))"
-  shasum -a 256 "$PROJECT_ROOT/Flux-1.0.0-macOS15+.dmg"
+if [ -f "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS15+.dmg" ]; then
+  echo "  - Legacy (macOS 15+):    $PROJECT_ROOT/Flux-1.0.0-beta.1-macOS15+.dmg ($(du -h "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS15+.dmg" | cut -f1))"
+  shasum -a 256 "$PROJECT_ROOT/Flux-1.0.0-beta.1-macOS15+.dmg"
 fi
 echo "=================================================="
