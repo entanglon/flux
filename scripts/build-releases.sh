@@ -60,30 +60,30 @@ build_macos26() {
   echo "==> Packaging $OUTPUT_DMG..."
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
   mkdir -p "$STAGING_DIR"
-  cp -R "$APP_PATH" "$STAGING_DIR/Flux.app"
+  cp -R "$APP_PATH" "$STAGING_DIR/$APP_NAME.app"
 
   # Set the correct app name
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist"
-  xattr -cr "$STAGING_DIR/Flux.app"
-  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/Flux.app"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
+  xattr -cr "$STAGING_DIR/$APP_NAME.app"
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/$APP_NAME.app"
 
-  # Also update /Applications/Flux.app for local testing
-  echo "==> Updating /Applications/Flux.app..."
+  # Also update /Applications/ for local testing
+  echo "==> Updating /Applications/$APP_NAME.app..."
   pkill -x "flux" || pkill -x "Flux" || true
-  rm -rf /Applications/Flux.app
-  cp -R "$STAGING_DIR/Flux.app" /Applications/Flux.app
-  xattr -cr /Applications/Flux.app
-  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - /Applications/Flux.app
+  rm -rf "/Applications/$APP_NAME.app"
+  cp -R "$STAGING_DIR/$APP_NAME.app" "/Applications/$APP_NAME.app"
+  xattr -cr "/Applications/$APP_NAME.app"
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "/Applications/$APP_NAME.app"
 
   "$CREATE_DMG" \
     --volname "$VOL_NAME" \
-    --volicon "$STAGING_DIR/Flux.app/Contents/Resources/AppIcon.icns" \
+    --volicon "$STAGING_DIR/$APP_NAME.app/Contents/Resources/AppIcon.icns" \
     --window-pos 200 120 \
     --window-size 540 380 \
     --icon-size 128 \
-    --icon "Flux.app" 140 180 \
-    --hide-extension "Flux.app" \
+    --icon "$APP_NAME.app" 140 180 \
+    --hide-extension "$APP_NAME.app" \
     --app-drop-link 400 180 \
     --overwrite \
     "$OUTPUT_DMG" \
@@ -117,22 +117,22 @@ build_macos15() {
   echo "==> Packaging $OUTPUT_DMG..."
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
   mkdir -p "$STAGING_DIR"
-  cp -R "$APP_PATH" "$STAGING_DIR/Flux.app"
+  cp -R "$APP_PATH" "$STAGING_DIR/$APP_NAME.app"
 
   # Set the correct app name
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $APP_NAME" "$STAGING_DIR/Flux.app/Contents/Info.plist"
-  xattr -cr "$STAGING_DIR/Flux.app"
-  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/Flux.app"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
+  xattr -cr "$STAGING_DIR/$APP_NAME.app"
+  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/$APP_NAME.app"
 
   "$CREATE_DMG" \
     --volname "$VOL_NAME" \
-    --volicon "$STAGING_DIR/Flux.app/Contents/Resources/AppIcon.icns" \
+    --volicon "$STAGING_DIR/$APP_NAME.app/Contents/Resources/AppIcon.icns" \
     --window-pos 200 120 \
     --window-size 540 380 \
     --icon-size 128 \
-    --icon "Flux.app" 140 180 \
-    --hide-extension "Flux.app" \
+    --icon "$APP_NAME.app" 140 180 \
+    --hide-extension "$APP_NAME.app" \
     --app-drop-link 400 180 \
     --overwrite \
     "$OUTPUT_DMG" \
