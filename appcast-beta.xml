@@ -7,26 +7,14 @@
         <language>en</language>
         <!-- Flagship: macOS 26+ (Native Apple Liquid Glass) -->
         <item>
-            <title>Flux (beta) 1.0.0-beta.1 (macOS 26+ Liquid Glass)</title>
-            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0-beta.1</sparkle:releaseNotesLink>
+            <title>Flux (beta) 1.0.0-beta.2 (macOS 26+ Liquid Glass)</title>
+            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0-beta.2</sparkle:releaseNotesLink>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <pubDate>Sun, 15 Sep 2026 16:19:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.1/Flux-beta-1.0.0-beta.1-macOS26+.dmg"
+            <pubDate>Sun, 15 Sep 2026 17:00:00 +0000</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.2/Flux-beta-1.0.0-beta.2-macOS26+.dmg"
                        length="45744079"
-                       sparkle:version="1"
-                       sparkle:shortVersionString="1.0.0-beta.1"
-                       type="application/octet-stream" />
-        </item>
-        <!-- Legacy: macOS 15+ (Translucent Vibrancy Material Fallback) -->
-        <item>
-            <title>Flux (beta) 1.0.0-beta.1 (macOS 15 Legacy)</title>
-            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0-beta.1</sparkle:releaseNotesLink>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <pubDate>Sun, 15 Sep 2026 16:19:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.1/Flux-beta-1.0.0-beta.1-macOS15+.dmg"
-                       length="45853064"
-                       sparkle:version="1"
-                       sparkle:shortVersionString="1.0.0-beta.1"
+                       sparkle:version="2"
+                       sparkle:shortVersionString="1.0.0-beta.2"
                        type="application/octet-stream" />
         </item>
     </channel>
