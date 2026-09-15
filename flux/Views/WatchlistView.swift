@@ -97,6 +97,7 @@ struct WatchlistView: View {
                                                     Capsule()
                                                         .stroke(activeFilter == filter ? Color.white.opacity(0.35) : Color.clear, lineWidth: 1)
                                                 )
+                                                .contentShape(Capsule())
                                             }
                                             .buttonStyle(.plain)
                                         }
@@ -115,6 +116,7 @@ struct WatchlistView: View {
                                 }
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(Color.accentColor)
+                                .contentShape(Rectangle())
                                 .buttonStyle(.plain)
                             }
                             .frame(maxWidth: .infinity)

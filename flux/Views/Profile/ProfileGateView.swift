@@ -156,6 +156,7 @@ struct ProfileGateView: View {
                         .background(
                             Capsule().fill(Color.white.opacity(isManaging ? 0.16 : 0.07))
                         )
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .onHover { h in
@@ -394,6 +395,7 @@ struct ProfileCreationView: View {
                                 .background(
                                     Capsule().fill(selectedCategory == cat ? Color.white.opacity(0.18) : Color.white.opacity(0.04))
                                 )
+                                .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -478,6 +480,7 @@ struct ProfileCreationView: View {
                         .background(
                             Capsule().fill(canCreate ? Color.white : Color.white.opacity(0.12))
                         )
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canCreate)
@@ -490,6 +493,9 @@ struct ProfileCreationView: View {
                         .buttonStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.5))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 44)

@@ -414,6 +414,50 @@ struct PlayerView: View {
                 let srcHost = URL(string: sof)?.host ?? "?"
                 let drops0 = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
                 Logger.player.error("Playback start opts: readahead=\(rh, privacy: .public) maxbytes=\(mb, privacy: .public) cachesecs=\(cs, privacy: .public) af=\(af, privacy: .public) src=\(srcHost, privacy: .public) drops0=\(drops0, privacy: .public)")
+                // Audio diagnostics: log ao, audio-device, volume, and aid to
+                // catch silent audio failures (audio-fallback-to-null hides them).
+                let ao = mpv.playerView?.playerView?.getPropertyString("ao") ?? "?"
+                let audioDev = mpv.playerView?.playerView?.getPropertyString("audio-device") ?? "?"
+                let vol = mpv.playerView?.playerView?.getPropertyString("volume") ?? "?"
+                let aid = mpv.playerView?.playerView?.getPropertyString("aid") ?? "?"
+                let trackCount = mpv.playerView?.playerView?.getPropertyInt("track-list/count") ?? -1
+                let devices = mpv.playerView?.playerView?.getPropertyString("audio-devices") ?? "?"
+                let muted = mpv.playerView?.playerView?.getPropertyString("mute") ?? "?"
+                let alang = mpv.playerView?.playerView?.getPropertyString("alang") ?? "?"
+                Logger.player.error("Playback start audio: ao=\(ao, privacy: .public) device=\(audioDev, privacy: .public) vol=\(vol, privacy: .public) aid=\(aid, privacy: .public) tracks=\(trackCount, privacy: .public) mute=\(muted, privacy: .public) alang=\(alang, privacy: .public)")
+                // File-based diagnostic — persists even when os.Logger drops.
+                let diagLine = "[\(Date())] ao=\(ao) device=\(audioDev) vol=\(vol) aid=\(aid) tracks=\(trackCount) mute=\(muted) alang=\(alang) src=\(srcHost) af=\(af)\n"
+                if let data = diagLine.data(using: .utf8) {
+                    let path = "/tmp/flux_audio_diag.log"
+                    if FileManager.default.fileExists(atPath: path) {
+                        if let fh = FileHandle(forWritingAtPath: path) {
+                            fh.seekToEndOfFile()
+                            fh.write(data)
+                            fh.closeFile()
+                        }
+                    } else {
+                        try? data.write(to: URL(fileURLWithPath: path))
+                    }
+                }
+                // Delayed diagnostic: check audio state 3s after playback starts
+                // (tracks may not be loaded yet at start).
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    guard let backend = mpv.playerView?.playerView else { return }
+                    let aid2 = backend.getPropertyString("aid") ?? "?"
+                    let tracks2 = backend.getPropertyInt("track-list/count") ?? -1
+                    let audioTracks2 = backend.getPropertyInt("track-list/0/type")  // won't work but try
+                    let timePos = backend.getPropertyString("time-pos") ?? "?"
+                    let pause = backend.getPropertyString("pause") ?? "?"
+                    let line3 = "[\(Date())] +3s aid=\(aid2) tracks=\(tracks2) timePos=\(timePos) pause=\(pause)\n"
+                    if let data = line3.data(using: .utf8) {
+                        if let fh = FileHandle(forWritingAtPath: "/tmp/flux_audio_diag.log") {
+                            fh.seekToEndOfFile()
+                            fh.write(data)
+                            fh.closeFile()
+                        }
+                    }
+                }
                 playbackStartTask = nil
             }
         }

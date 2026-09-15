@@ -28,5 +28,7 @@
 	<true/>
 	<key>SUAllowsAutomaticUpdates</key>
 	<false/>
+	<key>SUPublicEDKey</key>
+	<string>iALMM9Gtvt2iwIaZGMffq0E8p3KH+AUfTL07vdJ37z8=</string>
 </dict>
 </plist>

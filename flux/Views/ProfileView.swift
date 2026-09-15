@@ -64,6 +64,7 @@ struct ProfileView: View {
                         VStack(spacing: 1) { // 1px spacing for separators
                             Button(action: { showEditName = true }) {
                                 buildRow(title: "Name".localized, value: user.displayName ?? "Not Set".localized)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
 
@@ -89,6 +90,7 @@ struct ProfileView: View {
                                 }
                                 .padding()
                                 .background(Color.white.opacity(0.05))
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }

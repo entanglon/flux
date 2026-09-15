@@ -72,6 +72,7 @@ struct GeneralSettingsView: View {
                                         .frame(width: 20, height: 20)
                                         .background(Color.white.opacity(0.08))
                                         .clipShape(Circle())
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                                 .help("Edit Display Name".localized)
@@ -89,6 +90,7 @@ struct GeneralSettingsView: View {
                                         .padding(.vertical, 3)
                                         .background(Color.white.opacity(0.12))
                                         .clipShape(Capsule())
+                                        .contentShape(Capsule())
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -211,6 +213,7 @@ struct GeneralSettingsView: View {
                                                     .stroke(isCurrent ? Color.white.opacity(0.28) : Color.white.opacity(0.08), lineWidth: 1)
                                             )
                                     )
+                                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -296,6 +299,7 @@ struct GeneralSettingsView: View {
                                         .frame(width: 24, height: 24)
                                         .background(Color.white.opacity(0.08))
                                         .clipShape(Circle())
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                                 .help("Edit TMDB API Key".localized)
@@ -307,6 +311,7 @@ struct GeneralSettingsView: View {
                                         .frame(width: 24, height: 24)
                                         .background(Color.red.opacity(0.12))
                                         .clipShape(Circle())
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                                 .help("Remove TMDB API Key".localized)
@@ -856,6 +861,7 @@ struct AddonsSettingsTabView: View {
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
                                 .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         )
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .help("Open Flux Addon Web Store in browser with auto-login".localized)
@@ -899,6 +905,7 @@ struct AddonsSettingsTabView: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     )
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(isSyncing)
@@ -1039,6 +1046,7 @@ struct AddonsSettingsTabView: View {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .stroke(Color.white.opacity(0.18), lineWidth: 1)
                             )
+                            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .disabled(newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAdding)

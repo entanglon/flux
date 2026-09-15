@@ -85,23 +85,24 @@ struct AuthGateView: View {
 
                             // Submit
                             Button(action: submit) {
-                                Group {
+                                ZStack {
+                                    Capsule()
+                                        .fill(canSubmit ? Color.white : Color.white.opacity(0.12))
+
                                     if isLoading {
                                         ProgressView()
                                             .scaleEffect(0.7)
                                     } else {
                                         Text((isSignUp ? "Create Account" : "Sign In").localized)
                                             .font(.system(size: 15, weight: .bold))
+                                            .foregroundStyle(canSubmit ? .black : .white.opacity(0.4))
                                     }
                                 }
-                                .foregroundStyle(canSubmit ? .black : .white.opacity(0.4))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 44)
+                                .contentShape(Capsule())
                             }
                             .buttonStyle(.plain)
-                            .background(
-                                Capsule().fill(canSubmit ? Color.white : Color.white.opacity(0.12))
-                            )
                             .disabled(!canSubmit || isLoading)
 
                             // Toggle sign-in / sign-up
@@ -113,6 +114,9 @@ struct AuthGateView: View {
                                     Text((isSignUp ? "Sign In" : "Create Account").localized)
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(.white.opacity(0.9))
+                                        .padding(.vertical, 4)
+                                        .padding(.horizontal, 6)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -127,6 +131,7 @@ struct AuthGateView: View {
                                     .foregroundStyle(.white.opacity(0.45))
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 36)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }

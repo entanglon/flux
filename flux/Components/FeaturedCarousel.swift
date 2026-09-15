@@ -235,6 +235,8 @@ struct FeaturedCarousel: View {
                         .frame(width: index == state.currentIndex ? 24 : 8, height: 8)
                         .shadow(color: index == state.currentIndex ? .white.opacity(0.5) : .clear, radius: 4)
                         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: state.currentIndex)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.4)) {
                                 state.currentIndex = index

@@ -300,6 +300,7 @@ struct PINEntrySheet: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white.opacity(isCloseHovered ? 0.9 : 0.45))
             }
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .onHover { isCloseHovered = $0 }

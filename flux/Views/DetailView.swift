@@ -453,6 +453,7 @@ struct DetailView: View {
                                             .padding(.vertical, 14)
                                             .background(Color.white)
                                             .clipShape(Capsule())
+                                            .contentShape(Capsule())
                                             .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
                                         } else {
                                             // Default: Clean "Play" button for both movies and TV shows
@@ -467,6 +468,7 @@ struct DetailView: View {
                                             .padding(.vertical, 14)
                                             .background(Color.white)
                                             .clipShape(Capsule())
+                                            .contentShape(Capsule())
                                             .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
                                         }
                                     }

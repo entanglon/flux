@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Sparkle
+import AppKit
 
 /// Manages application updates via the Sparkle 2 framework.
 /// For unsigned builds, we use Sparkle for update checking only.

@@ -51,21 +51,24 @@ struct AuthFormView: View {
                 Button {
                     submit()
                 } label: {
-                    Text((isSignUp ? "Create Account" : "Sign In").localized)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(canSubmit ? .black : .white.opacity(0.4))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(Capsule().fill(canSubmit ? Color.white : Color.white.opacity(0.12)))
+                    ZStack {
+                        Capsule().fill(canSubmit ? Color.white : Color.white.opacity(0.12))
+
+                        if isLoading {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Text((isSignUp ? "Create Account" : "Sign In").localized)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(canSubmit ? .black : .white.opacity(0.4))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmit || isLoading)
-                .overlay {
-                    if isLoading {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-                }
 
                 HStack(spacing: 4) {
                     Text((isSignUp ? "Already have an account?" : "Don't have an account?").localized)
@@ -80,6 +83,9 @@ struct AuthFormView: View {
                         Text((isSignUp ? "Sign In" : "Sign Up").localized)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 6)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -88,10 +94,17 @@ struct AuthFormView: View {
                     Divider()
                         .background(Color.white.opacity(0.1))
                         .padding(.horizontal, 20)
-                    Button("Continue as Guest".localized) { onDismiss() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.45))
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Text("Continue as Guest".localized)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(40)

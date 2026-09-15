@@ -2,6 +2,18 @@ import Foundation
 import Combine
 import Darwin
 
+/// Global atexit handler — must be a free function (no captures) for C function pointer.
+private func fluxEngineAtexit() {
+    let pid = _fluxEnginePID
+    guard pid > 0 else { return }
+    kill(pid, SIGTERM)
+    usleep(200_000)
+    if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+}
+
+/// File-level PID storage for the atexit handler (C function pointer can't capture).
+private var _fluxEnginePID: Int32 = 0
+
 /// Manages Flux's own Stremio streaming server (server.js) instance.
 /// - Downloads server.js from Stremio's CDN on first run (bundling it is not permitted).
 /// - Runs it with node under Flux's own APP_PATH so it never touches a Stremio install.
@@ -18,6 +30,10 @@ class StremioServerManager: ObservableObject {
     private var process: Process?
     private(set) var port = 11470
     var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
+
+    /// PID of the engine process, persisted so the atexit handler can kill it
+    /// even when applicationWillTerminate never fires (force-quit / crash).
+    private static var atexitRegistered = false
 
     private let serverVersion = "4.20.17"
     private let maxPort = 11474
@@ -436,6 +452,8 @@ class StremioServerManager: ObservableObject {
         do {
             try task.run()
             self.process = task
+            _fluxEnginePID = task.processIdentifier
+            StremioServerManager.registerAtexit()
         } catch {
             print("[StremioServer] Launch failed: \(error.localizedDescription)")
             return
@@ -629,6 +647,26 @@ class StremioServerManager: ObservableObject {
         if freed > 0 {
             print("[StremioServer] Evicted \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)) of cache")
         }
+    }
+
+    // MARK: - Orphan prevention
+
+    private static func registerAtexit() {
+        guard !atexitRegistered else { return }
+        atexitRegistered = true
+        atexit(fluxEngineAtexit)
+    }
+
+    /// Kill ALL FluxEngine orphans on disk — called once at startup to clean up
+    /// any leftover processes from previous crashes.
+    static func killOrphanedEngines() {
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-f", "FluxEngine"]
+        pkill.standardOutput = FileHandle.nullDevice
+        pkill.standardError = FileHandle.nullDevice
+        try? pkill.run()
+        pkill.waitUntilExit()
     }
 
     deinit { stopServer() }

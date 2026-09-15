@@ -1062,68 +1062,28 @@ final class MPVLayerView: NSView {
         mpv = mpv_create()
         if mpv == nil { return }
         
-        // Options prior to initialization (matching Stremio's mpv.cpp)
+        // Pre-init options — only what's needed
         mpv_set_option_string(mpv, "terminal", "yes")
-        mpv_set_option_string(mpv, "load-scripts", "no")
-        mpv_set_option_string(mpv, "load-osd-console", "no")
-        mpv_set_option_string(mpv, "load-stats-overlay", "no")
         mpv_set_option_string(mpv, "ytdl", "yes")
-        mpv_set_option_string(mpv, "osc", "no")
-        // Fail over reasonably fast when a torrent swarm is dead: the Stremio
-        // server holds the file response silent until pieces flow, so without a
-        // timeout mpv would wait forever instead of triggering auto-fallback.
+        mpv_set_option_string(mpv, "volume-max", "200")
         mpv_set_option_string(mpv, "network-timeout", "45")
         mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
-        
-        // Support up to 200% volume amplification (matching VLC and Stremio)
-        mpv_set_option_string(mpv, "volume-max", "200")
-        // Enable AC3 Dynamic Range Compression (dialogue enhancement for movie audio tracks)
-        mpv_set_option_string(mpv, "ad-lavc-ac3drc", "1")
-        
+
         if mpv_initialize(mpv) < 0 {
             print("[MPV] init failed")
             return
         }
         
-        // Properties set AFTER initialization (matching Stremio's mpv.cpp)
-        mpv_set_property_string(mpv, "volume-max", "200")
-        mpv_set_property_string(mpv, "ad-lavc-ac3drc", "1")
+        // Minimal mpv config — use mpv defaults, don't over-configure.
         mpv_set_property_string(mpv, "vo", "libmpv")
-        mpv_set_property_string(mpv, "profile", "fast")
-        mpv_set_property_string(mpv, "scale", "bilinear")
-        
-        // Connect Hardware Acceleration setting to mpv
+        mpv_set_property_string(mpv, "gpu-hwdec-interop", "auto")
+
         let useHW = UserDefaults.standard.object(forKey: "useHardwareAcceleration") as? Bool ?? true
         mpv_set_property_string(mpv, "hwdec", useHW ? "auto" : "no")
-        mpv_set_property_string(mpv, "gpu-hwdec-interop", "auto")
-        mpv_set_property_string(mpv, "video-sync", "audio")
-        
-        // Audio: CoreAudio with proper downmixing for laptop speakers
-        mpv_set_property_string(mpv, "ao", "coreaudio")
-        mpv_set_property_string(mpv, "audio-channels", "auto-safe")
-        mpv_set_property_string(mpv, "audio-normalize-downmix", "yes")
-        
-        mpv_set_property_string(mpv, "sub-cache", "yes")
-        mpv_set_property_string(mpv, "sub-ass-override", "no")
-        
-        mpv_set_property_string(mpv, "cache", "yes")
-        mpv_set_property_string(mpv, "cache-secs", "60")
-        // DIAGNOSTIC A/B (8/31 rhythmic lags, see agent-chat.md): reverted 256MB
-        // back to 64MB to test whether the byte cap sets the reconnect/idle
-        // metronome. If lags vanish at 64MB, the cap (not the content) drives the
-        // cycle; if they persist unchanged, the cap is exonerated. Revisit after.
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "67108864")
-        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "15728640") // 15 MB backward seek buffer
-        mpv_set_property_string(mpv, "demuxer-readahead-secs", "12")
-        mpv_set_property_string(mpv, "demuxer-seekable-cache", "yes")      // Enable seekable cache for network streams
-        mpv_set_property_string(mpv, "demuxer-mkv-subtitle-preroll", "yes")
-        mpv_set_property_string(mpv, "stream-buffer-size", "131072")       // 128 KB initial network buffer for instant start
-        mpv_set_property_string(mpv, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
-        mpv_set_property_string(mpv, "force-seekable", "yes")              // Enable seeking in Hydra torrent streams
-        mpv_set_property_string(mpv, "access-references", "no")
+
+        // Don't stop on audio output issues — let mpv fall back
         mpv_set_property_string(mpv, "audio-fallback-to-null", "yes")
-        mpv_set_property_string(mpv, "framedrop", "vo")
-        
+
         mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         mpv_set_property_string(mpv, "referrer", "https://flux.app/")
 
@@ -1132,11 +1092,11 @@ final class MPVLayerView: NSView {
             mpv_set_property_string(mpv, "audio-spdif", "ac3,eac3,truehd,dts")
             mpv_set_property_string(mpv, "audio-exclusive", "yes")
         }
-        
+
         mpv_set_property_string(mpv, "sub-font-size", "45")
         mpv_set_property_string(mpv, "sub-border-size", "2")
         mpv_set_property_string(mpv, "sub-margin-y", "40")
-        
+
         let audioLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
         let subLang = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
         
