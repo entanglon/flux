@@ -27,7 +27,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUAllowsAutomaticUpdates</key>
-	<false/>
+	<true/>
 	<key>SUPublicEDKey</key>
 	<string>iALMM9Gtvt2iwIaZGMffq0E8p3KH+AUfTL07vdJ37z8=</string>
 </dict>
