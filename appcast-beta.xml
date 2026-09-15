@@ -6,6 +6,23 @@
         <description>Beta updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
         <item>
+            <title>Flux (beta) 1.0.0-beta.7</title>
+            <sparkle:releaseNotes><![CDATA[
+<h3>What's New</h3>
+<ul>
+<li>OTA update test</li>
+</ul>
+]]></sparkle:releaseNotes>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <pubDate>Tue, 16 Sep 2026 04:00:00 +0000</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.7/Flux-beta-1.0.0-beta.7-macOS26+.dmg"
+                       length="45743346"
+                       sparkle:version="7"
+                       sparkle:shortVersionString="1.0.0-beta.7"
+                       sparkle:edSignature="xqqmSNvglDtOSHsRjo5b6VBCxz6/jCpcA0Dw+CuPtJN1jnyR5U2jZJsgWVeDwFMZhsxi8mgZkp/nYjZ2qQDCCA=="
+                       type="application/octet-stream" />
+        </item>
+        <item>
             <title>Flux (beta) 1.0.0-beta.6</title>
             <sparkle:releaseNotes><![CDATA[
 <h3>What's New</h3>
@@ -20,23 +37,6 @@
                        sparkle:version="6"
                        sparkle:shortVersionString="1.0.0-beta.6"
                        sparkle:edSignature="ykVnbCckLqngMptqJT6d8tBXippIJXKk3IP2tcI7bY7sjEgkHzsTHX+lMuBMq9vOPcX9iYBMJlRAs5eYM14bDQ=="
-                       type="application/octet-stream" />
-        </item>
-        <item>
-            <title>Flux (beta) 1.0.0-beta.5</title>
-            <sparkle:releaseNotes><![CDATA[
-<h3>What's New</h3>
-<ul>
-<li>OTA update test with auto-install enabled</li>
-</ul>
-]]></sparkle:releaseNotes>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <pubDate>Tue, 16 Sep 2026 02:00:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.5/Flux-beta-1.0.0-beta.5-macOS26+.dmg"
-                       length="45743398"
-                       sparkle:version="5"
-                       sparkle:shortVersionString="1.0.0-beta.5"
-                       sparkle:edSignature="QvF5jen1a+V0W261yf7DklNT4W4vDE/JWd8aTWKtQyU+F7H8IEtMX4bmXld4uT35hq9RcOBck8aa+gdwqrkuDA=="
                        type="application/octet-stream" />
         </item>
     </channel>
