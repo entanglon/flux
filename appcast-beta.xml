@@ -6,23 +6,20 @@
         <description>Beta updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
         <item>
-            <title>Flux (beta) 1.0.0-beta.3</title>
+            <title>Flux (beta) 1.0.0-beta.4</title>
             <sparkle:releaseNotes><![CDATA[
 <h3>What's New</h3>
 <ul>
-<li>OTA updates now properly signed with EdDSA</li>
-<li>Fixed CoreAudio audio output</li>
-<li>Minimal mpv config</li>
-<li>FluxEngine orphan prevention</li>
+<li>OTA update test</li>
 </ul>
 ]]></sparkle:releaseNotes>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <pubDate>Mon, 16 Sep 2026 00:00:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.3/Flux-beta-1.0.0-beta.3-macOS26+.dmg"
-                       length="45743399"
-                       sparkle:version="3"
-                       sparkle:shortVersionString="1.0.0-beta.3"
-                       sparkle:edSignature="wOMPkdMqDTn4C60Nmxe9OvI4S+D82fyXpaRGXpcaxYsvkwvbEBtSHO/0GcE1s1GvX5Br4VoblWcFBPPK//FBBg=="
+            <pubDate>Tue, 16 Sep 2026 01:00:00 +0000</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.4/Flux-beta-1.0.0-beta.4-macOS26+.dmg"
+                       length="45743401"
+                       sparkle:version="4"
+                       sparkle:shortVersionString="1.0.0-beta.4"
+                       sparkle:edSignature="TLdWOu2kQD3i4aFj5SAz4RsSZSx7A1ACDlRCh/hdQSxQXbYC7TclY6bvdfqp2Xgs+n0uPYQd7b1l2BJBoiZ3DQ=="
                        type="application/octet-stream" />
         </item>
     </channel>
