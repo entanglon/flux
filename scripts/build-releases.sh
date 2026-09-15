@@ -17,10 +17,10 @@ if ! command -v "$CREATE_DMG" &> /dev/null; then
   exit 1
 fi
 
-# Detect beta vs stable from Info.plist
-BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PROJECT_ROOT/flux/Info.plist" 2>/dev/null || echo "com.entanglon.flux")
-DISPLAY_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PROJECT_ROOT/flux/Info.plist" 2>/dev/null || echo "Flux")
-VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PROJECT_ROOT/flux/Info.plist" 2>/dev/null || echo "1.0.0")
+# Detect beta vs stable from project.pbxproj
+BUNDLE_ID=$(grep -o 'PRODUCT_BUNDLE_IDENTIFIER = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
+DISPLAY_NAME=$(grep -o 'INFOPLIST_KEY_CFBundleDisplayName = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/INFOPLIST_KEY_CFBundleDisplayName = //;s/;//;s/"//g')
+VERSION=$(grep -o 'MARKETING_VERSION = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/MARKETING_VERSION = //;s/;//')
 
 if [[ "$BUNDLE_ID" == *"beta"* ]]; then
   IS_BETA=true
