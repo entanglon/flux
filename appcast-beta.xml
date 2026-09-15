@@ -5,10 +5,17 @@
         <link>https://raw.githubusercontent.com/entanglon/flux/main/appcast-beta.xml</link>
         <description>Beta updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
-        <!-- Flagship: macOS 26+ (Native Apple Liquid Glass) -->
         <item>
-            <title>Flux (beta) 1.0.0-beta.2 (macOS 26+ Liquid Glass)</title>
-            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0-beta.2</sparkle:releaseNotesLink>
+            <title>Flux (beta) 1.0.0-beta.2</title>
+            <sparkle:releaseNotes><![CDATA[
+<h3>What's New</h3>
+<ul>
+<li>OTA update channel test</li>
+<li>Fixed CoreAudio audio output</li>
+<li>Minimal mpv config</li>
+<li>FluxEngine orphan prevention</li>
+</ul>
+]]></sparkle:releaseNotes>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <pubDate>Sun, 15 Sep 2026 17:00:00 +0000</pubDate>
             <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.2/Flux-beta-1.0.0-beta.2-macOS26+.dmg"
