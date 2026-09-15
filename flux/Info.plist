@@ -26,5 +26,7 @@
 	<string>https://raw.githubusercontent.com/entanglon/flux/main/appcast-beta.xml</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
 </dict>
 </plist>
