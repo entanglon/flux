@@ -38,7 +38,7 @@ class PlayerManager: ObservableObject {
 
     /// Tracks the currently-active torrent hash so we can remove it before
     /// registering a new one (prevents double downloads).
-    private var activeTorrentHash: String?
+    private(set) var activeTorrentHash: String?
 
     // MARK: - Detail-Page Prefetch (advanced loading)
     //
@@ -645,8 +645,8 @@ class PlayerManager: ObservableObject {
         // Only clear streams if we don't already have pre-fetched streams for this playback key
         if prefetchedKey != playbackKey && prefetchedNextKey != playbackKey {
             self.availableStreams = []
-            self.currentStreamURL = nil
         }
+        self.currentStreamURL = nil
         self.statusText = nil
         self.consecutiveFallbacks = 0
         self.probeStatus = [:]
@@ -1688,7 +1688,22 @@ class PlayerManager: ObservableObject {
         guard let item = currentItem,
               let currentSeasonNum = currentSeason,
               let currentEpisodeNum = currentEpisode else { return nil }
-        return countBasedNext(seasons: item.seasons, season: currentSeasonNum, episode: currentEpisodeNum)
+        if let eps = item.episodes, !eps.isEmpty {
+            let seasonEps = eps.filter { $0.seasonNumber == currentSeasonNum }
+            if let nxt = seasonEps.filter({ $0.episodeNumber > currentEpisodeNum }).min(by: { $0.episodeNumber < $1.episodeNumber }) {
+                return (currentSeasonNum, nxt.episodeNumber)
+            }
+            let nextSeasonEps = eps.filter { $0.seasonNumber == currentSeasonNum + 1 }
+            if let e1 = nextSeasonEps.first(where: { $0.episodeNumber == 1 }) {
+                return (currentSeasonNum + 1, 1)
+            }
+        }
+        if let countNext = countBasedNext(seasons: item.seasons, season: currentSeasonNum, episode: currentEpisodeNum) {
+            return countNext
+        }
+        // Fallback when neither episodes nor seasons are present in memory yet (e.g. Continue Watching):
+        // Assume next episode in current season so background resolution can fetch metadata
+        return (currentSeasonNum, currentEpisodeNum + 1)
     }
 
     /// Count-based next episode (legacy semantics, no air-date knowledge).
@@ -1754,7 +1769,20 @@ class PlayerManager: ObservableObject {
         guard let item = currentItem,
               let cs = currentSeason,
               let ce = currentEpisode else { return nil }
-        return releaseVerdict(episodes: item.episodes, seasons: item.seasons, season: cs, episode: ce).next
+        if let nextEp = nextEpisode {
+            if !nextEp.isUpcoming {
+                return (nextEp.seasonNumber, nextEp.episodeNumber)
+            } else {
+                return nil
+            }
+        }
+        let verdict = releaseVerdict(episodes: item.episodes, seasons: item.seasons, season: cs, episode: ce)
+        if verdict.covered {
+            return verdict.next
+        }
+        // When not covered by local listings (e.g. Continue Watching resume before full seasons fetched),
+        // fall back to nextEpisodeInfo so the prompt/action can proceed and resolve metadata
+        return nextEpisodeInfo
     }
 
     private func tmdbID(for item: MediaItem) async -> String? {
@@ -1819,27 +1847,29 @@ class PlayerManager: ObservableObject {
         // 3. Background fetch from Stremio Service
         AsyncTask { [weak self] in
             guard let self = self else { return }
-            if let meta = try? await StremioService.shared.fetchMeta(type: "series", id: item.id),
-               let ep = meta.episodes?.first(where: { $0.seasonNumber == next.season && $0.episodeNumber == next.episode }) {
-                await MainActor.run {
-                    guard self.currentItem?.id == item.id,
-                          self.currentSeason == next.season || self.nextEpisodeInfo?.season == next.season else { return }
-                    self.nextEpisode = ep
-                    // Backfill listings so air-gated math + rail advancement work
-                    // for items resumed from Continue Watching (which carry no
-                    // seasons/episodes arrays). Never clobbers richer data.
-                    // (fetchMeta already returns a full MediaItem.)
-                    if var cur = self.currentItem, cur.id == item.id {
-                        var changed = false
-                        if (cur.episodes == nil || cur.episodes?.isEmpty == true), let meps = meta.episodes, !meps.isEmpty {
-                            cur.episodes = meps
-                            changed = true
+            if let meta = try? await StremioService.shared.fetchMeta(type: "series", id: item.id) {
+                let matchedEp = meta.episodes?.first(where: { $0.seasonNumber == next.season && $0.episodeNumber == next.episode })
+                    ?? meta.episodes?.first(where: { $0.seasonNumber == next.season + 1 && $0.episodeNumber == 1 })
+                if let ep = matchedEp {
+                    await MainActor.run {
+                        guard self.currentItem?.id == item.id,
+                              self.currentSeason == next.season || self.nextEpisodeInfo?.season == next.season else { return }
+                        self.nextEpisode = ep
+                        // Backfill listings so air-gated math + rail advancement work
+                        // for items resumed from Continue Watching (which carry no
+                        // seasons/episodes arrays). Never clobbers richer data.
+                        if var cur = self.currentItem, cur.id == item.id {
+                            var changed = false
+                            if (cur.episodes == nil || cur.episodes?.isEmpty == true), let meps = meta.episodes, !meps.isEmpty {
+                                cur.episodes = meps
+                                changed = true
+                            }
+                            if (cur.seasons == nil || cur.seasons?.isEmpty == true), let mseas = meta.seasons, !mseas.isEmpty {
+                                cur.seasons = mseas
+                                changed = true
+                            }
+                            if changed { self.currentItem = cur }
                         }
-                        if (cur.seasons == nil || cur.seasons?.isEmpty == true), let mseas = meta.seasons, !mseas.isEmpty {
-                            cur.seasons = mseas
-                            changed = true
-                        }
-                        if changed { self.currentItem = cur }
                     }
                 }
             }
@@ -1858,7 +1888,8 @@ class PlayerManager: ObservableObject {
             season: next.season,
             episode: next.episode,
             episodeImage: nextImage,
-            isAutoAdvance: true
+            isAutoAdvance: true,
+            startFromBeginning: true
         )
     }
     

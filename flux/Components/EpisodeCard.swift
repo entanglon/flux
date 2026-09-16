@@ -63,10 +63,21 @@ struct EpisodeCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Spacer()
                 
-                Text(episode.name)
-                    .font(.headline) // Apple TV style
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(episode.name)
+                        .font(.headline) // Apple TV style
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    
+                    if episode.isUpcoming {
+                        Text("Upcoming".localized)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.4), in: Capsule())
+                    }
+                }
                 
                 HStack(spacing: 6) {
                     if let runtime = episode.runtime {

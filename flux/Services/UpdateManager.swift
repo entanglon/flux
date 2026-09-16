@@ -8,7 +8,7 @@ import AppKit
 /// When an update is available, we open the GitHub releases page
 /// for manual download and installation.
 @MainActor
-final class UpdateManager: ObservableObject {
+final class UpdateManager: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
     static let shared = UpdateManager()
 
     private var updaterController: SPUStandardUpdaterController?
@@ -18,7 +18,8 @@ final class UpdateManager: ObservableObject {
     @Published var releaseNotes: String = ""
     private var cancellable: AnyCancellable?
 
-    private init() {
+    private override init() {
+        super.init()
         let isRunningTests = NSClassFromString("XCTestCase") != nil ||
             ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
             ProcessInfo.processInfo.environment["XCInjectBundleInto"] != nil
@@ -29,7 +30,7 @@ final class UpdateManager: ObservableObject {
         let controller = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: nil,
-            userDriverDelegate: nil
+            userDriverDelegate: self
         )
         self.updaterController = controller
         self.cancellable = controller.updater.publisher(for: \.canCheckForUpdates)
@@ -40,6 +41,25 @@ final class UpdateManager: ObservableObject {
     /// Triggers the Sparkle standard updater check workflow.
     func checkForUpdates() {
         updaterController?.checkForUpdates(nil)
+    }
+
+    // MARK: - SPUStandardUserDriverDelegate
+
+    nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        Task { @MainActor in
+            self.styleUpdateAlertWindow()
+        }
+    }
+
+    private func styleUpdateAlertWindow() {
+        for window in NSApp.windows {
+            let className = NSStringFromClass(type(of: window))
+            if className.contains("SUUpdateAlert") || window.title.contains("Software Update") {
+                window.titlebarAppearsTransparent = true
+                window.isMovableByWindowBackground = true
+                window.appearance = NSAppearance(named: .darkAqua)
+            }
+        }
     }
 
     /// Opens the GitHub releases page for manual download.

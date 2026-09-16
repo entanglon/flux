@@ -67,7 +67,7 @@ class AddonManager: ObservableObject {
     
     func openWebStore() {
         let base = "https://flux-addons.pages.dev"
-        if let token = KeychainStore.get("flux.authToken"), !token.isEmpty {
+        if let token = AuthManager.shared.authToken ?? KeychainManager.getToken(), !token.isEmpty {
             if let encodedToken = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                let url = URL(string: "\(base)/?token=\(encodedToken)") {
                 NSWorkspace.shared.open(url)

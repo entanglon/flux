@@ -272,6 +272,21 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func cloudPayloadExportsAndRestoresTMDBKeyAndDisplayName() {
+        let originalKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey)
+        let originalName = UserDefaults.standard.string(forKey: "flux.authDisplayName")
+        defer {
+            if let originalKey {
+                UserDefaults.standard.set(originalKey, forKey: UserDefaults.Key.tmdbApiKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+            }
+            if let originalName {
+                UserDefaults.standard.set(originalName, forKey: "flux.authDisplayName")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
+            }
+        }
+
         let testKey = "test_tmdb_key_\(UUID().uuidString)"
         let testName = "TestUser_\(UUID().uuidString.prefix(6))"
 
@@ -292,10 +307,6 @@ struct UserDataServiceTests {
 
         #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) == testKey)
         #expect(UserDefaults.standard.string(forKey: "flux.authDisplayName") == testName)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
-        UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
     }
 
     @Test @MainActor func profileManagerManagesPlaybackSettingsSeparatelyFromTMDBKey() {
@@ -696,6 +707,50 @@ struct UserDataServiceTests {
 
         #expect(UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) == "es")
         #expect(LanguageManager.shared.currentLanguage == .spanish)
+    }
+
+    @Test @MainActor func rewatchingCompletedEpisodeTracksActiveProgress() {
+        let showID = "tt_test_rewatch_\(UUID().uuidString)"
+        let epProgressKey = "episode_progress"
+        let histKey = UserDefaults.Key.profileHistory(id: ProfileManager.shared.currentProfile?.id.uuidString ?? "")
+        defer {
+            var allProg = UserDefaults.standard.dictionary(forKey: epProgressKey) as? [String: [String: Any]] ?? [:]
+            allProg.removeValue(forKey: "\(showID)_s1e1")
+            UserDefaults.standard.set(allProg, forKey: epProgressKey)
+            UserDefaults.standard.removeObject(forKey: histKey)
+        }
+
+        let show = MediaItem(
+            id: showID,
+            title: "Rewatch Test Show",
+            description: "",
+            streamURL: nil,
+            category: "series"
+        )
+
+        // 1. Mark Episode 1 as completed (95% progress)
+        UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 1, position: 1710, duration: 1800)
+        UserDataService.shared.addToHistory(show, progress: 0.95, season: 1, episode: 1, playbackPosition: 1710, playbackDuration: 1800)
+
+        let initialEpProg = UserDataService.shared.getEpisodeProgress(for: showID, season: 1, episode: 1)
+        #expect(initialEpProg?.progress ?? 0 >= 0.95)
+
+        // 2. User re-watches Episode 1 for 5 minutes (300s / 1800s ≈ 0.166)
+        UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 1, position: 300, duration: 1800)
+        UserDataService.shared.addToHistory(show, progress: 300.0 / 1800.0, season: 1, episode: 1, playbackPosition: 300, playbackDuration: 1800)
+
+        // 3. Verify episode progress tracks active re-watch position (not clamped to 95%)
+        let rewatchedEpProg = UserDataService.shared.getEpisodeProgress(for: showID, season: 1, episode: 1)
+        #expect(rewatchedEpProg != nil)
+        let prog = rewatchedEpProg?.progress ?? 0
+        #expect(prog > 0.15 && prog < 0.20, "Expected progress around 0.166 for 5 min re-watch, got \(prog)")
+
+        // 4. Verify history item points to Episode 1 with active progress instead of Episode 2
+        let hist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(hist?.lastSeason == 1)
+        #expect(hist?.lastEpisode == 1)
+        let histProg = hist?.progress ?? 0
+        #expect(histProg > 0.15 && histProg < 0.20, "Expected history progress around 0.166, got \(histProg)")
     }
 }
 

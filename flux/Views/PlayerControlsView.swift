@@ -13,6 +13,7 @@ struct PlayerControlsView: View {
     var isVolumeHUDVisible: Binding<Bool> = .constant(false)
     var title: String
     var subtitle: String
+    var logoURL: URL? = nil
     
     var onPlayPause: () -> Void
     var onSkipForward: () -> Void
@@ -167,15 +168,39 @@ struct PlayerControlsView: View {
                         HStack(alignment: .bottom) { // Keep bottom alignment for text baseline match
                             // Title & Subtitle (Metadata)
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(subtitle) // "S1, E1 . We Is Us"
-                                    .font(.system(size: 15, weight: .semibold)) // Slightly larger
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .shadow(radius: 2)
+                                if !subtitle.isEmpty {
+                                    Text(subtitle) // "S1, E1 . We Is Us"
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .shadow(radius: 2)
+                                }
                                 
-                                Text(title) // "Pluribus"
-                                    .font(.system(size: 36, weight: .bold)) // Larger Cinematic Title
-                                    .foregroundColor(.white)
-                                    .shadow(radius: 4)
+                                if let logoURL = logoURL {
+                                    CachedImage(url: logoURL, maxDimension: 600) { phase in
+                                        switch phase {
+                                        case .success(let img):
+                                            img.resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(maxWidth: 300, maxHeight: 64, alignment: .leading)
+                                                .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
+                                        case .failure:
+                                            Text(title)
+                                                .font(.system(size: 34, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .shadow(radius: 4)
+                                        default:
+                                            Text(title)
+                                                .font(.system(size: 34, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .shadow(radius: 4)
+                                        }
+                                    }
+                                } else {
+                                    Text(title) // "Pluribus"
+                                        .font(.system(size: 34, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .shadow(radius: 4)
+                                }
                             }
                             
                             Spacer()

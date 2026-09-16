@@ -1,10 +1,174 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
     <channel>
         <title>Flux Beta Updates</title>
         <link>https://raw.githubusercontent.com/entanglon/flux/main/appcast-beta.xml</link>
         <description>Beta updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
+        <item>
+            <title>Flux (beta) 1.0.0-beta.2</title>
+            <sparkle:releaseNotes><![CDATA[
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    color-scheme: dark light;
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --text-primary: #F0F3F6;
+    --text-secondary: #9DA7B3;
+    --accent: #58A6FF;
+    --accent-bg: rgba(88, 166, 255, 0.12);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --card-bg: rgba(0, 0, 0, 0.03);
+      --card-border: rgba(0, 0, 0, 0.08);
+      --text-primary: #1F2328;
+      --text-secondary: #57606A;
+      --accent: #0969DA;
+      --accent-bg: rgba(9, 105, 218, 0.1);
+    }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    background: transparent;
+    margin: 0;
+    padding: 10px 14px 20px 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .header-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .version-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 11px 13px;
+    margin-bottom: 10px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+  .card-header .icon {
+    margin-right: 7px;
+    font-size: 14px;
+  }
+  ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+  }
+  li {
+    margin-bottom: 4px;
+  }
+  li strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="header-card">
+    <div class="version-title">Flux 1.0.0-beta.2</div>
+    <div class="badge">Beta Release</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">🎨</span> Video Quality &amp; SDR Color Calibration</div>
+    <ul>
+      <li><strong>Deep True Blacks:</strong> Resolved lifted gray levels and color quantization banding on SDR displays by switching to standard 32-bit RGBA CGL framebuffer.</li>
+      <li><strong>Reference EDR Gating:</strong> Display color pipeline now matches standalone <code>mpv</code> and native macOS sRGB color spaces 1:1.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">🔊</span> 5.1 Multichannel Audio Stability</div>
+    <ul>
+      <li><strong>Zero CoreAudio Crashes:</strong> Switched audio output driver ladder to <code>avfoundation,coreaudio</code> with <code>auto-safe</code> channel negotiation.</li>
+      <li><strong>Seamless Downmix:</strong> 6-channel surround sound downmixes smoothly to MacBook speakers without AudioUnit layout failures.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">⏱️</span> Seamless Next-Episode Countdown</div>
+    <ul>
+      <li><strong>Early Credits Detection:</strong> Next episode prompt appears early as soon as credits roll (~90s remaining or 92% progress).</li>
+      <li><strong>Relaxed Countdown:</strong> Extended auto-play timer to 90 seconds with an animated circular progress ring.</li>
+      <li><strong>Clean Episode Starts:</strong> Next episodes start strictly at 0:00 without inheriting prior seek positions.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">🎬</span> Movie Credits &amp; Bi-Directional Toggle</div>
+    <ul>
+      <li><strong>Interactive Overlays:</strong> Clicking the player reveals controls while smoothly dismissing suggestions; hiding controls automatically returns suggestions.</li>
+      <li><strong>Watch Credits Mode:</strong> Added dedicated button to enjoy end-credits scenes unobstructed, plus a floating <em>Related</em> glass pill to restore suggestions on demand.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">🧩</span> WebStore &amp; PenguPlay Integration</div>
+    <ul>
+      <li><strong>One-Click Setup:</strong> Prominent <em>Setup &amp; Install</em> button directs users to account configuration on <code>pengu.uk</code>.</li>
+      <li><strong>Smart Detection:</strong> Accurately detects and badges installed PenguPlay instances.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="icon">🛡️</span> Library Safety &amp; Production Bridge</div>
+    <ul>
+      <li><strong>Automatic Migration:</strong> Seamlessly imports watch history, watchlist, collections, and personal TMDB API keys from the production bundle into the beta channel.</li>
+      <li><strong>PocketBase Cloud Sync:</strong> Automatically verifies and syncs restored library records to the cloud.</li>
+    </ul>
+  </div>
+</body>
+</html>
+]]></sparkle:releaseNotes>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <pubDate>Wed, 16 Sep 2026 21:05:00 +0530</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.2/Flux-beta-1.0.0-beta.2-macOS26+.dmg" length="45851128" sparkle:version="2" sparkle:shortVersionString="1.0.0-beta.2" sparkle:edSignature="1p8gwtLyNZZoxxPif3w81tUaSaTyvr1jWlpikEFRCVYxy6gqmsX8MhP7aTHDb8fKVf3VfdVWRIKRlP/LSUazCw==" type="application/octet-stream"></enclosure>
+        </item>
+        <item>
+            <title>Flux (beta) 1.0.0-beta.2 (macOS 15+ Legacy)</title>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:maximumSystemVersion>25.999.999</sparkle:maximumSystemVersion>
+            <pubDate>Wed, 16 Sep 2026 21:05:00 +0530</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.2/Flux-beta-1.0.0-beta.2-macOS15+.dmg" length="45963145" sparkle:version="2" sparkle:shortVersionString="1.0.0-beta.2" sparkle:edSignature="W4LP2XHWBsDCAiuhrMqTR5IGw0ssn7dNS+hAh3lJp/6NHdhRUZMS8jJifnxSp7Hw5ktmSyrLkeHmvzc4j+PmCw==" type="application/octet-stream"></enclosure>
+        </item>
         <item>
             <title>Flux (beta) 1.0.0-beta.1</title>
             <sparkle:releaseNotes><![CDATA[
@@ -15,12 +179,10 @@
 ]]></sparkle:releaseNotes>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <pubDate>Sun, 15 Sep 2026 16:00:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.1/Flux-beta-1.0.0-beta.1-macOS26+.dmg"
-                       length="45743386"
-                       sparkle:version="1"
-                       sparkle:shortVersionString="1.0.0-beta.1"
-                       sparkle:edSignature="3MQ0x39gfNNvmcLSqN++3ToWXR+AVb0HAePJBjQoY4lHj2xoZy88un/qauLR8Qij8FDhoOgOFXWhaXPN+CtaDg=="
-                       type="application/octet-stream" />
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.1/Flux-beta-1.0.0-beta.1-macOS26+.dmg" length="45743386" sparkle:version="1" sparkle:shortVersionString="1.0.0-beta.1" sparkle:edSignature="3MQ0x39gfNNvmcLSqN++3ToWXR+AVb0HAePJBjQoY4lHj2xoZy88un/qauLR8Qij8FDhoOgOFXWhaXPN+CtaDg==" type="application/octet-stream"></enclosure>
         </item>
     </channel>
-</rss>
+</rss><!-- sparkle-signatures:
+edSignature: SOtmnai5eDGeJtIWGxQ/FisrQbJm1/c1mtwsdVNmSIkrfJRsoHkHK2HHflLZd5CgGWfWG0gtlHg1IOVRIqlBCQ==
+length: 8023
+-->

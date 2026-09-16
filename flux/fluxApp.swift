@@ -64,6 +64,7 @@ struct fluxApp: App {
         #endif
 
         if !Self.isRunningTests {
+            BundleMigrationService.migrateIfNeeded()
             StremioServerManager.shared.startServerIfNeeded()
             StreamProxyManager.shared.start()
             AuthManager.shared.syncOnLaunch()

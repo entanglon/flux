@@ -361,6 +361,11 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = false
         self.loadedURL = nil
+        self.timePos = 0.0
+        self.duration = 0.0
+        self.progress = 0.0
+        self.bufferProgress = 0.0
+        self.isBuffering = false
         resetVolumeBoostIfNeeded()
         playerView?.stop()
     }
@@ -735,17 +740,19 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
-        // Evaluate potential EDR capability for the target display mask.
-        // We check `maximumPotentialExtendedDynamicRangeColorComponentValue`,
-        // because at launch before an EDR layer is active, `maximumExtendedDynamicRangeColorComponentValue`
-        // is 1.0 at rest on MacBook Air M1 and Liquid Retina XDR displays.
+        // Evaluate hardware reference EDR capability for the target display mask.
+        // We check `maximumReferenceExtendedDynamicRangeColorComponentValue`,
+        // which is > 1.0 strictly on true HDR/XDR panels (MacBook Pro Liquid Retina XDR, Pro Display XDR).
+        // Standard SDR panels (MacBook Air, external sRGB monitors) report reference EDR 0.0,
+        // and must use standard 32-bit RGBA pixel format to avoid lifted blacks and washed out colors.
         let targetScreen = NSScreen.screens.first(where: {
             guard let id = ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { return false }
             return (CGDisplayIDToOpenGLDisplayMask(id) & mask) != 0
         }) ?? NSScreen.main
         
-        let edr = targetScreen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-        let useFloat16 = edr > 1.0
+        let refEDR = targetScreen?.maximumReferenceExtendedDynamicRangeColorComponentValue ?? 0.0
+        let currentEDR = targetScreen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+        let useFloat16 = refEDR > 1.0 || currentEDR > 1.0
 
         let attributes: [CGLPixelFormatAttribute] = useFloat16
             ? [
@@ -912,7 +919,12 @@ final class MPVLayerView: NSView {
         mpvLayer.contentsScale = scale
         
         let screen = window?.screen ?? NSScreen.main
-        currentScreenNumber = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        let screenNum = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        if currentScreenNumber != screenNum {
+            currentScreenNumber = screenNum
+            lastPipelineKey = ""
+            applyColorPipeline()
+        }
     }
     
     func setupDisplayLink() {
@@ -943,9 +955,10 @@ final class MPVLayerView: NSView {
         lastPipelineKey = key
 
         let screen = window?.screen ?? NSScreen.main
-        let potentialEDR = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
+        let refEDR = screen?.maximumReferenceExtendedDynamicRangeColorComponentValue ?? 0.0
         let currentEDR = screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-        let canDoEDR = isHDR && potentialEDR > 1.0
+        let potentialEDR = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
+        let canDoEDR = isHDR && (refEDR > 1.0 || currentEDR > 1.0)
 
         if canDoEDR {
             // Calibrate target peak to display capability:
@@ -968,9 +981,10 @@ final class MPVLayerView: NSView {
 
             mpv_set_property_string(mpv, "target-peak", String(peak))
             mpv_set_property_string(mpv, "tone-mapping", "auto")
+            mpv_set_property_string(mpv, "hdr-compute-peak", "yes")
             print("[MPV] HDR EDR pipeline active (gamma=\(gamma), prim=\(primaries), peak=\(peak)nits)")
         } else {
-            for p in ["target-trc", "target-prim", "target-peak", "tone-mapping"] {
+            for p in ["target-trc", "target-prim", "target-peak", "tone-mapping", "hdr-compute-peak"] {
                 mpv_set_property_string(mpv, p, "auto")
             }
             if isHDR {
@@ -1080,6 +1094,12 @@ final class MPVLayerView: NSView {
 
         let useHW = UserDefaults.standard.object(forKey: "useHardwareAcceleration") as? Bool ?? true
         mpv_set_property_string(mpv, "hwdec", useHW ? "auto" : "no")
+
+        // Audio output: use AVFoundation with CoreAudio fallback. AVFoundation
+        // natively handles multi-channel 5.1/7.1 downmixing on macOS laptop speakers
+        // and avoids ao_coreaudio's layout failure and hotplug_cb crash.
+        mpv_set_property_string(mpv, "ao", "avfoundation,coreaudio")
+        mpv_set_property_string(mpv, "audio-channels", "auto-safe")
 
         // Don't stop on audio output issues — let mpv fall back
         mpv_set_property_string(mpv, "audio-fallback-to-null", "yes")

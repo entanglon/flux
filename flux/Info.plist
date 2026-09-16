@@ -23,7 +23,7 @@
 		</dict>
 	</array>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/entanglon/flux/main/appcast-beta.xml?nocache=20260916</string>
+	<string>https://raw.githubusercontent.com/entanglon/flux/main/appcast-beta.xml?nocache=20260916_2057</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUAllowsAutomaticUpdates</key>

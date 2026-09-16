@@ -764,6 +764,7 @@ struct DetailView: View {
                                 if !episodes.isEmpty {
                                     DetailRail(items: episodes, idPath: \.id, itemWidth: 380, itemHeight: 214) { episode in
                                         Button(action: {
+                                            guard !episode.isUpcoming else { return }
                                             let prog = getEpisodeProgress(episode)
                                             let hasProgress = prog > 0.01 && prog < 0.90
                                             let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
@@ -781,6 +782,7 @@ struct DetailView: View {
                                             LiquidEpisodeCard(episode: episode, progress: getEpisodeProgress(episode), item: displayItem)
                                         }
                                         .buttonStyle(.plain)
+                                        .disabled(episode.isUpcoming)
                                     }
                                 } else {
                                     ScrollView(.horizontal, showsIndicators: false) {
@@ -831,7 +833,11 @@ struct DetailView: View {
                                     Button {
                                         playBonusContent(item)
                                     } label: {
-                                        BonusContentCard(item: item, fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL)
+                                        BonusContentCard(
+                                            item: item,
+                                            fallbackBackdropURL: displayItem.backdropURL ?? displayItem.heroURL,
+                                            showTextOverlay: false
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1667,32 +1673,62 @@ struct LiquidEpisodeCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Spacer()
                 
-                Text(String.localizedFormat("EPISODE %d", episode.episodeNumber))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .tracking(1)
+                HStack(spacing: 8) {
+                    Text(String.localizedFormat("EPISODE %d", episode.episodeNumber))
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .tracking(1)
+                    
+                    if episode.isUpcoming {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.badge")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("Upcoming".localized)
+                                .font(.system(size: 9.5, weight: .black))
+                                .tracking(0.8)
+                        }
+                        .foregroundStyle(.white.opacity(0.95))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.orange.opacity(0.35), in: Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.55), lineWidth: 0.75))
+                    }
+                }
                 
                 Text(episode.name)
                     .font(.system(size: 22, weight: .bold, design: .default))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(episode.isUpcoming ? .white.opacity(0.75) : .white)
                     .lineLimit(1)
                 
                 Text(episode.overview)
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(.white.opacity(episode.isUpcoming ? 0.55 : 0.75))
                     .lineLimit(3)
                     .lineSpacing(2)
                     .frame(height: 60, alignment: .topLeading)
                 
                 // Bottom Row
                 HStack(spacing: 10) {
-                    // Play Icon (Always visible on all episode cards)
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
+                    if episode.isUpcoming {
+                        HStack(spacing: 5) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                            if let airDate = episode.airDate {
+                                Text(airDate)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
+                        }
+                    } else {
+                        // Play Icon (Always visible on aired episode cards)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
                     
                     // Progress Bar (Conditional: displayed only when in-progress)
-                    if progress > 0.01 && progress < 0.95 {
+                    if !episode.isUpcoming && progress > 0.01 && progress < 0.95 {
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.white.opacity(0.35)).frame(height: 4)
                             Capsule().fill(Color.white).frame(width: max(4, 70 * min(1.0, progress)), height: 4)
@@ -1700,28 +1736,32 @@ struct LiquidEpisodeCard: View {
                         .frame(width: 70)
                     }
                     
-                    Text("\(episode.runtime ?? 50)m")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                    if let rt = episode.runtime, rt > 0 {
+                        Text("\(rt)m")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
                     
                     Spacer()
                     
                     Menu {
-                        Button {
-                            if let item = item {
-                                PlayerManager.shared.play(
-                                    item,
-                                    season: episode.seasonNumber,
-                                    episode: episode.episodeNumber,
-                                    episodeImage: episode.stillURL,
-                                    fromContinueWatching: false,
-                                    forceStreamPicker: true,
-                                    startFromBeginning: false
-                                )
-                                openWindow(id: "player", value: item.id)
+                        if !episode.isUpcoming {
+                            Button {
+                                if let item = item {
+                                    PlayerManager.shared.play(
+                                        item,
+                                        season: episode.seasonNumber,
+                                        episode: episode.episodeNumber,
+                                        episodeImage: episode.stillURL,
+                                        fromContinueWatching: false,
+                                        forceStreamPicker: true,
+                                        startFromBeginning: false
+                                    )
+                                    openWindow(id: "player", value: item.id)
+                                }
+                            } label: {
+                                Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                             }
-                        } label: {
-                            Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                         }
 
                         Button {

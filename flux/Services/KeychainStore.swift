@@ -12,10 +12,13 @@ enum KeychainStore {
     }
 
     private static var testStore: [String: String] = [:]
+    private static let lock = NSLock()
 
     static func set(_ value: String, forKey key: String) {
         if isRunningTests {
+            lock.lock()
             testStore[key] = value
+            lock.unlock()
             return
         }
         UserDefaults.standard.set(value, forKey: keyPrefix + key)
@@ -23,6 +26,8 @@ enum KeychainStore {
 
     static func get(_ key: String) -> String? {
         if isRunningTests {
+            lock.lock()
+            defer { lock.unlock() }
             return testStore[key]
         }
         return UserDefaults.standard.string(forKey: keyPrefix + key)
@@ -30,7 +35,9 @@ enum KeychainStore {
 
     static func delete(_ key: String) {
         if isRunningTests {
+            lock.lock()
             testStore.removeValue(forKey: key)
+            lock.unlock()
             return
         }
         UserDefaults.standard.removeObject(forKey: keyPrefix + key)

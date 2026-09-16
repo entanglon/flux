@@ -13,6 +13,7 @@ final class ProfileManager: ObservableObject {
     private let legacyHistoryKey = "localHistoryDataStremio"
 
     private init() {
+        BundleMigrationService.migrateIfNeeded()
         if let data = UserDefaults.standard.data(forKey: profilesKey),
            let decoded = try? JSONDecoder().decode([UserProfile].self, from: data) {
             profiles = decoded

@@ -48,8 +48,20 @@ struct PlayerView: View {
     @State private var showVolumeHUD = false
     @State private var volumeHUDTask: Task<Void, Never>? = nil
     @State private var fetchedLogo: URL? = nil
+    @State private var upNextSecondsRemaining: Int = 60
+    @State private var upNextTotalDuration: Double = 60.0
+    @State private var upNextTimerTask: Task<Void, Never>? = nil
+    @State private var movieSuggestions: [MediaItem] = []
+    @State private var isLoadingSuggestions = false
+    @State private var isMovieSuggestionsDismissed = false
+    @State private var isWatchingCreditsCleanly = false
+    @State private var suggestionsScrollTargetIndex: Int = 0
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
     var item: MediaItem? // Optional item to play
+
+    private var activeItem: MediaItem? {
+        playerManager.currentItem ?? item
+    }
 
     init(item: MediaItem?) {
         self.item = item
@@ -118,6 +130,12 @@ struct PlayerView: View {
 
             // 7. Apple TV / Netflix Style "Up Next" Floating Card
             upNextOverlay
+
+            // 7b. Movie End-of-Playback Suggested Titles Rail
+            movieEndOfPlayOverlay
+
+            // 7c. Clean Credits Floating Return Pill
+            cleanCreditsWatchButton
 
             // 8. Player Tuning & Diagnostics HUD
             if showPlayerHUD {
@@ -291,6 +309,7 @@ struct PlayerView: View {
             }
         }
         .onDisappear {
+            cancelUpNextCountdown()
             contextMenuMonitor?.stop()
             contextMenuMonitor = nil
             mpv.resetVolumeBoostIfNeeded()
@@ -340,12 +359,24 @@ struct PlayerView: View {
         }
         .onChange(of: mpv.progress) { _, newProgress in
              if newProgress > 0.9 {
-                 playerManager.preloadNextEpisodeIfNeeded()
+                 if (activeItem?.isSeries ?? false) || playerManager.currentSeason != nil {
+                     playerManager.preloadNextEpisodeIfNeeded()
+                 } else if let media = activeItem, movieSuggestions.isEmpty {
+                     loadMovieSuggestions(for: media)
+                 }
              }
+        }
+        .onChange(of: shouldShowUpNextCard) { _, isShowing in
+            if isShowing {
+                startUpNextCountdown()
+            } else {
+                cancelUpNextCountdown()
+            }
         }
         .onChange(of: isPickerVisible) { _, visible in
             if visible {
                 autoPlayCancelled = true
+                cancelUpNextCountdown()
             }
         }
         .onChange(of: mpv.volume) { _, _ in
@@ -361,6 +392,11 @@ struct PlayerView: View {
     private func handleStreamURLChange(_ newURL: URL?) {
         guard let url = newURL else { return }
         print("PlayerView: URL changed to \(url), playing...")
+        cancelUpNextCountdown()
+        movieSuggestions = []
+        isLoadingSuggestions = false
+        isMovieSuggestionsDismissed = false
+        suggestionsScrollTargetIndex = 0
         autoPlayCancelled = false
         hasStartedPlayback = false
         lastDropCount = -1
@@ -469,25 +505,47 @@ struct PlayerView: View {
     /// just advance the Continue Watching rail. Latches end state so the Up
     /// Next card survives playback stopping.
     private func handleEndOfFile() {
-        if (item?.isSeries ?? false) || playerManager.currentSeason != nil {
-            didReachEnd = true
-        }
-        guard let media = item,
-              let s = playerManager.currentSeason,
-              let e = playerManager.currentEpisode else { return }
-        let duration = mpv.duration
-        let autoplay = autoPlayNextEnabled
-        let cancelled = autoPlayCancelled
-        let picker = isPickerVisible
-        Task { @MainActor in
-            await playerManager.completeEpisode(item: media, season: s, episode: e, duration: duration, autoplay: autoplay, cancelled: cancelled, pickerVisible: picker)
+        didReachEnd = true
+        isWatchingCreditsCleanly = false
+        let current = activeItem
+        if (current?.isSeries ?? false) || playerManager.currentSeason != nil {
+            let duration = mpv.duration
+            let autoplay = autoPlayNextEnabled
+            let cancelled = autoPlayCancelled
+            let picker = isPickerVisible
+            if let media = current, let s = playerManager.currentSeason, let e = playerManager.currentEpisode {
+                Task { @MainActor in
+                    await playerManager.completeEpisode(item: media, season: s, episode: e, duration: duration, autoplay: autoplay, cancelled: cancelled, pickerVisible: picker)
+                }
+            }
+        } else {
+            // Movie reached EOF: save completion in watch history and load suggested titles
+            if let media = current {
+                let duration = mpv.duration
+                UserDataService.shared.addToHistory(
+                    media,
+                    progress: 1.0,
+                    season: nil,
+                    episode: nil,
+                    episodeImage: nil,
+                    playbackPosition: duration,
+                    playbackDuration: duration,
+                    streamURL: playerManager.currentStreamURL,
+                    torrentInfoHash: playerManager.activeTorrentHash,
+                    fileIndex: nil,
+                    isRestart: true
+                )
+                loadMovieSuggestions(for: media)
+            }
         }
     }
 
     private func handleTimePosChange(_ t: Double) {
-        // User replayed/seeked away from the end: drop the latched end state.
+        // User replayed/seeked away from the end: drop the latched end state and cancel countdown.
         if didReachEnd, mpv.duration > 0, (mpv.duration - t) > 5.0 {
             didReachEnd = false
+            isWatchingCreditsCleanly = false
+            cancelUpNextCountdown()
         }
         confirmPlaybackStarted()
         // If playback is actively running, clear any stale or erroneous errorMessage
@@ -671,8 +729,9 @@ struct PlayerView: View {
                 ),
                 isControlsVisible: $isControlsVisible,
                 isVolumeHUDVisible: $showVolumeHUD,
-                title: item?.title ?? "Unknown Title",
+                title: activeItem?.title ?? "Unknown Title",
                 subtitle: getSubtitle(),
+                logoURL: activeItem.flatMap { resolvedLogoURL(for: $0) },
                 onPlayPause: { mpv.togglePlayPause() },
                 onSkipForward: { handleRelativeSeek(delta: 15) }, 
                 onSkipBackward: { handleRelativeSeek(delta: -15) },
@@ -826,11 +885,11 @@ struct PlayerView: View {
             }
         }
 
-        // 2. Remaining duration / progress heuristics (e.g. final 25 seconds or 96% progress)
-        if remaining <= 25 && remaining > 0.8 {
+        // 2. Remaining duration / progress heuristics (e.g. final 90 seconds or 92% progress with <= 120s remaining)
+        if remaining <= 90 && remaining > 0.8 {
             return true
         }
-        if mpv.progress >= 0.96 && remaining <= 45 && remaining > 0.8 {
+        if mpv.progress >= 0.92 && remaining <= 120 && remaining > 0.8 {
             return true
         }
 
@@ -840,8 +899,8 @@ struct PlayerView: View {
     private var shouldShowUpNextCard: Bool {
         // Air-gated: unaired episodes are never offered, here or anywhere else.
         guard playerManager.nextReleasedEpisodeInfo != nil,
-              let item = item,
-              item.isSeries || playerManager.currentSeason != nil,
+              let current = activeItem,
+              current.isSeries || playerManager.currentSeason != nil,
               autoPlayNextEnabled,
               !autoPlayCancelled else {
             return false
@@ -855,8 +914,7 @@ struct PlayerView: View {
     @ViewBuilder
     private var upNextOverlay: some View {
         if shouldShowUpNextCard, let next = playerManager.nextReleasedEpisodeInfo {
-            let remaining = mpv.duration > 0 ? max(0, mpv.duration - mpv.timePos) : 999
-            upNextCard(season: next.season, episode: next.episode, remainingSeconds: remaining)
+            upNextCard(season: next.season, episode: next.episode)
                 .transition(
                     .asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -868,9 +926,7 @@ struct PlayerView: View {
     }
 
     // MARK: - Apple TV & Netflix Style "Up Next" Card
-    private func upNextCard(season: Int, episode: Int, remainingSeconds: Double) -> some View {
-        let isCountingDown = remainingSeconds <= 15.0 && remainingSeconds > 0.8
-        let displaySeconds = Int(ceil(remainingSeconds))
+    private func upNextCard(season: Int, episode: Int) -> some View {
         let nextMeta = playerManager.nextEpisode
         let epTitle = nextMeta?.name.isEmpty == false ? nextMeta!.name : "Episode \(episode)"
         let stillURL = nextMeta?.stillURL ?? playerManager.currentEpisodeImage
@@ -897,8 +953,8 @@ struct PlayerView: View {
 
                         Spacer()
 
-                        if isCountingDown {
-                            Text("in %ds".localizedFormat(displaySeconds))
+                        if upNextSecondsRemaining > 0 {
+                            Text("in %ds".localizedFormat(upNextSecondsRemaining))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.75))
                         }
@@ -906,6 +962,7 @@ struct PlayerView: View {
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 autoPlayCancelled = true
+                                cancelUpNextCountdown()
                             }
                         } label: {
                             Image(systemName: "xmark")
@@ -982,34 +1039,25 @@ struct PlayerView: View {
                     // Action Controls: Big Primary "Play Next" Button + Watch Credits
                     HStack(spacing: 10) {
                         Button {
-                            withAnimation {
-                                autoPlayCancelled = true
-                                playerManager.playNextEpisode()
-                            }
+                            transitionToNextEpisode()
                         } label: {
                             HStack(spacing: 8) {
-                                if isCountingDown {
-                                    // Circular Animated Timer
-                                    ZStack {
-                                        Circle()
-                                            .stroke(Color.black.opacity(0.2), lineWidth: 2.5)
-                                        Circle()
-                                            .trim(from: 0, to: CGFloat(max(0, min(1.0, remainingSeconds / 15.0))))
-                                            .stroke(Color.black, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                                            .rotationEffect(.degrees(-90))
-                                        Image(systemName: "play.fill")
-                                            .font(.system(size: 8, weight: .black))
-                                            .foregroundStyle(.black)
-                                            .offset(x: 0.5)
-                                    }
-                                    .frame(width: 18, height: 18)
-                                } else {
+                                // Circular Animated Timer
+                                ZStack {
+                                    Circle()
+                                        .stroke(Color.black.opacity(0.2), lineWidth: 2.5)
+                                    Circle()
+                                        .trim(from: 0, to: CGFloat(max(0, min(1.0, Double(upNextSecondsRemaining) / max(1.0, upNextTotalDuration)))))
+                                        .stroke(Color.black, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                        .rotationEffect(.degrees(-90))
                                     Image(systemName: "play.fill")
-                                        .font(.system(size: 11, weight: .bold))
+                                        .font(.system(size: 8, weight: .black))
                                         .foregroundStyle(.black)
+                                        .offset(x: 0.5)
                                 }
+                                .frame(width: 18, height: 18)
 
-                                Text(isCountingDown ? "Play Next Episode".localized : "Play Now".localized)
+                                Text("Play Next Episode".localized)
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundStyle(.black)
                             }
@@ -1022,6 +1070,7 @@ struct PlayerView: View {
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 autoPlayCancelled = true
+                                cancelUpNextCountdown()
                             }
                         } label: {
                             Text("Credits".localized)
@@ -1059,6 +1108,370 @@ struct PlayerView: View {
             .padding(.bottom, isControlsVisible ? 100 : 36)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isControlsVisible)
         }
+    }
+
+    private func startUpNextCountdown() {
+        upNextTimerTask?.cancel()
+        let rem = mpv.duration > 0 ? Int(ceil(mpv.duration - mpv.timePos)) : 60
+        let count = min(90, max(30, rem))
+        upNextSecondsRemaining = count
+        upNextTotalDuration = Double(count)
+        upNextTimerTask = Task { @MainActor in
+            while upNextSecondsRemaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                upNextSecondsRemaining -= 1
+            }
+            guard !Task.isCancelled, shouldShowUpNextCard else { return }
+            transitionToNextEpisode()
+        }
+    }
+
+    private func cancelUpNextCountdown() {
+        upNextTimerTask?.cancel()
+        upNextTimerTask = nil
+    }
+
+    private func transitionToNextEpisode() {
+        guard let next = playerManager.nextReleasedEpisodeInfo else { return }
+        print("[PlayerView] Transitioning to next episode: S\(next.season):E\(next.episode)")
+        cancelUpNextCountdown()
+        autoPlayCancelled = false
+        didReachEnd = false
+        hasStartedPlayback = false
+        mpv.stop()
+        playerManager.playNextEpisode()
+    }
+
+    // MARK: - Movie End-of-Playback Suggestions Rail
+    private var isMovieCreditsOrEnd: Bool {
+        guard let current = activeItem,
+              !current.isSeries,
+              playerManager.currentSeason == nil else { return false }
+        return isEndCreditsOrNearEnd || didReachEnd
+    }
+
+    private var shouldShowMovieEndOfPlay: Bool {
+        guard isMovieCreditsOrEnd, !isWatchingCreditsCleanly else { return false }
+        return !isControlsVisible
+    }
+
+    @ViewBuilder
+    private var cleanCreditsWatchButton: some View {
+        if isMovieCreditsOrEnd && isWatchingCreditsCleanly && !isControlsVisible {
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isWatchingCreditsCleanly = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles.tv")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Related".localized)
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Related".localized)
+                    .padding(.top, 28)
+                    .padding(.trailing, 28)
+                }
+                Spacer()
+            }
+            .transition(.opacity)
+            .zIndex(105)
+        }
+    }
+
+    @ViewBuilder
+    private var movieEndOfPlayOverlay: some View {
+        if shouldShowMovieEndOfPlay, let current = activeItem {
+            ZStack {
+                // Semi-transparent dark cinematic gradient allowing the credits video to roll visibly underneath
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.65),
+                        Color.black.opacity(0.40),
+                        Color.black.opacity(0.85)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isControlsVisible = true
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 20) {
+                    // Header Row: Title/Logo (Top-Left) + Spacer + Action Buttons (Top-Right)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let logoURL = resolvedLogoURL(for: current) {
+                                CachedImage(url: logoURL, maxDimension: 600) { phase in
+                                    switch phase {
+                                    case .success(let img):
+                                        img.resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(maxWidth: 260, maxHeight: 65, alignment: .leading)
+                                    default:
+                                        Text(current.title)
+                                            .font(.system(size: 28, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                            } else {
+                                Text(current.title)
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+
+                            HStack(spacing: 8) {
+                                if let year = current.releaseDateYear {
+                                    Text(year)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                }
+                                if let cert = current.certification {
+                                    Text(cert)
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                                } else if let vote = current.voteAverage, vote > 0 {
+                                    Text(String(format: "★ %.1f", vote))
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.yellow.opacity(0.9))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                                }
+                                if let runtime = current.runtime {
+                                    Text(runtime)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                }
+                            }
+                        }
+
+                        Spacer()
+
+                        // Action Buttons: Watch Credits / Hide, Play Again & Close (Liquid Glass)
+                        HStack(spacing: 12) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isWatchingCreditsCleanly = true
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "eye")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Watch Credits".localized)
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Watch Credits".localized)
+
+                            Button {
+                                replayMovie()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Play Again".localized)
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Play Again".localized)
+
+                            Button {
+                                closePlayer()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .frame(width: 32, height: 32)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Close".localized)
+                        }
+                    }
+                    .padding(.horizontal, 48)
+                    .padding(.top, 40)
+
+                    Spacer()
+
+                    // Suggested Titles Section with Navigation Chevrons
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Related".localized)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 48)
+
+                        if isLoadingSuggestions {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(1.2)
+                                Spacer()
+                            }
+                            .frame(height: 220)
+                        } else if !movieSuggestions.isEmpty {
+                            ScrollViewReader { proxy in
+                                ZStack {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        LazyHStack(spacing: 16) {
+                                            ForEach(Array(movieSuggestions.enumerated()), id: \.element.id) { index, rec in
+                                                Button {
+                                                    playSuggestedMovie(rec)
+                                                } label: {
+                                                    GlassCard(item: rec, aspectRatio: .portrait, showTitle: true)
+                                                        .frame(width: 140)
+                                                }
+                                                .buttonStyle(.plain)
+                                                .id(rec.id)
+                                            }
+                                        }
+                                        .padding(.horizontal, 48)
+                                    }
+                                    .frame(height: 250)
+
+                                    // Left Navigation Arrow
+                                    if suggestionsScrollTargetIndex > 0 {
+                                        HStack {
+                                            Button {
+                                                scrollSuggestionsLeft(proxy: proxy)
+                                            } label: {
+                                                arrowButton("left")
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.leading, 12)
+                                            Spacer()
+                                        }
+                                    }
+
+                                    // Right Navigation Arrow
+                                    if suggestionsScrollTargetIndex < movieSuggestions.count - 1 {
+                                        HStack {
+                                            Spacer()
+                                            Button {
+                                                scrollSuggestionsRight(proxy: proxy)
+                                            } label: {
+                                                arrowButton("right")
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.trailing, 12)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.bottom, 48)
+                }
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .zIndex(120)
+        }
+    }
+
+    private func arrowButton(_ direction: String) -> some View {
+        Image(systemName: "chevron.\(direction)")
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 64)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 1))
+    }
+
+    private func scrollSuggestionsLeft(proxy: ScrollViewProxy) {
+        guard !movieSuggestions.isEmpty else { return }
+        suggestionsScrollTargetIndex = max(0, suggestionsScrollTargetIndex - 3)
+        let targetID = movieSuggestions[suggestionsScrollTargetIndex].id
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(targetID, anchor: .leading)
+        }
+    }
+
+    private func scrollSuggestionsRight(proxy: ScrollViewProxy) {
+        guard !movieSuggestions.isEmpty else { return }
+        suggestionsScrollTargetIndex = min(movieSuggestions.count - 1, suggestionsScrollTargetIndex + 3)
+        let targetID = movieSuggestions[suggestionsScrollTargetIndex].id
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            proxy.scrollTo(targetID, anchor: .leading)
+        }
+    }
+
+    private func loadMovieSuggestions(for media: MediaItem) {
+        guard movieSuggestions.isEmpty, !isLoadingSuggestions else { return }
+        isLoadingSuggestions = true
+        Task { @MainActor in
+            let similar = await TMDBEnricher.shared.fetchSimilar(item: media)
+            let filtered = similar.filter { $0.id != media.id }
+            if !filtered.isEmpty {
+                self.movieSuggestions = Array(filtered.prefix(12))
+            } else {
+                let type = media.category == "TV Show" || media.category == "Series" ? "series" : "movie"
+                if let related = try? await StremioService.shared.fetchRelated(type: type, genres: media.genres) {
+                    self.movieSuggestions = Array(related.filter { $0.id != media.id }.shuffled().prefix(10))
+                }
+            }
+            self.isLoadingSuggestions = false
+        }
+    }
+
+    private func playSuggestedMovie(_ movie: MediaItem) {
+        print("[PlayerView] Switching to suggested movie: \(movie.title)")
+        cancelUpNextCountdown()
+        didReachEnd = false
+        isWatchingCreditsCleanly = false
+        isMovieSuggestionsDismissed = false
+        suggestionsScrollTargetIndex = 0
+        movieSuggestions = []
+        hasStartedPlayback = false
+        mpv.stop()
+        playerManager.play(movie, startFromBeginning: true)
+    }
+
+    private func replayMovie() {
+        didReachEnd = false
+        isWatchingCreditsCleanly = false
+        isMovieSuggestionsDismissed = false
+        mpv.seek(absolute: 0)
+        mpv.play()
+    }
+
+    private func closePlayer() {
+        mpv.stop()
+        playerManager.close()
+        dismiss()
     }
 
     private var thumbnailPlaceholder: some View {
@@ -1551,7 +1964,7 @@ struct PlayerView: View {
                 if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
                    playerManager.nextReleasedEpisodeInfo != nil,
                    mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
-                    playerManager.playNextEpisode()
+                    transitionToNextEpisode()
                 }
                 // Diagnostic hitch sampling (8/31 investigation, error channel):
                 // log ONLY on increment, with position + cache level, so each

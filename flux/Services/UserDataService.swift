@@ -67,7 +67,8 @@ class UserDataService: ObservableObject {
     }
     
     private init() {
-         loadInitialData()
+        BundleMigrationService.migrateIfNeeded()
+        loadInitialData()
     }
     
     func startSyncing(user: User) {
@@ -478,11 +479,11 @@ class UserDataService: ObservableObject {
                 let existingEpisode = existingEntry?["lastEpisode"] as? Int
                 let isSameUnit = (typeString == "movie") || (existingSeason == season && existingEpisode == episode)
                 if isSameUnit {
-                    // If previously finished (>= 90%) and starting again (< 2%), permit restart
-                    if existingProg >= 0.90 && newProg < 0.02 {
+                    // If previously completed (>= 90%) and being re-watched (< 90%), track active re-watch progress
+                    if existingProg >= 0.90 && newProg < 0.90 {
                         finalProgress = newProg
                     } else {
-                        // High-water mark
+                        // High-water mark for active in-progress viewing (prevents backward scrub regression)
                         finalProgress = max(existingProg, newProg)
                     }
                 }
@@ -626,7 +627,7 @@ class UserDataService: ObservableObject {
         let rawProg = min(1.0, max(0.0, position / duration))
         let prevProg = allProgress[key]?["progress"] as? Double ?? 0.0
         let prog: Double
-        if isRestart || (prevProg >= 0.90 && rawProg < 0.02) {
+        if isRestart || (prevProg >= 0.90 && rawProg < 0.90) {
             prog = rawProg
         } else {
             prog = max(prevProg, rawProg)

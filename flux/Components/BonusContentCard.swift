@@ -3,6 +3,7 @@ import SwiftUI
 struct BonusContentCard: View {
     let item: BonusContentItem
     var fallbackBackdropURL: URL? = nil
+    var showTextOverlay: Bool = true
     
     @State private var isHovered = false
     
@@ -14,37 +15,41 @@ struct BonusContentCard: View {
                 .clipped()
             
             // 2. Subtle Bottom Text Shadow Gradient (Rest of image is 100% undimmed)
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.45),
-                    .init(color: .black.opacity(0.80), location: 1.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
+            if showTextOverlay {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.45),
+                        .init(color: .black.opacity(0.80), location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+            }
             
             // 3. Hover Subtle Brightness Wash (Zero Zoom)
             Color.white.opacity(isHovered ? 0.04 : 0.0)
                 .allowsHitTesting(false)
             
             // 5. Title and Metadata on the Card (Bottom Part - Fixed typography, no hover shifts)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .shadow(color: .black.opacity(0.85), radius: 3, x: 0, y: 1)
-                
-                Text(item.subtitle ?? item.categoryType)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(1)
-                    .shadow(color: .black.opacity(0.85), radius: 2, x: 0, y: 1)
+            if showTextOverlay {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .shadow(color: .black.opacity(0.85), radius: 3, x: 0, y: 1)
+                    
+                    Text(item.subtitle ?? item.categoryType)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .shadow(color: .black.opacity(0.85), radius: 2, x: 0, y: 1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: 300, height: 169)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
