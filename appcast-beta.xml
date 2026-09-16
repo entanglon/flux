@@ -141,14 +141,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
   </div>
 
   <div class="card">
-    <div class="card-header"><span class="icon">🧩</span> WebStore &amp; PenguPlay Integration</div>
-    <ul>
-      <li><strong>One-Click Setup:</strong> Prominent <em>Setup &amp; Install</em> button directs users to account configuration on <code>pengu.uk</code>.</li>
-      <li><strong>Smart Detection:</strong> Accurately detects and badges installed PenguPlay instances.</li>
-    </ul>
-  </div>
-
-  <div class="card">
     <div class="card-header"><span class="icon">🛡️</span> Library Safety &amp; Production Bridge</div>
     <ul>
       <li><strong>Automatic Migration:</strong> Seamlessly imports watch history, watchlist, collections, and personal TMDB API keys from the production bundle into the beta channel.</li>
@@ -183,6 +175,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: SOtmnai5eDGeJtIWGxQ/FisrQbJm1/c1mtwsdVNmSIkrfJRsoHkHK2HHflLZd5CgGWfWG0gtlHg1IOVRIqlBCQ==
-length: 8023
+edSignature: AUBhqSQJePJMLhI8j0hGObfylyt3hJKyAYw86UulgTE5clqnlEvBrLtbnJPwzpUW1iOWODFecypmnntOaVorDg==
+length: 7600
 -->
