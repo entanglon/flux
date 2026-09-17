@@ -323,11 +323,28 @@ class MPVController: ObservableObject {
     weak var playerView: MPVViewController?
     private var hasAutoSelectedTracksForCurrentMedia = false
     
+    func preparePaused(url: URL) {
+        if hasLoadedMedia, loadedURL == url {
+            print("[MPVController] Skipping duplicate preparePaused for \(url.lastPathComponent)")
+            return
+        }
+        self.isUserPaused = true
+        self.isPlaying = false
+        self.hasLoadedMedia = true
+        self.loadedURL = url
+        self.hasAutoSelectedTracksForCurrentMedia = false
+        playerView?.setMute(true)
+        playerView?.play(url, paused: true)
+    }
+
     func play(url: URL) {
         // Same media already loading/loaded on this controller (warm-core
         // adoption races finishSelect) — reloading would discard the buffer.
         if hasLoadedMedia, loadedURL == url {
             print("[MPVController] Skipping duplicate loadfile for \(url.lastPathComponent)")
+            if isUserPaused {
+                play()
+            }
             return
         }
         self.isUserPaused = false
@@ -335,6 +352,7 @@ class MPVController: ObservableObject {
         self.loadedURL = url
         self.hasAutoSelectedTracksForCurrentMedia = false
         resetVolumeBoostIfNeeded()
+        playerView?.setMute(false)
         // IINA-parity auto-pause: output device vanishing mid-playback pauses.
         AudioOutputRouteMonitor.shared.start()
         AudioOutputRouteMonitor.shared.onRouteChanged = { [weak self] in
@@ -344,11 +362,12 @@ class MPVController: ObservableObject {
                 self.pause()
             }
         }
-        playerView?.play(url)
+        playerView?.play(url, paused: false)
     }
 
     func play() {
         self.isUserPaused = false
+        playerView?.setMute(false)
         playerView?.resume()
     }
 
@@ -542,6 +561,18 @@ class MPVController: ObservableObject {
                 return ["ko", "kor", "korean", "hangul"]
             case "hindi", "hi", "hin":
                 return ["hi", "hin", "hindi"]
+            case "tamil", "ta", "tam":
+                return ["ta", "tam", "tamil"]
+            case "telugu", "te", "tel":
+                return ["te", "tel", "telugu"]
+            case "italian", "it", "ita":
+                return ["it", "ita", "italian", "italiano"]
+            case "russian", "ru", "rus":
+                return ["ru", "rus", "russian"]
+            case "chinese", "zh", "chi", "zho":
+                return ["zh", "chi", "zho", "chinese", "mandarin", "cantonese"]
+            case "portuguese", "pt", "por":
+                return ["pt", "por", "portuguese", "português", "portugues"]
             default:
                 return [cleanTarget]
             }
@@ -687,9 +718,10 @@ class MPVViewController: NSViewController {
         }
     }
     
-    func play(_ url: URL) { playerView.loadFile(url) }
+    func play(_ url: URL, paused: Bool = false) { playerView.loadFile(url, paused: paused) }
     func pause() { playerView.setPause(true) }
     func resume() { playerView.setPause(false) }
+    func setMute(_ muted: Bool) { playerView.setMute(muted) }
     func stop() { playerView.stop() }
     
     func seek(absolute seconds: Double) { playerView.seek(absoluteSeconds: seconds) }
@@ -858,6 +890,7 @@ final class MPVLayerView: NSView {
     private(set) var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
     private var pendingURL: URL?
+    private var pendingPaused: Bool = false
     private var displayLink: CVDisplayLink?
     let mpvLayer = MPVLayer()
     
@@ -1196,25 +1229,37 @@ final class MPVLayerView: NSView {
         setupDisplayLink()
         
         if let pending = pendingURL {
-            print("[MPV] Context ready! Now loading pending URL: \(pending.lastPathComponent)")
             let urlToLoad = pending
+            let shouldPause = pendingPaused
             pendingURL = nil
-            command("loadfile", urlToLoad.absoluteString)
+            pendingPaused = false
+            print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
+            if shouldPause {
+                command("loadfile", urlToLoad.absoluteString, "replace", "pause=yes")
+            } else {
+                command("loadfile", urlToLoad.absoluteString)
+            }
         }
     }
     
     private var isIntentionallySwitchingFile = false
 
-    func loadFile(_ url: URL) {
-        print("[MPV] loadFile called: \(url.absoluteString)")
+    func loadFile(_ url: URL, paused: Bool = false) {
+        print("[MPV] loadFile called: \(url.absoluteString) (paused: \(paused))")
         isIntentionallySwitchingFile = true
         if mpvGL == nil {
-            print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent)")
+            print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
             pendingURL = url
+            pendingPaused = paused
         } else {
             pendingURL = nil
-            print("[MPV] Executing loadfile command for: \(url.lastPathComponent)")
-            command("loadfile", url.absoluteString)
+            pendingPaused = false
+            print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
+            if paused {
+                command("loadfile", url.absoluteString, "replace", "pause=yes")
+            } else {
+                command("loadfile", url.absoluteString)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.isIntentionallySwitchingFile = false
@@ -1224,6 +1269,11 @@ final class MPVLayerView: NSView {
     func setPause(_ paused: Bool) {
         guard mpv != nil else { return }
         mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
+    }
+
+    func setMute(_ muted: Bool) {
+        guard mpv != nil else { return }
+        mpv_set_property_string(mpv, "mute", muted ? "yes" : "no")
     }
     
     func stop() {

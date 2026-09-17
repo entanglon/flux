@@ -84,6 +84,8 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
     /// Torrent identity even when this entry plays over direct HTTP (e.g. debrid
     /// links that ship both `url` and `infoHash`). Playback transport still follows `url`.
     var infoHash: String? = nil
+    /// Underlying release source or indexer (e.g. 1337x, YTS, TorrentGalaxy, Server 1)
+    var indexer: String? = nil
 
     /// True for magnet or torrent-swarm backed releases
     var isTorrent: Bool {
@@ -610,8 +612,45 @@ class StreamManager {
         return false
     }
 
+    static func canonicalLanguageCode(_ lang: String) -> String {
+        let u = lang.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch u {
+        case "ENGLISH", "EN", "ENG": return "EN"
+        case "HINDI", "HI", "HIN": return "HI"
+        case "TAMIL", "TA", "TAM": return "TAM"
+        case "TELUGU", "TE", "TEL": return "TEL"
+        case "JAPANESE", "JA", "JPN", "JAP": return "JA"
+        case "KOREAN", "KO", "KOR": return "KO"
+        case "SPANISH", "ES", "SPA", "LATINO", "CASTELLANO": return "ES"
+        case "FRENCH", "FR", "FRA", "FRE": return "FR"
+        case "GERMAN", "DE", "GER", "DEU": return "DE"
+        case "ITALIAN", "IT", "ITA": return "IT"
+        case "RUSSIAN", "RU", "RUS": return "RU"
+        case "CHINESE", "ZH", "CHI", "ZHO": return "ZH"
+        case "PORTUGUESE", "PT", "POR": return "PT"
+        default: return u
+        }
+    }
+
+    static let languageKeywordsAndFlags: [String: (keywords: [String], flags: [String])] = [
+        "EN": (["ENGLISH", "ENG", "EN"], ["🇬🇧", "🇺🇸"]),
+        "HI": (["HINDI", "HIN", "BOLLYWOOD", "DESI"], ["🇮🇳"]),
+        "TAM": (["TAMIL", "TAM"], ["🇮🇳"]),
+        "TEL": (["TELUGU", "TEL"], ["🇮🇳"]),
+        "JA": (["JAPANESE", "JAP", "JPN", "ANIME"], ["🇯🇵"]),
+        "KO": (["KOREAN", "KOR", "K-DRAMA"], ["🇰🇷"]),
+        "FR": (["FRENCH", "FR", "VF", "VOSTFR", "VFF", "TRUEFRENCH"], ["🇫🇷"]),
+        "ES": (["SPANISH", "SPA", "ESP", "LATINO", "CASTELLANO"], ["🇪🇸", "🇲🇽"]),
+        "DE": (["GERMAN", "GER", "DEUTSCH", "DL"], ["🇩🇪"]),
+        "IT": (["ITALIAN", "ITA", "ITALIANO"], ["🇮🇹"]),
+        "RU": (["RUSSIAN", "RUS"], ["🇷🇺"]),
+        "ZH": (["CHINESE", "CHI", "MANDARIN", "CANTONESE"], ["🇨🇳", "🇭🇰", "🇹🇼"]),
+        "PT": (["PORTUGUESE", "POR", "PT-BR", "DUBLADO"], ["🇧🇷", "🇵🇹"])
+    ]
+
     /// Checks if a stream contains or matches the user's preferred audio language,
-    /// intelligently taking into account the title's original release language.
+    /// intelligently taking into account the title's original release language,
+    /// flag emojis, and multi/dual audio combinations.
     func matchesPreferredLanguage(
         _ stream: Stream,
         preferred: String,
@@ -621,77 +660,86 @@ class StreamManager {
         // If the language filter toggle is disabled, accept all streams unconditionally
         guard enableLanguageFilter else { return true }
 
-        let pref = preferred.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let combined = "\(stream.title) \(stream.cleanTitle) \(stream.language ?? "")".uppercased()
+        let targetCode = Self.canonicalLanguageCode(preferred.isEmpty ? "ENGLISH" : preferred)
+        let origCode = (originalLanguage != nil && !originalLanguage!.isEmpty) ? Self.canonicalLanguageCode(originalLanguage!) : "EN"
+
+        let titleRaw = "\(stream.title) \(stream.cleanTitle)"
+        let upperTitle = titleRaw.uppercased()
+        let upperLang = (stream.language ?? "").uppercased()
+        let combined = "\(upperTitle) \(upperLang)"
 
         // Check if stream is multi-audio / dual-audio (contains original audio + regional track)
-        let isMultiOrDual = (stream.language?.uppercased().contains("MULTI") == true) ||
+        let isMultiOrDual = upperLang.contains("MULTI") ||
                             combined.contains("MULTI") ||
                             combined.contains("DUAL") ||
                             combined.contains("MVO") ||
                             combined.contains("DVO")
 
-        // Helper to check if original language of the media matches English
-        let isOriginalEnglish: Bool = {
-            guard let orig = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !orig.isEmpty else {
-                // If originalLanguage is unspecified or nil, assume English for standard Hollywood/Western catalog releases
-                return true
+        // 1. Check for explicit keywords or country flag emojis matching target language
+        let (keywords, flags) = Self.languageKeywordsAndFlags[targetCode] ?? ([targetCode], [])
+        let hasFlagMatch = flags.contains { stream.title.contains($0) }
+        let hasKeywordMatch = keywords.contains { kw in
+            // Guard short 2-character keywords (like EN, HI, FR, ES) with boundary check
+            if kw.count <= 2 {
+                let pattern = #"(?i)[\.\[\(\s/_-]\#(kw)[\.\]\)\s/_-]"#
+                return combined.range(of: pattern, options: .regularExpression) != nil ||
+                       upperLang.components(separatedBy: ", ").contains(kw)
+            } else {
+                return combined.contains(kw)
             }
-            return orig == "en" || orig == "eng" || orig == "english"
-        }()
-
-        if pref.isEmpty || pref == "ENGLISH" {
-            // Case 1: The title itself was originally released in English
-            if isOriginalEnglish {
-                // Hard foreign dubs without original English audio are disqualified
-                if isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage) {
-                    return false
-                }
-                // Standard untagged releases, explicit EN tags, and Dual/Multi-audio releases all have English!
-                return true
-            }
-
-            // Case 2: The title was originally foreign (e.g. Korean 'ko', Japanese 'ja', Spanish 'es')
-            // Match if an English dub track, dual-audio, or multi-audio is advertised
-            if let lang = stream.language?.uppercased() {
-                if lang.contains("EN") || isMultiOrDual {
-                    return true
-                }
-            }
-            if combined.contains("ENGLISH") || combined.contains("ENG") || isMultiOrDual {
-                return true
-            }
-            // Title is foreign and no English audio track is advertised
-            return false
         }
+        let hasExplicitMatch = hasFlagMatch || hasKeywordMatch
 
-        // Other preferred languages (e.g. Hindi, French, Spanish, German, etc.)
-        let langKeywords: [String: [String]] = [
-            "HINDI": ["HINDI", "HIN", "BOLLYWOOD"],
-            "TAMIL": ["TAMIL", "TAM"],
-            "TELUGU": ["TELUGU", "TEL"],
-            "JAPANESE": ["JAPANESE", "JAP", "JPN", "ANIME"],
-            "KOREAN": ["KOREAN", "KOR"],
-            "FRENCH": ["FRENCH", "FR", "VF", "VOSTFR", "VFF", "TRUEFRENCH"],
-            "SPANISH": ["SPANISH", "SPA", "ESP", "LATINO", "CASTELLANO"],
-            "GERMAN": ["GERMAN", "GER", "DEUTSCH", "DL"],
-            "ITALIAN": ["ITALIAN", "ITA"],
-            "RUSSIAN": ["RUSSIAN", "RUS"],
-            "CHINESE": ["CHINESE", "CHI", "MANDARIN", "CANTONESE"],
-            "PORTUGUESE": ["PORTUGUESE", "POR", "PT-BR"]
-        ]
-
-        if let keywords = langKeywords[pref] {
-            if keywords.contains(where: { combined.contains($0) }) {
-                return true
+        // 2. Scenario A: The media's authentic original release language matches the target language!
+        // (e.g. Hindi movie when user wants Hindi; Japanese anime when user wants Japanese; Hollywood when user wants English)
+        if origCode == targetCode {
+            // Hard foreign dubs that replace the original audio are disqualified
+            if isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage) {
+                return false
             }
-        } else if combined.contains(pref) {
+            // Standard untagged releases, Dual/Multi-audio releases, and explicitly tagged releases all contain original audio!
             return true
         }
 
-        // Multi-audio / Dual audio usually carries multiple regional/dub tracks
+        // 3. Scenario B: The media was originally foreign relative to target language
+        // (e.g. Hollywood movie when user wants Hindi/Spanish/French; or Japanese anime when user wants English)
+        if hasExplicitMatch {
+            return true
+        }
+
+        // 4. Bracketed language validation: if stream has bracketed languages like [Eng+Fre] or [Hin+Eng]
+        let bracketPattern = #"(?i)\[([^\]]+)\]|\(([^)]+)\)"#
+        if let regex = try? NSRegularExpression(pattern: bracketPattern),
+           let matches = regex.matches(in: stream.title, range: NSRange(stream.title.startIndex..., in: stream.title)) as [NSTextCheckingResult]?,
+           !matches.isEmpty {
+            for match in matches {
+                if let range = Range(match.range, in: stream.title) {
+                    let bracketContent = String(stream.title[range]).uppercased()
+                    let bracketHasTarget = keywords.contains { bracketContent.contains($0) } ||
+                                           flags.contains { bracketContent.contains($0) }
+                    if bracketHasTarget {
+                        return true
+                    }
+                }
+            }
+        }
+
+        // 5. Multi / Dual Audio inference
         if isMultiOrDual {
-            return true
+            // If target is English on a foreign title (e.g. anime), Dual/Multi almost always has English dub
+            if targetCode == "EN" {
+                return true
+            }
+            // If stream originates from an Indian-focused addon (e.g. MediaFusion) or carries Indian flag,
+            // Multi/Dual contains Indian regional tracks (Hindi/Tamil/Telugu)
+            if (targetCode == "HI" || targetCode == "TAM" || targetCode == "TEL") &&
+               (stream.source.localizedCaseInsensitiveContains("mediafusion") || stream.title.contains("🇮🇳")) {
+                return true
+            }
+            // For major Hollywood releases, general Multi/Dual without restrictive brackets frequently includes Spanish, French, or Hindi
+            if origCode == "EN" && !stream.title.contains("[") {
+                return true
+            }
         }
 
         return false
@@ -703,12 +751,28 @@ class StreamManager {
         let upperTitle = title.uppercased()
         let upperLang = lang.uppercased()
 
-        // If explicitly tagged English, Original Audio, Multi, or Dual, it is not a hard dub
-        if upperLang.contains("EN") || upperLang.contains("ENGLISH") || upperLang.contains("ORIGINAL") || upperLang.contains("MULTI") {
+        // If explicitly tagged Original Audio, Multi, or Dual, it is not a hard dub
+        if upperLang.contains("ORIGINAL") || upperLang.contains("MULTI") ||
+           upperTitle.contains("DUAL") || upperTitle.contains("MULTI") ||
+           upperTitle.contains("ORIG AUD") || upperTitle.contains("ORIGINAL") {
             return false
         }
-        if upperTitle.contains("DUAL") || upperTitle.contains("MULTI") || upperTitle.contains("ORIG AUD") {
-            return false
+
+        // If release explicitly tags the media's original native language, it is not a foreign dub
+        let origCode = (originalLanguage != nil && !originalLanguage!.isEmpty) ? Self.canonicalLanguageCode(originalLanguage!) : "EN"
+        if let (keywords, flags) = Self.languageKeywordsAndFlags[origCode] {
+            let hasFlag = flags.contains { title.contains($0) }
+            let tokens = upperTitle.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            let hasKw = keywords.contains { kw in
+                if kw.count <= 2 {
+                    return tokens.contains(kw) || upperLang.components(separatedBy: ", ").contains(kw)
+                } else {
+                    return upperTitle.contains(kw) || upperLang.contains(kw)
+                }
+            }
+            if hasFlag || hasKw {
+                return false
+            }
         }
 
         let dubMarkers = ["DUBBED", "DUBBING", "TRUEFRENCH", "VOSTFR", "VFF"]
@@ -906,10 +970,33 @@ class StreamManager {
         }
         guard !modeFiltered.isEmpty else { return (nil, []) }
 
-        // 2. Resolution cap
+        // 2. Resolution cap & Language gating
         let maxAllowed = qualityScore(preferredQuality)
         let qualityCapped = modeFiltered.filter { qualityScore($0.quality) <= maxAllowed }
-        let candidates = qualityCapped.isEmpty ? modeFiltered : qualityCapped
+        let qualityCandidates = qualityCapped.isEmpty ? modeFiltered : qualityCapped
+        var candidates = qualityCandidates
+
+        // Strict Language Gating when language filter is enabled:
+        // Prioritize streams matching the target audio language over foreign streams.
+        if enableLanguageFilter {
+            let matchedQuality = qualityCandidates.filter {
+                matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            }
+            if !matchedQuality.isEmpty {
+                print("[StreamManager] 🌐 Language Filter: found \(matchedQuality.count) candidate(s) matching \(preferredLang) within quality cap")
+                candidates = matchedQuality
+            } else {
+                let matchedAll = modeFiltered.filter {
+                    matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+                }
+                if !matchedAll.isEmpty {
+                    print("[StreamManager] 🌐 Language Filter: found \(matchedAll.count) candidate(s) matching \(preferredLang) (outside quality cap)")
+                    candidates = matchedAll
+                } else {
+                    print("[StreamManager] ⚠️ Language Filter: zero candidates matched \(preferredLang). Falling back to general pool.")
+                }
+            }
+        }
 
         // 3. Composite score calculation
         let ranked = candidates.sorted { s1, s2 in
@@ -1403,6 +1490,7 @@ class StreamManager {
                 let seeders = parseSeeders(from: rawTitle)
                 let leechers = parseLeechers(from: rawTitle)
                 let clean = cleanTitleString(name: nameHeader, title: rawTitle)
+                let indexer = Self.parseIndexer(name: nameHeader, title: rawTitle)
 
                 // Extract proxy headers from behaviorHints (e.g. Referer, Origin)
                 let headers = stream.behaviorHints?.proxyHeaders?["request"]
@@ -1423,7 +1511,8 @@ class StreamManager {
                     fileIdx: stream.fileIdx,
                     isSeasonPack: detectSeasonPack(name: nameHeader, title: rawTitle),
                     proxyHeaders: headers,
-                    infoHash: torrentHash
+                    infoHash: torrentHash,
+                    indexer: indexer
                 )
             }
             print("[\(sourceName)] Found \(streams.count) streams")
@@ -1465,7 +1554,89 @@ class StreamManager {
         }
         return nil
     }
-    
+
+    /// Normalizes and cleans raw addon/provider names for uniform UI display.
+    static func cleanProviderName(_ source: String) -> String {
+        let lower = source.lowercased()
+        if lower.contains("webstreamrmbg") || lower.contains("webstreamr-mbg") { return "WebStreamrMBG" }
+        if lower.contains("webstream") { return "WebStreamr" }
+        if lower.contains("pengu") { return "PenguPlay" }
+        if lower.contains("torrentio") { return "Torrentio" }
+        if lower.contains("mediafusion") { return "MediaFusion" }
+        if lower.contains("comet") { return "Comet" }
+        if lower.contains("meteor") { return "Meteor" }
+        if lower.contains("stremify") { return "Stremify" }
+        if lower.contains("knightcrawler") { return "KnightCrawler" }
+        if lower.contains("easydebrid") { return "EasyDebrid" }
+        if lower.contains("aiostreams") { return "AIOStreams" }
+        var s = source
+        s = s.replacingOccurrences(of: #"(?i)\s*\[.*?\]"#, with: "", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? source : s
+    }
+
+    /// Extracts origin release source or indexer (e.g. 1337x, YTS, TorrentGalaxy, Server 1).
+    static func parseIndexer(name: String, title: String) -> String? {
+        let combined = "\(name)\n\(title)"
+
+        // 1. Emoji gear indexer (e.g. "⚙️ 1337x", "⚙️ YTS", "⚙️ TorrentGalaxy")
+        if let match = combined.range(of: #"[⚙️⚙]\s*([^\n\r•]+)"#, options: .regularExpression) {
+            let raw = String(combined[match]).replacingOccurrences(of: #"[⚙️⚙]\s*"#, with: "", options: .regularExpression)
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+
+        // 2. Explicit prefix (e.g. "Indexer: 1337x", "Provider: Vidcloud", "Source: Server 1")
+        if let match = combined.range(of: #"(?i)\b(?:indexer|provider|source):\s*([^\n\r•]+)"#, options: .regularExpression) {
+            let raw = String(combined[match]).replacingOccurrences(of: #"(?i)\b(?:indexer|provider|source):\s*"#, with: "", options: .regularExpression)
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+
+        // 3. Bracketed server (e.g. "[Server 1]", "[StreamWish]")
+        if let match = title.range(of: #"(?i)\[(Server\s*\d+|StreamWish|DoodStream|FileLions|Vidcloud|UpCloud|MixDrop)\]"#, options: .regularExpression) {
+            let raw = String(title[match]).replacingOccurrences(of: #"(\[|\])"#, with: "", options: .regularExpression)
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+
+        return nil
+    }
+
+    /// Strips multi-line scraper metadata and emoji clutter, returning a clean full release title.
+    static func cleanReleaseTitle(title: String?, cleanTitle: String? = nil, itemTitle: String? = nil) -> String {
+        let raw = title ?? ""
+
+        // Split by lines and take the first line that isn't purely metadata (emojis, seeders, size)
+        let lines = raw.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+
+        var primaryLine: String?
+        for line in lines {
+            if line.range(of: #"^\d+(\.\d+)?\s*(gb|mb|tb|b)$"#, options: [.regularExpression, .caseInsensitive]) != nil { continue }
+            if line.range(of: #"^[👤👥💾⚙️⚙•\s\d]+(seeds?|gb|mb|tb)?$"#, options: [.regularExpression, .caseInsensitive]) != nil { continue }
+            if line.hasPrefix("👤") || line.hasPrefix("💾") || line.hasPrefix("⚙️") { continue }
+            primaryLine = line
+            break
+        }
+
+        var candidate = primaryLine ?? cleanTitle ?? raw
+
+        // Strip trailing metadata line remnants if on same line (e.g. "Movie.1080p.x264 👤 200")
+        if let emojiRemnant = candidate.range(of: #"\s*[👤👥💾⚙️⚙].*$"#, options: .regularExpression) {
+            candidate = String(candidate[..<emojiRemnant.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // If candidate is very short or generic (e.g. "1080p", "Server 1", "Unknown Stream"), enrich with itemTitle
+        let lower = candidate.lowercased()
+        if candidate.count <= 10 || lower == "1080p" || lower == "720p" || lower == "4k" || lower == "unknown stream" || lower.hasPrefix("server") {
+            if let it = itemTitle, !it.isEmpty {
+                return candidate.isEmpty || lower == "unknown stream" ? it : "\(it) • \(candidate)"
+            }
+        }
+
+        return candidate.isEmpty ? (itemTitle ?? "Unknown Source") : candidate
+    }
+
     private func cleanTitleString(name: String, title: String) -> String {
         // Strip emojis from both name and title
         let emojiPattern = #"[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{FE0F}\u{200D}]"#
@@ -1653,40 +1824,58 @@ class StreamManager {
         return false
     }
     
-    private func parseLanguage(from title: String) -> String? {
+    func parseLanguage(from title: String) -> String? {
         let upperTitle = title.uppercased()
         
         // Separate audio portion from subtitle portion if "SUB" / "SUBS" is present
         var audioPart = upperTitle
+        var rawAudioPart = title
         if let subRange = upperTitle.range(of: "SUB ") ?? upperTitle.range(of: "SUB(") ?? upperTitle.range(of: "SUBS") {
             audioPart = String(upperTitle[..<subRange.lowerBound])
+            let dist = upperTitle.distance(from: upperTitle.startIndex, to: subRange.lowerBound)
+            let rawSubIndex = title.index(title.startIndex, offsetBy: dist)
+            rawAudioPart = String(title[..<rawSubIndex])
         }
         
         var languages: [String] = []
         let tokens = audioPart.components(separatedBy: CharacterSet.alphanumerics.inverted)
         
-        func hasLang(_ keys: [String], full: String) -> Bool {
-            if audioPart.contains(full) { return true }
+        func hasLang(_ keys: [String], full: String? = nil, flags: [String] = []) -> Bool {
+            if let full = full, audioPart.contains(full) { return true }
             for k in keys {
                 if tokens.contains(k) { return true }
+            }
+            for f in flags {
+                if rawAudioPart.contains(f) { return true }
             }
             return false
         }
         
-        if hasLang(["EN", "ENG"], full: "ENGLISH") { languages.append("EN") }
-        if hasLang(["RU", "RUS"], full: "RUSSIAN") { languages.append("RU") }
-        if hasLang(["KO", "KOR"], full: "KOREAN") { languages.append("KO") }
-        if hasLang(["JA", "JPN"], full: "JAPANESE") { languages.append("JA") }
-        if hasLang(["HI", "HIN"], full: "HINDI") { languages.append("HI") }
-        if hasLang(["ES", "SPA"], full: "SPANISH") { languages.append("ES") }
-        if hasLang(["FR", "FRE", "FRA"], full: "FRENCH") { languages.append("FR") }
-        if hasLang(["DE", "GER", "DEU"], full: "GERMAN") { languages.append("DE") }
-        if hasLang(["IT", "ITA"], full: "ITALIAN") { languages.append("IT") }
-        if hasLang(["ZH", "CHI", "ZHO"], full: "CHINESE") { languages.append("ZH") }
+        if hasLang(["EN", "ENG"], full: "ENGLISH", flags: ["🇬🇧", "🇺🇸"]) { languages.append("EN") }
+        if hasLang(["RU", "RUS"], full: "RUSSIAN", flags: ["🇷🇺"]) { languages.append("RU") }
+        if hasLang(["KO", "KOR"], full: "KOREAN", flags: ["🇰🇷"]) { languages.append("KO") }
+        if hasLang(["JA", "JPN", "JAP"], full: "JAPANESE", flags: ["🇯🇵"]) { languages.append("JA") }
+        if hasLang(["ES", "SPA", "ESP"], full: "SPANISH", flags: ["🇪🇸", "🇲🇽"]) || audioPart.contains("LATINO") || audioPart.contains("CASTELLANO") { languages.append("ES") }
+        if hasLang(["FR", "FRE", "FRA"], full: "FRENCH", flags: ["🇫🇷"]) || audioPart.contains("TRUEFRENCH") || audioPart.contains("VF") || audioPart.contains("VOSTFR") || audioPart.contains("VFF") { languages.append("FR") }
+        if hasLang(["DE", "GER", "DEU"], full: "GERMAN", flags: ["🇩🇪"]) || audioPart.contains("DEUTSCH") { languages.append("DE") }
+        if hasLang(["IT", "ITA"], full: "ITALIAN", flags: ["🇮🇹"]) || audioPart.contains("ITALIANO") { languages.append("IT") }
+        if hasLang(["ZH", "CHI", "ZHO"], full: "CHINESE", flags: ["🇨🇳", "🇭🇰", "🇹🇼"]) || audioPart.contains("MANDARIN") || audioPart.contains("CANTONESE") { languages.append("ZH") }
+        if hasLang(["PT", "POR"], full: "PORTUGUESE", flags: ["🇧🇷", "🇵🇹"]) || audioPart.contains("DUBLADO") { languages.append("PT") }
+        if hasLang(["TA", "TAM"], full: "TAMIL") { languages.append("TAM") }
+        if hasLang(["TE", "TEL"], full: "TELUGU") { languages.append("TEL") }
+
+        let hasExplicitHindi = audioPart.contains("HINDI") || tokens.contains("HI") || tokens.contains("HIN")
+        let isIndianFlag = rawAudioPart.contains("🇮🇳")
+        if hasExplicitHindi || (isIndianFlag && !languages.contains("TAM") && !languages.contains("TEL")) {
+            if !languages.contains("HI") {
+                languages.append("HI")
+            }
+        }
         
         if audioPart.contains("MULTI") || tokens.contains("MULTI") ||
            audioPart.contains("DUAL") || tokens.contains("DUAL") ||
-           audioPart.contains("MVO") || audioPart.contains("DVO") {
+           audioPart.contains("MVO") || audioPart.contains("DVO") ||
+           languages.count >= 2 {
             if !languages.contains("MULTI") {
                 languages.append("MULTI")
             }

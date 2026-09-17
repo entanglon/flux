@@ -591,6 +591,7 @@ struct UserDataServiceTests {
         let profiles = payload["profiles"] as? [[String: Any]]
         #expect(profiles != nil)
         #expect(profiles?.isEmpty == false)
+        #expect(profiles?.first?["episodeProgress"] != nil)
     }
 
     @Test @MainActor func continueWatchingAndRecentlyWatchedSeparation() {
@@ -751,6 +752,127 @@ struct UserDataServiceTests {
         #expect(hist?.lastEpisode == 1)
         let histProg = hist?.progress ?? 0
         #expect(histProg > 0.15 && histProg < 0.20, "Expected history progress around 0.166, got \(histProg)")
+    }
+
+    @Test @MainActor func monotonicHighWaterMarkProtectsEpisodicProgressFromRegression() {
+        let showID = "tt_test_hwm_\(UUID().uuidString)"
+        let show = MediaItem(
+            id: showID,
+            title: "HWM Test Show",
+            description: "",
+            streamURL: nil,
+            category: "series"
+        )
+        defer {
+            var allProg = UserDefaults.standard.dictionary(forKey: UserDataService.shared.episodeProgressKey) as? [String: [String: Any]] ?? [:]
+            allProg.removeValue(forKey: "\(showID)_s1e10")
+            allProg.removeValue(forKey: "\(showID)_s1e4")
+            UserDefaults.standard.set(allProg, forKey: UserDataService.shared.episodeProgressKey)
+            UserDataService.shared.removeFromHistory(show)
+        }
+
+        // 1. Advance to Season 1 Episode 10 (50% progress)
+        UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 10, position: 1000, duration: 2000)
+        UserDataService.shared.addToHistory(show, progress: 0.50, season: 1, episode: 10, playbackPosition: 1000, playbackDuration: 2000)
+
+        let initialHist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(initialHist?.lastSeason == 1)
+        #expect(initialHist?.lastEpisode == 10)
+        #expect(initialHist?.progress == 0.50)
+
+        // 2. Play Episode 4 (not a restart, e.g. peeking at older episode or stale sync)
+        UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 4, position: 500, duration: 2000)
+        UserDataService.shared.addToHistory(show, progress: 0.25, season: 1, episode: 4, playbackPosition: 500, playbackDuration: 2000, isRestart: false)
+
+        // Verify low-level episodeProgress updated for Ep 4
+        let ep4Prog = UserDataService.shared.getEpisodeProgress(for: showID, season: 1, episode: 4)
+        #expect(ep4Prog?.progress == 0.25)
+
+        // High-water mark protection: history item must remain on Episode 10!
+        let protectedHist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(protectedHist?.lastSeason == 1)
+        #expect(protectedHist?.lastEpisode == 10)
+        #expect(protectedHist?.progress == 0.50)
+
+        // 3. User explicitly restarts from Episode 4 (isRestart: true)
+        UserDataService.shared.addToHistory(show, progress: 0.25, season: 1, episode: 4, playbackPosition: 500, playbackDuration: 2000, isRestart: true)
+        let restartedHist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(restartedHist?.lastSeason == 1)
+        #expect(restartedHist?.lastEpisode == 4)
+    }
+
+    @Test @MainActor func reconcileHistoryWithEpisodeProgressHealsOutdatedHistory() {
+        let showID = "tt_test_heal_\(UUID().uuidString)"
+        let show = MediaItem(
+            id: showID,
+            title: "Heal Test Show",
+            description: "",
+            streamURL: nil,
+            category: "series"
+        )
+        defer {
+            var allProg = UserDefaults.standard.dictionary(forKey: UserDataService.shared.episodeProgressKey) as? [String: [String: Any]] ?? [:]
+            for ep in 4...10 {
+                allProg.removeValue(forKey: "\(showID)_s1e\(ep)")
+            }
+            UserDefaults.standard.set(allProg, forKey: UserDataService.shared.episodeProgressKey)
+            UserDataService.shared.removeFromHistory(show)
+        }
+
+        // 1. Stored episode progress shows episodes 4-9 watched, ep 10 at 56%
+        for ep in 4...9 {
+            UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: ep, position: 1900, duration: 2000)
+        }
+        UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 10, position: 1120, duration: 2000)
+
+        // 2. Put an outdated history item at Episode 4 (simulating legacy data restoration)
+        UserDataService.shared.addToHistory(show, progress: 0.95, season: 1, episode: 4, playbackPosition: 1900, playbackDuration: 2000, isRestart: true)
+        let beforeHist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(beforeHist?.lastEpisode == 4)
+
+        // 3. Reconcile
+        UserDataService.shared.reconcileHistoryWithEpisodeProgress()
+
+        // 4. Verify history item was healed to Season 1 Episode 10 with 56% progress
+        let healedHist = UserDataService.shared.getHistoryItem(for: show)
+        #expect(healedHist?.lastSeason == 1)
+        #expect(healedHist?.lastEpisode == 10)
+        #expect(healedHist?.lastPlaybackPosition == 1120)
+        #expect(healedHist?.lastPlaybackDuration == 2000)
+        let progress = healedHist?.progress ?? 0
+        #expect(progress > 0.55 && progress < 0.57)
+    }
+
+    @Test func mergeHistoryDataPreservesFurthestEpisode() {
+        let localShow: [String: Any] = [
+            "id": "tt_merge_show_1",
+            "title": "Merge Test Series",
+            "category": "series",
+            "lastSeason": 1,
+            "lastEpisode": 10,
+            "progress": 0.56,
+            "playbackPosition": 1120.0,
+            "playbackDuration": 2000.0,
+            "timestamp": 1725000000.0
+        ]
+        let remoteShowOutdated: [String: Any] = [
+            "id": "tt_merge_show_1",
+            "title": "Merge Test Series",
+            "category": "series",
+            "lastSeason": 1,
+            "lastEpisode": 4,
+            "progress": 0.95,
+            "playbackPosition": 1900.0,
+            "playbackDuration": 2000.0,
+            "timestamp": 1726000000.0
+        ]
+
+        let merged = UserDataService.shared.mergeHistoryData(local: [localShow], remote: [remoteShowOutdated])
+        #expect(merged.count == 1)
+        let item = merged[0]
+        #expect(item["lastSeason"] as? Int == 1)
+        #expect(item["lastEpisode"] as? Int == 10)
+        #expect(item["playbackPosition"] as? Double == 1120.0)
     }
 }
 

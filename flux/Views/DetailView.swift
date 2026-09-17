@@ -1306,14 +1306,24 @@ struct DetailView: View {
             if (merged.releaseDate == nil || merged.releaseDate?.isEmpty == true) && (item.releaseDate != nil && !item.releaseDate!.isEmpty) {
                 merged.releaseDate = item.releaseDate
             }
-            // Preserve incoming card artwork only when full enrichment did not resolve a URL,
-            // ensuring the #1 community-rated artwork from fullEnrich is never overwritten.
-            if merged.heroURL == nil {
-                merged.heroURL = item.heroURL
-            }
-
-            if merged.backdropURL == nil {
-                merged.backdropURL = item.backdropURL ?? merged.heroURL
+            // Preserve incoming card artwork so opening detail view never swaps or pops backdrop.
+            // If the card already has a valid TMDB backdrop/hero, unconditionally lock onto it.
+            let incomingTMDBHero = [item.heroURL, item.backdropURL].compactMap { $0 }.first(where: { $0.host?.contains("tmdb.org") == true })
+            if let incoming = incomingTMDBHero {
+                merged.heroURL = incoming
+                merged.backdropURL = incoming
+            } else if !TMDBEnricher.shared.hasKey {
+                if let existingBackdrop = item.backdropURL {
+                    merged.backdropURL = existingBackdrop
+                    merged.heroURL = item.heroURL ?? existingBackdrop
+                }
+            } else {
+                if merged.heroURL == nil {
+                    merged.heroURL = merged.backdropURL
+                }
+                if merged.backdropURL == nil {
+                    merged.backdropURL = merged.heroURL
+                }
             }
 
             if merged.posterURL == nil {

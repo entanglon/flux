@@ -265,6 +265,8 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var lastStreamURL: URL?
     var lastTorrentInfoHash: String?
     var lastFileIndex: Int?
+    var lastStreamSource: String?
+    var lastStreamTitle: String?
     var isNewEpisode: Bool? = nil
 }
 
@@ -281,6 +283,7 @@ extension MediaItem {
             lastSeason: nil, lastEpisode: nil, lastEpisodeTitle: nil, lastEpisodeImage: nil,
             timestamp: nil, lastPlaybackPosition: nil, lastPlaybackDuration: nil,
             lastStreamURL: nil, lastTorrentInfoHash: nil, lastFileIndex: nil,
+            lastStreamSource: nil, lastStreamTitle: nil,
             isNewEpisode: nil
         )
     }

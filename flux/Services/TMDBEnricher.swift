@@ -194,14 +194,20 @@ class TMDBEnricher {
                 enriched.posterURL = adaptiveURL(path: posterPath, quality: .poster)
             }
 
-            // Language-Aware Backdrop & Hero Selection
-            if let backdrops = images?["backdrops"] as? [[String: Any]], !backdrops.isEmpty,
-               let bestBackdropPath = Self.selectBestBackdropPath(from: backdrops, preferredLanguage: currentAppLanguage, originalLanguage: origLang) {
-                enriched.backdropURL = adaptiveURL(path: bestBackdropPath, quality: .backdrop)
-                enriched.heroURL = adaptiveURL(path: bestBackdropPath, quality: .automatic)
+            // Canonical Default Backdrop & Hero Selection: prioritize canonical TMDB default backdrop_path
+            let hasTMDBBackdrop = enriched.backdropURL?.host?.contains("tmdb.org") == true
+            if hasTMDBBackdrop, let existingBackdrop = enriched.backdropURL {
+                if enriched.heroURL == nil {
+                    enriched.heroURL = existingBackdrop
+                }
             } else if let backdropPath = json["backdrop_path"] as? String {
                 enriched.backdropURL = adaptiveURL(path: backdropPath, quality: .backdrop)
                 enriched.heroURL = adaptiveURL(path: backdropPath, quality: .automatic)
+            } else if let backdrops = images?["backdrops"] as? [[String: Any]], !backdrops.isEmpty,
+                      let firstValid = backdrops.first(where: { ($0["file_path"] as? String) != nil }),
+                      let path = firstValid["file_path"] as? String {
+                enriched.backdropURL = adaptiveURL(path: path, quality: .backdrop)
+                enriched.heroURL = adaptiveURL(path: path, quality: .automatic)
             }
 
             // Language-Aware Logo Selection
@@ -250,7 +256,11 @@ class TMDBEnricher {
                 if !names.isEmpty { enriched.spokenLanguages = names }
             }
         }
-        
+
+        if enriched.logoURL == nil {
+            enriched.logoURL = await fetchLogoURL(tmdbID: id, type: type, originalLanguage: enriched.originalLanguage)
+        }
+
         // Retain caller's episode session properties. Logo must NOT be
         // overwritten with item.logoURL (which is nil for Cinemeta-origin
         // items) — doing so wipes the TMDB logo that quickEnrich just
@@ -291,7 +301,7 @@ class TMDBEnricher {
                    let (data, _) = try? await URLSession.shared.data(from: url) {
                     if type == "movie", let detail = try? JSONDecoder().decode(TMDBMovieDetail.self, from: data) {
                         await MainActor.run {
-                            if enriched.backdropURL == nil, let backdrop = detail.backdropURL {
+                            if (enriched.backdropURL == nil || enriched.backdropURL?.host?.contains("tmdb.org") != true), let backdrop = detail.backdropURL {
                                 enriched.backdropURL = backdrop
                                 enriched.heroURL = detail.heroURL ?? backdrop
                             }
@@ -326,7 +336,7 @@ class TMDBEnricher {
                         }
                     } else if type == "tv", let detail = try? JSONDecoder().decode(TMDBTVShowDetail.self, from: data) {
                         await MainActor.run {
-                            if enriched.backdropURL == nil, let backdrop = detail.backdropURL {
+                            if (enriched.backdropURL == nil || enriched.backdropURL?.host?.contains("tmdb.org") != true), let backdrop = detail.backdropURL {
                                 enriched.backdropURL = backdrop
                                 enriched.heroURL = detail.heroURL ?? backdrop
                             }
@@ -708,13 +718,29 @@ class TMDBEnricher {
         let mediaType = type.contains("tv") || type.contains("series") ? "tv" : "movie"
         let imgParam = includeImageLanguageParam(originalLanguage: originalLanguage)
         let urlString = "\(baseURL)/\(mediaType)/\(tmdbID)/images?api_key=\(apiKey)&include_image_language=\(imgParam)"
-        guard let url = URL(string: urlString),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let logos = json["logos"] as? [[String: Any]], !logos.isEmpty else {
-            return nil
+        
+        var candidateLogos: [[String: Any]] = []
+        if let url = URL(string: urlString),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let logos = json["logos"] as? [[String: Any]], !logos.isEmpty {
+            candidateLogos = logos
         }
-        return Self.selectBestLogoURL(from: logos, preferredLanguage: preferredLanguage, originalLanguage: originalLanguage)
+
+        // Fallback: If filtered fetch returned no logos (e.g. regional titles like Awarapan 2
+        // where logos are filed under original language or neutral tags), query all logos without language filter.
+        if candidateLogos.isEmpty {
+            let fallbackUrlString = "\(baseURL)/\(mediaType)/\(tmdbID)/images?api_key=\(apiKey)"
+            if let fallbackURL = URL(string: fallbackUrlString),
+               let (fallbackData, _) = try? await URLSession.shared.data(from: fallbackURL),
+               let fallbackJson = try? JSONSerialization.jsonObject(with: fallbackData) as? [String: Any],
+               let allLogos = fallbackJson["logos"] as? [[String: Any]], !allLogos.isEmpty {
+                candidateLogos = allLogos
+            }
+        }
+
+        guard !candidateLogos.isEmpty else { return nil }
+        return Self.selectBestLogoURL(from: candidateLogos, preferredLanguage: preferredLanguage, originalLanguage: originalLanguage)
     }
 
     func fetchMovieRuntime(tmdbID: String) async -> String? {
@@ -823,13 +849,24 @@ class TMDBEnricher {
                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                         return (i, nil, nil, nil)
                     }
-                    let logos = json["logos"] as? [[String: Any]] ?? []
+                    var logos = json["logos"] as? [[String: Any]] ?? []
                     let posters = json["posters"] as? [[String: Any]] ?? []
                     let backdrops = json["backdrops"] as? [[String: Any]] ?? []
 
+                    // Fallback: If filtered fetch returned no logos (e.g. regional titles like Awarapan 2),
+                    // query all logos without language filter.
+                    if logos.isEmpty {
+                        let fallbackUrl = URL(string: "\(baseURL)/\(type)/\(tmdbID)/images?api_key=\(apiKey)")
+                        if let fallbackUrl, let (fbData, _) = try? await URLSession.shared.data(from: fallbackUrl),
+                           let fbJson = try? JSONSerialization.jsonObject(with: fbData) as? [String: Any],
+                           let allLogos = fbJson["logos"] as? [[String: Any]], !allLogos.isEmpty {
+                            logos = allLogos
+                        }
+                    }
+
                     let logo = Self.selectBestLogoURL(from: logos, preferredLanguage: prefLang, originalLanguage: item.originalLanguage)
                     let posterPath = Self.selectBestPosterPath(from: posters, preferredLanguage: prefLang, originalLanguage: item.originalLanguage)
-                    let backdropPath = Self.selectBestBackdropPath(from: backdrops, preferredLanguage: prefLang, originalLanguage: item.originalLanguage)
+                    let backdropPath = (item.backdropURL == nil || item.backdropURL?.host?.contains("tmdb.org") != true) ? Self.selectBestBackdropPath(from: backdrops, preferredLanguage: prefLang, originalLanguage: item.originalLanguage) : nil
 
                     return (i, logo, posterPath, backdropPath)
                 }
@@ -855,9 +892,11 @@ class TMDBEnricher {
         if let posterPath {
             items[idx].posterURL = adaptiveURL(path: posterPath, quality: .poster)
         }
-        if let backdropPath {
+        if let backdropPath, (items[idx].backdropURL == nil || items[idx].backdropURL?.host?.contains("tmdb.org") != true) {
             items[idx].backdropURL = adaptiveURL(path: backdropPath, quality: .backdrop)
-            items[idx].heroURL = adaptiveURL(path: backdropPath, quality: .automatic)
+            if items[idx].heroURL == nil || items[idx].heroURL?.host?.contains("tmdb.org") != true {
+                items[idx].heroURL = adaptiveURL(path: backdropPath, quality: .automatic)
+            }
         }
         items[idx].imageURL = items[idx].backdropURL ?? items[idx].posterURL ?? items[idx].imageURL
         await memoryCache.storeItem(items[idx], for: items[idx].id)

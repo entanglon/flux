@@ -87,8 +87,7 @@ struct PlayerView: View {
         playerManager.isStreamPickerPresented = false
         let hasActivePlayback = playerManager.currentStreamURL != nil || playerManager.currentSelectedStream != nil || mpv.hasLoadedMedia
         if !hasActivePlayback {
-            playerManager.close()
-            dismiss()
+            closePlayer()
         }
     }
 
@@ -207,8 +206,7 @@ struct PlayerView: View {
                 return .handled
             }
             if showExitWarning {
-                playerManager.close()
-                dismiss() // Dismiss the window
+                closePlayer()
             } else {
                 withAnimation {
                     showExitWarning = true
@@ -299,7 +297,7 @@ struct PlayerView: View {
                     playerManager.tryNextStream()
                 }
             }
-            if mpv.hasLoadedMedia {
+            if !isPickerVisible && mpv.hasLoadedMedia {
                 print("PlayerView: adopting warm core, releasing hold...")
                 mpv.play()
             } else if let url = playerManager.currentStreamURL {
@@ -505,6 +503,20 @@ struct PlayerView: View {
     /// just advance the Continue Watching rail. Latches end state so the Up
     /// Next card survives playback stopping.
     private func handleEndOfFile() {
+        let duration = mpv.duration
+        let timePos = mpv.timePos
+        let remaining = duration > 0 ? (duration - timePos) : 0
+
+        // Premature stream cutoff detection: if file ended abruptly while significant duration remains,
+        // it was caused by network drop, socket closure, or upstream stream cut.
+        if hasStartedPlayback && duration > 60 && (remaining > 90 || (mpv.progress < 0.90 && remaining > 30)) {
+            print("[PlayerView] Premature EOF detected at \(Int(timePos))s / \(Int(duration))s (remaining: \(Int(remaining))s). Treating as connection drop.")
+            playerManager.updateWatchProgress(time: timePos, duration: duration)
+            playerManager.pendingResumeTime = timePos
+            playerManager.errorMessage = "Connection lost during playback. Tap to reconnect or choose another source.".localized
+            return
+        }
+
         didReachEnd = true
         isWatchingCreditsCleanly = false
         let current = activeItem
@@ -736,8 +748,7 @@ struct PlayerView: View {
                 onSkipForward: { handleRelativeSeek(delta: 15) }, 
                 onSkipBackward: { handleRelativeSeek(delta: -15) },
                 onClose: {
-                    playerManager.close()
-                    dismiss()
+                    closePlayer()
                 },
                 onTogglePiP: {
                     PiPManager.shared.toggle(mpv: mpv)
@@ -1469,6 +1480,9 @@ struct PlayerView: View {
     }
 
     private func closePlayer() {
+        if mpv.duration > 0 && mpv.timePos > 0 {
+            playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
+        }
         mpv.stop()
         playerManager.close()
         dismiss()
@@ -1707,7 +1721,8 @@ struct PlayerView: View {
             systemImage: "square.and.arrow.up",
             isEnabled: isPlaybackEnabled
         ) { [weak playerManager] in
-            let link = playerManager?.currentMagnetURL ?? playerManager?.currentStreamURL?.absoluteString ?? ""
+            let rawLink = playerManager?.currentMagnetURL ?? playerManager?.currentStreamURL?.absoluteString ?? ""
+            let link = playerManager?.cleanPlayableURLString(from: rawLink) ?? ""
             if !link.isEmpty {
                 DispatchQueue.main.async {
                     NSPasteboard.general.clearContents()
@@ -2034,7 +2049,7 @@ struct PlayerView: View {
                 }
 
                 VStack(spacing: 8) {
-                    Text(hasStreams ? "Playback Issue".localized : "No Streams Available".localized)
+                    Text(error.contains("Connection lost") ? "Playback Interrupted".localized : (hasStreams ? "Playback Issue".localized : "No Streams Available".localized))
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
 
@@ -2046,6 +2061,24 @@ struct PlayerView: View {
                 }
 
                 HStack(spacing: 12) {
+                    if playerManager.currentSelectedStream != nil {
+                        Button {
+                            playerManager.errorMessage = nil
+                            playerManager.retryCurrentStream()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Reconnect".localized)
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.white, in: Capsule())
+                            .foregroundColor(.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     if !hasStreams {
                         Button {
                             playerManager.errorMessage = nil
@@ -2077,15 +2110,14 @@ struct PlayerView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
-                            .background(Color.white, in: Capsule())
-                            .foregroundColor(.black)
+                            .background(playerManager.currentSelectedStream != nil ? Color.white.opacity(0.15) : Color.white, in: Capsule())
+                            .foregroundColor(playerManager.currentSelectedStream != nil ? .white : .black)
                         }
                         .buttonStyle(.plain)
                     }
 
                     Button {
-                        playerManager.close()
-                        dismiss()
+                        closePlayer()
                     } label: {
                         Text("Close".localized)
                             .font(.system(size: 13, weight: .semibold))
@@ -2113,19 +2145,32 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var aboutStreamSourceModal: some View {
-        let stream = playerManager.currentSelectedStream
+        let stream = playerManager.currentSelectedStream ?? playerManager.availableStreams.first(where: { s in
+            if let activeHash = playerManager.activeTorrentHash, s.isTorrent {
+                return playerManager.torrentHash(s)?.lowercased() == activeHash.lowercased()
+            }
+            if let currentURL = playerManager.currentStreamURL {
+                return s.url == currentURL || playerManager.getPlayableURL(for: s) == currentURL
+            }
+            return false
+        })
         let mediaInfo = mpv.getMediaInfo()
-        let isTorrent = stream?.isTorrent == true
-        let title = stream?.title ?? (playerManager.currentItem?.title ?? "Unknown")
-        let sourceName = stream?.source ?? "Direct Link"
-        let resolution = mediaInfo.resolution ?? (stream?.quality.isEmpty == false ? stream!.quality : "Unknown")
-        let vCodec = mediaInfo.videoCodec?.uppercased() ?? (stream?.codec?.uppercased() ?? "Auto")
+        let isTorrent = stream?.isTorrent == true || playerManager.activeTorrentHash != nil || playerManager.currentMagnetURL != nil || playerManager.currentStreamURL?.absoluteString.contains("127.0.0.1:11470") == true
+        let rawSourceName = stream?.source ?? playerManager.currentItem?.lastStreamSource ?? UserDefaults.standard.string(forKey: UserDefaults.Key.lastUsedSource) ?? (isTorrent ? "Stremio Engine".localized : "Direct Stream".localized)
+        let sourceName = StreamManager.cleanProviderName(rawSourceName)
+        let rawIndexer = stream?.indexer ?? StreamManager.parseIndexer(name: stream?.source ?? "", title: stream?.title ?? "")
+        let originIndexer = (rawIndexer != nil && rawIndexer?.lowercased() != sourceName.lowercased()) ? rawIndexer : nil
+        let cleanReleaseTitle = StreamManager.cleanReleaseTitle(title: stream?.title, cleanTitle: stream?.cleanTitle, itemTitle: playerManager.currentItem?.title)
+
+        let resolution = mediaInfo.resolution ?? (stream?.quality.isEmpty == false ? stream!.quality : "Unknown".localized)
+        let vCodec = mediaInfo.videoCodec?.uppercased() ?? (stream?.codec?.uppercased() ?? "Auto".localized)
         let aCodec = mediaInfo.audioCodec?.uppercased() ?? "Stereo"
-        let hwdec = mediaInfo.hwdec?.uppercased() ?? (UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "Active" : "Disabled")
-        let transport = isTorrent ? "BitTorrent Swarm (P2P)" : "Direct HTTP Stream"
+        let hwdec = mediaInfo.hwdec?.uppercased() ?? (UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "Active".localized : "Disabled".localized)
+        let transport = isTorrent ? "BitTorrent Swarm (P2P)".localized : "Direct HTTP Stream".localized
         let size = stream?.size ?? "—"
         let demuxerCache = String(format: "%.1f sec", mpv.demuxerCacheTime)
-        let link = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
+        let rawLink = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
+        let link = playerManager.cleanPlayableURLString(from: rawLink)
 
         VStack(alignment: .leading, spacing: 18) {
             // Header
@@ -2155,7 +2200,7 @@ struct PlayerView: View {
                 .buttonStyle(.plain)
             }
 
-            // Provider & Transport badges
+            // Provider, Indexer & Transport badges
             HStack(spacing: 8) {
                 HStack(spacing: 5) {
                     Image(systemName: "cube.box.fill")
@@ -2167,6 +2212,19 @@ struct PlayerView: View {
                 .padding(.vertical, 4)
                 .background(Color.white.opacity(0.12), in: Capsule())
                 .foregroundColor(.white)
+
+                if let origin = originIndexer {
+                    HStack(spacing: 5) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 10))
+                        Text(origin)
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.cyan.opacity(0.18), in: Capsule())
+                    .foregroundColor(.cyan)
+                }
 
                 HStack(spacing: 5) {
                     Image(systemName: isTorrent ? "point.3.filled.connected.trianglepath.dotted" : "globe")
@@ -2200,7 +2258,7 @@ struct PlayerView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .tracking(0.8)
 
-                Text(title)
+                Text(cleanReleaseTitle)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(3)
@@ -2213,16 +2271,16 @@ struct PlayerView: View {
             // Specs Grid
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 10) {
                 GridRow {
-                    specField(title: "Resolution", value: resolution)
-                    specField(title: "Video Codec", value: vCodec)
+                    specField(title: "Resolution".localized, value: resolution)
+                    specField(title: "Video Codec".localized, value: vCodec)
                 }
                 GridRow {
-                    specField(title: "Audio Codec", value: aCodec)
-                    specField(title: "Hardware Dec", value: hwdec)
+                    specField(title: "Audio Codec".localized, value: aCodec)
+                    specField(title: "Hardware Dec".localized, value: hwdec)
                 }
                 GridRow {
-                    specField(title: "File Size", value: size)
-                    specField(title: "Demuxer Buffer", value: demuxerCache)
+                    specField(title: "File Size".localized, value: size)
+                    specField(title: "Demuxer Buffer".localized, value: demuxerCache)
                 }
             }
 
@@ -2930,22 +2988,7 @@ struct StreamRowItemView: View {
     }
 
     private func cleanProviderName(_ source: String) -> String {
-        let lower = source.lowercased()
-        if lower.contains("webstreamrmbg") || lower.contains("webstreamr-mbg") { return "WebStreamrMBG" }
-        if lower.contains("webstream") { return "WebStreamr" }
-        if lower.contains("pengu") { return "PenguPlay" }
-        if lower.contains("torrentio") { return "Torrentio" }
-        if lower.contains("mediafusion") { return "MediaFusion" }
-        if lower.contains("comet") { return "Comet" }
-        if lower.contains("meteor") { return "Meteor" }
-        if lower.contains("stremify") { return "Stremify" }
-        if lower.contains("knightcrawler") { return "KnightCrawler" }
-        if lower.contains("easydebrid") { return "EasyDebrid" }
-        if lower.contains("aiostreams") { return "AIOStreams" }
-        var s = source
-        s = s.replacingOccurrences(of: #"(?i)\s*\[.*?\]"#, with: "", options: .regularExpression)
-        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? source : s
+        StreamManager.cleanProviderName(source)
     }
 
     private func badgeView(text: String, background: Color, foreground: Color, isBold: Bool = false) -> some View {

@@ -1,15 +1,20 @@
 import Foundation
 
+/// Centralized runtime vs test environment detection.
+enum AppEnvironment {
+    static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
 /// Persistent store for session secrets backed by a private UserDefaults namespace.
 /// Using UserDefaults eliminates macOS Security daemon Keychain ACL authorization dialogs
 /// which occur on every rebuild of ad-hoc / unsigned development binaries.
 enum KeychainStore {
     private static let keyPrefix = "flux.sec."
 
-    private static var isRunningTests: Bool {
-        NSClassFromString("XCTestCase") != nil ||
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-    }
+    private static var isRunningTests: Bool { AppEnvironment.isRunningTests }
 
     private static var testStore: [String: String] = [:]
     private static let lock = NSLock()

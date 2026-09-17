@@ -234,6 +234,12 @@ final class ProfileManager: ObservableObject {
 
     /// Wipes all active watching profile state and account profiles upon sign-out.
     func handleSignOut() {
+        if AppEnvironment.isRunningTests {
+            currentProfile = nil
+            profiles = []
+            applyProfileDataScope(nil)
+            return
+        }
         for profile in profiles {
             let prefix = "profile.\(profile.id.uuidString)."
             for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress"] {
@@ -446,6 +452,12 @@ final class ProfileManager: ObservableObject {
             } else {
                 dict["collections"] = []
             }
+            let epProgKey = prefix + "episodeProgress"
+            if let epProg = UserDefaults.standard.dictionary(forKey: epProgKey) as? [String: [String: Any]] {
+                dict["episodeProgress"] = epProg
+            } else {
+                dict["episodeProgress"] = [:]
+            }
             return dict
         }
     }
@@ -492,6 +504,18 @@ final class ProfileManager: ObservableObject {
                 }
                 UserDefaults.standard.set(localFormatCol, forKey: colKey)
             }
+            let epKey = "profile.\(id.uuidString).episodeProgress"
+            if let remoteEp = dict["episodeProgress"] as? [String: [String: Any]], !remoteEp.isEmpty {
+                var localEp = (UserDefaults.standard.dictionary(forKey: epKey) as? [String: [String: Any]]) ?? [:]
+                for (k, v) in remoteEp {
+                    let localTime = (localEp[k]?["timestamp"] as? Double) ?? 0
+                    let remoteTime = (v["timestamp"] as? Double) ?? 0
+                    if remoteTime >= localTime {
+                        localEp[k] = v
+                    }
+                }
+                UserDefaults.standard.set(localEp, forKey: epKey)
+            }
         }
         guard !imported.isEmpty else { return }
 
@@ -513,6 +537,11 @@ final class ProfileManager: ObservableObject {
                         if targetWatch.isEmpty,
                            let localWatch = UserDefaults.standard.array(forKey: sourcePrefix + "watchlist") as? [[String: Any]], !localWatch.isEmpty {
                             UserDefaults.standard.set(localWatch, forKey: targetPrefix + "watchlist")
+                        }
+                        let targetEp = (UserDefaults.standard.dictionary(forKey: targetPrefix + "episodeProgress") as? [String: [String: Any]]) ?? [:]
+                        if targetEp.isEmpty,
+                           let localEp = UserDefaults.standard.dictionary(forKey: sourcePrefix + "episodeProgress") as? [String: [String: Any]], !localEp.isEmpty {
+                            UserDefaults.standard.set(localEp, forKey: targetPrefix + "episodeProgress")
                         }
                         for key in [sourcePrefix + "history", sourcePrefix + "watchlist", sourcePrefix + "loved", sourcePrefix + "watchSnaps", sourcePrefix + "settings", sourcePrefix + "collections", sourcePrefix + "episodeProgress"] {
                             UserDefaults.standard.removeObject(forKey: key)

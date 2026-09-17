@@ -683,6 +683,153 @@ struct StreamManagerTests {
         #expect(winnerWithoutFilter?.id == fastForeignStream.id)
     }
 
+    @Test func parseLanguageExtractsFlagEmojisAndRegionalTokens() {
+        let manager = StreamManager.shared
+
+        let indianStream = manager.parseLanguage(from: "Torrentio\n1080p 🇮🇳 Hindi Dual Audio x264")
+        #expect(indianStream?.contains("HI") == true)
+        #expect(indianStream?.contains("MULTI") == true)
+
+        let britishStream = manager.parseLanguage(from: "Torrentio\n1080p 🇬🇧 English")
+        #expect(britishStream == "EN")
+
+        let animeSubStream = manager.parseLanguage(from: "1080p 🇯🇵 Japanese SUB 🇬🇧 English")
+        #expect(animeSubStream?.contains("JA") == true)
+        #expect(animeSubStream?.contains("EN") == false)
+
+        let compoundStream = manager.parseLanguage(from: "1080p [Hin+Eng] Dual Audio")
+        #expect(compoundStream?.contains("HI") == true)
+        #expect(compoundStream?.contains("EN") == true)
+        #expect(compoundStream?.contains("MULTI") == true)
+
+        let tamilStream = manager.parseLanguage(from: "1080p 🇮🇳 Tamil x264")
+        #expect(tamilStream?.contains("TAM") == true)
+        #expect(tamilStream?.contains("HI") == false)
+    }
+
+    @Test func matchesPreferredLanguageHandlesOriginalLanguageNativeReleases() {
+        let manager = StreamManager.shared
+
+        let untaggedNativeStream = Stream(
+            title: "Awarapan.2.2026.1080p.WEB-DL.x264",
+            cleanTitle: "Awarapan 2",
+            url: URL(string: "magnet:?xt=urn:btih:3333333333333333333333333333333333333333")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+
+        // Native Indian title when preferred is Hindi -> Matches!
+        let matchesHindi = manager.matchesPreferredLanguage(
+            untaggedNativeStream,
+            preferred: "Hindi",
+            originalLanguage: "hi",
+            enableLanguageFilter: true
+        )
+        #expect(matchesHindi == true)
+
+        // Same native Indian title when preferred is English -> Does NOT match (no English track tagged)!
+        let matchesEnglish = manager.matchesPreferredLanguage(
+            untaggedNativeStream,
+            preferred: "English",
+            originalLanguage: "hi",
+            enableLanguageFilter: true
+        )
+        #expect(matchesEnglish == false)
+
+        // Foreign Anime title untagged when preferred is English -> Does NOT match
+        let untaggedAnime = Stream(
+            title: "Demon.Slayer.S04E01.1080p.x264",
+            cleanTitle: "Demon Slayer S04E01",
+            url: URL(string: "magnet:?xt=urn:btih:4444444444444444444444444444444444444444")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+        let animeMatchesEnglish = manager.matchesPreferredLanguage(
+            untaggedAnime,
+            preferred: "English",
+            originalLanguage: "ja",
+            enableLanguageFilter: true
+        )
+        #expect(animeMatchesEnglish == false)
+
+        // Dual Audio Anime title when preferred is English -> Matches!
+        let dualAudioAnime = Stream(
+            title: "Demon.Slayer.S04E01.1080p.[Dual-Audio].x264",
+            cleanTitle: "Demon Slayer S04E01",
+            url: URL(string: "magnet:?xt=urn:btih:5555555555555555555555555555555555555555")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+        let dualMatchesEnglish = manager.matchesPreferredLanguage(
+            dualAudioAnime,
+            preferred: "English",
+            originalLanguage: "ja",
+            enableLanguageFilter: true
+        )
+        #expect(dualMatchesEnglish == true)
+    }
+
+    @Test func matchesPreferredLanguageBracketedCompoundMatching() {
+        let manager = StreamManager.shared
+
+        let bracketStream = Stream(
+            title: "Interstellar.2014.1080p.[Hin+Eng].x264",
+            cleanTitle: "Interstellar",
+            url: URL(string: "magnet:?xt=urn:btih:6666666666666666666666666666666666666666")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+
+        #expect(manager.matchesPreferredLanguage(bracketStream, preferred: "Hindi", originalLanguage: "en", enableLanguageFilter: true))
+        #expect(manager.matchesPreferredLanguage(bracketStream, preferred: "English", originalLanguage: "en", enableLanguageFilter: true))
+        #expect(!manager.matchesPreferredLanguage(bracketStream, preferred: "Spanish", originalLanguage: "en", enableLanguageFilter: true))
+    }
+
+    @Test func selectFastStartCandidateStrictGatingPrioritizesLanguageOverHigherSeededForeignStream() {
+        let manager = StreamManager.shared
+
+        let highSeedEnglishStream = Stream(
+            title: "Gladiator.II.2024.4K.HDR.English.x265",
+            cleanTitle: "Gladiator II",
+            url: URL(string: "magnet:?xt=urn:btih:7777777777777777777777777777777777777777")!,
+            source: "Torrentio",
+            quality: "4K",
+            size: "15.0 GB",
+            seeders: 500
+        )
+        let modestHindiStream = Stream(
+            title: "Gladiator.II.2024.1080p.Hindi.[Hin+Eng].Dual.Audio.x264",
+            cleanTitle: "Gladiator II",
+            url: URL(string: "magnet:?xt=urn:btih:8888888888888888888888888888888888888888")!,
+            source: "MediaFusion",
+            quality: "1080p",
+            size: "2.4 GB",
+            seeders: 20
+        )
+
+        // With language filter ON and Hindi preference: 1080p Hindi MUST beat 4K 500-seed English stream!
+        let (winnerHindi, _) = manager.selectFastStartCandidate(
+            from: [highSeedEnglishStream, modestHindiStream],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "Hindi",
+            originalLanguage: "en",
+            enableLanguageFilter: true
+        )
+        #expect(winnerHindi?.id == modestHindiStream.id)
+
+        // If no Hindi stream exists, it falls back to the general pool (English stream)
+        let (fallbackWinner, _) = manager.selectFastStartCandidate(
+            from: [highSeedEnglishStream],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "Hindi",
+            originalLanguage: "en",
+            enableLanguageFilter: true
+        )
+        #expect(fallbackWinner?.id == highSeedEnglishStream.id)
+    }
+
     @Test func episodeMatchingAwardsBonusToTargetEpisode() {
         let manager = StreamManager.shared
         let ep2Stream = Stream(
@@ -1105,6 +1252,63 @@ struct StreamManagerTests {
             preferredLang: "English", targetTitle: "Movie"
         )
         #expect(primary?.stableKey == webdl.stableKey)
+    }
+
+    @Test func cleanProviderNameNormalizesVariantsAndStripsBrackets() {
+        #expect(StreamManager.cleanProviderName("WebStreamrMBG") == "WebStreamrMBG")
+        #expect(StreamManager.cleanProviderName("webstreamrmbg [debrid]") == "WebStreamrMBG")
+        #expect(StreamManager.cleanProviderName("WebStreamr") == "WebStreamr")
+        #expect(StreamManager.cleanProviderName("pengu") == "PenguPlay")
+        #expect(StreamManager.cleanProviderName("PenguPlay [Direct]") == "PenguPlay")
+        #expect(StreamManager.cleanProviderName("torrentio") == "Torrentio")
+        #expect(StreamManager.cleanProviderName("Torrentio [RD+]") == "Torrentio")
+        #expect(StreamManager.cleanProviderName("mediafusion") == "MediaFusion")
+        #expect(StreamManager.cleanProviderName("MediaFusion [Live]") == "MediaFusion")
+        #expect(StreamManager.cleanProviderName("comet") == "Comet")
+        #expect(StreamManager.cleanProviderName("[P2P☁️] Meteor") == "Meteor")
+        #expect(StreamManager.cleanProviderName("stremify") == "Stremify")
+        #expect(StreamManager.cleanProviderName("knightcrawler") == "KnightCrawler")
+        #expect(StreamManager.cleanProviderName("easydebrid") == "EasyDebrid")
+        #expect(StreamManager.cleanProviderName("aiostreams") == "AIOStreams")
+        #expect(StreamManager.cleanProviderName("CustomScraper [v2.1]") == "CustomScraper")
+    }
+
+    @Test func parseIndexerExtractsOriginsAccurately() {
+        // Emoji gear indexer
+        #expect(StreamManager.parseIndexer(name: "Torrentio", title: "Movie.1080p\n👤 250 💾 2.4 GB ⚙️ 1337x") == "1337x")
+        #expect(StreamManager.parseIndexer(name: "Torrentio", title: "Movie.720p\n⚙️ YTS • 50 seeds") == "YTS")
+        #expect(StreamManager.parseIndexer(name: "Torrentio", title: "Movie.2160p\n⚙️ TorrentGalaxy") == "TorrentGalaxy")
+
+        // Explicit prefix
+        #expect(StreamManager.parseIndexer(name: "Scraper", title: "Movie • Source: Server 1") == "Server 1")
+        #expect(StreamManager.parseIndexer(name: "Scraper", title: "Provider: Vidcloud\n1080p stream") == "Vidcloud")
+        #expect(StreamManager.parseIndexer(name: "Scraper", title: "Indexer: ThePirateBay") == "ThePirateBay")
+
+        // Bracketed server
+        #expect(StreamManager.parseIndexer(name: "WebStreamr", title: "Movie [Server 1]") == "Server 1")
+        #expect(StreamManager.parseIndexer(name: "WebStreamr", title: "Movie [StreamWish]") == "StreamWish")
+
+        // No indexer
+        #expect(StreamManager.parseIndexer(name: "Torrentio", title: "Movie.1080p.BluRay.x264") == nil)
+    }
+
+    @Test func cleanReleaseTitleStripsScraperBloatAndEnrichesShortTitles() {
+        // Multi-line scraper metadata stripping
+        let multiLineScraper = "Movie.2024.1080p.WEBRip.x264-FLUX\n👤 250 💾 2.4 GB ⚙️ 1337x"
+        #expect(StreamManager.cleanReleaseTitle(title: multiLineScraper) == "Movie.2024.1080p.WEBRip.x264-FLUX")
+
+        // Scraper metadata on first line followed by title
+        let invertedScraper = "👤 500 💾 1.2 GB\nMovie.2024.720p.HDTV.x264"
+        #expect(StreamManager.cleanReleaseTitle(title: invertedScraper) == "Movie.2024.720p.HDTV.x264")
+
+        // Trailing inline emoji remnants
+        let inlineEmoji = "Movie.1080p.x264 👤 200 💾 1.5 GB"
+        #expect(StreamManager.cleanReleaseTitle(title: inlineEmoji) == "Movie.1080p.x264")
+
+        // Short / generic titles enriched with item title
+        #expect(StreamManager.cleanReleaseTitle(title: "1080p", itemTitle: "Inception") == "Inception • 1080p")
+        #expect(StreamManager.cleanReleaseTitle(title: "Server 1", itemTitle: "Avatar") == "Avatar • Server 1")
+        #expect(StreamManager.cleanReleaseTitle(title: nil, itemTitle: "Interstellar") == "Interstellar")
     }
 }
 

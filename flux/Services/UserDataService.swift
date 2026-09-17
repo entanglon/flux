@@ -16,6 +16,7 @@ class UserDataService: ObservableObject {
     private var watchlistKey = "localWatchlistDataStremio" // New Key to prevent crash from old TMDB int IDs
     private var historyKey = "localHistoryDataStremio"
     private var collectionsKey = "localCollectionsData"
+    var episodeProgressKey = "globalEpisodeProgress"
 
     /// Scopes all history/watchlist storage to a profile. When `migrateLegacyData`
     /// is set (first profile ever created), pre-profile data is carried over so
@@ -25,6 +26,7 @@ class UserDataService: ObservableObject {
             historyKey = "profile.\(profile.id.uuidString).history"
             watchlistKey = "profile.\(profile.id.uuidString).watchlist"
             collectionsKey = "profile.\(profile.id.uuidString).collections"
+            episodeProgressKey = "profile.\(profile.id.uuidString).episodeProgress"
 
             if !profile.isKids {
                 migrateLegacyDataIfNeeded(for: profile.id)
@@ -33,6 +35,7 @@ class UserDataService: ObservableObject {
             historyKey = "localHistoryDataStremio"
             watchlistKey = "localWatchlistDataStremio"
             collectionsKey = "localCollectionsData"
+            episodeProgressKey = "globalEpisodeProgress"
         }
         watchlist = []
         history = []
@@ -43,6 +46,7 @@ class UserDataService: ObservableObject {
     }
 
     private func migrateLegacyDataIfNeeded(for profileID: UUID) {
+        guard !AppEnvironment.isRunningTests else { return }
         let pWatchKey = "profile.\(profileID.uuidString).watchlist"
         let pHistKey = "profile.\(profileID.uuidString).history"
         let pColKey = "profile.\(profileID.uuidString).collections"
@@ -95,6 +99,10 @@ class UserDataService: ObservableObject {
         watchlistKey = "localWatchlistDataStremio"
         collectionsKey = "localCollectionsData"
         
+        if AppEnvironment.isRunningTests {
+            return
+        }
+        
         UserDefaults.standard.removeObject(forKey: "localHistoryDataStremio")
         UserDefaults.standard.removeObject(forKey: "localWatchlistDataStremio")
         UserDefaults.standard.removeObject(forKey: "localCollectionsData")
@@ -112,6 +120,110 @@ class UserDataService: ObservableObject {
         }
 
         collections = loadCollections()
+        reconcileHistoryWithEpisodeProgress()
+    }
+
+    /// Automatically reconciles history series items with verified records in `episodeProgress`.
+    /// If low-level episodeProgress proves the user reached a higher season or episode than what is
+    /// currently recorded in `history` (e.g. following cloud sync conflict or legacy data import),
+    /// this function heals the history item to point to the highest genuine watch progress.
+    func reconcileHistoryWithEpisodeProgress() {
+        guard !history.isEmpty else { return }
+        let allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
+        guard !allProgress.isEmpty else { return }
+
+        var didChange = false
+        var currentData = UserDefaults.standard.array(forKey: historyKey) as? [[String: Any]] ?? []
+
+        for idx in history.indices {
+            let item = history[idx]
+            let isSeries = item.category.lowercased().contains("tv") || item.category.lowercased().contains("series") || item.isSeries || item.lastSeason != nil
+            guard isSeries else { continue }
+
+            let cleanID = item.id.replacingOccurrences(of: "tt", with: "")
+
+            var episodeRecords: [(season: Int, episode: Int, progress: Double, position: Double, duration: Double, timestamp: Double)] = []
+
+            for (key, val) in allProgress {
+                guard let underscoreIdx = key.lastIndex(of: "_") else { continue }
+                let itemPrefix = String(key[..<underscoreIdx])
+                let suffix = String(key[key.index(after: underscoreIdx)...])
+                
+                let matchesID = (itemPrefix == item.id) || (!cleanID.isEmpty && (itemPrefix == cleanID || itemPrefix == "tt\(cleanID)"))
+                guard matchesID else { continue }
+                
+                guard suffix.starts(with: "s"),
+                      let eIndex = suffix.firstIndex(of: "e") else { continue }
+                let sStr = String(suffix[suffix.index(after: suffix.startIndex)..<eIndex])
+                let eStr = String(suffix[suffix.index(after: eIndex)...])
+                guard let s = Int(sStr), let e = Int(eStr) else { continue }
+
+                let prog = val["progress"] as? Double ?? 0.0
+                let pos = val["position"] as? Double ?? 0.0
+                let dur = val["duration"] as? Double ?? 0.0
+                let ts = val["timestamp"] as? Double ?? 0.0
+
+                episodeRecords.append((s, e, prog, pos, dur, ts))
+            }
+
+            guard !episodeRecords.isEmpty else { continue }
+            episodeRecords.sort {
+                if $0.season != $1.season {
+                    return $0.season < $1.season
+                }
+                return $0.episode < $1.episode
+            }
+
+            guard let furthest = episodeRecords.last else { continue }
+            let currentS = item.lastSeason ?? 0
+            let currentE = item.lastEpisode ?? 0
+
+            let isBehind: Bool
+            if currentS < furthest.season {
+                isBehind = true
+            } else if currentS == furthest.season && currentE < furthest.episode {
+                isBehind = true
+            } else {
+                isBehind = false
+            }
+
+            if isBehind {
+                var updatedItem = item
+                updatedItem.lastSeason = furthest.season
+                updatedItem.lastEpisode = furthest.episode
+                updatedItem.progress = furthest.progress
+                updatedItem.lastPlaybackPosition = furthest.position
+                updatedItem.lastPlaybackDuration = furthest.duration
+                if furthest.timestamp > (updatedItem.timestamp ?? 0) {
+                    updatedItem.timestamp = furthest.timestamp
+                }
+                history[idx] = updatedItem
+                didChange = true
+
+                if let dictIdx = currentData.firstIndex(where: { dict in
+                    let dictID = dict["id"] as? String ?? ""
+                    return dictID == item.id || (!cleanID.isEmpty && dictID.replacingOccurrences(of: "tt", with: "") == cleanID)
+                }) {
+                    var dict = currentData[dictIdx]
+                    dict["lastSeason"] = furthest.season
+                    dict["lastEpisode"] = furthest.episode
+                    dict["progress"] = furthest.progress
+                    dict["lastPlaybackPosition"] = furthest.position
+                    dict["lastPlaybackDuration"] = furthest.duration
+                    if furthest.timestamp > (dict["timestamp"] as? Double ?? 0) {
+                        dict["timestamp"] = furthest.timestamp
+                    }
+                    currentData[dictIdx] = dict
+                }
+            }
+        }
+
+        if didChange {
+            UserDefaults.standard.set(currentData, forKey: historyKey)
+            UserDefaults.standard.synchronize()
+            AuthManager.shared.scheduleAutoSync()
+            print("[UserDataService] 🩹 Successfully healed \(history.count) history item(s) from episodeProgress high-water mark")
+        }
     }
 
     /// Fills in missing artwork/IDs for history items via TMDB and publishes the
@@ -273,6 +385,8 @@ class UserDataService: ObservableObject {
             let lastStreamURLString = dict["lastStreamURL"] as? String
             let lastTorrentInfoHash = dict["lastTorrentInfoHash"] as? String
             let lastFileIndex = dict["lastFileIndex"] as? Int
+            let lastStreamSource = dict["lastStreamSource"] as? String
+            let lastStreamTitle = dict["lastStreamTitle"] as? String
             let isNewEpisode = dict["isNewEpisode"] as? Bool
             
             var item = MediaItem(
@@ -311,6 +425,8 @@ class UserDataService: ObservableObject {
             }
             item.lastTorrentInfoHash = lastTorrentInfoHash
             item.lastFileIndex = lastFileIndex
+            item.lastStreamSource = lastStreamSource
+            item.lastStreamTitle = lastStreamTitle
             item.isNewEpisode = isNewEpisode
             
             if let imageString = dict["lastEpisodeImage"] as? String, let url = URL(string: imageString) {
@@ -435,7 +551,7 @@ class UserDataService: ObservableObject {
         return result
     }
 
-    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, isLightweightTick: Bool = false, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
+    private func addToList(key: String, item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, streamSource: String? = nil, streamTitle: String? = nil, isRestart: Bool = false, isLightweightTick: Bool = false, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         let typeString = item.category.lowercased().contains("movie") ? "movie" : "tv"
         
         let imageVal = item.posterURL?.absoluteString ?? item.imageURL?.absoluteString ?? ""
@@ -467,24 +583,62 @@ class UserDataService: ObservableObject {
             return isMatch
         }
 
-        // Monotonic high-water mark progress calculation:
-        // Progress for Continue Watching cards must NEVER regress backwards when re-opening
-        // or scrubbing to an earlier timestamp, unless explicitly restarting.
+        // Monotonic high-water mark progress & episode calculation:
+        // Progress and episode positions for Continue Watching cards must NEVER regress backwards
+        // when re-opening, scrubbing, or peeking at an earlier episode, unless explicitly restarting.
+        let isSeries = (typeString != "movie")
+        let existingSeason = existingEntry?["lastSeason"] as? Int
+        let existingEpisode = existingEntry?["lastEpisode"] as? Int
+        let newSeason = season ?? item.lastSeason
+        let newEpisode = episode ?? item.lastEpisode
+
+        let isEarlierEpisode: Bool
+        if isSeries, !isRestart, let exS = existingSeason, let exE = existingEpisode, let inS = newSeason, let inE = newEpisode {
+            if inS < exS {
+                isEarlierEpisode = true
+            } else if inS == exS && inE < exE {
+                isEarlierEpisode = true
+            } else {
+                isEarlierEpisode = false
+            }
+        } else {
+            isEarlierEpisode = false
+        }
+
         var finalProgress: Double? = progress ?? item.progress
-        if let newProg = finalProgress {
-            if isRestart {
-                finalProgress = newProg
-            } else if let existingProg = existingEntry?["progress"] as? Double {
-                let existingSeason = existingEntry?["lastSeason"] as? Int
-                let existingEpisode = existingEntry?["lastEpisode"] as? Int
-                let isSameUnit = (typeString == "movie") || (existingSeason == season && existingEpisode == episode)
-                if isSameUnit {
-                    // If previously completed (>= 90%) and being re-watched (< 90%), track active re-watch progress
-                    if existingProg >= 0.90 && newProg < 0.90 {
-                        finalProgress = newProg
-                    } else {
-                        // High-water mark for active in-progress viewing (prevents backward scrub regression)
-                        finalProgress = max(existingProg, newProg)
+        var finalSeason: Int? = season ?? item.lastSeason
+        var finalEpisode: Int? = episode ?? item.lastEpisode
+        var finalEpisodeTitle: String? = episodeTitle ?? item.lastEpisodeTitle
+        var finalEpisodeImage: URL? = episodeImage ?? item.lastEpisodeImage
+        var finalPlaybackPos: Double? = playbackPosition ?? item.lastPlaybackPosition ?? (existingEntry?["lastPlaybackPosition"] as? Double)
+        var finalPlaybackDur: Double? = playbackDuration ?? item.lastPlaybackDuration ?? (existingEntry?["lastPlaybackDuration"] as? Double)
+
+        if isEarlierEpisode {
+            // Re-watching or peeking at an earlier episode:
+            // Individual episode progress was already stored via saveEpisodeProgress().
+            // Preserve the Continue Watching show card pointing to the furthest reached episode.
+            finalSeason = existingSeason
+            finalEpisode = existingEpisode
+            finalProgress = existingEntry?["progress"] as? Double
+            finalEpisodeTitle = existingEntry?["lastEpisodeTitle"] as? String
+            if let imgStr = existingEntry?["lastEpisodeImage"] as? String {
+                finalEpisodeImage = URL(string: imgStr)
+            }
+            finalPlaybackPos = existingEntry?["lastPlaybackPosition"] as? Double
+            finalPlaybackDur = existingEntry?["lastPlaybackDuration"] as? Double
+        } else {
+            // Same episode or advancing forward:
+            if let newProg = finalProgress {
+                if isRestart {
+                    finalProgress = newProg
+                } else if let existingProg = existingEntry?["progress"] as? Double {
+                    let isSameUnit = (!isSeries) || (existingSeason == finalSeason && existingEpisode == finalEpisode)
+                    if isSameUnit {
+                        if existingProg >= 0.90 && newProg < 0.90 {
+                            finalProgress = newProg
+                        } else {
+                            finalProgress = max(existingProg, newProg)
+                        }
                     }
                 }
             }
@@ -500,18 +654,20 @@ class UserDataService: ObservableObject {
         ]
         
         if let p = finalProgress { finalItem["progress"] = p }
-        if let s = season { finalItem["lastSeason"] = s }
-        if let e = episode { finalItem["lastEpisode"] = e }
-        if let et = episodeTitle { finalItem["lastEpisodeTitle"] = et }
-        if let ei = episodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
+        if let s = finalSeason { finalItem["lastSeason"] = s }
+        if let e = finalEpisode { finalItem["lastEpisode"] = e }
+        if let et = finalEpisodeTitle { finalItem["lastEpisodeTitle"] = et }
+        if let ei = finalEpisodeImage { finalItem["lastEpisodeImage"] = ei.absoluteString }
         if let r = item.runtime { finalItem["runtime"] = r }
         if let l = item.logoURL?.absoluteString { finalItem["logo"] = l }
         if let ol = item.originalLanguage { finalItem["originalLanguage"] = ol }
-        if let pos = playbackPosition ?? item.lastPlaybackPosition ?? (existingEntry?["lastPlaybackPosition"] as? Double) { finalItem["lastPlaybackPosition"] = pos }
-        if let dur = playbackDuration ?? item.lastPlaybackDuration ?? (existingEntry?["lastPlaybackDuration"] as? Double) { finalItem["lastPlaybackDuration"] = dur }
+        if let pos = finalPlaybackPos { finalItem["lastPlaybackPosition"] = pos }
+        if let dur = finalPlaybackDur { finalItem["lastPlaybackDuration"] = dur }
         if let su = streamURL ?? item.lastStreamURL { finalItem["lastStreamURL"] = su.absoluteString }
         if let hash = torrentInfoHash ?? item.lastTorrentInfoHash { finalItem["lastTorrentInfoHash"] = hash }
         if let fi = fileIndex ?? item.lastFileIndex { finalItem["lastFileIndex"] = fi }
+        if let ss = streamSource ?? item.lastStreamSource ?? (existingEntry?["lastStreamSource"] as? String) { finalItem["lastStreamSource"] = ss }
+        if let st = streamTitle ?? item.lastStreamTitle ?? (existingEntry?["lastStreamTitle"] as? String) { finalItem["lastStreamTitle"] = st }
         if (finalProgress ?? 0) > 0.05 {
             finalItem["isNewEpisode"] = false
         } else if let ne = item.isNewEpisode ?? (existingEntry?["isNewEpisode"] as? Bool) {
@@ -603,12 +759,6 @@ class UserDataService: ObservableObject {
         }
     }
 
-    var episodeProgressKey: String {
-        if let profile = ProfileManager.shared.currentProfile {
-            return "profile.\(profile.id.uuidString).episodeProgress"
-        }
-        return "globalEpisodeProgress"
-    }
 
     func getEpisodeProgress(for itemID: String, season: Int, episode: Int) -> (progress: Double, position: Double, duration: Double)? {
         let key = "\(itemID)_s\(season)e\(episode)"
@@ -644,7 +794,7 @@ class UserDataService: ObservableObject {
         }
     }
 
-    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, isRestart: Bool = false, isLightweightTick: Bool = false) {
+    func addToHistory(_ item: MediaItem, progress: Double? = nil, season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, episodeImage: URL? = nil, playbackPosition: Double? = nil, playbackDuration: Double? = nil, streamURL: URL? = nil, torrentInfoHash: String? = nil, fileIndex: Int? = nil, streamSource: String? = nil, streamTitle: String? = nil, isRestart: Bool = false, isLightweightTick: Bool = false) {
         let effProgress = progress ?? item.progress
         let effSeason = season ?? item.lastSeason
         let effEpisode = episode ?? item.lastEpisode
@@ -667,6 +817,8 @@ class UserDataService: ObservableObject {
             streamURL: streamURL ?? item.lastStreamURL,
             torrentInfoHash: torrentInfoHash ?? item.lastTorrentInfoHash,
             fileIndex: fileIndex ?? item.lastFileIndex,
+            streamSource: streamSource ?? item.lastStreamSource,
+            streamTitle: streamTitle ?? item.lastStreamTitle,
             isRestart: isRestart,
             isLightweightTick: isLightweightTick,
             target: \.history
@@ -757,6 +909,8 @@ class UserDataService: ObservableObject {
         if let su = item.lastStreamURL?.absoluteString { dict["lastStreamURL"] = su }
         if let hash = item.lastTorrentInfoHash { dict["lastTorrentInfoHash"] = hash }
         if let fi = item.lastFileIndex { dict["lastFileIndex"] = fi }
+        if let ss = item.lastStreamSource { dict["lastStreamSource"] = ss }
+        if let st = item.lastStreamTitle { dict["lastStreamTitle"] = st }
         if let ne = item.isNewEpisode { dict["isNewEpisode"] = ne }
         if let ol = item.originalLanguage { dict["originalLanguage"] = ol }
         return dict
@@ -924,16 +1078,53 @@ class UserDataService: ObservableObject {
             guard let _ = item["id"] as? String else { continue }
             let key = canonicalIdentityKey(for: item)
             if let localItem = map[key] {
+                let localType = localItem["type"] as? String ?? ""
+                let remoteType = item["type"] as? String ?? ""
+                let isSeries = (localType != "movie" && remoteType != "movie")
+                
+                let localSeason = localItem["lastSeason"] as? Int ?? 0
+                let localEpisode = localItem["lastEpisode"] as? Int ?? 0
+                let remoteSeason = item["lastSeason"] as? Int ?? 0
+                let remoteEpisode = item["lastEpisode"] as? Int ?? 0
+                
+                let localProg = localItem["progress"] as? Double ?? 0
+                let remoteProg = item["progress"] as? Double ?? 0
                 let localTime = localItem["timestamp"] as? Double ?? 0
                 let remoteTime = item["timestamp"] as? Double ?? 0
-                if remoteTime > localTime {
-                    map[key] = item
-                } else if remoteTime == localTime {
-                    let localProg = localItem["progress"] as? Double ?? 0
-                    let remoteProg = item["progress"] as? Double ?? 0
-                    if remoteProg > localProg {
-                        map[key] = item
+
+                let adoptRemote: Bool
+                if isSeries && (localSeason > 0 || remoteSeason > 0) {
+                    if remoteSeason > localSeason {
+                        adoptRemote = true
+                    } else if remoteSeason < localSeason {
+                        adoptRemote = false
+                    } else if remoteEpisode > localEpisode {
+                        adoptRemote = true
+                    } else if remoteEpisode < localEpisode {
+                        adoptRemote = false
+                    } else {
+                        // Same season and episode: compare progress, then timestamp
+                        if remoteProg > localProg {
+                            adoptRemote = true
+                        } else if remoteProg < localProg {
+                            adoptRemote = false
+                        } else {
+                            adoptRemote = remoteTime > localTime
+                        }
                     }
+                } else {
+                    // Movies: prefer newer timestamp, or higher progress if same timestamp
+                    if remoteTime > localTime {
+                        adoptRemote = true
+                    } else if remoteTime == localTime {
+                        adoptRemote = remoteProg > localProg
+                    } else {
+                        adoptRemote = false
+                    }
+                }
+                
+                if adoptRemote {
+                    map[key] = item
                 }
             } else {
                 map[key] = item
@@ -1181,6 +1372,7 @@ class UserDataService: ObservableObject {
                 }
                 UserDefaults.standard.set(localEpProgress, forKey: self.episodeProgressKey)
             }
+            self.reconcileHistoryWithEpisodeProgress()
             if watchlistChanged || historyChanged || collectionsChanged {
                 NotificationCenter.default.post(name: .fluxRefresh, object: nil)
             }

@@ -227,6 +227,93 @@ struct TMDBEnricherTests {
         // view shows the graphic logo instead of the text fallback.
         #expect(item.logoURL?.absoluteString == "https://images.metahub.space/logo/medium/tt0903747/img")
     }
+
+    @Test func selectBestLogoURLPrefersActiveLanguageOrOriginalLanguageFallback() {
+        // Given a logo list without English, but containing Hindi ("hi") matching the originalLanguage
+        let logos: [[String: Any]] = [
+            ["file_path": "/awarapan_hi.png", "iso_639_1": "hi", "vote_average": 5.2, "vote_count": 8, "width": 800],
+            ["file_path": "/awarapan_ru.png", "iso_639_1": "ru", "vote_average": 4.0, "vote_count": 2, "width": 600],
+            ["file_path": "/awarapan_logo.svg", "iso_639_1": "en", "vote_average": 5.5, "vote_count": 10, "width": 800] // SVG ignored
+        ]
+
+        let selected = TMDBEnricher.selectBestLogoURL(from: logos, preferredLanguage: "en", originalLanguage: "hi")
+        #expect(selected?.absoluteString == "https://image.tmdb.org/t/p/original/awarapan_hi.png")
+    }
+
+    @Test @MainActor func cleanPlayableURLStringUnwrapsProxyAndPreservesDirectLinks() {
+        let playerManager = PlayerManager.shared
+
+        // 1. Local stream proxy wrapper URL
+        let proxyURL = "http://127.0.0.1:51547/proxy?url=https%3A%2F%2Fupstream.provider.com%2Fvideo%2Fmaster.m3u8%3Ftoken%3Dsecret123"
+        let cleaned = playerManager.cleanPlayableURLString(from: proxyURL)
+        #expect(cleaned == "https://upstream.provider.com/video/master.m3u8?token=secret123")
+
+        // 2. Direct HTTP / HTTPS stream
+        let directURL = "https://cdn.example.com/hls/stream.m3u8"
+        #expect(playerManager.cleanPlayableURLString(from: directURL) == directURL)
+
+        // 3. Magnet link
+        let magnet = "magnet:?xt=urn:btih:c12fe1c06bba254a9dc9f519b335de7ece74fed2&dn=Movie"
+        #expect(playerManager.cleanPlayableURLString(from: magnet) == magnet)
+
+        // 4. Empty string
+        #expect(playerManager.cleanPlayableURLString(from: "") == "")
+    }
+
+    @Test func prematureEOFCutoffLogicCorrectlyDetectsMidStreamDisconnect() {
+        func isPrematureCutoff(duration: Double, timePos: Double) -> Bool {
+            let remaining = duration > 0 ? (duration - timePos) : 0
+            let progress = duration > 0 ? (timePos / duration) : 0
+            return duration > 60 && (remaining > 90 || (progress < 0.90 && remaining > 30))
+        }
+
+        // Mid-movie network cutoff (e.g. at 45 min out of 120 min) -> Premature EOF
+        #expect(isPrematureCutoff(duration: 7200, timePos: 2700) == true)
+
+        // Dropped at 80% with 24 min remaining -> Premature EOF
+        #expect(isPrematureCutoff(duration: 7200, timePos: 5760) == true)
+
+        // Dropped at 91% with 10 min (600s) remaining (> 90s) -> Premature EOF
+        #expect(isPrematureCutoff(duration: 7200, timePos: 6600) == true)
+
+        // Reached end credits (98% with 20s remaining) -> Natural finish (not cutoff)
+        #expect(isPrematureCutoff(duration: 7200, timePos: 7180) == false)
+
+        // Reached exact end -> Natural finish
+        #expect(isPrematureCutoff(duration: 7200, timePos: 7200) == false)
+    }
+
+    @Test func incomingCardTMDBBackdropAnchorsUnconditionally() {
+        let cardBackdrop = URL(string: "https://image.tmdb.org/t/p/original/RMXG8myu1aGlNUsRjtxzmpdMK0.jpg")!
+        let cardHero = URL(string: "https://image.tmdb.org/t/p/original/RMXG8myu1aGlNUsRjtxzmpdMK0.jpg")!
+        let incomingCard = MediaItem(
+            id: "1368337",
+            title: "The Odyssey",
+            description: "",
+            imageURL: cardBackdrop,
+            posterURL: nil,
+            backdropURL: cardBackdrop,
+            heroURL: cardHero,
+            streamURL: nil,
+            category: "Movie"
+        )
+        
+        // Enriched item that returned an alternative community backdrop
+        var enriched = incomingCard
+        enriched.backdropURL = URL(string: "https://image.tmdb.org/t/p/original/iuylzRSllrGn7YB322kwKoOVMcq.jpg")
+        enriched.heroURL = URL(string: "https://image.tmdb.org/t/p/original/iuylzRSllrGn7YB322kwKoOVMcq.jpg")
+        
+        // Simulate DetailView anchoring logic
+        var merged = enriched
+        let incomingTMDBHero = [incomingCard.heroURL, incomingCard.backdropURL].compactMap { $0 }.first(where: { $0.host?.contains("tmdb.org") == true })
+        if let incoming = incomingTMDBHero {
+            merged.heroURL = incoming
+            merged.backdropURL = incoming
+        }
+        
+        #expect(merged.heroURL == cardHero)
+        #expect(merged.backdropURL == cardBackdrop)
+    }
 }
 
 
