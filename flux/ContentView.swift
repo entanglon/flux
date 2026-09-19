@@ -38,7 +38,12 @@ struct ContentView: View {
                     }
                 }
                 .navigationDestination(for: MediaItem.self) { item in
-                    DetailView(item: item)
+                    if item.category == "Person" || item.category == "Actor" {
+                        let personID = item.personID ?? Int(item.id.replacingOccurrences(of: "person-", with: "")) ?? 0
+                        PersonView(personID: personID, fallbackName: item.title)
+                    } else {
+                        DetailView(item: item)
+                    }
                 }
                 .navigationDestination(for: CollectionNavigation.self) { nav in
                     CollectionDetailView(collectionID: nav.id)

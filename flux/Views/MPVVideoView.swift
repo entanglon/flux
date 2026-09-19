@@ -108,6 +108,8 @@ struct Track: Identifiable, Equatable {
     let title: String
     let lang: String
     var isSelected: Bool
+    var isDefault: Bool = false
+    var isForced: Bool = false
     
     var displayName: String {
         let rawTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -385,6 +387,10 @@ class MPVController: ObservableObject {
         self.progress = 0.0
         self.bufferProgress = 0.0
         self.isBuffering = false
+        self.hasAutoSelectedTracksForCurrentMedia = false
+        self.audioTracks = []
+        self.subtitleTracks = []
+        self.chapters = []
         resetVolumeBoostIfNeeded()
         playerView?.stop()
     }
@@ -459,6 +465,8 @@ class MPVController: ObservableObject {
                     self.fetchTracks()
                     self.fetchChapters()
                 }
+            case "track-list":
+                self.fetchTracks()
             case "pause":
                 if let paused = value as? Bool {
                     self.isPlaying = !paused
@@ -543,7 +551,11 @@ class MPVController: ObservableObject {
         }
     }
 
-    private func trackMatchesLanguage(track: Track, targetLang: String) -> Bool {
+    func trackMatchesLanguage(track: Track, targetLang: String) -> Bool {
+        Self.trackMatchesLanguage(track: track, targetLang: targetLang)
+    }
+
+    static func trackMatchesLanguage(track: Track, targetLang: String) -> Bool {
         let cleanTarget = targetLang.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let aliases: [String] = {
             switch cleanTarget {
@@ -556,21 +568,21 @@ class MPVController: ObservableObject {
             case "german", "de", "deu", "ger":
                 return ["de", "deu", "ger", "german", "deutsch"]
             case "japanese", "ja", "jpn":
-                return ["ja", "jpn", "japanese", "nihongo"]
+                return ["ja", "jpn", "japanese", "nihongo", "日本語"]
             case "korean", "ko", "kor":
-                return ["ko", "kor", "korean", "hangul"]
+                return ["ko", "kor", "korean", "hangul", "한국어"]
             case "hindi", "hi", "hin":
-                return ["hi", "hin", "hindi"]
+                return ["hi", "hin", "hindi", "हिन्दी"]
             case "tamil", "ta", "tam":
-                return ["ta", "tam", "tamil"]
+                return ["ta", "tam", "tamil", "தமிழ்"]
             case "telugu", "te", "tel":
-                return ["te", "tel", "telugu"]
+                return ["te", "tel", "telugu", "తెలుగు"]
             case "italian", "it", "ita":
                 return ["it", "ita", "italian", "italiano"]
             case "russian", "ru", "rus":
-                return ["ru", "rus", "russian"]
+                return ["ru", "rus", "russian", "русский"]
             case "chinese", "zh", "chi", "zho":
-                return ["zh", "chi", "zho", "chinese", "mandarin", "cantonese"]
+                return ["zh", "chi", "zho", "chinese", "mandarin", "cantonese", "中文"]
             case "portuguese", "pt", "por":
                 return ["pt", "por", "portuguese", "português", "portugues"]
             default:
@@ -582,21 +594,31 @@ class MPVController: ObservableObject {
         let trackTitle = track.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let trackDisplay = track.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        // Direct language code match
+        // 1. Direct language code match on container metadata (e.g. "en", "ja", "ko")
         if !trackLang.isEmpty && trackLang != "und" && aliases.contains(trackLang) {
             return true
         }
 
-        // Title or display name match
+        // 2. Title or display name match
         for alias in aliases {
-            if trackTitle.contains(alias) || trackDisplay.contains(alias) {
-                return true
+            if alias.count <= 2 {
+                // Short 2-char codes (en, ja, es, etc.) require word boundaries
+                // so they do not falsely match words like "commentary", "adventure", "opening", etc.
+                let pattern = #"(?i)(?:^|[\.\[\(\s/_\-,:])\#(alias)(?:$|[\.\]\)\s/_\-,:])"#
+                if trackTitle.range(of: pattern, options: .regularExpression) != nil ||
+                   trackDisplay.range(of: pattern, options: .regularExpression) != nil {
+                    return true
+                }
+            } else {
+                if trackTitle.contains(alias) || trackDisplay.contains(alias) {
+                    return true
+                }
             }
         }
 
-        // If target is English, detect dub tracks that aren't other languages
+        // 3. If target is English, detect dub tracks that aren't other foreign languages
         if cleanTarget.hasPrefix("eng") && (trackTitle.contains("dub") || trackDisplay.contains("dub")) {
-            let foreignWords = ["spanish", "french", "german", "japanese", "korean", "hindi", "italian", "russian"]
+            let foreignWords = ["spanish", "french", "german", "japanese", "korean", "hindi", "italian", "russian", "portuguese", "chinese"]
             if !foreignWords.contains(where: { trackTitle.contains($0) || trackDisplay.contains($0) }) {
                 return true
             }
@@ -615,39 +637,62 @@ class MPVController: ObservableObject {
 
         // 1. Audio Track Selection
         let activeAudio = audioTracks.first(where: { $0.isSelected })
-        let isAudioPreferred = activeAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
+        var selectedTrack: Track? = nil
 
-        if !isAudioPreferred {
-            if let matchedAudio = audioTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }) {
-                print("[MPV] Auto-selecting preferred audio track: \(matchedAudio.displayName) (id: \(matchedAudio.id))")
-                playerView?.selectTrack(matchedAudio)
+        let matchingAudioTracks = audioTracks.filter { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }
+        // Prioritize dialogue tracks over commentary tracks
+        if let matched = matchingAudioTracks.first(where: { !$0.title.lowercased().contains("commentary") }) ?? matchingAudioTracks.first {
+            selectedTrack = matched
+            if activeAudio?.id != matched.id {
+                print("[MPV] Auto-selecting preferred audio track: \(matched.displayName) (id: \(matched.id))")
+                playerView?.selectTrack(matched)
+            }
+        } else {
+            // Preferred audio (e.g. English) is not available for this source.
+            // Fall back ladder:
+            // 1. Media's authentic original language track (dialogue prioritized)
+            // 2. Container's default track (isDefault == true, non-commentary)
+            // 3. First non-commentary audio track
+            // 4. Container default track
+            // 5. First available audio track
+            let origLang = PlayerManager.shared.currentItem?.originalLanguage ?? ""
+            let origMatches = !origLang.isEmpty ? audioTracks.filter { trackMatchesLanguage(track: $0, targetLang: origLang) } : []
+            let origTrack = origMatches.first(where: { !$0.title.lowercased().contains("commentary") }) ?? origMatches.first
+
+            let fallbackTrack = origTrack
+                ?? audioTracks.first(where: { $0.isDefault && !$0.title.lowercased().contains("commentary") })
+                ?? audioTracks.first(where: { !$0.title.lowercased().contains("commentary") })
+                ?? audioTracks.first(where: { $0.isDefault })
+                ?? audioTracks.first
+
+            if let fallback = fallbackTrack {
+                selectedTrack = fallback
+                if activeAudio == nil || activeAudio?.id != fallback.id {
+                    print("[MPV] Preferred audio (\(preferredAudio)) not available — falling back to: \(fallback.displayName) (id: \(fallback.id))")
+                    playerView?.selectTrack(fallback)
+                }
             }
         }
 
-        let currentOrNewAudio = audioTracks.first(where: {
-            if !isAudioPreferred, let matched = audioTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }) {
-                return $0.id == matched.id
-            }
-            return $0.isSelected
-        })
-        let resultingAudioMatches = currentOrNewAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
+        let effectiveAudioTrack = selectedTrack ?? activeAudio
+        let isEffectivePreferred = effectiveAudioTrack.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
 
         // 2. Subtitle Track Selection
         // If preferredSub is Off or None, the user explicitly does not want subtitles by default
         guard preferredSub != "Off" && preferredSub != "None" else { return }
 
-        // If the audio track is foreign/non-preferred (e.g. only Korean audio available and user wanted English),
-        // we MUST automatically turn on preferred subtitles!
+        // If the audio track is foreign/non-preferred relative to default audio,
+        // we automatically turn on preferred subtitles!
         let activeSub = subtitleTracks.first(where: { $0.isSelected })
         let isSubPreferred = activeSub.map { trackMatchesLanguage(track: $0, targetLang: preferredSub) } ?? false
 
-        if !resultingAudioMatches && !isSubPreferred {
+        if !isEffectivePreferred && !isSubPreferred {
             if let matchedSub = subtitleTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredSub) }) {
                 print("[MPV] Foreign audio detected without subtitles — auto-selecting embedded subtitle: \(matchedSub.displayName) (id: \(matchedSub.id))")
                 playerView?.selectTrack(matchedSub)
             } else if let extSub = PlayerManager.shared.externalSubtitles.first(where: { sub in
-                let lang = sub.language.lowercased()
-                return lang.contains("en") || lang.contains("eng") || lang.contains("english")
+                let dummy = Track(id: 0, type: "sub", title: sub.language, lang: sub.language, isSelected: false)
+                return trackMatchesLanguage(track: dummy, targetLang: preferredSub)
             }) {
                 print("[MPV] Foreign audio detected — auto-attaching external subtitle: \(extSub.language)")
                 addExternalSubtitle(extSub)
@@ -700,15 +745,23 @@ class MPVViewController: NSViewController {
         }
         
         self.playerView.onPlaybackError = { [weak self] in
+              guard let self = self, self.delegate?.hasLoadedMedia == true else { return }
               print("[MPV] Playback error detected")
               DispatchQueue.main.async {
-                  self?.delegate?.onPlaybackError?()
+                  self.delegate?.onPlaybackError?()
               }
         }
 
         self.playerView.onEndOfFile = { [weak self] in
               DispatchQueue.main.async {
                   self?.delegate?.registerEndOfFile()
+              }
+        }
+
+        self.playerView.onFileLoaded = { [weak self] in
+              DispatchQueue.main.async {
+                  self?.delegate?.fetchTracks()
+                  self?.delegate?.fetchChapters()
               }
         }
         
@@ -900,6 +953,7 @@ final class MPVLayerView: NSView {
     /// Fired exactly once when the file ends naturally (EOF). File switches
     /// emit STOP/REDIRECT reasons instead, so autoplay must only listen here.
     var onEndOfFile: (() -> Void)?
+    var onFileLoaded: (() -> Void)?
     private var isEventLoopRunning = false
     private let eventLoopLock = NSLock()
     /// Last forwarded mpv log line (consecutive-dedupe key for diagnostics).
@@ -1070,6 +1124,7 @@ final class MPVLayerView: NSView {
     func teardown() {
         guard !isCleaningUp else { return }
         isCleaningUp = true
+        isIntentionallySwitchingFile = true
         
         // Invalidate the callback token first so any in-flight or future mpv
         // callback resolves to nil and no-ops instead of touching a dying view.
@@ -1163,6 +1218,12 @@ final class MPVLayerView: NSView {
             case "Japanese": return "jpn,ja"
             case "Korean": return "kor,ko"
             case "Hindi": return "hin,hi"
+            case "Italian": return "ita,it"
+            case "Portuguese": return "por,pt"
+            case "Chinese": return "zho,chi,zh"
+            case "Russian": return "rus,ru"
+            case "Tamil": return "tam,ta"
+            case "Telugu": return "tel,te"
             default: return "eng,en"
             }
         }
@@ -1186,6 +1247,7 @@ final class MPVLayerView: NSView {
         mpv_observe_property(mpv, 0, "seeking", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "video-params/gamma", MPV_FORMAT_STRING)
         mpv_observe_property(mpv, 0, "video-params/primaries", MPV_FORMAT_STRING)
+        mpv_observe_property(mpv, 0, "track-list", MPV_FORMAT_NONE)
         
         // Only capture warnings and errors to minimize CPU and string allocations
         mpv_request_log_messages(mpv, "warn")
@@ -1277,7 +1339,11 @@ final class MPVLayerView: NSView {
     }
     
     func stop() {
+        isIntentionallySwitchingFile = true
         command("stop")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.isIntentionallySwitchingFile = false
+        }
     }
     
     func seek(absoluteSeconds seconds: Double) {
@@ -1312,8 +1378,10 @@ final class MPVLayerView: NSView {
                 let title = getPropertyString("track-list/\(i)/title") ?? getPropertyString("track-list/\(i)/demux-title") ?? ""
                 let lang = getPropertyString("track-list/\(i)/lang") ?? "und"
                 let selected = getPropertyBool("track-list/\(i)/selected") ?? false
+                let isDef = getPropertyBool("track-list/\(i)/default") ?? false
+                let isForce = getPropertyBool("track-list/\(i)/forced") ?? false
                 if type == "audio" || type == "sub" {
-                    tracks.append(Track(id: id, type: type, title: title, lang: lang, isSelected: selected))
+                    tracks.append(Track(id: id, type: type, title: title, lang: lang, isSelected: selected, isDefault: isDef, isForced: isForce))
                 }
             }
         }
@@ -1490,6 +1558,7 @@ final class MPVLayerView: NSView {
                     }
                 case MPV_EVENT_FILE_LOADED:
                     print("[MPV EVENT] FILE_LOADED")
+                    DispatchQueue.main.async { [weak self] in self?.onFileLoaded?() }
                 case MPV_EVENT_LOG_MESSAGE:
                     let logMsg = event.pointee.data.assumingMemoryBound(to: mpv_event_log_message.self)
                     let prefix = String(cString: logMsg.pointee.prefix)

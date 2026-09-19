@@ -268,6 +268,7 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var lastStreamSource: String?
     var lastStreamTitle: String?
     var isNewEpisode: Bool? = nil
+    var personID: Int? = nil
 }
 
 /// Minimal init for recommendation seeds — extension keeps the memberwise init.
@@ -284,7 +285,16 @@ extension MediaItem {
             timestamp: nil, lastPlaybackPosition: nil, lastPlaybackDuration: nil,
             lastStreamURL: nil, lastTorrentInfoHash: nil, lastFileIndex: nil,
             lastStreamSource: nil, lastStreamTitle: nil,
-            isNewEpisode: nil
+            isNewEpisode: nil,
+            personID: nil
         )
+    }
+
+    init(personID: Int, name: String, profileURL: URL?, knownFor: String) {
+        self.init(seed: "person-\(personID)", title: name, category: "Actor")
+        self.description = knownFor
+        self.imageURL = profileURL
+        self.posterURL = profileURL
+        self.personID = personID
     }
 }

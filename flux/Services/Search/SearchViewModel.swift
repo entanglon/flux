@@ -12,6 +12,7 @@ final class SearchViewModel: ObservableObject {
 
     @Published private(set) var instantSuggestions: [PrefixTrie.TrieEntry] = []
     @Published private(set) var searchResults: [MediaItem] = []
+    @Published private(set) var personResults: [PersonCandidate] = []
     @Published private(set) var isSearching: Bool = false
     @Published private(set) var isLoading: Bool = false
 
@@ -25,6 +26,7 @@ final class SearchViewModel: ObservableObject {
         query = ""
         instantSuggestions = []
         searchResults = []
+        personResults = []
         isSearching = false
         isLoading = false
     }
@@ -41,6 +43,7 @@ final class SearchViewModel: ObservableObject {
         guard !trimmed.isEmpty else {
             instantSuggestions = []
             searchResults = []
+            personResults = []
             isSearching = false
             isLoading = false
             return
@@ -49,20 +52,23 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         isLoading = true
         searchResults = [] // Clear previous results so ghost cards display cleanly during query refinement
+        personResults = []
 
         Task {
-            let local = await engine.updateQuery(newQuery) { [weak self] remote in
+            let local = await engine.updateQuery(newQuery) { [weak self] remote, people in
                 Task { @MainActor in
                     guard let self = self, self.query == newQuery else { return }
                     let items = remote.map { $0.toMediaItem() }
                     let finalResults: [MediaItem]
-                    if ProfileManager.shared.currentProfile?.isKids == true {
+                    let isKids = ProfileManager.shared.currentProfile?.isKids == true
+                    if isKids {
                         finalResults = await KidsContentFilter.shared.filterSafeItems(items)
                     } else {
                         finalResults = items
                     }
                     withAnimation(.easeOut(duration: 0.2)) {
                         self.searchResults = finalResults
+                        self.personResults = isKids ? [] : people
                         self.isLoading = false
                     }
                 }

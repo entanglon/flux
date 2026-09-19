@@ -970,35 +970,51 @@ class StreamManager {
         }
         guard !modeFiltered.isEmpty else { return (nil, []) }
 
-        // 2. Resolution cap & Language gating
+        // 2. Strict Resolution Cap
         let maxAllowed = qualityScore(preferredQuality)
         let qualityCapped = modeFiltered.filter { qualityScore($0.quality) <= maxAllowed }
         let qualityCandidates = qualityCapped.isEmpty ? modeFiltered : qualityCapped
         var candidates = qualityCandidates
 
-        // Strict Language Gating when language filter is enabled:
-        // Prioritize streams matching the target audio language over foreign streams.
+        // 3. Strict Language Gating when language filter is enabled
         if enableLanguageFilter {
             let matchedQuality = qualityCandidates.filter {
                 matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
             }
             if !matchedQuality.isEmpty {
-                print("[StreamManager] 🌐 Language Filter: found \(matchedQuality.count) candidate(s) matching \(preferredLang) within quality cap")
+                print("[StreamManager] 🌐 Language Filter: found \(matchedQuality.count) candidate(s) matching audio (\(preferredLang)) within quality cap")
                 candidates = matchedQuality
             } else {
                 let matchedAll = modeFiltered.filter {
                     matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
                 }
                 if !matchedAll.isEmpty {
-                    print("[StreamManager] 🌐 Language Filter: found \(matchedAll.count) candidate(s) matching \(preferredLang) (outside quality cap)")
+                    print("[StreamManager] 🌐 Language Filter: found \(matchedAll.count) candidate(s) matching audio (\(preferredLang)) (outside quality cap)")
                     candidates = matchedAll
                 } else {
-                    print("[StreamManager] ⚠️ Language Filter: zero candidates matched \(preferredLang). Falling back to general pool.")
+                    // Language Inavailability Safeguard:
+                    // If preferred audio is completely unavailable (e.g. niche foreign cinema or Japanese anime with no dub),
+                    // gracefully fall back to original audio candidates or the general quality-capped pool!
+                    if let orig = originalLanguage, !orig.isEmpty {
+                        let matchedOrig = qualityCandidates.filter {
+                            matchesPreferredLanguage($0, preferred: orig, originalLanguage: originalLanguage, enableLanguageFilter: true)
+                        }
+                        if !matchedOrig.isEmpty {
+                            print("[StreamManager] 🌐 Language Filter: preferred audio (\(preferredLang)) unavailable. Falling back to original audio (\(orig))")
+                            candidates = matchedOrig
+                        } else {
+                            print("[StreamManager] ⚠️ Language Filter: zero candidates matched (\(preferredLang)). Falling back to general pool.")
+                            candidates = qualityCandidates
+                        }
+                    } else {
+                        print("[StreamManager] ⚠️ Language Filter: zero candidates matched (\(preferredLang)). Falling back to general pool.")
+                        candidates = qualityCandidates
+                    }
                 }
             }
         }
 
-        // 3. Composite score calculation
+        // 4. Composite score calculation
         let ranked = candidates.sorted { s1, s2 in
             let score1 = computeCompositeRank(
                 s1,
@@ -1053,12 +1069,27 @@ class StreamManager {
             score += evaluateEpisodeMatch(stream: stream, targetSeason: targetSeason, targetEpisode: targetEpisode)
         }
 
-        // Preferred Audio Language bonus / Foreign Dub penalty (only if language filter is enabled)
+        // Preferred Audio Language bonus / Foreign Dub penalty
+        let matchesPrimary = matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+        let matchesOriginal = (originalLanguage != nil && !originalLanguage!.isEmpty)
+            ? matchesPreferredLanguage(stream, preferred: originalLanguage!, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            : false
+        let isForeign = isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage)
+
         if enableLanguageFilter {
-            if matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true) {
-                score += 4000.0
-            } else if isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage) {
-                score -= 2500.0
+            if matchesPrimary {
+                score += 5000.0
+            } else if matchesOriginal {
+                score += 2500.0
+            } else if isForeign {
+                score -= 3500.0
+            }
+        } else {
+            // Language filter is OFF: softly prioritize preferred language without discarding or penalizing any streams
+            if matchesPrimary {
+                score += 2000.0
+            } else if matchesOriginal {
+                score += 1000.0
             }
         }
 
@@ -1292,7 +1323,7 @@ class StreamManager {
             }
         }
 
-        // Noise tokens (file extensions, codecs, release groups, resolutions, quality tags, common release tags)
+        // Noise tokens (file extensions, codecs, release groups, resolutions, quality tags, common release tags, scraper provider tags)
         let noiseTokens: Set<String> = [
             "mkv", "mp4", "avi", "mov", "webm", "ts", "m3u8",
             "1080p", "720p", "2160p", "480p", "360p", "4k", "2k", "uhd", "fhd", "hd", "sd",
@@ -1300,6 +1331,7 @@ class StreamManager {
             "webdl", "webrip", "bluray", "brrip", "bdrip", "hdtv", "dvdrip", "remux", "hdr", "dv", "sdr",
             "hindi", "english", "dual", "audio", "dub", "dubbed", "esub", "sub", "subs", "multisubs",
             "cinefreak", "cinefreaktop", "top", "yts", "psa", "rartv", "eztv", "galaxy", "tgx", "ettv",
+            "2peckle", "peckle", "vidfast", "vedge", "kisskh", "vidlink", "cinejoy", "vidsrc", "autoembed", "superembed", "embed", "stream", "server", "shegu", "lb03", "external", "direct", "pad",
             "amazon", "netflix", "hotstar", "zee5", "gdrive", "download", "watch", "online", "series", "web", "korean", "anime",
             "tv", "original", "repack", "proper", "internal", "complete", "season", "episode", "ep", "part", "vol", "volume"
         ]

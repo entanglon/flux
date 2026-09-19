@@ -4,7 +4,9 @@ import Foundation
 enum AppEnvironment {
     static var isRunningTests: Bool {
         NSClassFromString("XCTestCase") != nil ||
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil ||
+        ProcessInfo.processInfo.arguments.contains(where: { $0.contains("xctest") })
     }
 }
 

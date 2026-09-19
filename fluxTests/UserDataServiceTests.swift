@@ -4,6 +4,109 @@ import Foundation
 
 struct UserDataServiceTests {
 
+    @MainActor struct TestStateGuard {
+        let savedProfiles: [UserProfile]
+        let savedCurrentProfile: UserProfile?
+        let savedProfileIDs: Set<String>
+        let savedHistory: [MediaItem]
+        let savedWatchlist: [MediaItem]
+        let savedCollections: [UserCollection]
+        let savedIsAuth: Bool
+        let savedUser: User?
+        let savedIsGuest: Bool
+        let savedLanguage: AppLanguage
+        let savedTmdb: String?
+        let savedHistoryKey: String
+        let savedHistoryDefaults: Any?
+        let savedWatchlistKey: String
+        let savedWatchlistDefaults: Any?
+        let savedCollectionsKey: String
+        let savedCollectionsDefaults: Any?
+        let savedEpProgressKey: String
+        let savedEpProgressDefaults: Any?
+        let savedRecentSearches: [MediaItem]
+        let savedAddons: [StremioAddon]
+
+        init() {
+            savedProfiles = ProfileManager.shared.profiles
+            savedCurrentProfile = ProfileManager.shared.currentProfile
+            savedProfileIDs = Set(ProfileManager.shared.profiles.map { $0.id.uuidString })
+            savedHistory = UserDataService.shared.history
+            savedWatchlist = UserDataService.shared.watchlist
+            savedCollections = UserDataService.shared.collections
+            savedRecentSearches = RecentSearchManager.shared.recentItems
+            savedAddons = AddonManager.shared.addons
+            savedIsAuth = AuthManager.shared.isAuthenticated
+            savedUser = AuthManager.shared.currentUser
+            savedIsGuest = AuthManager.shared.isGuestMode
+            savedLanguage = LanguageManager.shared.currentLanguage
+            savedTmdb = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey)
+            let profileID = ProfileManager.shared.currentProfile?.id.uuidString ?? ""
+            savedHistoryKey = profileID.isEmpty ? "localHistoryDataStremio" : "profile.\(profileID).history"
+            savedWatchlistKey = profileID.isEmpty ? "localWatchlistDataStremio" : "profile.\(profileID).watchlist"
+            savedCollectionsKey = profileID.isEmpty ? "localCollectionsData" : "profile.\(profileID).collections"
+            savedEpProgressKey = UserDataService.shared.episodeProgressKey
+            savedHistoryDefaults = UserDefaults.standard.object(forKey: savedHistoryKey)
+            savedWatchlistDefaults = UserDefaults.standard.object(forKey: savedWatchlistKey)
+            savedCollectionsDefaults = UserDefaults.standard.object(forKey: savedCollectionsKey)
+            savedEpProgressDefaults = UserDefaults.standard.object(forKey: savedEpProgressKey)
+        }
+
+        func restore() {
+            // 1. Purge any temporary profiles created during the test run from UserDefaults
+            let currentProfiles = ProfileManager.shared.profiles
+            for p in currentProfiles {
+                if !savedProfileIDs.contains(p.id.uuidString) {
+                    let prefix = "profile.\(p.id.uuidString)."
+                    for suffix in ["history", "watchlist", "loved", "watchSnaps", "settings", "collections", "episodeProgress", "recentSearches"] {
+                        UserDefaults.standard.removeObject(forKey: prefix + suffix)
+                    }
+                }
+            }
+
+            // 2. Restore underlying UserDefaults keys BEFORE selecting profile so loadInitialData reads correct data
+            if let val = savedHistoryDefaults {
+                UserDefaults.standard.set(val, forKey: savedHistoryKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: savedHistoryKey)
+            }
+            if let val = savedWatchlistDefaults {
+                UserDefaults.standard.set(val, forKey: savedWatchlistKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: savedWatchlistKey)
+            }
+            if let val = savedCollectionsDefaults {
+                UserDefaults.standard.set(val, forKey: savedCollectionsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: savedCollectionsKey)
+            }
+            if let val = savedEpProgressDefaults {
+                UserDefaults.standard.set(val, forKey: savedEpProgressKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: savedEpProgressKey)
+            }
+
+            // 3. Restore profiles and currentProfile
+            ProfileManager.shared.profiles = savedProfiles
+            ProfileManager.shared.currentProfile = savedCurrentProfile
+            if let profile = savedCurrentProfile {
+                ProfileManager.shared.selectProfile(profile)
+            }
+            UserDataService.shared.history = savedHistory
+            UserDataService.shared.watchlist = savedWatchlist
+            UserDataService.shared.collections = savedCollections
+            RecentSearchManager.shared.setRecentItems(savedRecentSearches)
+            AddonManager.shared.addons = savedAddons
+
+            AuthManager.shared.resetStateForTesting(user: savedUser, authenticated: savedIsAuth, guest: savedIsGuest)
+            LanguageManager.shared.setLanguage(savedLanguage)
+            if let tmdb = savedTmdb {
+                UserDefaults.standard.set(tmdb, forKey: UserDefaults.Key.tmdbApiKey)
+            }
+            UserDefaults.standard.synchronize()
+        }
+    }
+
     @Test func mediaItemInitializationAndTypes() {
         let movie = MediaItem(
             id: "tt1234567",
@@ -212,6 +315,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func signOutRemovesActiveWatchingProfileAndData() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         // Setup mock user session and profile
         let testProfile = UserProfile(id: UUID(), name: "TestAccountUser", avatarID: "avatar2", createdAt: Date())
         ProfileManager.shared.profiles = [testProfile]
@@ -236,6 +342,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func continueAsGuestInitializesFreshGuestWatchingProfile() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         // Sign out to clean state
         AuthManager.shared.signOut()
         #expect(ProfileManager.shared.currentProfile == nil)
@@ -247,12 +356,12 @@ struct UserDataServiceTests {
         #expect(ProfileManager.shared.currentProfile != nil)
         #expect(ProfileManager.shared.currentProfile?.name == "Guest")
         #expect(UserDataService.shared.history.isEmpty)
-        
-        // Clean up
-        AuthManager.shared.signOut()
     }
 
     @Test @MainActor func ensureDefaultProfileSetsWatchingProfileNameToChosenName() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         AuthManager.shared.signOut()
         #expect(ProfileManager.shared.profiles.isEmpty)
 
@@ -266,26 +375,15 @@ struct UserDataServiceTests {
         ProfileManager.shared.ensureDefaultProfile(name: "Alex")
         #expect(ProfileManager.shared.currentProfile?.name == "Alex")
         #expect(ProfileManager.shared.profiles.count == 2)
-
-        // Clean up
-        AuthManager.shared.signOut()
     }
 
     @Test @MainActor func cloudPayloadExportsAndRestoresTMDBKeyAndDisplayName() {
-        let originalKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey)
-        let originalName = UserDefaults.standard.string(forKey: "flux.authDisplayName")
-        defer {
-            if let originalKey {
-                UserDefaults.standard.set(originalKey, forKey: UserDefaults.Key.tmdbApiKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
-            }
-            if let originalName {
-                UserDefaults.standard.set(originalName, forKey: "flux.authDisplayName")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
-            }
-        }
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
+        let testProfile = UserProfile(id: UUID(), name: "TestUser", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
 
         let testKey = "test_tmdb_key_\(UUID().uuidString)"
         let testName = "TestUser_\(UUID().uuidString.prefix(6))"
@@ -317,6 +415,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func freshSignUpGuaranteesEmptyLibraryAndStockAddonsOnly() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         AuthManager.shared.signOut()
         #expect(UserDataService.shared.history.isEmpty)
         #expect(UserDataService.shared.watchlist.isEmpty)
@@ -328,6 +429,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func sanitizeProfileNamesConvertsDefaultToGuestOrUserName() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         // Test in guest mode
         UserDefaults.standard.set(true, forKey: "flux.authGuestMode")
         let legacyProfile = UserProfile(id: UUID(), name: "Default", avatarID: "face-blue", createdAt: Date())
@@ -338,13 +442,12 @@ struct UserDataServiceTests {
 
         #expect(ProfileManager.shared.currentProfile?.name == "Guest")
         #expect(ProfileManager.shared.profiles.first?.name == "Guest")
-
-        // Clean up
-        ProfileManager.shared.handleSignOut()
-        UserDefaults.standard.removeObject(forKey: "flux.authGuestMode")
     }
 
     @Test @MainActor func startSignInFlowClearsGuestModeAndEnablesAuthGate() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         AuthManager.shared.continueAsGuest()
         #expect(AuthManager.shared.isGuestMode == true)
         #expect(AuthManager.shared.needsGate == false)
@@ -352,12 +455,12 @@ struct UserDataServiceTests {
         AuthManager.shared.startSignInFlow()
         #expect(AuthManager.shared.isGuestMode == false)
         #expect(AuthManager.shared.needsGate == true)
-
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: "flux.authGuestMode")
     }
 
     @Test @MainActor func needsDisplayNamePromptRejectsDefaultAndGuest() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         // Authenticate with a fallback name "Default"
         AuthManager.shared.currentUser = User(id: "test-user-123", email: "test@example.com", displayName: "Default")
         AuthManager.shared.isAuthenticated = true
@@ -372,12 +475,12 @@ struct UserDataServiceTests {
         AuthManager.shared.updateDisplayName("Alex Smith")
         #expect(AuthManager.shared.currentUser?.displayName == "Alex Smith")
         #expect(AuthManager.shared.needsDisplayNamePrompt == false)
-
-        // Clean up
-        AuthManager.shared.signOut()
     }
 
     @Test @MainActor func stockKidsProfileCannotBeDeletedOrRenamed() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         ProfileManager.shared.handleSignOut()
         ProfileManager.shared.ensureGuestProfile()
         
@@ -397,8 +500,6 @@ struct UserDataServiceTests {
             let remaining = ProfileManager.shared.profiles.first(where: { $0.id == kidsProfile.id })
             #expect(remaining != nil)
         }
-        
-        ProfileManager.shared.handleSignOut()
     }
 
     @Test @MainActor func parentalPinVerificationAndKeychainStorage() {
@@ -425,6 +526,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func switchingFromKidsProfileRequiresPIN() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         ProfileManager.shared.handleSignOut()
         ProfileManager.shared.ensureGuestProfile()
         ParentalLockManager.shared.removePin()
@@ -445,7 +549,6 @@ struct UserDataServiceTests {
         
         // Clean up
         ParentalLockManager.shared.removePin()
-        ProfileManager.shared.handleSignOut()
     }
 
     @Test @MainActor func perProfilePinVerificationAndIsolation() {
@@ -502,6 +605,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func kidsProfileDataIsolationOnCloudApply() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         // Setup mock adult and kids profiles
         let adultID = UUID()
         let kidsID = UUID()
@@ -584,6 +690,9 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func cloudPayloadExportVersion3HasPerProfileData() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         ProfileManager.shared.ensureDefaultProfile(name: "TestUser")
         let payload = UserDataService.shared.exportCloudPayload()
         #expect(payload["version"] as? Int == 3)
@@ -595,14 +704,13 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func continueWatchingAndRecentlyWatchedSeparation() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         let profileID = UUID()
         let profile = UserProfile(id: profileID, name: "Test Separation", avatarID: "avatar_1", createdAt: Date())
         ProfileManager.shared.profiles = [profile]
         ProfileManager.shared.selectProfile(profile)
-        
-        let histKey = UserDefaults.Key.profileHistory(id: profileID.uuidString)
-        UserDefaults.standard.removeObject(forKey: histKey)
-        UserDataService.shared.history = []
         
         let inProgressItem = MediaItem(
             id: "tt_test_prog",
@@ -633,20 +741,16 @@ struct UserDataServiceTests {
         
         #expect(rw.contains(where: { $0.id == "tt_test_done" }))
         #expect(!rw.contains(where: { $0.id == "tt_test_prog" }))
-        
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: histKey)
     }
 
     @Test @MainActor func monotonicProgressPreventsBackwardRegression() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
         let profileID = UUID()
         let profile = UserProfile(id: profileID, name: "Test Monotonic", avatarID: "avatar_1", createdAt: Date())
         ProfileManager.shared.profiles = [profile]
         ProfileManager.shared.selectProfile(profile)
-        
-        let histKey = UserDefaults.Key.profileHistory(id: profileID.uuidString)
-        UserDefaults.standard.removeObject(forKey: histKey)
-        UserDataService.shared.history = []
         
         let itemFirst = MediaItem(
             id: "tt_test_seek",
@@ -679,12 +783,16 @@ struct UserDataServiceTests {
         UserDataService.shared.addToHistory(itemScrubbedBack, isRestart: true)
         let saved3 = UserDataService.shared.getHistoryItem(for: itemFirst)
         #expect(saved3?.progress == 0.20, "Explicit restart should allow resetting progress to 0.20")
-        
-        // Clean up
-        UserDefaults.standard.removeObject(forKey: histKey)
     }
 
     @Test @MainActor func cloudPayloadExportsAndRestoresAppLanguage() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
+        let testProfile = UserProfile(id: UUID(), name: "TestLang", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+
         let originalLanguage = LanguageManager.shared.currentLanguage
         defer {
             LanguageManager.shared.setLanguage(originalLanguage)
@@ -711,16 +819,14 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func rewatchingCompletedEpisodeTracksActiveProgress() {
-        let showID = "tt_test_rewatch_\(UUID().uuidString)"
-        let epProgressKey = "episode_progress"
-        let histKey = UserDefaults.Key.profileHistory(id: ProfileManager.shared.currentProfile?.id.uuidString ?? "")
-        defer {
-            var allProg = UserDefaults.standard.dictionary(forKey: epProgressKey) as? [String: [String: Any]] ?? [:]
-            allProg.removeValue(forKey: "\(showID)_s1e1")
-            UserDefaults.standard.set(allProg, forKey: epProgressKey)
-            UserDefaults.standard.removeObject(forKey: histKey)
-        }
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
 
+        let testProfile = UserProfile(id: UUID(), name: "TestRewatch", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+
+        let showID = "tt_test_rewatch_\(UUID().uuidString)"
         let show = MediaItem(
             id: showID,
             title: "Rewatch Test Show",
@@ -755,6 +861,13 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func monotonicHighWaterMarkProtectsEpisodicProgressFromRegression() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
+        let testProfile = UserProfile(id: UUID(), name: "TestHWM", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+
         let showID = "tt_test_hwm_\(UUID().uuidString)"
         let show = MediaItem(
             id: showID,
@@ -763,13 +876,6 @@ struct UserDataServiceTests {
             streamURL: nil,
             category: "series"
         )
-        defer {
-            var allProg = UserDefaults.standard.dictionary(forKey: UserDataService.shared.episodeProgressKey) as? [String: [String: Any]] ?? [:]
-            allProg.removeValue(forKey: "\(showID)_s1e10")
-            allProg.removeValue(forKey: "\(showID)_s1e4")
-            UserDefaults.standard.set(allProg, forKey: UserDataService.shared.episodeProgressKey)
-            UserDataService.shared.removeFromHistory(show)
-        }
 
         // 1. Advance to Season 1 Episode 10 (50% progress)
         UserDataService.shared.saveEpisodeProgress(for: showID, season: 1, episode: 10, position: 1000, duration: 2000)
@@ -802,6 +908,13 @@ struct UserDataServiceTests {
     }
 
     @Test @MainActor func reconcileHistoryWithEpisodeProgressHealsOutdatedHistory() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
+        let testProfile = UserProfile(id: UUID(), name: "TestHeal", avatarID: "avatar_1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+
         let showID = "tt_test_heal_\(UUID().uuidString)"
         let show = MediaItem(
             id: showID,
@@ -810,14 +923,6 @@ struct UserDataServiceTests {
             streamURL: nil,
             category: "series"
         )
-        defer {
-            var allProg = UserDefaults.standard.dictionary(forKey: UserDataService.shared.episodeProgressKey) as? [String: [String: Any]] ?? [:]
-            for ep in 4...10 {
-                allProg.removeValue(forKey: "\(showID)_s1e\(ep)")
-            }
-            UserDefaults.standard.set(allProg, forKey: UserDataService.shared.episodeProgressKey)
-            UserDataService.shared.removeFromHistory(show)
-        }
 
         // 1. Stored episode progress shows episodes 4-9 watched, ep 10 at 56%
         for ep in 4...9 {
@@ -874,5 +979,25 @@ struct UserDataServiceTests {
         #expect(item["lastEpisode"] as? Int == 10)
         #expect(item["playbackPosition"] as? Double == 1120.0)
     }
+
+    @Test @MainActor func recentSearchManagerProtectedFromSignOutAndScopedToProfiles() {
+        let guardState = TestStateGuard()
+        defer { guardState.restore() }
+
+        let testProfile = UserProfile(id: UUID(), name: "SearchProfileUser", avatarID: "avatar1", createdAt: Date())
+        ProfileManager.shared.profiles = [testProfile]
+        ProfileManager.shared.selectProfile(testProfile)
+
+        let initialSearch = MediaItem(id: "803736", title: "Hey! Sinamika", description: "", streamURL: nil, category: "Movie")
+        RecentSearchManager.shared.setRecentItems([initialSearch])
+        #expect(RecentSearchManager.shared.recentItems.contains(where: { $0.id == "803736" }))
+
+        // Execute Sign Out
+        AuthManager.shared.signOut()
+
+        // When signed out, in-memory active watching profile is nil, so recentItems scopes to empty
+        #expect(RecentSearchManager.shared.recentItems.isEmpty)
+    }
 }
+
 

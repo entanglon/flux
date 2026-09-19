@@ -671,7 +671,7 @@ struct StreamManagerTests {
         )
         #expect(winnerWithFilter?.id == moderateEnglishStream.id)
 
-        // 2. With language filter OFF: Highest seed/speed candidate wins without language penalty
+        // 2. With language filter OFF: English stream is still softly preferred over a foreign dub
         let (winnerWithoutFilter, _) = manager.selectFastStartCandidate(
             from: [fastForeignStream, moderateEnglishStream],
             sourceMode: "both",
@@ -680,7 +680,101 @@ struct StreamManagerTests {
             originalLanguage: "en",
             enableLanguageFilter: false
         )
-        #expect(winnerWithoutFilter?.id == fastForeignStream.id)
+        #expect(winnerWithoutFilter?.id == moderateEnglishStream.id)
+    }
+
+    @Test func languageFilterDisabledSoftlyPrefersLanguagesWithoutDiscardingOthers() {
+        let manager = StreamManager.shared
+
+        // Non-English title (Japanese anime) with no English stream available
+        let japaneseStream = Stream(
+            title: "Anime.Episode.01.1080p.WEB-DL.Japanese.Audio.x264",
+            cleanTitle: "Anime",
+            url: URL(string: "magnet:?xt=urn:btih:3333333333333333333333333333333333333333")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "1.2 GB",
+            seeders: 80
+        )
+        let russianDubStream = Stream(
+            title: "Anime.Episode.01.1080p.RUSSIAN.DUBBED.x264",
+            cleanTitle: "Anime",
+            url: URL(string: "magnet:?xt=urn:btih:4444444444444444444444444444444444444444")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "1.2 GB",
+            seeders: 90
+        )
+
+        // Even though user's primary preference is English, when filter is OFF,
+        // Japanese stream is NOT discarded and beats the Russian dub due to original audio bonus
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [russianDubStream, japaneseStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            originalLanguage: "ja",
+            enableLanguageFilter: false
+        )
+        #expect(winner?.id == japaneseStream.id)
+    }
+
+    @Test func languageFilterEnabledStrictlyGatesByPreferredAudio() {
+        let manager = StreamManager.shared
+
+        let spanishStream = Stream(
+            title: "Series.S01E01.1080p.Spanish.Audio",
+            cleanTitle: "Series",
+            url: URL(string: "magnet:?xt=urn:btih:5555555555555555555555555555555555555555")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 40
+        )
+        let germanStream = Stream(
+            title: "Series.S01E01.1080p.GERMAN.DUBBED",
+            cleanTitle: "Series",
+            url: URL(string: "magnet:?xt=urn:btih:6666666666666666666666666666666666666666")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 200
+        )
+
+        // Preferred audio is Spanish.
+        // With language filter ON, Spanish candidate wins over high-seeded German stream.
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [germanStream, spanishStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "Spanish",
+            originalLanguage: "fr",
+            enableLanguageFilter: true
+        )
+        #expect(winner?.id == spanishStream.id)
+    }
+
+    @Test func languageInavailabilityFallsBackGracefullyWithoutAborting() {
+        let manager = StreamManager.shared
+
+        let koreanStream = Stream(
+            title: "KDrama.S01E01.1080p.WEB-DL.KOR",
+            cleanTitle: "KDrama",
+            url: URL(string: "magnet:?xt=urn:btih:7777777777777777777777777777777777777777")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 150
+        )
+
+        // User wants English, but title only has Korean streams.
+        // Fast start MUST NOT return nil or fail; it gracefully falls back to available pool.
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [koreanStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            originalLanguage: "ko",
+            enableLanguageFilter: true
+        )
+        #expect(winner?.id == koreanStream.id)
     }
 
     @Test func parseLanguageExtractsFlagEmojisAndRegionalTokens() {

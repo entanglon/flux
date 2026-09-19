@@ -70,6 +70,7 @@ final class ProfileManager: ObservableObject {
 
     /// Ensures that the Kids profile never retains any adult or accidentally copied history/watchlist.
     func cleanKidsProfileDataIfNeeded() {
+        guard !AppEnvironment.isRunningTests else { return }
         guard let kids = profiles.first(where: { $0.isKids }) else { return }
         let kidsPrefix = "profile.\(kids.id.uuidString)."
         
@@ -211,8 +212,10 @@ final class ProfileManager: ObservableObject {
             snapshotSettings(for: old.id)
         }
         currentProfile = profile
-        if let data = try? JSONEncoder().encode(profile) {
-            UserDefaults.standard.set(data, forKey: currentProfileKey)
+        if !AppEnvironment.isRunningTests {
+            if let data = try? JSONEncoder().encode(profile) {
+                UserDefaults.standard.set(data, forKey: currentProfileKey)
+            }
         }
         restoreSettings(for: profile.id)
         if profile.isKids {
@@ -230,6 +233,7 @@ final class ProfileManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: currentProfileKey)
         UserDataService.shared.switchProfile(to: nil)
         TasteProfileManager.shared.switchProfile(to: nil)
+        RecentSearchManager.shared.switchProfile(to: nil)
     }
 
     /// Wipes all active watching profile state and account profiles upon sign-out.
@@ -242,7 +246,7 @@ final class ProfileManager: ObservableObject {
         }
         for profile in profiles {
             let prefix = "profile.\(profile.id.uuidString)."
-            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress"] {
+            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches"] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -380,9 +384,11 @@ final class ProfileManager: ObservableObject {
     func deleteProfile(_ profile: UserProfile) {
         guard !profile.isStock && !profile.isKids else { return }
         // Wipe the profile's namespaced data
-        let prefix = "profile.\(profile.id.uuidString)."
-        for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps"] {
-            UserDefaults.standard.removeObject(forKey: key)
+        if !AppEnvironment.isRunningTests {
+            let prefix = "profile.\(profile.id.uuidString)."
+            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
         }
         profiles.removeAll { $0.id == profile.id }
         saveProfiles()
@@ -395,9 +401,11 @@ final class ProfileManager: ObservableObject {
     private func applyProfileDataScope(_ profile: UserProfile?) {
         UserDataService.shared.switchProfile(to: profile)
         TasteProfileManager.shared.switchProfile(to: profile)
+        RecentSearchManager.shared.switchProfile(to: profile)
     }
 
     private func saveProfiles() {
+        guard !AppEnvironment.isRunningTests else { return }
         if let data = try? JSONEncoder().encode(profiles) {
             UserDefaults.standard.set(data, forKey: profilesKey)
         }
@@ -431,12 +439,18 @@ final class ProfileManager: ObservableObject {
                 dict["settings"] = snap
             }
             if let hist = UserDefaults.standard.array(forKey: prefix + "history") as? [[String: Any]] {
-                dict["history"] = UserDataService.shared.sanitizeDataArray(hist)
+                dict["history"] = UserDataService.shared.sanitizeDataArray(hist).filter { d in
+                    guard let id = d["id"] as? String else { return false }
+                    return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
+                }
             } else {
                 dict["history"] = []
             }
             if let watch = UserDefaults.standard.array(forKey: prefix + "watchlist") as? [[String: Any]] {
-                dict["watchlist"] = UserDataService.shared.sanitizeDataArray(watch)
+                dict["watchlist"] = UserDataService.shared.sanitizeDataArray(watch).filter { d in
+                    guard let id = d["id"] as? String else { return false }
+                    return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
+                }
             } else {
                 dict["watchlist"] = []
             }
@@ -454,9 +468,29 @@ final class ProfileManager: ObservableObject {
             }
             let epProgKey = prefix + "episodeProgress"
             if let epProg = UserDefaults.standard.dictionary(forKey: epProgKey) as? [String: [String: Any]] {
-                dict["episodeProgress"] = epProg
+                dict["episodeProgress"] = epProg.filter { (k, _) in
+                    !k.hasPrefix("tt_test_") && !k.hasPrefix("test_")
+                }
             } else {
                 dict["episodeProgress"] = [:]
+            }
+            let searchKey = prefix + "recentSearches"
+            if let searchData = UserDefaults.standard.data(forKey: searchKey),
+               let items = try? JSONDecoder().decode([MediaItem].self, from: searchData) {
+                dict["recentSearches"] = items.filter {
+                    !$0.id.hasPrefix("tt_test_") && !$0.id.hasPrefix("test_")
+                }.map { it in
+                    var d: [String: Any] = [
+                        "id": it.id,
+                        "title": it.title,
+                        "category": it.category
+                    ]
+                    if let p = it.posterURL?.absoluteString { d["posterURL"] = p }
+                    if let b = it.backdropURL?.absoluteString { d["backdropURL"] = b }
+                    return d
+                }
+            } else {
+                dict["recentSearches"] = []
             }
             return dict
         }
@@ -516,6 +550,46 @@ final class ProfileManager: ObservableObject {
                 }
                 UserDefaults.standard.set(localEp, forKey: epKey)
             }
+            let searchKey = "profile.\(id.uuidString).recentSearches"
+            if let remoteSearches = dict["recentSearches"] as? [[String: Any]], !remoteSearches.isEmpty {
+                let items: [MediaItem] = remoteSearches.compactMap { d in
+                    guard let sid = d["id"] as? String, let stitle = d["title"] as? String else { return nil }
+                    let cat = d["category"] as? String ?? "Movie"
+                    let poster = (d["posterURL"] as? String).flatMap { URL(string: $0) }
+                    let backdrop = (d["backdropURL"] as? String).flatMap { URL(string: $0) }
+                    return MediaItem(
+                        id: sid,
+                        title: stitle,
+                        description: "",
+                        imageURL: nil,
+                        posterURL: poster,
+                        backdropURL: backdrop,
+                        heroURL: nil,
+                        streamURL: nil,
+                        category: cat,
+                        progress: nil,
+                        trailerURL: nil,
+                        cast: nil,
+                        seasons: nil,
+                        runtime: nil,
+                        certification: nil,
+                        genres: nil,
+                        popularity: nil,
+                        releaseDate: nil,
+                        originalLanguage: nil,
+                        spokenLanguages: nil,
+                        originCountry: nil,
+                        voteAverage: nil,
+                        episodes: nil
+                    )
+                }
+                if !items.isEmpty, let encoded = try? JSONEncoder().encode(items) {
+                    UserDefaults.standard.set(encoded, forKey: searchKey)
+                    if id == self.currentProfile?.id {
+                        RecentSearchManager.shared.setRecentItems(items)
+                    }
+                }
+            }
         }
         guard !imported.isEmpty else { return }
 
@@ -543,7 +617,12 @@ final class ProfileManager: ObservableObject {
                            let localEp = UserDefaults.standard.dictionary(forKey: sourcePrefix + "episodeProgress") as? [String: [String: Any]], !localEp.isEmpty {
                             UserDefaults.standard.set(localEp, forKey: targetPrefix + "episodeProgress")
                         }
-                        for key in [sourcePrefix + "history", sourcePrefix + "watchlist", sourcePrefix + "loved", sourcePrefix + "watchSnaps", sourcePrefix + "settings", sourcePrefix + "collections", sourcePrefix + "episodeProgress"] {
+                        let targetSearch = UserDefaults.standard.data(forKey: targetPrefix + "recentSearches")
+                        if targetSearch == nil,
+                           let localSearch = UserDefaults.standard.data(forKey: sourcePrefix + "recentSearches") {
+                            UserDefaults.standard.set(localSearch, forKey: targetPrefix + "recentSearches")
+                        }
+                        for key in [sourcePrefix + "history", sourcePrefix + "watchlist", sourcePrefix + "loved", sourcePrefix + "watchSnaps", sourcePrefix + "settings", sourcePrefix + "collections", sourcePrefix + "episodeProgress", sourcePrefix + "recentSearches"] {
                             UserDefaults.standard.removeObject(forKey: key)
                         }
                     }

@@ -42,9 +42,11 @@ struct PlayerView: View {
     @State private var lastProgressSaveTime: Date = .distantPast
     @State private var showManualStreamPicker = false
     @State private var showAboutStreamSource = false
+    @State private var isLinkCopied = false
     @State private var showPlayerHUD = false
     @State private var hostWindow: NSWindow?
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
+    @State private var keyMonitor: PlayerKeyMonitor?
     @State private var showVolumeHUD = false
     @State private var volumeHUDTask: Task<Void, Never>? = nil
     @State private var fetchedLogo: URL? = nil
@@ -63,7 +65,14 @@ struct PlayerView: View {
         playerManager.currentItem ?? item
     }
 
-    init(item: MediaItem?) {
+    private var currentPlaybackKey: String {
+        let id = activeItem?.id ?? ""
+        let s = playerManager.currentSeason ?? -1
+        let e = playerManager.currentEpisode ?? -1
+        return "\(id):\(s):\(e)"
+    }
+
+    init(item: MediaItem? = nil) {
         self.item = item
         // Idempotent: re-inits (any PlayerManager @Published change rebuilds the
         // root) always hand back the SAME session controller.
@@ -152,15 +161,36 @@ struct PlayerView: View {
                 if self.hostWindow !== window {
                     self.hostWindow = window
                     self.setupContextMenuMonitor(for: window)
+                    self.setupKeyMonitor(for: window)
                 }
             }
         )
-        .task(id: item?.id) {
-            guard let media = item else { return }
+        .onChange(of: currentPlaybackKey) { _, _ in
+            playerManager.errorMessage = nil
+            fetchedLogo = nil
+            animatedProgress = 0.0
+            hasStartedPlayback = false
+            didReachEnd = false
+            showManualStreamPicker = false
+            showAboutStreamSource = false
+            isLinkCopied = false
+            movieSuggestions = []
+            isMovieSuggestionsDismissed = false
+            isWatchingCreditsCleanly = false
+            playbackStartTask?.cancel()
+            playbackStartTask = nil
+            bufferingGraceTask?.cancel()
+            bufferingGraceTask = nil
+            upNextTimerTask?.cancel()
+            upNextTimerTask = nil
+        }
+        .task(id: activeItem?.id) {
+            fetchedLogo = nil
+            guard let media = activeItem else { return }
             // Only query TMDB if an active API key is available
             guard TMDBEnricher.shared.hasKey else { return }
             // If already have a valid TMDB logo at original resolution, skip
-            if fetchedLogo != nil || (media.logoURL != nil && media.logoURL?.absoluteString.contains("image.tmdb.org") == true && media.logoURL?.absoluteString.contains("/original/") == true) {
+            if media.logoURL != nil && media.logoURL?.absoluteString.contains("image.tmdb.org") == true && media.logoURL?.absoluteString.contains("/original/") == true {
                 return
             }
             let isTV = media.category.lowercased().contains("tv") || media.category.lowercased().contains("series")
@@ -187,37 +217,7 @@ struct PlayerView: View {
             return .handled
         }
         .onKeyPress(.escape) {
-            if showPlayerHUD {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showPlayerHUD = false
-                }
-                return .handled
-            }
-            if showAboutStreamSource {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showAboutStreamSource = false
-                }
-                return .handled
-            }
-            if isPickerVisible {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    dismissStreamPicker()
-                }
-                return .handled
-            }
-            if showExitWarning {
-                closePlayer()
-            } else {
-                withAnimation {
-                    showExitWarning = true
-                }
-                // Reset warning after 2 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    withAnimation {
-                        showExitWarning = false
-                    }
-                }
-            }
+            handleEscapePress()
             return .handled
         }
         .onKeyPress(.leftArrow) {
@@ -340,11 +340,13 @@ struct PlayerView: View {
         .onChange(of: isMidPlaybackBuffering) { _, buffering in
             // Grace: brief seeks/buffer blips (<0.6s) never flash the overlay
             // or unmount the controls layer (the ±10/15s skip flicker).
+            // For startup stalls (timePos < 1.0), respond faster so frozen 00:00 frames don't linger bare.
             bufferingGraceTask?.cancel()
             bufferingGraceTask = nil
             if buffering {
+                let delayNs: UInt64 = mpv.timePos < 1.0 ? 150_000_000 : 600_000_000
                 bufferingGraceTask = Task {
-                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    try? await Task.sleep(nanoseconds: delayNs)
                     guard !Task.isCancelled else { return }
                     await MainActor.run { sustainedBuffering = true }
                 }
@@ -390,6 +392,7 @@ struct PlayerView: View {
     private func handleStreamURLChange(_ newURL: URL?) {
         guard let url = newURL else { return }
         print("PlayerView: URL changed to \(url), playing...")
+        playerManager.errorMessage = nil
         cancelUpNextCountdown()
         movieSuggestions = []
         isLoadingSuggestions = false
@@ -418,10 +421,10 @@ struct PlayerView: View {
     /// instead of overlapping the first frames.
     private func confirmPlaybackStarted() {
         guard !hasStartedPlayback, playbackStartTask == nil,
-              mpv.timePos > 0.05, !mpv.isBuffering, !mpv.isSeeking else { return }
+              mpv.timePos > 0.15, !mpv.isBuffering, !mpv.isSeeking else { return }
         playbackStartTask = Task {
             try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled, mpv.timePos > 0.05 else {
+            guard !Task.isCancelled, mpv.timePos > 0.15, !mpv.isBuffering, !mpv.isSeeking else {
                 await MainActor.run { playbackStartTask = nil }
                 return
             }
@@ -503,6 +506,7 @@ struct PlayerView: View {
     /// just advance the Continue Watching rail. Latches end state so the Up
     /// Next card survives playback stopping.
     private func handleEndOfFile() {
+        guard mpv.hasLoadedMedia else { return }
         let duration = mpv.duration
         let timePos = mpv.timePos
         let remaining = duration > 0 ? (duration - timePos) : 0
@@ -596,7 +600,7 @@ struct PlayerView: View {
     /// log line per stuck position so future stops are visible AND fingerprinted.
     private func updateFrozenWatchdog() {
         let t = mpv.timePos
-        let eligible = hasStartedPlayback && !didReachEnd && t >= 3.0
+        let eligible = hasStartedPlayback && !didReachEnd && t >= 0.5
             && !mpv.isBuffering && !mpv.isSeeking && !mpv.isUserPaused
         guard eligible else {
             if frameFrozen { frameFrozen = false }
@@ -1479,13 +1483,48 @@ struct PlayerView: View {
         mpv.play()
     }
 
+    private func handleEscapePress() {
+        if showPlayerHUD {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showPlayerHUD = false
+            }
+            return
+        }
+        if showAboutStreamSource {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showAboutStreamSource = false
+            }
+            return
+        }
+        if isPickerVisible {
+            withAnimation(.easeOut(duration: 0.2)) {
+                dismissStreamPicker()
+            }
+            return
+        }
+        closePlayer()
+    }
+
     private func closePlayer() {
         if mpv.duration > 0 && mpv.timePos > 0 {
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
         }
+        keyMonitor?.stop()
+        keyMonitor = nil
+        contextMenuMonitor?.stop()
+        contextMenuMonitor = nil
         mpv.stop()
         playerManager.close()
         dismiss()
+    }
+
+    private func setupKeyMonitor(for window: NSWindow) {
+        keyMonitor?.stop()
+        let monitor = PlayerKeyMonitor()
+        monitor.start(for: window) { [self] in
+            self.handleEscapePress()
+        }
+        self.keyMonitor = monitor
     }
 
     private var thumbnailPlaceholder: some View {
@@ -1752,7 +1791,7 @@ struct PlayerView: View {
     }
 
     private var isMidPlaybackBuffering: Bool {
-        return hasStartedPlayback && mpv.timePos >= 3.0 && (mpv.isBuffering || mpv.isSeeking || frameFrozen) && !mpv.isUserPaused
+        return hasStartedPlayback && (mpv.isBuffering || mpv.isSeeking || frameFrozen) && !mpv.isUserPaused
     }
 
     private var isBufferingOverlayActive: Bool {
@@ -1811,6 +1850,83 @@ struct PlayerView: View {
         return nil
     }
 
+    @ViewBuilder
+    private func loadingLogo(for media: MediaItem, progress: CGFloat) -> some View {
+        let logoURL = resolvedLogoURL(for: media)
+
+        PulsingLogoContainer {
+            ZStack {
+                if let lURL = logoURL {
+                    CachedImage(url: lURL, maxDimension: 600) { phase in
+                        switch phase {
+                        case .success(let img):
+                            ZStack {
+                                // Base translucent watermark logo
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 340, maxHeight: 120)
+                                    .opacity(0.25)
+                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
+
+                                // Real progress fill logo (left-to-right fill)
+                                img.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 340, maxHeight: 120)
+                                    .opacity(1.0)
+                                    .mask(
+                                        GeometryReader { geo in
+                                            Rectangle()
+                                                .frame(width: max(0, geo.size.width * progress))
+                                                .animation(.linear(duration: 0.25), value: progress)
+                                        }
+                                    )
+                                    .shadow(color: .white.opacity(0.5), radius: 12, x: 0, y: 2)
+                            }
+                        case .failure:
+                            stylizedTextLogo(title: media.title, progress: progress)
+                        default:
+                            Color.clear.frame(maxWidth: 340, maxHeight: 120)
+                        }
+                    }
+                } else {
+                    stylizedTextLogo(title: media.title, progress: progress)
+                }
+            }
+        }
+        .padding(.horizontal, 40)
+    }
+
+    @ViewBuilder
+    private func stylizedTextLogo(title: String, progress: CGFloat) -> some View {
+        ZStack {
+            // Base watermark text matching Hero typography
+            Text(title)
+                .font(.system(size: 48, weight: .heavy, design: .default))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(Color.white.opacity(0.25))
+                .shadow(color: .black.opacity(0.6), radius: 12, x: 0, y: 4)
+
+            // Real progress fill text
+            Text(title)
+                .font(.system(size: 48, weight: .heavy, design: .default))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(Color.white)
+                .mask(
+                    GeometryReader { geo in
+                        Rectangle()
+                            .frame(width: max(0, geo.size.width * progress), alignment: .leading)
+                            .animation(.linear(duration: 0.25), value: progress)
+                    }
+                )
+                .shadow(color: .white.opacity(0.4), radius: 12, x: 0, y: 2)
+        }
+        .frame(maxWidth: 600)
+    }
+
     private var midPlaybackLogoBufferingView: some View {
         ZStack {
             // Subtle dark vignette over the paused video frame
@@ -1820,60 +1936,8 @@ struct PlayerView: View {
             let mpvProgressMid = max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 5.0))
             let realProgress = CGFloat(mpvProgressMid > 0.005 ? mpvProgressMid : animatedProgress)
 
-            if let media = item {
-                let logoURL = resolvedLogoURL(for: media)
-
-                PulsingLogoContainer {
-                    ZStack {
-                        if let lURL = logoURL {
-                            // Base translucent watermark logo
-                            AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 340, maxHeight: 120)
-                                    .opacity(0.25)
-                                    .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                            } placeholder: {
-                                EmptyView()
-                            }
-
-                            // Real progress fill logo (left-to-right fill)
-                            AsyncImage(url: lURL) { img in
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 340, maxHeight: 120)
-                                    .opacity(1.0)
-                                    .mask(
-                                        GeometryReader { geo in
-                                            Rectangle()
-                                                .frame(width: max(0, geo.size.width * realProgress))
-                                                .animation(.linear(duration: 0.25), value: realProgress)
-                                        }
-                                    )
-                                    .shadow(color: .white.opacity(0.5), radius: 12, x: 0, y: 2)
-                            } placeholder: {
-                                EmptyView()
-                            }
-                        } else {
-                            // Text fallback for media with no logo image
-                            Text(media.title.uppercased())
-                                .font(.system(size: 36, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.25))
-
-                            Text(media.title.uppercased())
-                                .font(.system(size: 36, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white)
-                                .mask(
-                                    GeometryReader { geo in
-                                        Rectangle()
-                                            .frame(width: max(0, geo.size.width * realProgress))
-                                            .animation(.linear(duration: 0.25), value: realProgress)
-                                    }
-                                )
-                        }
-                    }
-                }
-                .padding(.horizontal, 40)
+            if let media = activeItem {
+                loadingLogo(for: media, progress: realProgress)
             }
         }
         .transition(.opacity)
@@ -1883,7 +1947,7 @@ struct PlayerView: View {
     private var logoBufferingView: some View {
         ZStack {
             // Fullscreen backdrop picture & vignette
-            if let media = item, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
+            if let media = activeItem, let bgURL = media.backdropURL ?? media.heroURL ?? media.posterURL ?? media.imageURL {
                 AsyncImage(url: bgURL) { image in
                     image.resizable()
                         .aspectRatio(contentMode: .fill)
@@ -1905,62 +1969,8 @@ struct PlayerView: View {
             // Real Telemetry Progress Fill Loading — strictly monotonic (never moves backward)
             let realProgress = CGFloat(animatedProgress)
             
-            VStack(spacing: 20) {
-                if let media = item {
-                    let logoURL = resolvedLogoURL(for: media)
-
-                    PulsingLogoContainer {
-                        ZStack {
-                            if let lURL = logoURL {
-                                // Base translucent watermark logo
-                                AsyncImage(url: lURL) { img in
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxWidth: 340, maxHeight: 120)
-                                        .opacity(0.25)
-                                        .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
-                                } placeholder: {
-                                    EmptyView()
-                                }
-
-                                // Real progress fill logo (left-to-right fill)
-                                AsyncImage(url: lURL) { img in
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxWidth: 340, maxHeight: 120)
-                                        .opacity(1.0)
-                                        .mask(
-                                            GeometryReader { geo in
-                                                Rectangle()
-                                                    .frame(width: max(0, geo.size.width * realProgress))
-                                                    .animation(.linear(duration: 0.25), value: realProgress)
-                                            }
-                                        )
-                                        .shadow(color: .white.opacity(0.4), radius: 12, x: 0, y: 2)
-                                } placeholder: {
-                                    EmptyView()
-                                }
-                            } else {
-                                // Text fallback for media with no logo image
-                                Text(media.title.uppercased())
-                                    .font(.system(size: 36, weight: .black, design: .rounded))
-                                    .foregroundStyle(Color.white.opacity(0.25))
-
-                                Text(media.title.uppercased())
-                                    .font(.system(size: 36, weight: .black, design: .rounded))
-                                    .foregroundStyle(Color.white)
-                                    .mask(
-                                        GeometryReader { geo in
-                                            Rectangle()
-                                                .frame(width: max(0, geo.size.width * realProgress))
-                                                .animation(.linear(duration: 0.25), value: realProgress)
-                                        }
-                                    )
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 40)
-                }
+            if let media = activeItem {
+                loadingLogo(for: media, progress: realProgress)
             }
         }
         .onReceive(loadingTimer) { _ in
@@ -2026,8 +2036,9 @@ struct PlayerView: View {
             let cacheTime = mpv.demuxerCacheTime
             playerManager.reportTelemetryProgress(cacheTime: cacheTime)
 
-            let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 4.0))
-            self.animatedProgress = max(self.animatedProgress, mpvBuf)
+            let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 5.0))
+            let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, mpvBuf)
+            self.animatedProgress = max(self.animatedProgress, targetProgress)
         }
     }
 
@@ -2164,15 +2175,26 @@ struct PlayerView: View {
 
         let resolution = mediaInfo.resolution ?? (stream?.quality.isEmpty == false ? stream!.quality : "Unknown".localized)
         let vCodec = mediaInfo.videoCodec?.uppercased() ?? (stream?.codec?.uppercased() ?? "Auto".localized)
-        let aCodec = mediaInfo.audioCodec?.uppercased() ?? "Stereo"
-        let hwdec = mediaInfo.hwdec?.uppercased() ?? (UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "Active".localized : "Disabled".localized)
+        let aCodec = (mediaInfo.audioCodec?.isEmpty == false ? mediaInfo.audioCodec!.uppercased() : nil) ?? "Auto".localized
+        let hwdec: String = {
+            if let h = mediaInfo.hwdec?.lowercased() {
+                if h == "no" || h == "none" || h.isEmpty {
+                    return "Software (CPU)".localized
+                } else if h.contains("videotoolbox") {
+                    return "VideoToolbox (Hardware)".localized
+                } else {
+                    return h.uppercased()
+                }
+            }
+            return UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "VideoToolbox (Hardware)".localized : "Software (CPU)".localized
+        }()
         let transport = isTorrent ? "BitTorrent Swarm (P2P)".localized : "Direct HTTP Stream".localized
         let size = stream?.size ?? "—"
         let demuxerCache = String(format: "%.1f sec", mpv.demuxerCacheTime)
         let rawLink = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
         let link = playerManager.cleanPlayableURLString(from: rawLink)
 
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header
             HStack {
                 HStack(spacing: 8) {
@@ -2200,54 +2222,62 @@ struct PlayerView: View {
                 .buttonStyle(.plain)
             }
 
-            // Provider, Indexer & Transport badges
-            HStack(spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "cube.box.fill")
-                        .font(.system(size: 10))
-                    Text(sourceName)
-                        .font(.system(size: 12, weight: .bold))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(0.12), in: Capsule())
-                .foregroundColor(.white)
-
-                if let origin = originIndexer {
+            // Provider, Indexer & Transport badges (Organized 2-Row Layout)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
                     HStack(spacing: 5) {
-                        Image(systemName: "server.rack")
+                        Image(systemName: "cube.box.fill")
                             .font(.system(size: 10))
-                        Text(origin)
+                        Text(sourceName)
                             .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.cyan.opacity(0.18), in: Capsule())
-                    .foregroundColor(.cyan)
-                }
+                    .background(Color.white.opacity(0.12), in: Capsule())
+                    .foregroundColor(.white)
 
-                HStack(spacing: 5) {
-                    Image(systemName: isTorrent ? "point.3.filled.connected.trianglepath.dotted" : "globe")
-                        .font(.system(size: 10))
-                    Text(transport)
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background((isTorrent ? Color.purple : Color.cyan).opacity(0.2), in: Capsule())
-                .foregroundColor(isTorrent ? Color.purple.opacity(0.9) : Color.cyan)
-
-                if isTorrent, let seeders = stream?.seeders {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 10))
-                        Text("\(seeders) \("seeds".localized)")
-                            .font(.system(size: 11, weight: .medium))
+                    if let origin = originIndexer {
+                        HStack(spacing: 5) {
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 10))
+                            Text(origin)
+                                .font(.system(size: 12, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.cyan.opacity(0.18), in: Capsule())
+                        .foregroundColor(.cyan)
                     }
-                    .padding(.horizontal, 8)
+                }
+
+                HStack(spacing: 8) {
+                    HStack(spacing: 5) {
+                        Image(systemName: isTorrent ? "point.3.filled.connected.trianglepath.dotted" : "globe")
+                            .font(.system(size: 10))
+                        Text(transport)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.18), in: Capsule())
-                    .foregroundColor(.green)
+                    .background((isTorrent ? Color.purple : Color.cyan).opacity(0.2), in: Capsule())
+                    .foregroundColor(isTorrent ? Color.purple.opacity(0.9) : Color.cyan)
+
+                    if isTorrent, let seeders = stream?.seeders {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 10))
+                            Text("\(seeders) \("seeds".localized)")
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.18), in: Capsule())
+                        .foregroundColor(.green)
+                    }
                 }
             }
 
@@ -2258,18 +2288,20 @@ struct PlayerView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .tracking(0.8)
 
-                Text(cleanReleaseTitle)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                ScrollView(.vertical) {
+                    Text(cleanReleaseTitle)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 64)
+                .padding(10)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
-            // Specs Grid
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 10) {
+            // Specs Grid (Evenly Spanned Columns)
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 12) {
                 GridRow {
                     specField(title: "Resolution".localized, value: resolution)
                     specField(title: "Video Codec".localized, value: vCodec)
@@ -2283,6 +2315,7 @@ struct PlayerView: View {
                     specField(title: "Demuxer Buffer".localized, value: demuxerCache)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider()
                 .background(Color.white.opacity(0.12))
@@ -2293,10 +2326,22 @@ struct PlayerView: View {
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(link, forType: .string)
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isLinkCopied = true
+                        }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            await MainActor.run {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    isLinkCopied = false
+                                }
+                            }
+                        }
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "doc.on.doc")
-                            Text("Copy Stream Link".localized)
+                            Image(systemName: isLinkCopied ? "checkmark" : "doc.on.doc")
+                                .foregroundColor(isLinkCopied ? .green : .white)
+                            Text(isLinkCopied ? "Copied!".localized : "Copy Stream Link".localized)
                         }
                         .font(.system(size: 12, weight: .semibold))
                         .padding(.horizontal, 14)
@@ -2326,6 +2371,10 @@ struct PlayerView: View {
         }
         .padding(24)
         .frame(width: 480)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onTapGesture {
+            // Consume tap so selecting text or clicking inside modal does not dismiss
+        }
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -2335,7 +2384,7 @@ struct PlayerView: View {
     }
 
     private func specField(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title.uppercased())
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white.opacity(0.45))
@@ -2343,7 +2392,9 @@ struct PlayerView: View {
             Text(value)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // MARK: - Stream Picker State & Category
@@ -2502,7 +2553,7 @@ struct PlayerView: View {
                 // Media Title & Episode / Stream Stats
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        if let media = item {
+                        if let media = activeItem {
                             Text(media.title)
                                 .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
@@ -2906,7 +2957,7 @@ struct PlayerView: View {
         if let season = PlayerManager.shared.currentSeason, let episode = PlayerManager.shared.currentEpisode {
             return "S\(season):E\(episode)"
         }
-        return item?.description ?? "No description"
+        return activeItem?.description ?? "No description"
     }
 
 }
@@ -3406,6 +3457,43 @@ struct StreamRowItemView: View {
         let shown = parts.prefix(max).joined(separator: ", ")
         let remaining = parts.count - max
         return "\(shown) +\(remaining)"
+    }
+}
+
+// MARK: - Native AppKit Key Monitor (Universal Escape Handling)
+
+final class PlayerKeyMonitor {
+    private var monitor: Any?
+    private weak var window: NSWindow?
+
+    func start(for window: NSWindow, onEscape: @escaping () -> Void) {
+        self.window = window
+        stop()
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            guard let eventWindow = event.window, (self.window == nil ? eventWindow.isKeyWindow : eventWindow == self.window) else {
+                return event
+            }
+            if event.keyCode == 53 { // ESC key
+                DispatchQueue.main.async {
+                    onEscape()
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor = monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    deinit {
+        stop()
     }
 }
 

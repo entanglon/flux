@@ -1490,11 +1490,37 @@ class TMDBEnricher {
         "cru": 1112,   // Crunchyroll
     ]
 
+    /// Regional provider overrides (e.g. Hotstar in IN, regional Prime IDs)
+    static let regionalProviderOverrides: [String: [String: String]] = [
+        "IN": [
+            "dnp": "122|2336|337", // Hotstar, JioHotstar, Disney+
+            "amp": "119|9",        // Prime Video India, Global
+            "cru": "283|1112",     // Crunchyroll India, Global
+        ]
+    ]
+
     func fetchWatchProviderCatalog(platformID: String, type: String, page: Int = 1) async -> [MediaItem] {
-        guard hasKeyForHome, let providerID = Self.tmdbProviderIDs[platformID] else { return [] }
+        guard hasKeyForHome, let defaultProviderID = Self.tmdbProviderIDs[platformID] else { return [] }
         let mediaType = type == "series" ? "tv" : "movie"
-        let urlString = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providerID)&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
-        return (try? await fetchCatalog(from: urlString, type: mediaType)) ?? []
+        let providersQuery = Self.regionalProviderOverrides[currentRegion]?[platformID] ?? "\(defaultProviderID)"
+
+        // 1. Try with user's current region
+        let localURL = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(providersQuery)&watch_region=\(currentRegion)&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+        let localItems = (try? await fetchCatalog(from: localURL, type: mediaType)) ?? []
+        if !localItems.isEmpty {
+            return localItems
+        }
+
+        // 2. If current region had 0 results and region is not US, fallback to US catalog
+        if currentRegion != "US" {
+            let usURL = "\(baseURL)/discover/\(mediaType)?api_key=\(apiKey)&with_watch_providers=\(defaultProviderID)&watch_region=US&sort_by=popularity.desc&include_adult=false&vote_count.gte=30&page=\(page)"
+            let usItems = (try? await fetchCatalog(from: usURL, type: mediaType)) ?? []
+            if !usItems.isEmpty {
+                return usItems
+            }
+        }
+
+        return []
     }
 
     func fetchSimilar(item: MediaItem) async -> [MediaItem] {

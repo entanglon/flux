@@ -36,7 +36,7 @@ actor DecodeGate {
 }
 
 enum CachedImageDownsampler {
-    static func downsample(data: Data, maxDimension: CGFloat) async -> DecodedImage? {
+    static func downsample(data: Data, maxDimension: CGFloat, trimLetterbox: Bool = false) async -> DecodedImage? {
         guard !Task.isCancelled else { return nil }
         await DecodeGate.shared.acquire()
         let result = await Task.detached(priority: .utility) { () -> DecodedImage? in
@@ -50,8 +50,12 @@ enum CachedImageDownsampler {
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
                 return nil
             }
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            guard var cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
                 return nil
+            }
+
+            if trimLetterbox {
+                cgImage = self.trimLetterbox(from: cgImage)
             }
             
             let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
@@ -63,6 +67,86 @@ enum CachedImageDownsampler {
         await DecodeGate.shared.release()
         return result
     }
+
+    static func trimLetterbox(from cgImage: CGImage) -> CGImage {
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 64 && height > 36 else { return cgImage }
+
+        let scanW = 64
+        let scanH = 36
+        var buffer = [UInt8](repeating: 0, count: scanW * scanH)
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        guard let context = CGContext(
+            data: &buffer,
+            width: scanW,
+            height: scanH,
+            bitsPerComponent: 8,
+            bytesPerRow: scanW,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return cgImage }
+        context.interpolationQuality = .low
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: scanW, height: scanH))
+
+        func rowBrightness(_ row: Int) -> Double {
+            var sum = 0
+            let offset = row * scanW
+            for col in 0..<scanW { sum += Int(buffer[offset + col]) }
+            return Double(sum) / Double(scanW)
+        }
+
+        func colBrightness(_ col: Int) -> Double {
+            var sum = 0
+            for row in 0..<scanH { sum += Int(buffer[row * scanW + col]) }
+            return Double(sum) / Double(scanH)
+        }
+
+        let threshold: Double = 16.0
+        let maxRowTrim = Int(Double(scanH) * 0.22) // Up to ~22% top/bottom
+        let maxColTrim = Int(Double(scanW) * 0.20) // Up to ~20% left/right
+
+        var top = 0
+        while top < maxRowTrim && rowBrightness(top) < threshold { top += 1 }
+
+        var bottom = scanH - 1
+        while bottom > (scanH - 1 - maxRowTrim) && rowBrightness(bottom) < threshold { bottom -= 1 }
+
+        var left = 0
+        while left < maxColTrim && colBrightness(left) < threshold { left += 1 }
+
+        var right = scanW - 1
+        while right > (scanW - 1 - maxColTrim) && colBrightness(right) < threshold { right -= 1 }
+
+        let bottomTrim = (scanH - 1) - bottom
+        let rightTrim = (scanW - 1) - right
+        guard top > 0 || bottomTrim > 0 || left > 0 || rightTrim > 0 else {
+            return cgImage
+        }
+
+        // Contrast safeguard: ensure interior isn't also completely dark (night scene)
+        var interiorSum = 0
+        var interiorCount = 0
+        for r in top...bottom {
+            let offset = r * scanW
+            for c in left...right {
+                interiorSum += Int(buffer[offset + c])
+                interiorCount += 1
+            }
+        }
+        guard interiorCount > 0 else { return cgImage }
+        let interiorAvg = Double(interiorSum) / Double(interiorCount)
+        guard interiorAvg >= threshold + 10.0 else {
+            return cgImage
+        }
+
+        let cropX = CGFloat(left) / CGFloat(scanW) * CGFloat(width)
+        let cropY = CGFloat(top) / CGFloat(scanH) * CGFloat(height)
+        let cropW = CGFloat(right - left + 1) / CGFloat(scanW) * CGFloat(width)
+        let cropH = CGFloat(bottom - top + 1) / CGFloat(scanH) * CGFloat(height)
+        let cropRect = CGRect(x: cropX, y: cropY, width: cropW, height: cropH)
+        return cgImage.cropping(to: cropRect) ?? cgImage
+    }
 }
 
 struct CachedImage<Content: View>: View {
@@ -70,23 +154,26 @@ struct CachedImage<Content: View>: View {
     var fallbacks: [URL?] = []
     let transaction: Transaction
     let maxDimension: CGFloat // Max size to decode
+    var trimLetterbox: Bool = false
     @ViewBuilder let content: (AsyncImagePhase) -> Content
 
     @State private var phase: AsyncImagePhase = .empty
 
-    init(url: URL?, fallbacks: [URL?] = [], maxDimension: CGFloat = 300, transaction: Transaction = Transaction(), @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+    init(url: URL?, fallbacks: [URL?] = [], maxDimension: CGFloat = 300, trimLetterbox: Bool = false, transaction: Transaction = Transaction(), @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         self.url = url
         self.fallbacks = fallbacks
         self.maxDimension = maxDimension
+        self.trimLetterbox = trimLetterbox
         self.transaction = transaction
         self.content = content
 
         // Instant frame 0 cache hit for smooth 120 FPS scrolling without task latency
         let candidates = ([url] + fallbacks).compactMap { $0 }
         let roundedDim = Int(maxDimension.rounded())
+        let trimSuffix = trimLetterbox ? "#trim" : ""
         var initialPhase: AsyncImagePhase = .empty
         for candidate in candidates {
-            let key = "\(candidate.absoluteString)#\(roundedDim)" as NSString
+            let key = "\(candidate.absoluteString)#\(roundedDim)\(trimSuffix)" as NSString
             if let cached = ImageInMemoryCache.shared.object(forKey: key) {
                 initialPhase = .success(Image(nsImage: cached))
                 break
@@ -111,10 +198,11 @@ struct CachedImage<Content: View>: View {
         }
 
         let roundedDim = Int(maxDimension.rounded())
+        let trimSuffix = trimLetterbox ? "#trim" : ""
 
         // 1. Immediate in-memory cache hit
         for candidate in candidates {
-            let key = "\(candidate.absoluteString)#\(roundedDim)" as NSString
+            let key = "\(candidate.absoluteString)#\(roundedDim)\(trimSuffix)" as NSString
             if let cached = ImageInMemoryCache.shared.object(forKey: key) {
                 phase = .success(Image(nsImage: cached))
                 return
@@ -124,7 +212,7 @@ struct CachedImage<Content: View>: View {
         // 2. Fetch and decode (disk cache -> network -> downsample)
         for candidate in candidates {
             if Task.isCancelled { return }
-            let cacheKey = "\(candidate.absoluteString)#\(roundedDim)" as NSString
+            let cacheKey = "\(candidate.absoluteString)#\(roundedDim)\(trimSuffix)" as NSString
 
             // Re-check memory cache (another task may have decoded it)
             if let cached = ImageInMemoryCache.shared.object(forKey: cacheKey) {
@@ -139,7 +227,7 @@ struct CachedImage<Content: View>: View {
 
             // 2. Session's own disk cache
             if let cachedResponse = session.configuration.urlCache?.cachedResponse(for: request),
-               let downsampled = await CachedImageDownsampler.downsample(data: cachedResponse.data, maxDimension: maxDimension) {
+               let downsampled = await CachedImageDownsampler.downsample(data: cachedResponse.data, maxDimension: maxDimension, trimLetterbox: trimLetterbox) {
                 ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)
                 if Task.isCancelled { return }
                 withTransaction(transaction) {
@@ -155,7 +243,7 @@ struct CachedImage<Content: View>: View {
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                     continue // dead URL — try next candidate
                 }
-                guard let downsampled = await CachedImageDownsampler.downsample(data: data, maxDimension: maxDimension) else {
+                guard let downsampled = await CachedImageDownsampler.downsample(data: data, maxDimension: maxDimension, trimLetterbox: trimLetterbox) else {
                     continue // undecodable — try next candidate
                 }
                 ImageInMemoryCache.shared.setObject(downsampled.image, forKey: cacheKey, cost: downsampled.cost)

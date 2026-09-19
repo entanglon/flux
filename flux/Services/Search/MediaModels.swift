@@ -20,6 +20,29 @@ enum CatalogSource: Sendable, Hashable, Equatable {
     case localCache
 }
 
+// MARK: - Person / Actor Candidate
+struct PersonCandidate: Identifiable, Hashable, Sendable {
+    let id: Int
+    let name: String
+    let profilePath: String?
+    let knownForDepartment: String?
+    let knownForTitles: [String]
+    let popularity: Double
+
+    var profileURL: URL? {
+        guard let path = profilePath, !path.isEmpty else { return nil }
+        if path.hasPrefix("http") {
+            return URL(string: path)
+        }
+        return URL(string: "https://image.tmdb.org/t/p/w300\(path)")
+    }
+
+    func toMediaItem() -> MediaItem {
+        let desc = knownForTitles.isEmpty ? (knownForDepartment ?? "Actor") : knownForTitles.joined(separator: ", ")
+        return MediaItem(personID: id, name: name, profileURL: profileURL, knownFor: desc)
+    }
+}
+
 // MARK: - Canonical Candidate Produced by Every Search Provider
 
 /// Every provider (TMDB, Cinemeta, local cache) maps into this single shape

@@ -558,7 +558,7 @@ struct StreamingSettingsView: View {
                 Toggle(L10n.tr("Language Filter in Flux Mode"), isOn: $enableFluxLanguageFilter)
                     .disabled(!enableFluxMode)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
-                Text("When enabled, Flux Mode filters streams by your preferred audio language. When disabled, it races the fastest and healthiest streams regardless of language tags.".localized)
+                Text("When enabled, Flux Mode strictly filters streams to match your Default Audio. When disabled, it races the fastest and healthiest stream provided by your addons.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .opacity(enableFluxMode ? 1.0 : 0.6)

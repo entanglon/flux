@@ -78,7 +78,6 @@ class StremioService {
         }
         // Addon returns the full catalog in one request — only serve it on page 1.
         guard page == 1 else { return [] }
-        guard AddonManager.shared.isCinemetaEnabled else { return [] }
         return try await fetchCatalog(type: type, id: platformID, baseURL: ottCatalogBase, preserveOrder: true)
     }
 

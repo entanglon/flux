@@ -53,6 +53,14 @@ class AuthManager: ObservableObject {
         }
     }
 
+    #if DEBUG
+    func resetStateForTesting(user: User?, authenticated: Bool, guest: Bool) {
+        self.currentUser = user
+        self.isAuthenticated = authenticated
+        self.isGuestMode = guest
+    }
+    #endif
+
     // MARK: - Guest Mode
 
     func continueAsGuest() {
@@ -205,11 +213,13 @@ class AuthManager: ObservableObject {
         autoSyncTask?.cancel()
         autoSyncTask = nil
         KeychainManager.clearSession()
-        UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
-        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.cloudLastSyncAt)
-        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
-        UserDefaults.standard.removeObject(forKey: Self.userDisplayNameKey)
-        UserDefaults.standard.removeObject(forKey: "flux.hasExplicitlyCustomizedName")
+        if !AppEnvironment.isRunningTests {
+            UserDefaults.standard.removeObject(forKey: Self.guestModeKey)
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.cloudLastSyncAt)
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.tmdbApiKey)
+            UserDefaults.standard.removeObject(forKey: Self.userDisplayNameKey)
+            UserDefaults.standard.removeObject(forKey: "flux.hasExplicitlyCustomizedName")
+        }
         self.currentUser = nil
         self.isAuthenticated = false
         self.isGuestMode = false
@@ -221,8 +231,10 @@ class AuthManager: ObservableObject {
         TasteProfileManager.shared.handleSignOut()
         AddonManager.shared.resetToStockAddons()
         PlayerManager.shared.handleSignOut()
-        RecentSearchManager.shared.clear()
-        Task { await SearchEngine.shared.clearUserIndex() }
+        if !AppEnvironment.isRunningTests {
+            RecentSearchManager.shared.clear()
+            Task { await SearchEngine.shared.clearUserIndex() }
+        }
         NotificationCenter.default.post(name: .fluxRefresh, object: nil)
     }
 
@@ -231,6 +243,7 @@ class AuthManager: ObservableObject {
     private var autoSyncTask: Task<Void, Never>?
 
     func scheduleAutoSync(delay: TimeInterval = 2.0) {
+        guard !AppEnvironment.isRunningTests else { return }
         guard isAuthenticated, Self.isConfigured else { return }
         autoSyncTask?.cancel()
         autoSyncTask = Task {
@@ -262,6 +275,7 @@ class AuthManager: ObservableObject {
     }
 
     private func syncNowInternal(pullFirst: Bool, forcePull: Bool = false) async {
+        guard !AppEnvironment.isRunningTests else { return }
         // TEMP-DIAGNOSTIC (missing profiles).
         Logger.auth.error("DIAG syncNowInternal: pullFirst=\(pullFirst, privacy: .public) forcePull=\(forcePull, privacy: .public) hasToken=\(KeychainManager.getToken() != nil, privacy: .public)")
         guard let token = KeychainManager.getToken(),
@@ -312,6 +326,16 @@ class AuthManager: ObservableObject {
             }
 
             let payload = UserDataService.shared.exportCloudPayload()
+            
+            // Cloud Anti-Regression Shield:
+            // Never allow an empty or wiped local history to overwrite a populated remote history!
+            let localHistoryCount = (payload["history"] as? [[String: Any]])?.count ?? 0
+            let remoteHistoryCount = (remote?.payload["history"] as? [[String: Any]])?.count ?? 0
+            if remoteHistoryCount > 0 && localHistoryCount == 0 {
+                Logger.auth.error("Cloud push aborted: local history is unexpectedly empty while remote has \(remoteHistoryCount) items!")
+                return
+            }
+
             let now = Date().timeIntervalSince1970
             let newRecordID = try await client.pushData(
                 token: token,

@@ -698,7 +698,7 @@ class UserDataService: ObservableObject {
                 self[keyPath: target] = newItems
             }
         }
-        if !isLightweightTick {
+        if !isLightweightTick && !AppEnvironment.isRunningTests {
             AuthManager.shared.scheduleAutoSync()
         }
     }
@@ -773,8 +773,9 @@ class UserDataService: ObservableObject {
     func saveEpisodeProgress(for itemID: String, season: Int, episode: Int, position: Double, duration: Double, isRestart: Bool = false, isLightweightTick: Bool = false) {
         guard duration > 0 else { return }
         let key = "\(itemID)_s\(season)e\(episode)"
-        var allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
         let rawProg = min(1.0, max(0.0, position / duration))
+
+        var allProgress = UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]] ?? [:]
         let prevProg = allProgress[key]?["progress"] as? Double ?? 0.0
         let prog: Double
         if isRestart || (prevProg >= 0.90 && rawProg < 0.90) {
@@ -871,6 +872,7 @@ class UserDataService: ObservableObject {
     }
     
     private func saveCollections() {
+        guard !AppEnvironment.isRunningTests else { return }
         let raw: [[String: Any]] = collections.map { c in
             let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
             return [
@@ -1014,9 +1016,18 @@ class UserDataService: ObservableObject {
             ?? (UserDefaults.standard.array(forKey: "localHistoryDataStremio") as? [[String: Any]])
             ?? []
 
-        let sanitizedWatchlist = sanitizeDataArray(watchlistData)
-        let sanitizedHistory = sanitizeDataArray(historyData)
-        let epProgress = (UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]]) ?? [:]
+        let sanitizedWatchlist = sanitizeDataArray(watchlistData).filter { dict in
+            guard let id = dict["id"] as? String else { return false }
+            return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
+        }
+        let sanitizedHistory = sanitizeDataArray(historyData).filter { dict in
+            guard let id = dict["id"] as? String else { return false }
+            return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
+        }
+        let rawEpProgress = (UserDefaults.standard.dictionary(forKey: episodeProgressKey) as? [String: [String: Any]]) ?? [:]
+        let epProgress = rawEpProgress.filter { (k, _) in
+            !k.hasPrefix("tt_test_") && !k.hasPrefix("test_")
+        }
 
         let tmdbKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
         let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""

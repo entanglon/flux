@@ -36,7 +36,7 @@ actor SearchEngine {
     @discardableResult
     func updateQuery(
         _ rawQuery: String,
-        onRemoteResults: @escaping @Sendable ([MediaCandidate]) -> Void
+        onRemoteResults: @escaping @Sendable ([MediaCandidate], [PersonCandidate]) -> Void
     ) async -> [PrefixTrie.TrieEntry] {
         // Cancelling the previous task cooperatively stops in-flight network requests
         activeTask?.cancel()
@@ -94,21 +94,23 @@ actor SearchEngine {
     private func performRemoteSearch(
         query: String,
         originalQuery: String,
-        onResults: @escaping @Sendable ([MediaCandidate]) -> Void
+        onResults: @escaping @Sendable ([MediaCandidate], [PersonCandidate]) -> Void
     ) async {
         guard !Task.isCancelled else { return }
 
         let hasTMDB = TMDBEnricher.shared.hasKey
         let candidates: [MediaCandidate]
+        var people: [PersonCandidate] = []
 
         if hasTMDB {
             // TMDB enrichment mode: Query TMDB directly and exclusively.
             // Eliminates 500-1500ms Cinemeta latency and prevents conflicting Cinemeta metadata from polluting results.
-            var hits = (try? await tmdbClient.multiSearch(query: query)) ?? []
-            if hits.isEmpty && query != originalQuery {
-                hits = (try? await tmdbClient.multiSearch(query: originalQuery)) ?? []
+            var searchRes = (try? await tmdbClient.multiSearch(query: query)) ?? MultiSearchResult(candidates: [], people: [])
+            if searchRes.candidates.isEmpty && searchRes.people.isEmpty && query != originalQuery {
+                searchRes = (try? await tmdbClient.multiSearch(query: originalQuery)) ?? MultiSearchResult(candidates: [], people: [])
             }
-            candidates = hits
+            candidates = searchRes.candidates
+            people = searchRes.people
         } else {
             // Non-TMDB mode: Query Cinemeta catalog
             candidates = (try? await cinemetaClient.search(query: query)) ?? []
@@ -120,8 +122,9 @@ actor SearchEngine {
         let deduped = Self.deduplicate(candidates)
         let eligible = filter.filter(deduped)
         let ranked = scorer.rank(candidates: eligible, query: originalQuery)
+        let sortedPeople = people.sorted { $0.popularity > $1.popularity }
 
-        onResults(ranked)
+        onResults(ranked, sortedPeople)
     }
     
     /// Clears the trie and re-indexes only public trending titles, purging any previous user data.

@@ -4,6 +4,7 @@ struct SearchView: View {
     @StateObject private var viewModel = SearchViewModel()
     @FocusState private var isSearchFocused: Bool
     @ObservedObject private var recentManager = RecentSearchManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     
     // Grid for Search Results
     let resultColumns = [
@@ -18,14 +19,14 @@ struct SearchView: View {
                     Color.clear.frame(height: 44)
 
                     if viewModel.isSearching {
-                        if viewModel.isLoading && viewModel.searchResults.isEmpty {
+                        if viewModel.isLoading && viewModel.searchResults.isEmpty && viewModel.personResults.isEmpty {
                             LazyVGrid(columns: resultColumns, spacing: 24) {
                                 ForEach(0..<12, id: \.self) { _ in
                                     GhostCard()
                                 }
                             }
                             .transition(.opacity)
-                        } else if viewModel.searchResults.isEmpty {
+                        } else if viewModel.searchResults.isEmpty && viewModel.personResults.isEmpty {
                             VStack(spacing: 16) {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 48))
@@ -39,15 +40,50 @@ struct SearchView: View {
                             .frame(maxWidth: .infinity, minHeight: 300)
                             .transition(.opacity)
                         } else {
-                            LazyVGrid(columns: resultColumns, spacing: 24) {
-                                ForEach(viewModel.searchResults) { item in
-                                    NavigationLink(value: item) {
-                                        GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                            VStack(alignment: .leading, spacing: 32) {
+                                if !viewModel.personResults.isEmpty {
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        Text("People".localized)
+                                            .font(.system(size: 20, weight: .bold))
+                                            .foregroundStyle(.white)
+
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 20) {
+                                                ForEach(viewModel.personResults) { person in
+                                                    NavigationLink(value: PersonNavigation(id: person.id, fallbackName: person.name)) {
+                                                        PersonSearchCard(person: person)
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .simultaneousGesture(TapGesture().onEnded {
+                                                        recentManager.add(person.toMediaItem())
+                                                    })
+                                                }
+                                            }
+                                            .padding(.vertical, 4)
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .simultaneousGesture(TapGesture().onEnded {
-                                        recentManager.add(item)
-                                    })
+                                }
+
+                                if !viewModel.searchResults.isEmpty {
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        if !viewModel.personResults.isEmpty {
+                                            Text("Movies & TV Shows".localized)
+                                                .font(.system(size: 20, weight: .bold))
+                                                .foregroundStyle(.white)
+                                        }
+
+                                        LazyVGrid(columns: resultColumns, spacing: 24) {
+                                            ForEach(viewModel.searchResults) { item in
+                                                NavigationLink(value: item) {
+                                                    GlassCard(item: item, aspectRatio: .portrait, showTitle: false)
+                                                }
+                                                .buttonStyle(.plain)
+                                                .simultaneousGesture(TapGesture().onEnded {
+                                                    recentManager.add(item)
+                                                })
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             .transition(.opacity)
@@ -209,22 +245,26 @@ struct RecentSearchCard: View {
     var body: some View {
         HStack(spacing: 12) {
             // Left Poster Thumbnail
-            CachedImage(url: item.posterURL ?? item.imageURL) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 48, height: 68)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                default:
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 48, height: 68)
-                        .overlay(
-                            Image(systemName: "film")
-                                .font(.system(size: 18))
-                                .foregroundStyle(.white.opacity(0.3))
-                        )
+            if item.category == "Actor" || item.category == "Person" {
+                CastCircle(name: item.title, imageURL: item.posterURL ?? item.imageURL, size: 48)
+            } else {
+                CachedImage(url: item.posterURL ?? item.imageURL) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 48, height: 68)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    default:
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(0.1))
+                            .frame(width: 48, height: 68)
+                            .overlay(
+                                Image(systemName: "film")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.white.opacity(0.3))
+                            )
+                    }
                 }
             }
             
@@ -250,12 +290,55 @@ struct RecentSearchCard: View {
     }
     
     private var subtitleText: String {
+        if item.category == "Actor" || item.category == "Person" {
+            return !item.description.isEmpty ? item.description : item.localizedCategory
+        }
         var parts: [String] = []
         parts.append(item.localizedCategory)
         if let year = item.releaseDateYear, !year.isEmpty {
             parts.append(year)
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Person Search Card
+struct PersonSearchCard: View {
+    let person: PersonCandidate
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            CastCircle(name: person.name, imageURL: person.profileURL, size: 84)
+                .scaleEffect(isHovered ? 1.05 : 1.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+
+            VStack(spacing: 2) {
+                Text(person.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+            .frame(width: 96)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    private var subtitle: String {
+        if !person.knownForTitles.isEmpty {
+            return person.knownForTitles.prefix(2).joined(separator: ", ")
+        }
+        return (person.knownForDepartment ?? "Actor").localized
     }
 }
 

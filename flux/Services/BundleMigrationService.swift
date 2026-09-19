@@ -8,6 +8,7 @@ enum BundleMigrationService {
     private static let sourceBundleID = "com.entanglon.flux"
 
     static func migrateIfNeeded() {
+        guard !AppEnvironment.isRunningTests else { return }
         let currentBundleID = Bundle.main.bundleIdentifier ?? ""
         guard currentBundleID != sourceBundleID else { return }
 
@@ -25,7 +26,7 @@ enum BundleMigrationService {
 
         Logger.sync.info("Starting bundle migration from \(sourceBundleID) to \(currentBundleID)...")
 
-        let prefixesToMigrate = ["profile.", "flux.", "local"]
+        let prefixesToMigrate = ["profile.", "flux.", "flux_", "local"]
         let exactKeysToMigrate = [
             UserDefaults.Key.tmdbApiKey,
             "globalEpisodeProgress",
@@ -41,7 +42,8 @@ enum BundleMigrationService {
             "enableFluxMode",
             "autoPlayNextEnabled",
             "appLanguage",
-            "lastUsedSource"
+            "lastUsedSource",
+            "flux_recent_searches"
         ]
 
         var migratedCount = 0
@@ -51,15 +53,26 @@ enum BundleMigrationService {
                 prefixesToMigrate.contains(where: { key.hasPrefix($0) })
             guard shouldMigrate else { continue }
 
-            // If target has a non-empty string, dictionary, or array, preserve it
-            if let targetStr = UserDefaults.standard.string(forKey: key), !targetStr.isEmpty {
-                continue
-            }
-            if let targetArr = UserDefaults.standard.array(forKey: key), !targetArr.isEmpty {
-                continue
-            }
-            if let targetDict = UserDefaults.standard.dictionary(forKey: key), !targetDict.isEmpty {
-                continue
+            if key == "StremioConfiguredAddons" {
+                let targetData = UserDefaults.standard.data(forKey: key)
+                let targetAddons = targetData.flatMap { try? JSONDecoder().decode([StremioAddon].self, from: $0) } ?? []
+                let sourceData = value as? Data
+                let sourceAddons = sourceData.flatMap { try? JSONDecoder().decode([StremioAddon].self, from: $0) } ?? []
+                // Only skip if target has at least as many configured addons as source and has streaming addons
+                if targetAddons.count >= sourceAddons.count && targetAddons.count > 2 {
+                    continue
+                }
+            } else {
+                // If target has a non-empty string, dictionary, or array, preserve it
+                if let targetStr = UserDefaults.standard.string(forKey: key), !targetStr.isEmpty {
+                    continue
+                }
+                if let targetArr = UserDefaults.standard.array(forKey: key), !targetArr.isEmpty {
+                    continue
+                }
+                if let targetDict = UserDefaults.standard.dictionary(forKey: key), !targetDict.isEmpty {
+                    continue
+                }
             }
 
             UserDefaults.standard.set(value, forKey: key)

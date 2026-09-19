@@ -147,6 +147,7 @@ struct PocketBaseClient {
     /// duplicate. One extra GET only in that case.
     @discardableResult
     func pushData(token: String, userID: String, payload: [String: Any], updatedAt: Double, existingRecordID: String?) async throws -> String? {
+        guard !AppEnvironment.isRunningTests else { return nil }
         let body: [String: Any] = [
             "user": userID,
             "payload": payload,

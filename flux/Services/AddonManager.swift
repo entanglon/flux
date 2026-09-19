@@ -143,6 +143,9 @@ class AddonManager: ObservableObject {
         self.addons = Array(map.values)
         ensureDefaultAddons()
         sortAddonsDeterministically()
+        if let encoded = try? JSONEncoder().encode(self.addons) {
+            UserDefaults.standard.set(encoded, forKey: storageKey)
+        }
     }
     
     // MARK: - Local Persistence
@@ -245,7 +248,9 @@ class AddonManager: ObservableObject {
     func resetToStockAddons() {
         addons = []
         ensureDefaultAddons()
-        saveAddons()
+        if !AppEnvironment.isRunningTests {
+            saveAddons()
+        }
     }
     
     private func sortAddonsDeterministically() {

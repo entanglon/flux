@@ -6,6 +6,8 @@
 //
 
 import Testing
+import Foundation
+import CoreGraphics
 @testable import flux
 
 struct fluxTests {
@@ -101,5 +103,130 @@ struct fluxTests {
         #expect(itemWithLang.displayOriginalLanguage == "Korean")
     }
 
+    // MARK: - Audio Track Language Matching Precision Tests
+
+    @Test func trackMatchesLanguagePreventsSubwordFalsePositives() {
+        // "commentary", "adventure", "opening", "ending" must NOT falsely match "en" (English)
+        let commTrack = Track(id: 1, type: "audio", title: "Audio Commentary", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: commTrack, targetLang: "English"))
+        #expect(!MPVController.trackMatchesLanguage(track: commTrack, targetLang: "en"))
+
+        let adventureTrack = Track(id: 2, type: "audio", title: "Adventure Sound FX", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: adventureTrack, targetLang: "English"))
+
+        let openingTrack = Track(id: 3, type: "audio", title: "Opening Theme", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: openingTrack, targetLang: "English"))
+
+        // "releases" must NOT falsely match "es" (Spanish)
+        let releasesTrack = Track(id: 4, type: "audio", title: "Special Releases Mix", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: releasesTrack, targetLang: "Spanish"))
+        #expect(!MPVController.trackMatchesLanguage(track: releasesTrack, targetLang: "es"))
+
+        // "edition" must NOT falsely match "it" (Italian)
+        let editionTrack = Track(id: 5, type: "audio", title: "Criterion Edition Mix", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: editionTrack, targetLang: "Italian"))
+        #expect(!MPVController.trackMatchesLanguage(track: editionTrack, targetLang: "it"))
+
+        // "default" must NOT falsely match "de" (German)
+        let defaultTrack = Track(id: 6, type: "audio", title: "Default Track", lang: "und", isSelected: false)
+        #expect(!MPVController.trackMatchesLanguage(track: defaultTrack, targetLang: "German"))
+        #expect(!MPVController.trackMatchesLanguage(track: defaultTrack, targetLang: "de"))
+    }
+
+    @Test func trackMatchesLanguageAccuratelyIdentifiesRealLanguageTags() {
+        // Explicit metadata code
+        let enMetaTrack = Track(id: 1, type: "audio", title: "Surround 5.1", lang: "eng", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: enMetaTrack, targetLang: "English"))
+
+        let jaMetaTrack = Track(id: 2, type: "audio", title: "Stereo", lang: "ja", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: jaMetaTrack, targetLang: "Japanese"))
+        #expect(MPVController.trackMatchesLanguage(track: jaMetaTrack, targetLang: "ja"))
+
+        // Bracketed and tagged titles
+        let bracketTrack = Track(id: 3, type: "audio", title: "Audio [en] 5.1", lang: "und", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: bracketTrack, targetLang: "English"))
+
+        let parenTrack = Track(id: 4, type: "audio", title: "Stereo (ja)", lang: "und", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: parenTrack, targetLang: "Japanese"))
+
+        // Full word titles
+        let spanishTrack = Track(id: 5, type: "audio", title: "Spanish Latino 5.1", lang: "und", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: spanishTrack, targetLang: "Spanish"))
+
+        let frenchTrack = Track(id: 6, type: "audio", title: "French VFF AC3", lang: "und", isSelected: false)
+        #expect(MPVController.trackMatchesLanguage(track: frenchTrack, targetLang: "French"))
+    }
+
+    // MARK: - Actor Search & Person Candidate Tests
+
+    @Test func personCandidateConvertsToMediaItem() {
+        let candidate = PersonCandidate(
+            id: 10859,
+            name: "Ryan Reynolds",
+            profilePath: "/4Yt28sL.jpg",
+            knownForDepartment: "Acting",
+            knownForTitles: ["Deadpool", "Free Guy"],
+            popularity: 88.5
+        )
+
+        let mediaItem = candidate.toMediaItem()
+        #expect(mediaItem.id == "person-10859")
+        #expect(mediaItem.title == "Ryan Reynolds")
+        #expect(mediaItem.category == "Actor")
+        #expect(mediaItem.personID == 10859)
+        #expect(mediaItem.description == "Deadpool, Free Guy")
+        #expect(mediaItem.posterURL?.absoluteString == "https://image.tmdb.org/t/p/w300/4Yt28sL.jpg")
+    }
+
+    // MARK: - Letterbox Trimming Tests
+
+    @Test func letterboxTrimmingDetectsBlackBars() {
+        let width = 160
+        let height = 90
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            #expect(Bool(false), "Failed to create test graphics context")
+            return
+        }
+
+        // Fill with black bars (top 15 rows and bottom 15 rows)
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Fill bright center content (middle 60 rows)
+        context.setFillColor(CGColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 15, width: width, height: 60))
+
+        guard let originalCG = context.makeImage() else {
+            #expect(Bool(false), "Failed to generate test image")
+            return
+        }
+
+        let trimmedCG = CachedImageDownsampler.trimLetterbox(from: originalCG)
+        #expect(trimmedCG.height < height, "Trimmed image should have removed black bars")
+        #expect(trimmedCG.width == width, "Width should remain unchanged for letterbox")
+    }
+
+    // MARK: - OTT Watch Provider Regional Mappings
+
+    @Test func ottPlatformProviderMappingsAndRegionalOverrides() {
+        #expect(TMDBEnricher.tmdbProviderIDs["dnp"] == 337)
+        #expect(TMDBEnricher.tmdbProviderIDs["amp"] == 9)
+        #expect(TMDBEnricher.tmdbProviderIDs["nfx"] == 8)
+        #expect(TMDBEnricher.tmdbProviderIDs["hbm"] == 1899)
+        #expect(TMDBEnricher.regionalProviderOverrides["IN"]?["dnp"] == "122|2336|337")
+        #expect(TMDBEnricher.regionalProviderOverrides["IN"]?["amp"] == "119|9")
+        #expect(TMDBEnricher.regionalProviderOverrides["IN"]?["cru"] == "283|1112")
+    }
 }
 

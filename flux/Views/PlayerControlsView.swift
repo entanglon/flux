@@ -58,8 +58,23 @@ struct PlayerControlsView: View {
                 VStack {
                     // Top Bar
                     HStack(alignment: .top) {
-                        // Left Group: PIP/Share
+                        // Left Group: Back / PIP / Share
                         HStack(spacing: 0) {
+                            Button(action: { onClose() }) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .frame(width: 40, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Close".localized)
+                            .accessibilityLabel("Close".localized)
+
+                            Divider()
+                                .frame(height: 16)
+                                .background(Color.white.opacity(0.2))
+
                             Button(action: { onTogglePiP?() }) {
                                 Image(systemName: "rectangle.on.rectangle")
                                     .font(.system(size: 14, weight: .medium))

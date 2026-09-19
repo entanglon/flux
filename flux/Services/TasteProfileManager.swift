@@ -35,8 +35,10 @@ final class TasteProfileManager: ObservableObject {
         snapshots = []
         lovedKey = "tasteProfileLovedItems"
         watchedKey = "tasteProfileWatchSnapshots"
-        UserDefaults.standard.removeObject(forKey: "tasteProfileLovedItems")
-        UserDefaults.standard.removeObject(forKey: "tasteProfileWatchSnapshots")
+        if !AppEnvironment.isRunningTests {
+            UserDefaults.standard.removeObject(forKey: "tasteProfileLovedItems")
+            UserDefaults.standard.removeObject(forKey: "tasteProfileWatchSnapshots")
+        }
     }
 
     struct WatchSnapshot: Codable {

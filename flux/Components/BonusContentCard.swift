@@ -82,7 +82,7 @@ struct BonusContentCard: View {
     @ViewBuilder
     private var thumbnailArtwork: some View {
         if let url = item.thumbnailURL {
-            CachedImage(url: url, maxDimension: 800) { phase in
+            CachedImage(url: url, maxDimension: 800, trimLetterbox: true) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -105,7 +105,7 @@ struct BonusContentCard: View {
     @ViewBuilder
     private var secondaryFallbackArtwork: some View {
         if let fallbackThumb = item.fallbackThumbnailURL {
-            CachedImage(url: fallbackThumb, maxDimension: 600) { phase in
+            CachedImage(url: fallbackThumb, maxDimension: 600, trimLetterbox: true) { phase in
                 switch phase {
                 case .success(let image):
                     image

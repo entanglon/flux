@@ -2,6 +2,11 @@ import Foundation
 
 // MARK: - TMDB /3/search/multi Client with Cooperative Task Cancellation
 
+struct MultiSearchResult: Sendable {
+    let candidates: [MediaCandidate]
+    let people: [PersonCandidate]
+}
+
 actor TMDBClient {
     private let apiKeyProvider: @Sendable () -> String
     private let session: URLSession
@@ -18,9 +23,9 @@ actor TMDBClient {
         self.session = session
     }
 
-    func multiSearch(query: String) async throws -> [MediaCandidate] {
+    func multiSearch(query: String) async throws -> MultiSearchResult {
         let initialResults = try await performMultiSearch(query: query)
-        if !initialResults.isEmpty {
+        if !initialResults.candidates.isEmpty || !initialResults.people.isEmpty {
             return initialResults
         }
 
@@ -39,7 +44,7 @@ actor TMDBClient {
             let singularQuery = singularTokens.joined(separator: " ")
             if singularQuery != query {
                 let singularResults = try await performMultiSearch(query: singularQuery)
-                if !singularResults.isEmpty {
+                if !singularResults.candidates.isEmpty || !singularResults.people.isEmpty {
                     return singularResults
                 }
             }
@@ -51,18 +56,18 @@ actor TMDBClient {
             let stripped = tokens.filter { !stopWords.contains($0.lowercased()) }.joined(separator: " ")
             if !stripped.isEmpty && stripped != query {
                 let strippedResults = try await performMultiSearch(query: stripped)
-                if !strippedResults.isEmpty {
+                if !strippedResults.candidates.isEmpty || !strippedResults.people.isEmpty {
                     return strippedResults
                 }
             }
         }
 
-        return []
+        return MultiSearchResult(candidates: [], people: [])
     }
 
-    private func performMultiSearch(query: String) async throws -> [MediaCandidate] {
+    private func performMultiSearch(query: String) async throws -> MultiSearchResult {
         let key = apiKeyProvider()
-        guard !key.isEmpty else { return [] }
+        guard !key.isEmpty else { return MultiSearchResult(candidates: [], people: []) }
         
         let tmdbLang = await MainActor.run {
             let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
@@ -87,7 +92,26 @@ actor TMDBClient {
         }
 
         let decoded = try JSONDecoder().decode(TMDBMultiSearchResponse.self, from: data)
-        return decoded.results.compactMap { $0.asMediaCandidate }
+        var candidates: [MediaCandidate] = []
+        var people: [PersonCandidate] = []
+
+        for res in decoded.results {
+            if let candidate = res.asMediaCandidate {
+                candidates.append(candidate)
+            } else if let person = res.asPersonCandidate {
+                people.append(person)
+                // Surface the actor's top known_for titles into the candidates list
+                if let known = res.knownFor {
+                    for k in known {
+                        if let knownCand = k.asMediaCandidate {
+                            candidates.append(knownCand)
+                        }
+                    }
+                }
+            }
+        }
+
+        return MultiSearchResult(candidates: candidates, people: people)
     }
 }
 
@@ -117,6 +141,9 @@ struct TMDBResult: Decodable, Sendable {
     let firstAirDate: String?
     let adult: Bool?
     let genreIds: [Int]?
+    let profilePath: String?
+    let knownForDepartment: String?
+    let knownFor: [TMDBResult]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, name, popularity, adult, overview
@@ -128,6 +155,9 @@ struct TMDBResult: Decodable, Sendable {
         case releaseDate = "release_date"
         case firstAirDate = "first_air_date"
         case genreIds = "genre_ids"
+        case profilePath = "profile_path"
+        case knownForDepartment = "known_for_department"
+        case knownFor = "known_for"
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -162,6 +192,22 @@ struct TMDBResult: Decodable, Sendable {
             imdbID: nil,
             genres: TMDBGenreMapper.names(for: genreIds),
             source: .tmdb
+        )
+    }
+
+    var asPersonCandidate: PersonCandidate? {
+        guard mediaType == "person" else { return nil }
+        guard let personName = (name ?? title)?.trimmingCharacters(in: .whitespacesAndNewlines), !personName.isEmpty else {
+            return nil
+        }
+        let titles = (knownFor ?? []).compactMap { ($0.title ?? $0.name)?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return PersonCandidate(
+            id: id,
+            name: personName,
+            profilePath: profilePath,
+            knownForDepartment: knownForDepartment,
+            knownForTitles: titles,
+            popularity: popularity ?? 0.0
         )
     }
 }

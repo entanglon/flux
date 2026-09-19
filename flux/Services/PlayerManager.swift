@@ -174,7 +174,7 @@ class PlayerManager: ObservableObject {
             return
         }
 
-        guard let winner = await raceBestStream(from: streams), !Task.isCancelled else {
+        guard let winner = await raceBestStream(from: streams, item: item, season: season, episode: episode), !Task.isCancelled else {
             await MainActor.run {
                 self.isPrefetching = false
                 self.inflightPrefetchKey = nil
@@ -281,6 +281,8 @@ class PlayerManager: ObservableObject {
             backing: .buffered,
             defer: false
         )
+        host.identifier = NSUserInterfaceItemIdentifier("flux_warm_core_host")
+        host.title = "FluxWarmCoreHost"
         host.alphaValue = 0.01
         host.isOpaque = false
         host.backgroundColor = .black
@@ -634,7 +636,23 @@ class PlayerManager: ObservableObject {
                 }
             }
         }
-        self.pendingResumeTime = resumePos
+        // Apple TV style single player window handoff:
+        // If an outgoing playback or loading session is active, cleanly flush its progress and stop it
+        if let _ = currentItem {
+            let curTime = sessionController?.timePos ?? 0
+            let curDur = sessionController?.duration ?? 0
+            if curDur > 0 && curTime > 0 {
+                updateWatchProgress(time: curTime, duration: curDur, isLightweightTick: false)
+            }
+            sessionController?.stop()
+            self.fetchAndRaceTask?.cancel()
+            self.fetchAndRaceTask = nil
+            self.discardWarmCore()
+            if let hash = activeTorrentHash, hash != prefetchTorrentHash {
+                StremioServerManager.shared.removeTorrent(infoHash: hash)
+                activeTorrentHash = nil
+            }
+        }
 
         self.currentItem = item
         self.currentSeason = season
@@ -1067,7 +1085,7 @@ class PlayerManager: ObservableObject {
 
             // Flux Mode Auto-Play Engine
             if isFluxEnabled, !streams.isEmpty {
-                if let winner = await self.raceBestStream(from: streams) {
+                if let winner = await self.raceBestStream(from: streams, item: item, season: season, episode: episode) {
                     guard await isStillCurrentTarget() else {
                         print("[PlayerManager] Discarding Flux Mode stream winner because user selected another title/episode.")
                         return
@@ -1105,10 +1123,15 @@ class PlayerManager: ObservableObject {
     
     // Flux Mode source pick:
     // Leverages selectFastStartCandidate with quality cap, language match, and speed scoring.
-    // Stashes standby fallbacks and warms HTTP candidates in the background.
-    private func raceBestStream(from streams: [Stream]) async -> Stream? {
+    // Immediately commits to the highest-scoring candidate and stashes standby fallbacks
+    // for seamless watchdog auto-advancement without blocking playback on artificial network probes.
+    private func raceBestStream(from streams: [Stream], item: MediaItem? = nil, season: Int? = nil, episode: Int? = nil) async -> Stream? {
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
+
+        let targetItem = item ?? currentItem
+        let targetSeason = season ?? currentSeason
+        let targetEpisode = episode ?? currentEpisode
 
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
         let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
@@ -1120,121 +1143,25 @@ class PlayerManager: ObservableObject {
             sourceMode: sourceMode,
             preferredQuality: preferredQuality,
             preferredLang: preferredLang,
-            originalLanguage: currentItem?.originalLanguage,
+            originalLanguage: targetItem?.originalLanguage,
             enableLanguageFilter: enableLanguageFilter,
             probeStatus: self.probeStatus,
-            targetSeason: currentSeason,
-            targetEpisode: currentEpisode,
-            targetTitle: currentItem?.title
+            targetSeason: targetSeason,
+            targetEpisode: targetEpisode,
+            targetTitle: targetItem?.title
         )
 
         guard let winnerCandidate = primary else { return nil }
-
-        // If in HTTP mode or candidate is HTTP, concurrently probe top candidates
-        // to find the first alive (200-399) HTTP stream and discard dead ones (404/timeouts).
-        if sourceMode == "http" || !winnerCandidate.isTorrent {
-            let allHttp = ([winnerCandidate] + fallbacks).filter { !$0.isTorrent }
-            if !allHttp.isEmpty {
-                let (verifiedWinner, verifiedFallbacks) = await raceAndVerifyHTTPCandidates(Array(allHttp.prefix(6)))
-                if let verified = verifiedWinner {
-                    await MainActor.run {
-                        self.standbyFallbacks = verifiedFallbacks + fallbacks.filter { $0.isTorrent }
-                    }
-                    print("[PlayerManager] ⚡ Flux Mode verified alive HTTP stream: \(verified.cleanTitle) (\(verified.quality))")
-                    return verified
-                } else if sourceMode == "http" {
-                    // In HTTP-only mode, if probing was inconclusive/slow, fall back to the top candidate
-                    // rather than failing auto-play.
-                    print("[PlayerManager] HTTP probe inconclusive; falling back to top candidate: \(winnerCandidate.cleanTitle)")
-                    await MainActor.run {
-                        self.standbyFallbacks = fallbacks
-                    }
-                    return winnerCandidate
-                } else {
-                    // In 'both' mode, if HTTP candidates are unresponsive, fall back to best torrent candidate!
-                    if let topTorrent = ([winnerCandidate] + fallbacks).first(where: { $0.isTorrent }) {
-                        print("[PlayerManager] HTTP candidates unresponsive; falling back to best torrent: \(topTorrent.cleanTitle)")
-                        await MainActor.run {
-                            self.standbyFallbacks = fallbacks.filter { $0.stableKey != topTorrent.stableKey }
-                        }
-                        return topTorrent
-                    }
-                }
-            }
-        }
 
         await MainActor.run {
             self.standbyFallbacks = fallbacks
         }
 
-        // Background probe HTTP fallbacks so their socket and TLS are hot
-        let httpFallbacks = fallbacks.filter { !$0.isTorrent }
-        if !httpFallbacks.isEmpty {
-            AsyncTask {
-                _ = await self.raceAndVerifyHTTPCandidates(Array(httpFallbacks.prefix(3)))
-            }
-        }
-
+        print("[PlayerManager] ⚡ Flux Mode selected best candidate: \(winnerCandidate.cleanTitle) (\(winnerCandidate.quality)) via \(winnerCandidate.source)")
         return winnerCandidate
     }
 
-    /// Races HTTP candidates in parallel via lightweight HEAD / Range probes with a 5.0s timeout.
-    /// Preserves original ranked preference order: top-ranked stream that responds wins!
-    private func raceAndVerifyHTTPCandidates(_ candidates: [Stream]) async -> (winner: Stream?, verifiedFallbacks: [Stream]) {
-        guard !candidates.isEmpty else { return (nil, []) }
 
-        return await withTaskGroup(of: (Stream, Bool, Int).self) { group in
-            for stream in candidates {
-                let playableURL = self.getPlayableURL(for: stream)
-                group.addTask {
-                    var request = URLRequest(url: playableURL)
-                    request.httpMethod = "HEAD"
-                    request.timeoutInterval = 5.0
-                    do {
-                        let (_, response) = try await URLSession.shared.data(for: request)
-                        if let http = response as? HTTPURLResponse {
-                            let statusCode = http.statusCode
-                            if (200...399).contains(statusCode) {
-                                return (stream, true, statusCode)
-                            }
-                            return (stream, false, statusCode)
-                        }
-                        return (stream, false, 0)
-                    } catch {
-                        // Fallback: quick ranged probe
-                        var getReq = URLRequest(url: playableURL)
-                        getReq.httpMethod = "GET"
-                        getReq.setValue("bytes=0-1024", forHTTPHeaderField: "Range")
-                        getReq.timeoutInterval = 4.0
-                        if let (_, getResp) = try? await URLSession.shared.data(for: getReq),
-                           let http = getResp as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                            return (stream, true, http.statusCode)
-                        }
-                        return (stream, false, -1)
-                    }
-                }
-            }
-
-            var results: [String: Bool] = [:]
-            for await (stream, ok, statusCode) in group {
-                results[stream.stableKey] = ok
-                // Only permanently blacklist on explicit 404/410/403 status codes, NOT timeouts
-                if !ok && (statusCode == 404 || statusCode == 410 || statusCode == 403) {
-                    await MainActor.run {
-                        self.probeStatus[stream.stableKey] = StreamProbeResult(ok: false, latency: 99)
-                    }
-                }
-            }
-
-            // CRITICAL: Preserve original candidate preference ranking
-            let verified = candidates.filter { results[$0.stableKey] == true }
-            guard let winner = verified.first else {
-                return (nil, [])
-            }
-            let fallbacks = verified.dropFirst()
-            return (winner, Array(fallbacks))
-        }
-    }
     
     /// Lightweight background verification used by the "Best" tab.
     /// Fast HEAD check for HTTP sources, and seeder health validation for torrents.
@@ -1411,8 +1338,8 @@ class PlayerManager: ObservableObject {
                         // If bytes have started flowing (telemetry received):
                         if let lastProgress = self.lastTelemetryProgressTime {
                             let stallDuration = Date().timeIntervalSince(lastProgress)
-                            // Stall timeout: 6 seconds of ZERO new bytes after connection was established
-                            if stallDuration >= 6.0 {
+                            let stallTimeout: TimeInterval = stream.isTorrent ? 14.0 : 10.0
+                            if stallDuration >= stallTimeout {
                                 print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
                                 self.advanceToStandbyFallback()
                                 return true
@@ -2085,6 +2012,10 @@ class PlayerManager: ObservableObject {
         }
 
         guard !filteredStreams.isEmpty else {
+            if isFetchingStreams {
+                print("[PlayerManager] tryNextStream invoked while streams are still actively fetching — deferring until scrape finishes.")
+                return
+            }
             errorMessage = "No playable \(sourceMode) sources available."
             return
         }
