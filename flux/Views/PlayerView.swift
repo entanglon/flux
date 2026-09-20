@@ -322,6 +322,13 @@ struct PlayerView: View {
             playerManager.close()
             NotificationCenter.default.post(name: .fluxRefresh, object: nil)
         }
+        .onReceive(loadingTimer) { _ in
+            // Hot-swap telemetry: mpv's native cache-speed (KB/s) + position
+            // feed the startup slow-source monitor in PlayerManager. Lives on
+            // the root body (always mounted during playback), so the monitor
+            // keeps receiving samples after the buffering overlay unmounts.
+            playerManager.reportStartupThroughput(kbps: mpv.recentCacheSpeedKBps, timePos: mpv.timePos)
+        }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             handleStreamURLChange(newURL)
         }
@@ -618,7 +625,8 @@ struct PlayerView: View {
             frameFrozen = true
             if abs(t - freezeLoggedAtPos) > 2.0 {
                 freezeLoggedAtPos = t
-                let cache = String(format: "%.1f", mpv.demuxerCacheTime)
+                let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+                let cache = String(format: "%.1f", bufferAhead)
                 let pos = String(format: "%.1f", t)
                 Logger.player.error("Frame freeze (timePos stuck at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s)")
             }
@@ -1933,8 +1941,14 @@ struct PlayerView: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
 
-            let mpvProgressMid = max(mpv.bufferProgress, min(0.99, mpv.demuxerCacheTime / 5.0))
-            let realProgress = CGFloat(mpvProgressMid > 0.005 ? mpvProgressMid : animatedProgress)
+            // Direct mpv link — no stale fallback. The old
+            // `> 0.005 ? mpv : animatedProgress` fallback served the ~100%
+            // STARTUP value once mpv's telemetry dropped to 0 at stall start,
+            // so the bar showed FULL and then visibly jumped BACKWARD when
+            // the refill began. mpv's own cache-buffering-state (0-100%)
+            // ticks the refill honestly; cacheTime/5 covers the pre-fill gap.
+            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+            let realProgress = CGFloat(min(0.99, max(mpv.bufferProgress, bufferAhead / 5.0)))
 
             if let media = activeItem {
                 loadingLogo(for: media, progress: realProgress)
@@ -2018,7 +2032,8 @@ struct PlayerView: View {
                         lastAvsyncChange = avsync
                     }
                     if !parts.isEmpty {
-                        let cache = String(format: "%.1f", mpv.demuxerCacheTime)
+                        let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+                        let cache = String(format: "%.1f", bufferAhead)
                         let pos = String(format: "%.1f", mpv.timePos)
                         Logger.player.error("Hitch \(parts.joined(separator: ", "), privacy: .public) at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s")
                     }
@@ -2033,10 +2048,10 @@ struct PlayerView: View {
             }
 
             // Genuine demuxer buffer telemetry from mpv (no artificial base jumps)
-            let cacheTime = mpv.demuxerCacheTime
-            playerManager.reportTelemetryProgress(cacheTime: cacheTime)
+            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+            playerManager.reportTelemetryProgress(cacheTime: bufferAhead)
 
-            let mpvBuf = max(mpv.bufferProgress, min(1.0, cacheTime / 5.0))
+            let mpvBuf = max(mpv.bufferProgress, min(1.0, bufferAhead / 5.0))
             let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, mpvBuf)
             self.animatedProgress = max(self.animatedProgress, targetProgress)
         }
@@ -2189,8 +2204,34 @@ struct PlayerView: View {
             return UserDefaults.standard.bool(forKey: "useHardwareAcceleration") ? "VideoToolbox (Hardware)".localized : "Software (CPU)".localized
         }()
         let transport = isTorrent ? "BitTorrent Swarm (P2P)".localized : "Direct HTTP Stream".localized
-        let size = stream?.size ?? "—"
-        let demuxerCache = String(format: "%.1f sec", mpv.demuxerCacheTime)
+        let size: String = {
+            func isValidSize(_ str: String?) -> Bool {
+                guard let s = str?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !s.isEmpty, s != "—", !s.hasPrefix("0 MB"), !s.hasPrefix("0.0 MB"), !s.hasPrefix("0.00 GB") else {
+                    return false
+                }
+                return true
+            }
+
+            if isValidSize(stream?.size) {
+                return stream!.size!
+            }
+            if isValidSize(mediaInfo.fileSize) {
+                return mediaInfo.fileSize!
+            }
+            if stream?.url.absoluteString.contains(".m3u8") == true || stream?.title.localizedCaseInsensitiveContains("HLS") == true {
+                return "Adaptive (HLS)".localized
+            }
+            return "—"
+        }()
+        let demuxerCache: String = {
+            if mpv.isBuffering {
+                let percent = Int(mpv.bufferProgress * 100)
+                return percent > 0 ? "Buffering (\(percent)%)" : "0.0 sec"
+            }
+            let dur = mediaInfo.bufferDuration ?? (mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos))
+            return String(format: "%.1f sec", dur)
+        }()
         let rawLink = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
         let link = playerManager.cleanPlayableURLString(from: rawLink)
 

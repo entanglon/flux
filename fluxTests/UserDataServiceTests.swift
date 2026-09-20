@@ -422,9 +422,10 @@ struct UserDataServiceTests {
         #expect(UserDataService.shared.history.isEmpty)
         #expect(UserDataService.shared.watchlist.isEmpty)
         #expect(UserDataService.shared.collections.isEmpty)
-        #expect(AddonManager.shared.addons.count == 2)
+        #expect(AddonManager.shared.addons.count == 3)
         #expect(AddonManager.shared.addons.contains(where: { $0.id == "opensubtitles3" && $0.isStock }))
         #expect(AddonManager.shared.addons.contains(where: { $0.id == "cinemeta" && $0.isStock }))
+        #expect(AddonManager.shared.addons.contains(where: { $0.id == "stock.stream-route-proxy" && $0.isStock }))
         #expect(AddonManager.shared.addons.allSatisfy { $0.isStock })
     }
 

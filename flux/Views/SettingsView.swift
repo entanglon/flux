@@ -518,10 +518,12 @@ struct GeneralSettingsView: View {
 // MARK: - 2. Streaming Settings
 struct StreamingSettingsView: View {
     @ObservedObject var languageManager = LanguageManager.shared
+    @ObservedObject private var proxyManager = StreamRouteProxyManager.shared
     @AppStorage("enableFluxMode") private var enableFluxMode = true
     @AppStorage("preferredQuality") private var preferredQuality = "4K"
     @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
     @AppStorage("enableFluxLanguageFilter") private var enableFluxLanguageFilter = false
+    @State private var showProxySheet = false
     
     var body: some View {
         Form {
@@ -536,6 +538,30 @@ struct StreamingSettingsView: View {
                 Text("Select whether Flux should load HTTP streams, Torrent streams, or both simultaneously.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            
+            Section(header: Text(L10n.tr("HTTP Stream Route Proxy")), footer: Text("Routes throttled HTTP scraper streams (e.g. 2peckle) through a private forward proxy over Tailscale/LAN while strictly bypassing torrents and metadata.".localized)) {
+                Toggle(L10n.tr("Enable Route Proxy"), isOn: $proxyManager.isEnabled)
+                
+                if proxyManager.isEnabled {
+                    HStack {
+                        Text("Proxy Endpoint".localized)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(proxyManager.endpointURL)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.primary)
+                    }
+                }
+                
+                Button(action: {
+                    showProxySheet = true
+                }) {
+                    Label("Configure Route Proxy…".localized, systemImage: "network.badge.shield.half.filled")
+                }
+            }
+            .sheet(isPresented: $showProxySheet) {
+                StreamRouteProxyConfigSheet()
             }
             
             Section(header: Text(L10n.tr("Flux Mode"))) {
@@ -820,6 +846,7 @@ struct AddonsSettingsTabView: View {
     @State private var isAdding = false
     @State private var isSyncing = false
     @State private var addError: String?
+    @State private var showStreamProxySheet = false
 
     var body: some View {
         Form {
@@ -974,7 +1001,17 @@ struct AddonsSettingsTabView: View {
                             }
                             
                             // Configure Gear Button (Left of Toggle)
-                            if let configURL = configureURL(for: addon) {
+                            if addon.id == "stock.stream-route-proxy" {
+                                Button(action: {
+                                    showStreamProxySheet = true
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.75))
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Configure Stream Route Proxy".localized)
+                            } else if let configURL = configureURL(for: addon) {
                                 Button(action: {
                                     NSWorkspace.shared.open(configURL)
                                 }) {
@@ -1071,6 +1108,9 @@ struct AddonsSettingsTabView: View {
                 await authManager.syncNowAsync(forcePull: true)
             }
         }
+        .sheet(isPresented: $showStreamProxySheet) {
+            StreamRouteProxyConfigSheet()
+        }
     }
     
     private func configureURL(for addon: StremioAddon) -> URL? {
@@ -1090,11 +1130,17 @@ struct AddonsSettingsTabView: View {
     private func fallbackIcon(name: String) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(0.1))
+                .fill(name == "Stream Route Proxy" ? Color.blue.opacity(0.3) : Color.white.opacity(0.1))
                 .frame(width: 24, height: 24)
-            Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
+            if name == "Stream Route Proxy" {
+                Image(systemName: "network.badge.shield.half.filled")
+                    .font(.system(size: 12))
+                    .foregroundColor(.cyan)
+            } else {
+                Text(String(name.prefix(1)).uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+            }
         }
     }
     

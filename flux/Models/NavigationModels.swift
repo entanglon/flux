@@ -9,6 +9,8 @@ extension Notification.Name {
     static let fluxNavigate = Notification.Name("fluxNavigate")
     /// Display the keyboard shortcuts sheet (Cmd+/).
     static let fluxShowShortcuts = Notification.Name("fluxShowShortcuts")
+    /// Broadcast when network connectivity is restored after an offline period.
+    static let fluxNetworkRestored = Notification.Name("fluxNetworkRestored")
 }
 
 struct GenreNavigation: Hashable {

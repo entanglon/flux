@@ -217,6 +217,11 @@ struct ContentView: View {
                 await AuthManager.shared.syncNowAsync(forcePull: true)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxNetworkRestored)) { _ in
+            Task {
+                await AuthManager.shared.syncNowAsync(forcePull: true)
+            }
+        }
     }
 
     // MARK: - Sidebar Sections (Apple TV / Music SF Symbols)

@@ -157,6 +157,62 @@ struct fluxTests {
         #expect(MPVController.trackMatchesLanguage(track: frenchTrack, targetLang: "French"))
     }
 
+    // MARK: - Audio Auto-Selection Tests
+
+    @Test func originalLanguageAudioWinsOverEnglishCommentary() {
+        // 3 Idiots incident: Hindi movie, Default Audio English, container
+        // carries Hindi dialogue + English-tagged directors' commentary.
+        // The original-language dialogue track must win — never commentary.
+        let hindiDialogue = Track(id: 1, type: "audio", title: "Stereo", lang: "hin", isSelected: false)
+        let engCommentary = Track(id: 2, type: "audio", title: "Directors Commentary", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [hindiDialogue, engCommentary],
+            preferredLang: "English",
+            originalLanguage: "hi"
+        )
+        #expect(pick?.id == hindiDialogue.id)
+    }
+
+    @Test func preferredLanguageDialogueBeatsCommentaryWhenOriginalMissing() {
+        // Foreign title whose file only carries English audio: preferred
+        // dialogue plays, commentary never does (even when it is default).
+        let engCommentary = Track(id: 1, type: "audio", title: "Commentary", lang: "eng", isSelected: false, isDefault: true)
+        let engDialogue = Track(id: 2, type: "audio", title: "Stereo", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [engCommentary, engDialogue],
+            preferredLang: "English",
+            originalLanguage: "hi"
+        )
+        #expect(pick?.id == engDialogue.id)
+    }
+
+    @Test func sameLanguageCommentaryNeverBeatsDialogue() {
+        // English title, English preferred: the old `?? matching.first`
+        // fallthrough landed on commentary when every preferred match was
+        // commentary. The container default dialogue must win instead.
+        let engCommentary = Track(id: 1, type: "audio", title: "Commentary 2020", lang: "eng", isSelected: false, isDefault: true)
+        let engDialogue = Track(id: 2, type: "audio", title: "5.1", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [engCommentary, engDialogue],
+            preferredLang: "English",
+            originalLanguage: "en"
+        )
+        #expect(pick?.id == engDialogue.id)
+    }
+
+    @Test func commentaryOnlyContainerIsLastResort() {
+        let engCommentary = Track(id: 1, type: "audio", title: "Commentary", lang: "eng", isSelected: false)
+        let pick = MPVController.preferredAudioTrack(
+            from: [engCommentary],
+            preferredLang: "English",
+            originalLanguage: "en"
+        )
+        #expect(pick?.id == engCommentary.id)
+    }
+
     // MARK: - Actor Search & Person Candidate Tests
 
     @Test func personCandidateConvertsToMediaItem() {

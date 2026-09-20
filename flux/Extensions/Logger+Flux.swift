@@ -11,4 +11,5 @@ extension Logger {
     static let tmdb = Logger(subsystem: subsystem, category: "TMDB")
     static let sync = Logger(subsystem: subsystem, category: "Sync")
     static let ui = Logger(subsystem: subsystem, category: "UI")
+    static let network = Logger(subsystem: subsystem, category: "Network")
 }

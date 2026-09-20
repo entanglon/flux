@@ -158,6 +158,8 @@ struct CachedImage<Content: View>: View {
     @ViewBuilder let content: (AsyncImagePhase) -> Content
 
     @State private var phase: AsyncImagePhase = .empty
+    @State private var reloadToken: UInt = 0
+    @State private var autoRetryCount: Int = 0
 
     init(url: URL?, fallbacks: [URL?] = [], maxDimension: CGFloat = 300, trimLetterbox: Bool = false, transaction: Transaction = Transaction(), @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         self.url = url
@@ -184,8 +186,21 @@ struct CachedImage<Content: View>: View {
 
     var body: some View {
         content(phase)
-            .task(id: url) {
+            .task(id: "\(url?.absoluteString ?? "")#\(reloadToken)") {
                 await loadImage()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .fluxRefresh)) { _ in
+                autoRetryCount = 0
+                reloadToken &+= 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .fluxNetworkRestored)) { _ in
+                if case .failure = phase {
+                    autoRetryCount = 0
+                    reloadToken &+= 1
+                } else if case .empty = phase {
+                    autoRetryCount = 0
+                    reloadToken &+= 1
+                }
             }
     }
 
@@ -205,6 +220,7 @@ struct CachedImage<Content: View>: View {
             let key = "\(candidate.absoluteString)#\(roundedDim)\(trimSuffix)" as NSString
             if let cached = ImageInMemoryCache.shared.object(forKey: key) {
                 phase = .success(Image(nsImage: cached))
+                autoRetryCount = 0
                 return
             }
         }
@@ -219,6 +235,7 @@ struct CachedImage<Content: View>: View {
                 withTransaction(transaction) {
                     phase = .success(Image(nsImage: cached))
                 }
+                autoRetryCount = 0
                 return
             }
 
@@ -233,6 +250,7 @@ struct CachedImage<Content: View>: View {
                 withTransaction(transaction) {
                     phase = .success(Image(nsImage: downsampled.image))
                 }
+                autoRetryCount = 0
                 return
             }
 
@@ -251,6 +269,7 @@ struct CachedImage<Content: View>: View {
                 withTransaction(transaction) {
                     phase = .success(Image(nsImage: downsampled.image))
                 }
+                autoRetryCount = 0
                 return
             } catch {
                 if Task.isCancelled { return }
@@ -260,6 +279,15 @@ struct CachedImage<Content: View>: View {
 
         if !Task.isCancelled {
             phase = .failure(URLError(.cannotFindHost))
+            // Auto-retry transient failures if card remains visible on screen (e.g. Wi-Fi blip)
+            if autoRetryCount < 2 {
+                let delay = autoRetryCount == 0 ? 3_000_000_000 : 7_000_000_000
+                autoRetryCount += 1
+                try? await Task.sleep(nanoseconds: UInt64(delay))
+                if !Task.isCancelled {
+                    reloadToken &+= 1
+                }
+            }
         }
     }
 }

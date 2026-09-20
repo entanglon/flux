@@ -79,6 +79,11 @@ struct TrendingView: View {
                 await loadTrendingData()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxNetworkRestored)) { _ in
+            Task {
+                await loadTrendingData()
+            }
+        }
     }
     
     private func loadTrendingData() async {

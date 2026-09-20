@@ -225,6 +225,33 @@ class AddonManager: ObservableObject {
             addons.append(cinemeta)
         }
 
+        // Stream Route Proxy — stock stream proxy middleware addon
+        let streamProxyID = "stock.stream-route-proxy"
+        if let existingIdx = addons.firstIndex(where: { $0.id == streamProxyID }) {
+            addons[existingIdx].id = streamProxyID
+            addons[existingIdx].isStock = true
+            addons[existingIdx].name = "Stream Route Proxy"
+            addons[existingIdx].description = "Route throttled HTTP scraper hosts through a high-speed private forward proxy (e.g. Tailscale / Tinyproxy)"
+            addons[existingIdx].isEnabled = StreamRouteProxyManager.shared.isEnabled
+        } else {
+            let proxyAddon = StremioAddon(
+                id: streamProxyID,
+                name: "Stream Route Proxy",
+                description: "Route throttled HTTP scraper hosts through a high-speed private forward proxy (e.g. Tailscale / Tinyproxy)",
+                version: "1.0.0",
+                logoURL: nil,
+                iconURL: nil,
+                url: "flux://stream-route-proxy",
+                transportUrl: "flux://stream-route-proxy",
+                isEnabled: StreamRouteProxyManager.shared.isEnabled,
+                isStock: true,
+                category: AddonCategory.official.rawValue,
+                catalogs: nil,
+                resources: ["stream"]
+            )
+            addons.append(proxyAddon)
+        }
+
         sortAddonsDeterministically()
         saveAddons()
     }
@@ -334,6 +361,9 @@ class AddonManager: ObservableObject {
     func toggleAddon(_ addon: StremioAddon) {
         if let idx = addons.firstIndex(where: { $0.id == addon.id }) {
             addons[idx].isEnabled.toggle()
+            if addon.id == "stock.stream-route-proxy" {
+                StreamRouteProxyManager.shared.isEnabled = addons[idx].isEnabled
+            }
             saveAddons()
         }
     }

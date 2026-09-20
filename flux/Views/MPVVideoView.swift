@@ -208,6 +208,11 @@ class MPVController: ObservableObject {
     @Published var timePos: Double = 0.0
     @Published var volume: Double = 1.0
     @Published var bufferProgress: Double = 0.0
+    /// mpv's native `cache-speed` — current I/O read speed between the cache
+    /// and the network layer, in KB/s over a 1-second window. Read-only
+    /// telemetry (no engine config change); feeds the startup hot-swap
+    /// monitor that hot-swaps starved sources for measured-faster standbys.
+    var recentCacheSpeedKBps: Double = 0.0
     /// True once a loadfile was issued on this controller — lets the player
     /// window adopt a prefetch warm core without issuing a second load.
     @Published private(set) var hasLoadedMedia = false
@@ -221,6 +226,7 @@ class MPVController: ObservableObject {
     /// frame-drop-count at stall begin, for delta computation at stall end.
     private var stallStartDrops = -1
     @Published var demuxerCacheTime: Double = 0.0
+    @Published var demuxerCacheDuration: Double = 0.0
     @Published var isSeeking = false
     @Published var isUserPaused = false
     
@@ -310,7 +316,7 @@ class MPVController: ObservableObject {
         diag.audioBitrate = (backend?.getPropertyDouble("audio-bitrate") ?? 0.0) / 1000.0
         diag.hwDecoder = backend?.getPropertyString("hwdec-current") ?? "software"
         diag.droppedFrames = backend?.getPropertyInt("frame-drop-count") ?? 0
-        diag.cacheBufferSeconds = self.demuxerCacheTime
+        diag.cacheBufferSeconds = self.demuxerCacheDuration > 0 ? self.demuxerCacheDuration : max(0.0, self.demuxerCacheTime - self.timePos)
         return diag
     }
     
@@ -386,6 +392,7 @@ class MPVController: ObservableObject {
         self.duration = 0.0
         self.progress = 0.0
         self.bufferProgress = 0.0
+        self.recentCacheSpeedKBps = 0.0
         self.isBuffering = false
         self.hasAutoSelectedTracksForCurrentMedia = false
         self.audioTracks = []
@@ -482,7 +489,8 @@ class MPVController: ObservableObject {
                     if buff && !self.isBuffering {
                         self.stallStartDate = Date()
                         self.stallStartDrops = self.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
-                        let cache = String(format: "%.1f", self.demuxerCacheTime)
+                        let bufferAhead = self.demuxerCacheDuration > 0 ? self.demuxerCacheDuration : max(0.0, self.demuxerCacheTime - self.timePos)
+                        let cache = String(format: "%.1f", bufferAhead)
                         let pos = String(format: "%.0f", self.timePos)
                         let af = self.playerView?.playerView?.getPropertyString("af") ?? "?"
                         Logger.player.error("Cache stall began (cache: \(cache, privacy: .public)s, at \(pos, privacy: .public)s, drops: \(self.stallStartDrops, privacy: .public), af: \(af, privacy: .public))")
@@ -517,9 +525,18 @@ class MPVController: ObservableObject {
                 } else if let percent = value as? Double {
                     self.bufferProgress = min(1.0, max(0.0, percent / 100.0))
                 }
+            case "cache-speed":
+                if let kbps = value as? Int64 {
+                    // mpv reports bytes/sec over a 1s window → store KB/s.
+                    self.recentCacheSpeedKBps = Double(kbps) / 1024.0
+                }
             case "demuxer-cache-time":
                 if let time = value as? Double {
                     self.demuxerCacheTime = time
+                }
+            case "demuxer-cache-duration":
+                if let dur = value as? Double {
+                    self.demuxerCacheDuration = max(0.0, dur)
                 }
             case "video-params/gamma", "video-params/primaries":
                 self.playerView?.playerView?.applyColorPipeline()
@@ -530,7 +547,7 @@ class MPVController: ObservableObject {
     }
 
     /// Live media format inspection for "About Stream Source"
-    func getMediaInfo() -> (videoCodec: String?, audioCodec: String?, resolution: String?, hwdec: String?) {
+    func getMediaInfo() -> (videoCodec: String?, audioCodec: String?, resolution: String?, hwdec: String?, fileSize: String?, bufferDuration: Double?) {
         let backend = playerView?.playerView
         let vCodec = backend?.getPropertyString("video-codec") ?? backend?.getPropertyString("video-format")
         let aCodec = backend?.getPropertyString("audio-codec")
@@ -538,7 +555,54 @@ class MPVController: ObservableObject {
         let h = backend?.getPropertyInt("video-params/h")
         let res = (w != nil && h != nil && w! > 0 && h! > 0) ? "\(w!)×\(h!)" : nil
         let hwdec = backend?.getPropertyString("hwdec-current")
-        return (vCodec, aCodec, res, hwdec)
+
+        var formattedSize: String? = nil
+        let fileFormat = backend?.getPropertyString("file-format")?.lowercased() ?? ""
+        let isHlsOrDash = fileFormat.contains("hls") || fileFormat.contains("applehttp") || fileFormat.contains("dash")
+        let rawBytes = backend?.getPropertyInt64("file-size") ?? backend?.getPropertyInt64("stream-end")
+        let totalDuration = (self.duration > 0 ? self.duration : (backend?.getPropertyDouble("duration") ?? 0.0))
+
+        // Legitimate non-manifest video file sizes (must be >= 5MB, or >= 500KB if duration is very short)
+        let isPlausibleFileSize = !isHlsOrDash && (rawBytes != nil) && (
+            (totalDuration > 60.0 && rawBytes! >= 5 * 1024 * 1024) ||
+            (totalDuration <= 60.0 && rawBytes! >= 500 * 1024)
+        )
+
+        if isPlausibleFileSize, let bytes = rawBytes {
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useGB, .useMB]
+            formatter.countStyle = .file
+            formattedSize = formatter.string(fromByteCount: bytes)
+        } else {
+            // HLS, DASH, or chunked stream where file-size is just the manifest/playlist text size (e.g. 4KB):
+            // Calculate actual media size from active video+audio bitrate * duration
+            let vBitrate = backend?.getPropertyDouble("video-bitrate") ?? 0.0
+            let aBitrate = backend?.getPropertyDouble("audio-bitrate") ?? 0.0
+            let totalBitrate = vBitrate + aBitrate
+            if totalBitrate > 50_000, totalDuration > 0 {
+                let estimatedBytes = Int64((totalBitrate / 8.0) * totalDuration)
+                if estimatedBytes >= 5 * 1024 * 1024 {
+                    let formatter = ByteCountFormatter()
+                    formatter.allowedUnits = [.useGB, .useMB]
+                    formatter.countStyle = .file
+                    formattedSize = "~" + formatter.string(fromByteCount: estimatedBytes) + (isHlsOrDash ? " (HLS)" : "")
+                }
+            } else if isHlsOrDash {
+                formattedSize = "Adaptive (HLS)"
+            }
+        }
+
+        let dur: Double = {
+            if self.demuxerCacheDuration > 0 {
+                return self.demuxerCacheDuration
+            }
+            if self.demuxerCacheTime > self.timePos {
+                return self.demuxerCacheTime - self.timePos
+            }
+            return 0.0
+        }()
+
+        return (vCodec, aCodec, res, hwdec, formattedSize, dur)
     }
     
     func fetchTracks() {
@@ -627,6 +691,48 @@ class MPVController: ObservableObject {
         return false
     }
 
+    /// Pure audio auto-selection decision (unit-tested in fluxTests).
+    /// Original-language-first for foreign titles (Apple TV / Netflix
+    /// behavior): a Hindi/Japanese/Korean title must open on its authentic
+    /// dialogue track even when the container carries a track in the user's
+    /// preferred language — directors' commentary is tagged `eng`, so a naive
+    /// preferred-language match hijacked *3 Idiots* with English commentary.
+    /// Commentary tracks never win while any dialogue track exists.
+    static func preferredAudioTrack(
+        from tracks: [Track],
+        preferredLang: String,
+        originalLanguage: String?
+    ) -> Track? {
+        guard !tracks.isEmpty else { return nil }
+
+        func isCommentary(_ t: Track) -> Bool { t.title.lowercased().contains("commentary") }
+
+        let original = (originalLanguage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Probe the original language with a dummy track so ISO codes ("hi",
+        // "ja", "ko") resolve through the same alias table as full names.
+        let originalProbe = Track(id: -1, type: "audio", title: "", lang: original, isSelected: false)
+        let originalDiffersFromPreferred = !original.isEmpty
+            && !trackMatchesLanguage(track: originalProbe, targetLang: preferredLang)
+
+        let origMatches = !original.isEmpty
+            ? tracks.filter { trackMatchesLanguage(track: $0, targetLang: original) }
+            : []
+        let origDialogue = origMatches.first(where: { !isCommentary($0) }) ?? origMatches.first
+        let preferredDialogue = tracks.first { trackMatchesLanguage(track: $0, targetLang: preferredLang) && !isCommentary($0) }
+
+        if originalDiffersFromPreferred, let pick = origDialogue ?? preferredDialogue {
+            // Foreign title: original dialogue wins; a preferred-language dub
+            // only when the container lacks the original audio entirely.
+            return pick
+        }
+
+        return preferredDialogue
+            ?? tracks.first(where: { $0.isDefault && !isCommentary($0) })
+            ?? tracks.first(where: { !isCommentary($0) })
+            ?? tracks.first(where: { $0.isDefault })
+            ?? tracks.first
+    }
+
     private func autoSelectPreferredTracks() {
         guard !hasAutoSelectedTracksForCurrentMedia else { return }
         guard !audioTracks.isEmpty else { return }
@@ -635,42 +741,20 @@ class MPVController: ObservableObject {
         let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
         let preferredSub = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
 
-        // 1. Audio Track Selection
+        // 1. Audio Track Selection — pure decision helper (see doc comment).
         let activeAudio = audioTracks.first(where: { $0.isSelected })
         var selectedTrack: Track? = nil
 
-        let matchingAudioTracks = audioTracks.filter { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }
-        // Prioritize dialogue tracks over commentary tracks
-        if let matched = matchingAudioTracks.first(where: { !$0.title.lowercased().contains("commentary") }) ?? matchingAudioTracks.first {
-            selectedTrack = matched
-            if activeAudio?.id != matched.id {
-                print("[MPV] Auto-selecting preferred audio track: \(matched.displayName) (id: \(matched.id))")
-                playerView?.selectTrack(matched)
-            }
-        } else {
-            // Preferred audio (e.g. English) is not available for this source.
-            // Fall back ladder:
-            // 1. Media's authentic original language track (dialogue prioritized)
-            // 2. Container's default track (isDefault == true, non-commentary)
-            // 3. First non-commentary audio track
-            // 4. Container default track
-            // 5. First available audio track
-            let origLang = PlayerManager.shared.currentItem?.originalLanguage ?? ""
-            let origMatches = !origLang.isEmpty ? audioTracks.filter { trackMatchesLanguage(track: $0, targetLang: origLang) } : []
-            let origTrack = origMatches.first(where: { !$0.title.lowercased().contains("commentary") }) ?? origMatches.first
-
-            let fallbackTrack = origTrack
-                ?? audioTracks.first(where: { $0.isDefault && !$0.title.lowercased().contains("commentary") })
-                ?? audioTracks.first(where: { !$0.title.lowercased().contains("commentary") })
-                ?? audioTracks.first(where: { $0.isDefault })
-                ?? audioTracks.first
-
-            if let fallback = fallbackTrack {
-                selectedTrack = fallback
-                if activeAudio == nil || activeAudio?.id != fallback.id {
-                    print("[MPV] Preferred audio (\(preferredAudio)) not available — falling back to: \(fallback.displayName) (id: \(fallback.id))")
-                    playerView?.selectTrack(fallback)
-                }
+        let currentOriginalLanguage = PlayerManager.shared.currentItem?.originalLanguage
+        if let pick = Self.preferredAudioTrack(
+            from: audioTracks,
+            preferredLang: preferredAudio,
+            originalLanguage: currentOriginalLanguage
+        ) {
+            selectedTrack = pick
+            if activeAudio?.id != pick.id {
+                print("[MPV] Auto-selecting audio track: \(pick.displayName) (id: \(pick.id)) preferred=\(preferredAudio) original=\(currentOriginalLanguage ?? "nil")")
+                playerView?.selectTrack(pick)
             }
         }
 
@@ -1183,14 +1267,41 @@ final class MPVLayerView: NSView {
         let useHW = UserDefaults.standard.object(forKey: "useHardwareAcceleration") as? Bool ?? true
         mpv_set_property_string(mpv, "hwdec", useHW ? "auto" : "no")
 
-        // Audio output: use AVFoundation with CoreAudio fallback. AVFoundation
-        // natively handles multi-channel 5.1/7.1 downmixing on macOS laptop speakers
-        // and avoids ao_coreaudio's layout failure and hotplug_cb crash.
-        mpv_set_property_string(mpv, "ao", "avfoundation,coreaudio")
+        // Audio output: low-latency, strictly hardware-synchronized CoreAudio driver
+        // with AVFoundation fallback.
+        // float format + auto-safe channels provide native 32-bit float audio and safe channel layout.
+        mpv_set_property_string(mpv, "ao", "coreaudio,avfoundation")
+        mpv_set_property_string(mpv, "audio-format", "float")
         mpv_set_property_string(mpv, "audio-channels", "auto-safe")
+        // Increase audio device buffer from default 0.2s to 0.5s to cushion against transient network jitter
+        mpv_set_property_string(mpv, "audio-buffer", "0.5")
+        mpv_set_property_string(mpv, "audio-wait-open", "0.2")
+
+        // Smooth out A/V sync adjustments gradually rather than violent frame-rate jumps
+        mpv_set_property_string(mpv, "autosync", "30")
 
         // Don't stop on audio output issues — let mpv fall back
         mpv_set_property_string(mpv, "audio-fallback-to-null", "yes")
+
+        // Network stream auto-reconnection and keep-alive (FFmpeg libavformat)
+        // Prevents dropped playback when CDNs/hosts terminate idle TCP connections after demuxer cache fills
+        mpv_set_property_string(mpv, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,reconnect_on_http_error=4xx,5xx")
+        mpv_set_property_string(mpv, "demuxer-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2")
+        mpv_set_property_string(mpv, "cache", "yes")
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "157286400") // 150 MiB standard
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "52428800") // 50 MiB
+        mpv_set_property_string(mpv, "demuxer-readahead-secs", "30")
+        // Cache stall protection: buffer at least 3 seconds before resuming playback
+        // to prevent rapid stall/resume stutter loops.
+        // cache-pause-initial prevents premature playback before buffer fills at start.
+        mpv_set_property_string(mpv, "cache-pause", "yes")
+        mpv_set_property_string(mpv, "cache-pause-wait", "3.0")
+        mpv_set_property_string(mpv, "cache-pause-initial", "yes")
+        // Use standard vo framedrop and disable framedrop on high-res seek:
+        // Prevents unbounded 5x-10x fast-forward speedup after buffer underruns
+        // while preserving smooth playback.
+        mpv_set_property_string(mpv, "framedrop", "vo")
+        mpv_set_property_string(mpv, "hr-seek-framedrop", "no")
 
         mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         mpv_set_property_string(mpv, "referrer", "https://flux.app/")
@@ -1244,6 +1355,8 @@ final class MPVLayerView: NSView {
         mpv_observe_property(mpv, 0, "cache-buffering-state", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "demuxer-cache-time", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "demuxer-cache-duration", MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, "cache-speed", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "seeking", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "video-params/gamma", MPV_FORMAT_STRING)
         mpv_observe_property(mpv, 0, "video-params/primaries", MPV_FORMAT_STRING)
@@ -1296,6 +1409,16 @@ final class MPVLayerView: NSView {
             pendingURL = nil
             pendingPaused = false
             print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
+            if let mpv = self.mpv {
+                let selectedStream = PlayerManager.shared.currentSelectedStream
+                let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+                if let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) {
+                    print("[MPV] Routing pending stream through forward proxy: \(proxyURL)")
+                    mpv_set_property_string(mpv, "http-proxy", proxyURL)
+                } else {
+                    mpv_set_property_string(mpv, "http-proxy", "")
+                }
+            }
             if shouldPause {
                 command("loadfile", urlToLoad.absoluteString, "replace", "pause=yes")
             } else {
@@ -1309,6 +1432,19 @@ final class MPVLayerView: NSView {
     func loadFile(_ url: URL, paused: Bool = false) {
         print("[MPV] loadFile called: \(url.absoluteString) (paused: \(paused))")
         isIntentionallySwitchingFile = true
+
+        // Configure MPV forward proxy property dynamically for scoped direct HTTP streams
+        if let mpv = self.mpv {
+            let selectedStream = PlayerManager.shared.currentSelectedStream
+            let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+            if let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) {
+                print("[MPV] Routing stream through forward proxy: \(proxyURL)")
+                mpv_set_property_string(mpv, "http-proxy", proxyURL)
+            } else {
+                mpv_set_property_string(mpv, "http-proxy", "")
+            }
+        }
+
         if mpvGL == nil {
             print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
             pendingURL = url
@@ -1505,10 +1641,19 @@ final class MPVLayerView: NSView {
         return str
     }
     
-    func getPropertyInt(_ name: String) -> Int? {
+    func getPropertyInt64(_ name: String) -> Int64? {
         guard mpv != nil else { return nil }
         var value: Int64 = 0
-        if mpv_get_property(mpv, name, MPV_FORMAT_INT64, &value) >= 0 { return Int(value) }
+        if mpv_get_property(mpv, name, MPV_FORMAT_INT64, &value) >= 0 { return value }
+        if let d = getPropertyDouble(name), d > 0 { return Int64(d) }
+        if let s = getPropertyString(name), let parsed = Int64(s), parsed > 0 { return parsed }
+        return nil
+    }
+
+    func getPropertyInt(_ name: String) -> Int? {
+        if let val = getPropertyInt64(name) {
+            return Int(val)
+        }
         return nil
     }
     

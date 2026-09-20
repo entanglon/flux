@@ -40,6 +40,27 @@ struct PocketBaseClient {
         return id
     }
 
+    /// Extract expiration Date from a PocketBase auth JWT payload.
+    static func tokenExpiration(in token: String) -> Date? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var b64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let pad = b64.count % 4
+        if pad > 0 { b64 += String(repeating: "=", count: 4 - pad) }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = obj["exp"] as? TimeInterval else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
+    /// Check if token is expired or within bufferSeconds of expiring.
+    static func isTokenExpired(token: String, bufferSeconds: TimeInterval = 60) -> Bool {
+        guard let exp = tokenExpiration(in: token) else { return true }
+        return exp.timeIntervalSinceNow < bufferSeconds
+    }
+
     // MARK: - Email/Password Auth
 
     /// Sign in with email and password.

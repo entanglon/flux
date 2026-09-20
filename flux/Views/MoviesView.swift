@@ -51,6 +51,11 @@ struct MoviesView: View {
                 await loadData()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fluxNetworkRestored)) { _ in
+            Task {
+                await loadData()
+            }
+        }
     }
     
     @ViewBuilder private var adultMoviesRails: some View {

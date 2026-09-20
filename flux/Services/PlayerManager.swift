@@ -8,6 +8,12 @@ typealias AsyncTask = _Concurrency.Task
 struct StreamProbeResult {
     let ok: Bool
     let latency: Double
+    /// Measured sustained throughput (KB/s) from the parallel ranged-GET
+    /// probe race. nil = not measured (HEAD-only probe or torrent swarm data).
+    var throughputKBps: Double? = nil
+    /// Upstream served an HTML interstitial / JSON error / junk body instead
+    /// of media — the MovieBox-style hijack class.
+    var hijacked: Bool = false
 }
 
 class PlayerManager: ObservableObject {
@@ -77,6 +83,10 @@ class PlayerManager: ObservableObject {
     private var startupWatchdogTask: Task<Void, Never>?
     private var lastTelemetryProgressTime: Date?
     private var lastObservedCacheTime: Double = 0.0
+    // Startup hot-swap monitor feed (see armStartupWatchdog post-start branch)
+    private var startupThroughputSamples: [(date: Date, kbps: Double)] = []
+    private var lastStartupTimePos: Double = 0.0
+    private var slowStartStrikes: Int = 0
 
     // Next-Episode preloading state (AIOStreams style)
     private var prefetchedNextKey: String?
@@ -150,42 +160,7 @@ class PlayerManager: ObservableObject {
         isPrefetching = false
     }
 
-    private func runPrefetch(item: MediaItem, season: Int?, episode: Int?, key: String, allowPrime: Bool) async {
-        async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode)
-
-        // Populates StreamManager's cache — the non-Flux picker reads from it
-        // on Play, so results show immediately instead of after addon fan-out.
-        let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { _ in }
-        guard !Task.isCancelled else { return }
-
-        let fluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
-        defer {
-            if Task.isCancelled {
-                DispatchQueue.main.async { self.isPrefetching = false }
-            }
-        }
-        guard fluxEnabled, allowPrime, !streams.isEmpty else {
-            await MainActor.run {
-                self.prefetchedKey = key   // streams cached for instant picker
-                self.prefetchedAt = Date()
-                self.isPrefetching = false
-                self.inflightPrefetchKey = nil
-            }
-            return
-        }
-
-        guard let winner = await raceBestStream(from: streams, item: item, season: season, episode: episode), !Task.isCancelled else {
-            await MainActor.run {
-                self.isPrefetching = false
-                self.inflightPrefetchKey = nil
-            }
-            return
-        }
-
-        // Prime the pipeline so pieces/bytes are already flowing pre-Play:
-        // torrents register on the Stremio server (fire-and-forget per the
-        // Stremio-exact protocol); HTTP sources get a small ranged GET to warm
-        // proxy + CDN edge.
+    private func primeWinner(winner: Stream, item: MediaItem, season: Int?, episode: Int?, key: String, subs: [StremioSubtitleTrack]?) async {
         if winner.isTorrent {
             guard let hash = torrentHash(winner) else {
                 await MainActor.run {
@@ -195,9 +170,6 @@ class PlayerManager: ObservableObject {
                 return
             }
 
-            // Register ownership before beginning the request. Do not spawn an
-            // unstructured child task here: it would outlive cancellation and
-            // could create an orphan torrent after the detail page disappeared.
             await MainActor.run {
                 guard self.inflightPrefetchKey == key else { return }
                 self.prefetchTorrentHash = hash
@@ -229,17 +201,26 @@ class PlayerManager: ObservableObject {
             Self.warmHTTP(url: getPlayableURL(for: winner))
         }
 
-        let subs = await subsTask
-        guard !Task.isCancelled else { return }
-
         await MainActor.run {
-            // Session started while we were racing (user hit Play early) —
-            // playback is already resolving normally; don't build a warm core
-            // nobody will adopt (it would just buffer in the background).
+            let targetMatchesCurrent = (self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode)
+            if targetMatchesCurrent {
+                self.prefetchedKey = key
+                self.prefetchedStream = winner
+                self.prefetchedSubtitles = subs
+                self.prefetchedAt = Date()
+                self.inflightPrefetchKey = nil
+                self.isPrefetching = false
+                if self.currentSelectedStream == nil && self.currentStreamURL == nil {
+                    print("[PlayerManager] ⚡ Delivering prefetch winner directly to active player session: \(winner.cleanTitle)")
+                    self.finishSelect(winner)
+                    self.armStartupWatchdog(for: winner)
+                }
+                return
+            }
+
             guard self.currentItem == nil, !Task.isCancelled else {
                 self.isPrefetching = false
                 self.inflightPrefetchKey = nil
-                print("[PlayerManager] Prefetch aborted — playback started before priming finished")
                 return
             }
             self.prefetchedKey = key
@@ -250,6 +231,56 @@ class PlayerManager: ObservableObject {
             self.buildWarmCore(key: key, url: getPlayableURL(for: winner), stream: winner)
             self.isPrefetching = false
             print("[PlayerManager] ⚡ Prefetch primed: \(winner.cleanTitle) (\(winner.source)) — warm core holding")
+            Logger.stream.error("⚡ Prefetch primed: \(winner.cleanTitle, privacy: .public) via \(winner.source, privacy: .public) — warm core holding, race ran during browsing")
+        }
+    }
+
+    private func runPrefetch(item: MediaItem, season: Int?, episode: Int?, key: String, allowPrime: Bool) async {
+        let subsTask = Task { await SubtitleManager.shared.fetchSubtitles(for: item, season: season, episode: episode) }
+
+        let fluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        defer {
+            if Task.isCancelled {
+                DispatchQueue.main.async { self.isPrefetching = false }
+            }
+        }
+
+        var earlyPrimed = false
+        let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: season, episode: episode) { updatedStreams in
+            guard fluxEnabled, allowPrime, !earlyPrimed, !Task.isCancelled else { return }
+            let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+            let prefQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
+            if StreamManager.shared.hasQualityQuorum(streams: updatedStreams, sourceMode: sourceMode, preferredQuality: prefQuality, targetTitle: item.title) {
+                earlyPrimed = true
+                AsyncTask {
+                    guard let winner = await self.raceBestStream(from: updatedStreams, item: item, season: season, episode: episode), !Task.isCancelled else { return }
+                    let subs = await subsTask.value
+                    await self.primeWinner(winner: winner, item: item, season: season, episode: episode, key: key, subs: subs)
+                }
+            }
+        }
+        guard !Task.isCancelled else { return }
+
+        guard fluxEnabled, allowPrime, !streams.isEmpty else {
+            await MainActor.run {
+                self.prefetchedKey = key   // streams cached for instant picker
+                self.prefetchedAt = Date()
+                self.isPrefetching = false
+                self.inflightPrefetchKey = nil
+            }
+            return
+        }
+
+        if !earlyPrimed {
+            guard let winner = await raceBestStream(from: streams, item: item, season: season, episode: episode), !Task.isCancelled else {
+                await MainActor.run {
+                    self.isPrefetching = false
+                    self.inflightPrefetchKey = nil
+                }
+                return
+            }
+            let subs = await subsTask.value
+            await self.primeWinner(winner: winner, item: item, season: season, episode: episode, key: key, subs: subs)
         }
     }
 
@@ -636,6 +667,8 @@ class PlayerManager: ObservableObject {
                 }
             }
         }
+        let playbackKey = prefetchKey(for: item, season: season, episode: episode)
+
         // Apple TV style single player window handoff:
         // If an outgoing playback or loading session is active, cleanly flush its progress and stop it
         if let _ = currentItem {
@@ -647,10 +680,16 @@ class PlayerManager: ObservableObject {
             sessionController?.stop()
             self.fetchAndRaceTask?.cancel()
             self.fetchAndRaceTask = nil
-            self.discardWarmCore()
+            if warmCore?.key != playbackKey {
+                self.discardWarmCore()
+            }
             if let hash = activeTorrentHash, hash != prefetchTorrentHash {
                 StremioServerManager.shared.removeTorrent(infoHash: hash)
                 activeTorrentHash = nil
+            }
+        } else {
+            if warmCore?.key != playbackKey {
+                self.discardWarmCore()
             }
         }
 
@@ -667,6 +706,18 @@ class PlayerManager: ObservableObject {
         self.errorMessage = nil
         self.currentSelectedStream = nil
         self.hasConfirmedPlaybackSuccess = false
+        // New session → nothing is playing yet. Without this reset the first
+        // successful title flips hasPlaybackStarted permanently (it is never
+        // set back to false anywhere else), and every later Flux Mode
+        // auto-attempt's startup watchdog sees "already playing" and refuses
+        // to advance past a stalled candidate — the classic "Flux Mode hangs,
+        // manual pick works" failure.
+        self.hasPlaybackStarted = false
+        self.lastTelemetryProgressTime = nil
+        self.lastObservedCacheTime = 0.0
+        self.lastStartupTimePos = 0.0
+        self.startupThroughputSamples.removeAll()
+        self.slowStartStrikes = 0
         if forceStreamPicker {
             self.forceStreamPicker = true
             self.isManualSelection = true
@@ -676,7 +727,6 @@ class PlayerManager: ObservableObject {
             self.isManualSelection = false
             self.isStreamPickerPresented = false
         }
-        let playbackKey = prefetchKey(for: item, season: season, episode: episode)
 
         // Only clear streams if we don't already have pre-fetched streams for this playback key
         if prefetchedKey != playbackKey && prefetchedNextKey != playbackKey {
@@ -743,7 +793,8 @@ class PlayerManager: ObservableObject {
             }
 
             if let cached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey],
-               isSavedURLCompatible(cached.url, hash: activeTorrentHash) {
+               isSavedURLCompatible(cached.url, hash: activeTorrentHash),
+               !cachedStreamLabelLooksLikeJunk(cached.stream, item: item) {
                 let elapsed = Date().timeIntervalSince(cached.timestamp)
                 
                 // If Fresh (< 24 hours), verify health and play or fall back
@@ -791,7 +842,10 @@ class PlayerManager: ObservableObject {
                     self.lastPlayedStreams.removeValue(forKey: fallbackKey)
                 }
             } else if isMatchingEpisode, let savedURL = item.lastStreamURL ?? historyItem?.lastStreamURL,
-                      isSavedURLCompatible(savedURL, hash: historyItem?.lastTorrentInfoHash) {
+                      isSavedURLCompatible(savedURL, hash: historyItem?.lastTorrentInfoHash),
+                      !StreamManager.labelLooksLikeJunk(
+                        labelText: "\(item.lastStreamTitle ?? historyItem?.lastStreamTitle ?? "") \(item.lastStreamSource ?? historyItem?.lastStreamSource ?? "")",
+                        targetTitle: item.title) {
                 let elapsed = Date().timeIntervalSince(historyItem?.timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date())
                 if elapsed < 86400 {
                     let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
@@ -879,6 +933,23 @@ class PlayerManager: ObservableObject {
             print("[PlayerManager] Cached stream health probe failed for \(url.host ?? ""): \(error.localizedDescription)")
             return false
         }
+    }
+    
+    /// Junk-label gate for instant-replay: a cached/persisted stream whose
+    /// scraper label is a promo/review/intro ("MovieBox promo trailer") must
+    /// NEVER auto-replay. A HEAD health check passes fine against a promo CDN
+    /// — that's exactly the probe-vs-playback divergence — so the only
+    /// reliable signal is the label itself. Gate does not mutate caches; if
+    /// the caller then falls through to the race, the ranker's junk demotion
+    /// will bury the source anyway.
+    private func cachedStreamLabelLooksLikeJunk(_ stream: Stream?, item: MediaItem) -> Bool {
+        guard let stream else { return false }
+        let label = "\(stream.title) \(stream.source)"
+        if StreamManager.labelLooksLikeJunk(labelText: label, targetTitle: item.title) {
+            print("[PlayerManager] 🗑️ Cached stream label looks like junk promo — skipping replay: \(label)")
+            return true
+        }
+        return false
     }
     
     private func populateStreamsInBackground(item: MediaItem, season: Int?, episode: Int?) {
@@ -987,6 +1058,11 @@ class PlayerManager: ObservableObject {
                     self.loadedAddonsCount = self.totalAddonsCount
                     self.pendingAddonNames = []
                     self.finishSelect(pf)
+                    // The fast path bypasses attemptStream entirely, so arm the
+                    // startup watchdog here too: a prefetched stream that went
+                    // stale (expired CDN token / dead origin) must auto-advance
+                    // to the standby fallbacks instead of hanging at 00:00.
+                    self.armStartupWatchdog(for: pf)
                 }
                 return
             }
@@ -1020,6 +1096,26 @@ class PlayerManager: ObservableObject {
                     guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)
+
+                    // Early Quorum Commit: If in Flux Mode and no stream is selected yet,
+                    // check if incoming streams already meet Quality Quorum!
+                    if isFluxEnabled && !forceStreamPicker && self.currentSelectedStream == nil && self.currentStreamURL == nil {
+                        let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
+                        let prefQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
+                        if StreamManager.shared.hasQualityQuorum(streams: updatedStreams, sourceMode: sourceMode, preferredQuality: prefQuality, targetTitle: item.title) {
+                            AsyncTask {
+                                if let fastWinner = await self.raceBestStream(from: updatedStreams, item: item, season: season, episode: episode) {
+                                    await MainActor.run {
+                                        guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
+                                        guard self.currentSelectedStream == nil && self.currentStreamURL == nil else { return }
+                                        print("[PlayerManager] ⚡ Quorum reached early (\(updatedStreams.count) streams)! Committing winner: \(fastWinner.cleanTitle)")
+                                        self.isManualSelection = false
+                                        self.attemptStream(fastWinner)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1134,7 +1230,7 @@ class PlayerManager: ObservableObject {
         let targetEpisode = episode ?? currentEpisode
 
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
-        let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
+        let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
         let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
         let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
@@ -1151,18 +1247,30 @@ class PlayerManager: ObservableObject {
             targetTitle: targetItem?.title
         )
 
-        guard let winnerCandidate = primary else { return nil }
+        guard let firstPass = primary else { return nil }
+
+        let top5Candidates = Array(([firstPass] + fallbacks).prefix(5))
+
+        let (winner, standby) = await StreamManager.shared.raceTopCandidates(
+            top5Candidates,
+            playableURL: { self.getPlayableURL(for: $0) },
+            timeout: 1.5
+        )
+
+        let winnerCandidate = winner ?? firstPass
+        let finalStandby = standby.isEmpty ? fallbacks : standby
 
         await MainActor.run {
-            self.standbyFallbacks = fallbacks
+            self.standbyFallbacks = finalStandby
         }
 
         print("[PlayerManager] ⚡ Flux Mode selected best candidate: \(winnerCandidate.cleanTitle) (\(winnerCandidate.quality)) via \(winnerCandidate.source)")
+        Logger.stream.error("⚡ Race winner: \(winnerCandidate.cleanTitle, privacy: .public) via \(winnerCandidate.source, privacy: .public)")
         return winnerCandidate
     }
 
 
-    
+
     /// Lightweight background verification used by the "Best" tab.
     /// Fast HEAD check for HTTP sources, and seeder health validation for torrents.
     /// Zero background torrent swarms spawned so RAM stays clean.
@@ -1203,6 +1311,9 @@ class PlayerManager: ObservableObject {
                 }
                 for await (key, result) in group {
                     await MainActor.run {
+                        // The measured throughput race result is authoritative —
+                        // never overwrite it with a latency-only HEAD probe.
+                        guard self.probeStatus[key]?.throughputKBps == nil else { return }
                         self.probeStatus[key] = result
                     }
                 }
@@ -1251,9 +1362,10 @@ class PlayerManager: ObservableObject {
 
         let target = stream.url
         // Route HTTP streams with required headers through the local proxy
+        let streamTitle = stream.cleanTitle.isEmpty ? stream.title : stream.cleanTitle
         if let headers = stream.proxyHeaders, !headers.isEmpty, !stream.isTorrent,
            StreamProxyManager.shared.isRunning,
-           let proxied = StreamProxyManager.shared.proxyURL(for: target, headers: headers) {
+           let proxied = StreamProxyManager.shared.proxyURL(for: target, headers: headers, title: streamTitle) {
             print("[PlayerManager] Routing through proxy for \(stream.source) (headers: \(headers.keys.joined(separator: ", ")))")
             return proxied
         }
@@ -1313,53 +1425,23 @@ class PlayerManager: ObservableObject {
         Logger.stream.error("Attempting stream (proxied=\(routedViaProxy, privacy: .public)) from \(stream.source, privacy: .public)")
         let isFluxEnabled = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
 
+        // Each committed attempt is a fresh startup: clear any stale
+        // hasPlaybackStarted left by the previous candidate/session so this
+        // attempt's watchdog is actually live (see reset rationale in play()).
+        hasPlaybackStarted = false
+
         // Cancel any existing startup watchdog
         startupWatchdogTask?.cancel()
         startupWatchdogTask = nil
         lastTelemetryProgressTime = nil
         lastObservedCacheTime = 0.0
+        startupThroughputSamples.removeAll()
+        lastStartupTimePos = 0.0
+        slowStartStrikes = 0
 
         // Set up smart startup watchdog in Flux Mode with stall detection
         if isFluxEnabled && !isManualSelection {
-            let connectTimeout: TimeInterval = stream.isTorrent ? 18.0 : 14.0
-            print("[PlayerManager] ⏱️ Armed startup stall watchdog for \(stream.cleanTitle) (\(stream.quality)): connect timeout \(Int(connectTimeout))s")
-            let startedAt = Date()
-            startupWatchdogTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
-                    guard !Task.isCancelled else { return }
-
-                    let shouldAdvance = await MainActor.run { () -> Bool in
-                        guard let self = self else { return false }
-                        if self.hasPlaybackStarted { return false }
-
-                        let elapsed = Date().timeIntervalSince(startedAt)
-
-                        // If bytes have started flowing (telemetry received):
-                        if let lastProgress = self.lastTelemetryProgressTime {
-                            let stallDuration = Date().timeIntervalSince(lastProgress)
-                            let stallTimeout: TimeInterval = stream.isTorrent ? 14.0 : 10.0
-                            if stallDuration >= stallTimeout {
-                                print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
-                                self.advanceToStandbyFallback()
-                                return true
-                            }
-                            return false
-                        }
-
-                        // Connecting phase: no bytes received yet
-                        if elapsed >= connectTimeout {
-                            print("[PlayerManager] ⏱️ Stream connect timeout (\(Int(connectTimeout))s, no response). Auto-advancing to standby fallback...")
-                            self.advanceToStandbyFallback()
-                            return true
-                        }
-
-                        return false
-                    }
-
-                    if shouldAdvance { break }
-                }
-            }
+            armStartupWatchdog(for: stream)
         }
 
         // Skip recently-dead hashes for AUTO selection only — an explicit user
@@ -1420,10 +1502,93 @@ class PlayerManager: ObservableObject {
         }
     }
 
+    /// Arms the smart startup watchdog: advances to the standby fallback on
+    /// connect timeout (no bytes at all) or on a mid-startup stall (bytes
+    /// stopped flowing). Only meaningful in Flux Mode auto-selection; manual
+    /// picks surface errors instead of silently swapping sources.
+    /// Also used by the prefetch fast path (fetchAndRace finishSelect), which
+    /// never routes through attemptStream — without this, a stale warm core
+    /// (expired CDN token, dead origin) would hang with no auto-advance.
+    private func armStartupWatchdog(for stream: Stream) {
+        lastTelemetryProgressTime = nil
+        lastObservedCacheTime = 0.0
+        lastStartupTimePos = 0.0
+        startupThroughputSamples.removeAll()
+        slowStartStrikes = 0
+
+        let connectTimeout: TimeInterval = stream.isTorrent ? 18.0 : 14.0
+        print("[PlayerManager] ⏱️ Armed startup stall watchdog for \(stream.cleanTitle) (\(stream.quality)): connect timeout \(Int(connectTimeout))s")
+        let startedAt = Date()
+        startupWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
+                guard !Task.isCancelled else { return }
+
+                let shouldAdvance = await MainActor.run { () -> Bool in
+                    guard let self = self else { return false }
+
+                    let elapsed = Date().timeIntervalSince(startedAt)
+
+                    if self.hasPlaybackStarted {
+                        return false
+                    }
+
+                    // Slow-delivery / dead-origin detection — runs for BOTH
+                    // zero-telemetry (dead origin: proxy accepted the socket,
+                    // upstream never sent a byte) and trickling sources. The
+                    // probe race pre-verifies the winner, so a healthy probed
+                    // source delivers its first demuxer data in ~1-3s; anything
+                    // still under the floor at 8s (HTTP) / 14s (torrent swarm
+                    // warmup) is dead or unusable. Advancing here instead of at
+                    // the 14s connect timeout cut a 4-dead-candidate worst case
+                    // from ~56s to ~32s.
+                    let slowLimit: TimeInterval = stream.isTorrent ? 14.0 : 8.0
+                    let slowMediaFloor: Double = stream.isTorrent ? 1.0 : 1.5
+                    if elapsed >= slowLimit, self.lastObservedCacheTime < slowMediaFloor {
+                        print("[PlayerManager] 🐌 Slow/dead source detected (only \(String(format: "%.1f", self.lastObservedCacheTime))s of media buffered in \(Int(elapsed))s). Auto-advancing to standby fallback...")
+                        Logger.stream.error("Slow/dead source advanced after \(elapsed, privacy: .public)s (cache \(self.lastObservedCacheTime, privacy: .public)s) from \(stream.source, privacy: .public)")
+                        self.advanceToStandbyFallback()
+                        return true
+                    }
+
+                    // If bytes have started flowing (telemetry received for this session):
+                    if let lastProgress = self.lastTelemetryProgressTime, lastProgress >= startedAt {
+                        let stallDuration = Date().timeIntervalSince(lastProgress)
+                        let stallTimeout: TimeInterval = stream.isTorrent ? 14.0 : 10.0
+                        if stallDuration >= stallTimeout {
+                            print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
+                            self.advanceToStandbyFallback()
+                            return true
+                        }
+                        return false
+                    }
+
+                    // Connecting phase: no bytes received yet
+                    if elapsed >= connectTimeout {
+                        print("[PlayerManager] ⏱️ Stream connect timeout (\(Int(connectTimeout))s, no response). Auto-advancing to standby fallback...")
+                        self.advanceToStandbyFallback()
+                        return true
+                    }
+
+                    return false
+                }
+
+                if shouldAdvance { break }
+
+                // Monitor window expiry: an established session (≥30s since arm
+                // with playback running) leaves the watchdog alone entirely.
+                let monitorExpired = await MainActor.run { [weak self] () -> Bool in
+                    guard let self else { return true }
+                    return self.hasPlaybackStarted && Date().timeIntervalSince(startedAt) >= 30.0
+                }
+                if monitorExpired { break }
+            }
+        }
+    }
+
     func markPlaybackStarted() {
         hasPlaybackStarted = true
-        startupWatchdogTask?.cancel()
-        startupWatchdogTask = nil
+        cancelStartupWatchdog()
     }
 
     func cancelStartupWatchdog() {
@@ -1436,9 +1601,29 @@ class PlayerManager: ObservableObject {
             lastObservedCacheTime = cacheTime
             lastTelemetryProgressTime = Date()
         }
-        if cacheTime >= 1.5 {
-            cancelStartupWatchdog()
-        }
+        // NOTE: deliberately no watchdog cancel here. The watchdog now also
+        // runs the 30s post-start hot-swap monitor and exits on its own via
+        // the monitor-expiry break; cancelling at 1.5s of cache would blind
+        // the slow-source hot-swap right when buffering has barely begun.
+        // Pre-start checks are guarded by hasPlaybackStarted, so a healthy
+        // stream is never advanced past.
+    }
+
+    /// Feed from PlayerView's 0.5s timer: mpv's native cache-speed (KB/s)
+    /// plus the current position, for the startup hot-swap monitor.
+    func reportStartupThroughput(kbps: Double, timePos: Double) {
+        lastStartupTimePos = timePos
+        startupThroughputSamples.append((Date(), kbps))
+        startupThroughputSamples.removeAll { Date().timeIntervalSince($0.date) > 6.0 }
+    }
+
+    /// Sustained throughput (KB/s) averaged over the trailing window.
+    /// nil until ~2s of samples exist (0.5s cadence).
+    private func sustainedStartupThroughputKBps(window: TimeInterval) -> Double? {
+        let cutoff = Date().addingTimeInterval(-window)
+        let recent = startupThroughputSamples.filter { $0.date >= cutoff }
+        guard recent.count >= 4 else { return nil }
+        return recent.map { $0.kbps }.reduce(0, +) / Double(recent.count)
     }
 
     func advanceToStandbyFallback() {
@@ -1455,11 +1640,18 @@ class PlayerManager: ObservableObject {
         let fallback = standbyFallbacks.removeFirst()
         print("[PlayerManager] ⚡ Seamlessly advancing to standby fallback: \(fallback.cleanTitle) (\(fallback.source))")
 
-        // If the old stream was a torrent that stalled, clean it up and mark dead
+        // If the old stream stalled or failed, record it so it is not
+        // re-elected as candidate #1 next time: torrents get a session-scoped
+        // dead hash, HTTP origins get a delivery-reputation strike
+        // (HostHealthTracker — demoted in computeCompositeRank) plus a failed
+        // probeStatus so selectFastStartCandidate filters it for this session.
         if let currentURL = currentStreamURL, let oldStream = availableStreams.first(where: { getPlayableURL(for: $0) == currentURL }) {
             if oldStream.isTorrent, let oldHash = torrentHash(oldStream) {
                 markHashDead(oldStream)
                 StremioServerManager.shared.removeTorrent(infoHash: oldHash)
+            } else if !oldStream.isTorrent {
+                markHashDead(oldStream)
+                HostHealthTracker.shared.recordFailure(host: oldStream.url.host ?? "")
             }
         }
 

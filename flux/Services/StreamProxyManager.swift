@@ -1,3 +1,4 @@
+import OSLog
 import Foundation
 import Network
 
@@ -67,7 +68,7 @@ class StreamProxyManager {
     }
     
     /// Creates a proxy URL that MPV can play. The proxy will fetch `originalURL` with the given `headers`.
-    func proxyURL(for originalURL: URL, headers: [String: String]) -> URL? {
+    func proxyURL(for originalURL: URL, headers: [String: String], title: String? = nil) -> URL? {
         guard let headersJSON = encodeHeaders(headers) else { return nil }
 
         var components = URLComponents()
@@ -75,10 +76,14 @@ class StreamProxyManager {
         components.host = "127.0.0.1"
         components.port = Int(port)
         components.path = "/proxy"
-        components.queryItems = [
+        var items = [
             URLQueryItem(name: "url", value: originalURL.absoluteString),
             URLQueryItem(name: "headers", value: headersJSON)
         ]
+        if let title = title, !title.isEmpty {
+            items.append(URLQueryItem(name: "title", value: title))
+        }
+        components.queryItems = items
         return components.url
     }
     
@@ -120,11 +125,17 @@ class StreamProxyManager {
         let method = parts[0]
         let fullPath = parts[1]
         
-        // Extract Range header from the incoming request
-        var rangeHeader: String? = nil
-        for line in lines {
-            if line.lowercased().hasPrefix("range:") {
-                rangeHeader = line.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+        // Extract incoming headers that need forwarding (like Range)
+        var rangeHeader: String?
+        for line in lines.dropFirst() {
+            if line.isEmpty { break }
+            let headerParts = line.components(separatedBy: ": ")
+            if headerParts.count >= 2 {
+                let key = headerParts[0].lowercased()
+                let value = headerParts.dropFirst().joined(separator: ": ")
+                if key == "range" {
+                    rangeHeader = value
+                }
             }
         }
         
@@ -143,6 +154,7 @@ class StreamProxyManager {
         
         let headersString = queryItems.first(where: { $0.name == "headers" })?.value
         let customHeaders = decodeHeaders(headersString)
+        let streamTitle = queryItems.first(where: { $0.name == "title" })?.value
         
         print("[StreamProxy] \(method) -> \(targetURL.host ?? "?") [\(customHeaders.keys.joined(separator: ", "))]")
         
@@ -166,9 +178,31 @@ class StreamProxyManager {
             request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
         }
         
+        let isProxyTarget: Bool = {
+            if StreamRouteProxyManager.shared.shouldProxy(url: targetURL, title: streamTitle) {
+                return true
+            }
+            // If StreamRouteProxy is enabled, any direct HTTP stream passing through
+            // StreamProxyManager is by definition a web-scraped stream with custom headers (e.g. PenguPlay, 2peckle).
+            // Unless it is a local host or metadata provider, route it through the proxy.
+            if StreamRouteProxyManager.shared.isEnabled {
+                let host = (targetURL.host ?? "").lowercased()
+                let bypass = host == "127.0.0.1" || host == "localhost" || host.contains("pocketbase") || host.contains("cinemeta") || host.contains("themoviedb")
+                return !bypass
+            }
+            return false
+        }()
+
         // Handle HEAD requests
         if method == "HEAD" {
-            let config = URLSessionConfiguration.default
+            let config: URLSessionConfiguration
+            if isProxyTarget,
+               let proxyDict = StreamRouteProxyManager.shared.proxyDictionary() {
+                config = URLSessionConfiguration.ephemeral
+                config.connectionProxyDictionary = proxyDict
+            } else {
+                config = URLSessionConfiguration.default
+            }
             config.timeoutIntervalForRequest = 10
             let session = URLSession(configuration: config)
             
@@ -188,7 +222,6 @@ class StreamProxyManager {
                     }
                     headers += "Access-Control-Allow-Origin: *\r\n"
                     headers += "\r\n"
-                    
                     connection.send(content: headers.data(using: .utf8), completion: .contentProcessed { _ in
                         connection.cancel()
                     })
@@ -201,7 +234,16 @@ class StreamProxyManager {
         }
         
         // Handle GET requests by piping upstream chunks directly to MPV.
-        let config = URLSessionConfiguration.default
+        let config: URLSessionConfiguration
+        if isProxyTarget,
+           let proxyDict = StreamRouteProxyManager.shared.proxyDictionary() {
+            config = URLSessionConfiguration.ephemeral
+            config.connectionProxyDictionary = proxyDict
+            Logger.player.info("[StreamProxy] Routing upstream fetch for \(targetURL.host ?? "", privacy: .public) through forward proxy")
+            print("[StreamProxy] Routing upstream fetch for \(targetURL.host ?? "") through forward proxy")
+        } else {
+            config = URLSessionConfiguration.default
+        }
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 0 // No resource timeout for streaming
         let id = UUID()
@@ -257,8 +299,8 @@ class StreamProxyManager {
 }
 
 private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
-    private static let highWaterMark = 2 * 1024 * 1024
-    private static let lowWaterMark = 1 * 1024 * 1024
+    private static let highWaterMark = 16 * 1024 * 1024
+    private static let lowWaterMark = 4 * 1024 * 1024
 
     private let id: UUID
     private let connection: NWConnection
@@ -293,7 +335,7 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     /// Silent-retry budget per connection (then legacy finish → mpv reconnects itself).
     private var upstreamRetryCount = 0
     private let maxUpstreamRetries = 3
-    private let retryBackoffs: [TimeInterval] = [0.5, 1.5, 3.0]
+    private let retryBackoffs: [TimeInterval] = [0.05, 0.2, 0.5]
     private var pendingRetry: DispatchWorkItem?
     /// Set when a retry was requested mid-send; launch runs after the in-flight
     /// send completes so resume offsets stay exact (no gaps, no duplicates).
@@ -308,317 +350,292 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
     }
 
     func start(request: URLRequest) {
-        // Snapshot the request template + base offset for transparent retries.
-        initialUpstreamRequest = request
-        if let range = request.value(forHTTPHeaderField: "Range")?.trimmingCharacters(in: .whitespaces),
-           range.lowercased().hasPrefix("bytes=") {
-            let rest = String(range.dropFirst(6)).components(separatedBy: "-").first ?? ""
-            baseOffset = Int64(rest.trimmingCharacters(in: .whitespaces)) ?? 0
+        stateLock.lock()
+        self.initialUpstreamRequest = request
+        if let rangeHeader = request.value(forHTTPHeaderField: "Range"),
+           let parsed = Self.parseRangeStart(from: rangeHeader) {
+            self.baseOffset = parsed
         }
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed, .cancelled:
-                self?.finish(cancelConnection: false)
-            default:
-                break
-            }
-        }
+        self.attemptExpectedBytes = nil
+        self.attemptDeliveredBytes = 0
+        self.attemptIndex = 0
+        stateLock.unlock()
 
-        task = session?.dataTask(with: request)
+        let task = session?.dataTask(with: request)
+        self.task = task
         task?.resume()
     }
 
     func cancel() {
-        finish(cancelConnection: true)
+        stateLock.lock()
+        isCompleted = true
+        pendingRetry?.cancel()
+        pendingRetry = nil
+        stateLock.unlock()
+        task?.cancel()
+        session?.invalidateAndCancel()
+        connection.cancel()
+    }
+
+    private static func parseRangeStart(from rangeHeader: String) -> Int64? {
+        guard rangeHeader.lowercased().hasPrefix("bytes=") else { return nil }
+        let spec = String(rangeHeader.dropFirst("bytes=".count))
+        let parts = spec.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let first = parts.first, let start = Int64(first.trimmingCharacters(in: .whitespaces)) else {
+            return nil
+        }
+        return start
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        guard let httpResponse = response as? HTTPURLResponse else {
-            sendError(status: 502, message: "Invalid upstream response")
+        stateLock.lock()
+        guard !isCompleted else {
+            stateLock.unlock()
             completionHandler(.cancel)
             return
         }
 
-        // Silent-retry response: validate resume, never re-send headers downstream.
-        var isRetryResponse = false
-        stateLock.lock()
-        isRetryResponse = expectingRetryResponse
-        if isRetryResponse { expectingRetryResponse = false }
-        stateLock.unlock()
-        if isRetryResponse {
-            // Only an exact-range resume continues transparently. Anything else
-            // (200-full, 416, redirect) would corrupt the byte stream → legacy path.
+        guard let httpResponse = response as? HTTPURLResponse else {
+            stateLock.unlock()
+            completionHandler(.cancel)
+            return
+        }
+
+        let isRetry = expectingRetryResponse
+        expectingRetryResponse = false
+        attemptDeliveredBytes = 0
+        if httpResponse.expectedContentLength > 0 {
+            attemptExpectedBytes = httpResponse.expectedContentLength
+        } else {
+            attemptExpectedBytes = nil
+        }
+
+        if isRetry {
             guard httpResponse.statusCode == 206 else {
-                print("[StreamProxy] Retry rejected (status \(httpResponse.statusCode)): falling back to full reconnect")
+                stateLock.unlock()
                 completionHandler(.cancel)
-                finish(cancelConnection: true)
+                finish(error: NSError(domain: "StreamProxy", code: httpResponse.statusCode,
+                                     userInfo: [NSLocalizedDescriptionKey: "Retry returned non-206 (\(httpResponse.statusCode))"]))
                 return
             }
-            stateLock.lock()
-            if let cl = httpResponse.value(forHTTPHeaderField: "Content-Length"), let n = Int64(cl) {
-                attemptExpectedBytes = n
-            } else {
-                attemptExpectedBytes = nil
-            }
-            attemptDeliveredBytes = 0
             stateLock.unlock()
             completionHandler(.allow)
             return
         }
 
-        let headerData = makeResponseHeaders(from: httpResponse).data(using: .utf8)
+        guard !didSendResponseHeaders else {
+            stateLock.unlock()
+            completionHandler(.allow)
+            return
+        }
         didSendResponseHeaders = true
-        stateLock.lock()
-        responseHeaderLength = headerData?.count ?? 0
-        if let cl = httpResponse.value(forHTTPHeaderField: "Content-Length"), let n = Int64(cl) {
-            attemptExpectedBytes = n
-        } else {
-            attemptExpectedBytes = nil
+
+        let statusCode = httpResponse.statusCode
+        var headerString = "HTTP/1.1 \(statusCode) \(HTTPURLResponse.localizedString(forStatusCode: statusCode))\r\n"
+        for (key, value) in httpResponse.allHeaderFields {
+            let keyStr = "\(key)"
+            let lower = keyStr.lowercased()
+            if lower == "connection" || lower == "transfer-encoding" { continue }
+            headerString += "\(keyStr): \(value)\r\n"
         }
-        attemptDeliveredBytes = 0
+        if httpResponse.value(forHTTPHeaderField: "Access-Control-Allow-Origin") == nil {
+            headerString += "Access-Control-Allow-Origin: *\r\n"
+        }
+        headerString += "Connection: close\r\n\r\n"
         stateLock.unlock()
-        if let headerData {
-            enqueue(headerData, from: dataTask)
+
+        if let headerData = headerString.data(using: .utf8) {
+            stateLock.lock()
+            responseHeaderLength = headerData.count
+            stateLock.unlock()
+            enqueue(data: headerData, isMediaBody: false)
         }
+
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        if !didSendResponseHeaders {
-            sendError(status: 502, message: "Upstream response missing headers")
+        stateLock.lock()
+        guard !isCompleted else {
+            stateLock.unlock()
             return
         }
-        enqueue(data, from: dataTask)
+        attemptDeliveredBytes += Int64(data.count)
+        stateLock.unlock()
+
+        enqueue(data: data, isMediaBody: true)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        // Transparent resume: a mid-stream upstream blip re-fetches silently via
-        // Range instead of killing the downstream connection (which forces a full
-        // mpv reconnect + visible stall). Only when we actually forwarded media;
-        // pre-first-byte failures keep the legacy fail-fast path below.
-        if silentlyResumeIfPossible(after: error) {
+        stateLock.lock()
+        guard !isCompleted else {
+            stateLock.unlock()
             return
         }
 
-        if let error, !isCompleted {
-            print("[StreamProxy] Upstream stream ended with error: \(error.localizedDescription)")
-            if !didSendResponseHeaders {
-                sendError(status: 502, message: "Upstream error: \(error.localizedDescription)")
+        if let error = error, (error as NSError).code == NSURLErrorCancelled {
+            stateLock.unlock()
+            return
+        }
+
+        let isPrematureEOF: Bool
+        if let error = error {
+            let code = (error as NSError).code
+            let isNetworkBlip = code == NSURLErrorNetworkConnectionLost
+                || code == NSURLErrorTimedOut
+                || code == NSURLErrorCannotConnectToHost
+                || (error as NSError).domain == NSPOSIXErrorDomain && code == 54 // ECONNRESET
+            isPrematureEOF = isNetworkBlip
+        } else if let expected = attemptExpectedBytes, attemptDeliveredBytes < expected {
+            isPrematureEOF = true
+        } else {
+            isPrematureEOF = false
+        }
+
+        if isPrematureEOF && upstreamRetryCount < maxUpstreamRetries && initialUpstreamRequest != nil {
+            upstreamRetryCount += 1
+            let retryIndex = upstreamRetryCount
+            let backoff = retryBackoffs[min(retryIndex - 1, retryBackoffs.count - 1)]
+
+            if isSending {
+                retryDeferredUntilSendCompletes = true
+                stateLock.unlock()
                 return
             }
+
+            stateLock.unlock()
+            scheduleRetry(after: backoff)
+            return
         }
 
-        finish(cancelConnection: true)
+        stateLock.unlock()
+        finish(error: error)
     }
 
-    /// Decides whether an upstream completion can be recovered transparently.
-    /// Returns true when a silent retry was scheduled (caller must return).
-    /// Error case: retry when media already flowed. Clean-completion case: retry
-    /// only when upstream promised MORE than it delivered (else it's true EOF).
-    private func silentlyResumeIfPossible(after error: Error?) -> Bool {
-        stateLock.lock()
-        guard !isCompleted else { stateLock.unlock(); return false }
-        let mediaForwarded = max(Int64(0), totalForwardedBytes - Int64(responseHeaderLength))
-        let deliveredThisAttempt = attemptDeliveredBytes - (attemptIndex == 0 ? Int64(responseHeaderLength) : 0)
-        if let error {
-            guard didSendResponseHeaders, mediaForwarded > 0, upstreamRetryCount < maxUpstreamRetries else {
-                stateLock.unlock()
-                return false
+    private func scheduleRetry(after delay: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.stateLock.lock()
+            guard !self.isCompleted, let baseRequest = self.initialUpstreamRequest else {
+                self.stateLock.unlock()
+                return
             }
-            print("[StreamProxy] Upstream error after \(mediaForwarded) media bytes (\(error.localizedDescription)): silent resume scheduled")
-        } else {
-            guard didSendResponseHeaders, mediaForwarded > 0,
-                  let expected = attemptExpectedBytes, deliveredThisAttempt < expected,
-                  upstreamRetryCount < maxUpstreamRetries else {
-                stateLock.unlock()
-                return false
-            }
-            print("[StreamProxy] Upstream ended early (\(deliveredThisAttempt)/\(expected) bytes): silent resume scheduled")
+
+            let resumeOffset = self.baseOffset + self.totalForwardedBytes
+            var retryReq = baseRequest
+            retryReq.setValue("bytes=\(resumeOffset)-", forHTTPHeaderField: "Range")
+            self.expectingRetryResponse = true
+            self.attemptIndex += 1
+            self.attemptExpectedBytes = nil
+            self.attemptDeliveredBytes = 0
+            self.task = nil
+            self.stateLock.unlock()
+
+            let nextTask = self.session?.dataTask(with: retryReq)
+            self.stateLock.lock()
+            self.task = nextTask
+            self.stateLock.unlock()
+            nextTask?.resume()
         }
-        upstreamRetryCount += 1
-        let delay = retryBackoffs[min(upstreamRetryCount - 1, retryBackoffs.count - 1)]
-        pendingRetry?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.startUpstreamRetry() }
+
+        stateLock.lock()
         pendingRetry = work
         stateLock.unlock()
-        sendQueue.asyncAfter(deadline: .now() + delay, execute: work)
-        return true
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// Launches a replacement upstream task resuming exactly where forwarding
-    /// stopped. Runs on sendQueue; defers past any in-flight send so offsets
-    /// stay exact (no gaps, no duplicate bytes downstream).
-    private func startUpstreamRetry() {
-        // Must run on sendQueue (callers: work item + completeSend).
-        if isSending {
-            retryDeferredUntilSendCompletes = true
-            return
-        }
+    private func enqueue(data: Data, isMediaBody: Bool) {
         stateLock.lock()
-        guard !isCompleted, let template = initialUpstreamRequest else { stateLock.unlock(); return }
-        // Drop anything still queued from the dead task; it will be re-fetched
-        // from the resume offset below.
-        pendingSends.removeAll()
-        queuedBytes = 0
-        upstreamSuspended = false
-        let resumeAt = baseOffset + max(Int64(0), totalForwardedBytes - Int64(responseHeaderLength))
-        var request = template
-        request.setValue("bytes=\(resumeAt)-", forHTTPHeaderField: "Range")
-        guard let session else { stateLock.unlock(); return }
-        let retryTask = session.dataTask(with: request)
-        self.task = retryTask
-        expectingRetryResponse = true
-        attemptIndex += 1
-        attemptExpectedBytes = nil
-        attemptDeliveredBytes = 0
-        stateLock.unlock()
-        print("[StreamProxy] Resuming upstream at byte \(resumeAt) (attempt \(upstreamRetryCount)/\(maxUpstreamRetries))")
-        // Delivery-reputation feed: an upstream cut that forced a silent retry
-        // demotes the origin host in autoplay ranking (HostHealthTracker).
-        if let host = template.url?.host {
-            HostHealthTracker.shared.recordFailure(host: host)
-        }
-        retryTask.resume()
-    }
+        pendingSends.append(data)
+        queuedBytes += data.count
 
-    private func makeResponseHeaders(from httpResponse: HTTPURLResponse) -> String {
-        let statusCode = httpResponse.statusCode
-        var responseHeaders = "HTTP/1.1 \(statusCode) \(HTTPURLResponse.localizedString(forStatusCode: statusCode))\r\n"
-        responseHeaders += "Access-Control-Allow-Origin: *\r\n"
-        responseHeaders += "Accept-Ranges: bytes\r\n"
-
-        let headersToCopy = ["Content-Length", "Content-Type", "Content-Range", "ETag", "Last-Modified"]
-        for headerName in headersToCopy {
-            if let value = httpResponse.value(forHTTPHeaderField: headerName) {
-                responseHeaders += "\(headerName): \(value)\r\n"
-            }
+        if queuedBytes >= Self.highWaterMark && !upstreamSuspended {
+            upstreamSuspended = true
+            task?.suspend()
         }
 
-        if httpResponse.value(forHTTPHeaderField: "Content-Type") == nil {
-            responseHeaders += "Content-Type: application/octet-stream\r\n"
+        let shouldStartSending = !isSending
+        if shouldStartSending {
+            isSending = true
         }
-
-        responseHeaders += "\r\n"
-        return responseHeaders
-    }
-
-    /// Bounded, completion-driven delivery. URLSession may read upstream data
-    /// considerably faster than mpv drains the loopback socket; suspending the
-    /// upstream task prevents an unbounded queue of Data buffers in that case.
-    private func enqueue(_ data: Data, from dataTask: URLSessionDataTask) {
-        var shouldSuspend = false
-        stateLock.lock()
-        if !isCompleted {
-            queuedBytes += data.count
-            if !upstreamSuspended && queuedBytes >= Self.highWaterMark {
-                upstreamSuspended = true
-                shouldSuspend = true
-            }
-        }
-        let completed = isCompleted
         stateLock.unlock()
 
-        guard !completed else { return }
-        if shouldSuspend {
-            #if DEBUG
-            print("[StreamProxy] Pausing upstream at \(queuedBytes / 1024) KB queued")
-            #endif
-            dataTask.suspend()
+        if shouldStartSending {
+            sendNext()
         }
+    }
 
+    private func sendNext() {
         sendQueue.async { [weak self] in
-            guard let self, !self.isCompleted else { return }
-            self.pendingSends.append(data)
-            self.sendNextIfNeeded()
-        }
-    }
+            guard let self = self else { return }
 
-    private func sendNextIfNeeded() {
-        dispatchPrecondition(condition: .onQueue(sendQueue))
-        guard !isCompleted, !isSending, !pendingSends.isEmpty else { return }
-        isSending = true
-        let data = pendingSends.removeFirst()
-        connection.send(content: data, completion: .contentProcessed { [weak self] error in
-            guard let self else { return }
-            self.sendQueue.async {
+            self.stateLock.lock()
+            guard !self.isCompleted, !self.pendingSends.isEmpty else {
                 self.isSending = false
-                self.completeSend(byteCount: data.count)
-                if let error {
-                    print("[StreamProxy] Client send failed: \(error)")
-                    self.finish(cancelConnection: false)
+                let needRetry = self.retryDeferredUntilSendCompletes
+                self.retryDeferredUntilSendCompletes = false
+                self.stateLock.unlock()
+
+                if needRetry {
+                    self.scheduleRetry(after: 0.0)
+                }
+                return
+            }
+
+            let chunk = self.pendingSends.removeFirst()
+            self.stateLock.unlock()
+
+            self.connection.send(content: chunk, completion: .contentProcessed { [weak self] sendError in
+                guard let self = self else { return }
+
+                if let sendError = sendError {
+                    self.finish(error: sendError)
                     return
                 }
-                self.sendNextIfNeeded()
-            }
-        })
-    }
 
-    private func completeSend(byteCount: Int) {
-        var taskToResume: URLSessionDataTask?
-        var launchDeferredRetry = false
-        stateLock.lock()
-        queuedBytes = max(0, queuedBytes - byteCount)
-        totalForwardedBytes += Int64(byteCount)
-        attemptDeliveredBytes += Int64(byteCount)
-        if upstreamSuspended, queuedBytes <= Self.lowWaterMark, !isCompleted {
-            upstreamSuspended = false
-            taskToResume = task
-        }
-        if retryDeferredUntilSendCompletes, !isCompleted {
-            retryDeferredUntilSendCompletes = false
-            launchDeferredRetry = true
-        }
-        stateLock.unlock()
-        taskToResume?.resume()
-        if launchDeferredRetry {
-            // completeSend runs on sendQueue (caller guarantee) so offsets stay exact.
-            startUpstreamRetry()
-        }
-    }
+                self.stateLock.lock()
+                self.queuedBytes -= chunk.count
+                self.totalForwardedBytes += Int64(chunk.count)
 
-    private func sendError(status: Int, message: String) {
-        let body = "{\"error\":\"\(message)\"}"
-        let response = "HTTP/1.1 \(status) Error\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n\(body)"
-        guard let data = response.data(using: .utf8) else {
-            finish(cancelConnection: true)
-            return
-        }
+                if self.upstreamSuspended && self.queuedBytes <= Self.lowWaterMark {
+                    self.upstreamSuspended = false
+                    self.task?.resume()
+                }
+                self.stateLock.unlock()
 
-        sendQueue.async { [weak self] in
-            guard let self, !self.isCompleted else { return }
-            self.connection.send(content: data, completion: .contentProcessed { [weak self] _ in
-                self?.finish(cancelConnection: true)
+                self.sendNext()
             })
         }
     }
 
-    private func finish(cancelConnection: Bool) {
+    private func finish(error: Error?) {
         stateLock.lock()
         guard !isCompleted else {
             stateLock.unlock()
             return
         }
         isCompleted = true
-        queuedBytes = 0
-        upstreamSuspended = false
         pendingRetry?.cancel()
         pendingRetry = nil
-        retryDeferredUntilSendCompletes = false
-        let task = task
-        let session = session
+        let drainRemaining = pendingSends
+        pendingSends.removeAll()
+        queuedBytes = 0
         stateLock.unlock()
 
         task?.cancel()
-        session?.invalidateAndCancel()
-        sendQueue.async { [weak self] in
-            guard let self else { return }
-            self.pendingSends.removeAll(keepingCapacity: false)
-            self.isSending = false
-            self.session = nil
-            if cancelConnection {
+        session?.finishTasksAndInvalidate()
+
+        if !drainRemaining.isEmpty {
+            var combined = Data()
+            drainRemaining.forEach { combined.append($0) }
+            connection.send(content: combined, isComplete: true, completion: .contentProcessed { [weak self] _ in
+                guard let self = self else { return }
                 self.connection.cancel()
-            }
-            self.onComplete(self.id)
+                self.onComplete(self.id)
+            })
+        } else {
+            connection.cancel()
+            onComplete(id)
         }
     }
 }

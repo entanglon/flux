@@ -110,7 +110,6 @@ ContentView_Backup.swift
 *.zip
 *.tar.gz
 agent-chat.md
-handover.md
 AGENTS.md
 task.md
 EVALUATION.md
@@ -129,3 +128,5 @@ genre/
 public/
 OTTs/
 backend/
+
+.freebuff/

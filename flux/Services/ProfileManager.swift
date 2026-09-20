@@ -320,7 +320,8 @@ final class ProfileManager: ObservableObject {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
          "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB",
-         "appLanguage"]
+         "appLanguage",
+         UserDefaults.Key.streamRouteProxyEnabled, UserDefaults.Key.streamRouteProxyEndpoint, UserDefaults.Key.streamRouteProxyTargetHosts]
     }
 
     /// Persists current UserDefaults into the active profile's settings snapshot.
@@ -359,6 +360,7 @@ final class ProfileManager: ObservableObject {
             if let lang = snap["appLanguage"] as? String {
                 LanguageManager.shared.syncFromProfile(lang)
             }
+            StreamRouteProxyManager.shared.reloadFromUserDefaults()
         } else {
             // First time loading this profile: snapshot current settings so active preferences persist
             snapshotSettings(for: profileID)

@@ -10,24 +10,36 @@
 
 ---
 
-## CURRENT TOP PRIORITY INVESTIGATION (Sep 20, 2026)
-### Incident: *My Name is Khan* Flux Mode Playback Failure vs Manual Source #2 Success
-- **Reproduction**:
-  1. User attempted to play *My Name is Khan* (TMDB ID: `26022` / IMDb ID: `tt1188996`) in Flux Mode.
-  2. Auto-play failed / stalled at 00:00.
-  3. User opened the manual stream picker and selected the **second listed source**.
-  4. Source #2 played immediately and smoothly.
-- **Unified Log Findings**:
-  - `14:07:58.399 [Stream] Attempting stream (proxied=true) from PenguPlay` (Flux Mode Candidate #1)
-  - `14:08:27.671 [Stream] Attempting stream (proxied=false) from PenguPlay` (User Manual Source #2)
-- **What Freebuff Needs to Research & Fix**:
-  1. **Why was Candidate #1 `proxied=true`?**
-     - Check `StreamManager.swift` for the stream metadata of *My Name is Khan*. Candidate #1 had `proxyHeaders` (e.g. `Referer: https://cinefreak...` or similar) that routed it through `StreamProxyManager` (`127.0.0.1:51547`).
-     - Is `StreamProxyManager.swift` failing to pipe data to mpv, or did the remote host reject the proxy?
-     - Or is Candidate #1 an inaccessible/dead host that should NOT be ranked #1 above healthy direct streams?
-  2. **Auto-Fallback Failure**:
-     - When Candidate #1 failed to play, why did Flux Mode stall rather than seamlessly falling back to Candidate #2 via `PlayerManager.advanceToStandbyFallback()`?
-     - Inspect `PlayerManager.swift:1322-1363` (startup stall watchdog) and `advancePast()`.
+## ACTIVE: Junk-Brand Label Detection + Replay Gate (Sep 20, evening)
+- **Incident**: Coyote vs. Acme auto-played the MovieBox promo trailer; manual pick played fine. Root cause: junk scan checked URL/filename/Referer but NEVER the scraper label (`stream.title` / `stream.source`) — scrapers brand promos "Coyote vs. Acme MovieBox promo trailer" behind opaque CDN tokens the filename scanner can't analyze, and a junk CDN measures *fastest* (no congestion).
+- **Fix**: `StreamManager.labelLooksLikeJunk(labelText:targetTitle:)` — shared static detector (label junk tokens incl. moviebox; target-title words subtracted so "Trailer Park Boys" stays safe). Used by `evaluateTitleMatch` (→ −15,000, runs before foreign-title immunity) and by a new `cachedStreamLabelLooksLikeJunk` gate on BOTH instant-replay paths in `play()` — a HEAD health check passes instantly against a promo CDN, so labels are the only reliable replay signal.
+- **Tests**: `evaluateTitleMatchDemotesJunkBrandedSourceBehindOpaqueToken`, `labelLooksLikeJunkGuardsReplayGate` — suite at 194/194.
+- **Do not**: scan `stream.source` for conflict logic (labels are scraper noise for title matching — junk detection only); gate the replay paths on URL health alone ever again.
+
+## ARCHIVED: Measured Source Racing & Hot-Swap (Sep 20, evening)
+- **Design**: hybrid "measure, then commit" — parallel 512KB ranged-GET probes (3s hard cap) over the top HTTP shortlist in `StreamManager.raceThroughput`; first candidate sustaining ≥800KB/s commits early (after better-ranked rivals measured slower), else best-measured wins the re-rank. Full parallel-mpv racing deliberately rejected (bandwidth self-competition distorts the measurement; N×~60MB RAM).
+- **Ranking invariant**: for probed HTTP streams, MEASURED throughput replaces the paper SSS (+5000 cap) in `computeCompositeRank` — never add both. ≥800KB/s → +3500…+5500; 170–800 → linear; <170 → −4000; hijacked (HTML/JSON/tiny non-media probe bodies) → ok=false + −25000. Torrents are never HTTP-probed.
+- **Hot-swap safety nets**: pre-start slow-delivery watchdog (<1.5s media after 8s HTTP / <1.0s after 14s torrent) and post-start monitor (first 30s, <15s watched, buffer <4s, mpv `cache-speed` <100KB/s sustained ×2 strikes → `advanceToStandbyFallback`). The watchdog now survives playback start (`markPlaybackStarted` no longer cancels; `reportTelemetryProgress` no longer cancels at 1.5s cache) and exits on its own at window expiry.
+- **Do not**: reintroduce unbounded HEAD probes (they hang on HEAD-blocking CDNs — ranged GETs + hard time-box are mandatory), or route probes anywhere but the real delivery path (loopback proxy + headers included).
+- **mpv contract unchanged**: only read-only `cache-speed` observation added (`recentCacheSpeedKBps`); zero engine option changes.
+
+## RESOLVED (Sep 20, later): Wrong Content & Wrong Audio (3 Idiots / Family Guy)
+- **Refined incident report**: Flux Mode was not hanging for the user — it played wrong things. *3 Idiots* opened with English directors'-commentary audio (user read it as "a review"); *Family Guy* played a MovieBox-style intro video; sources buffer.
+- **Audio hijack root cause**: `autoSelectPreferredTracks` matched preferred language (English), and when every preferred-language match was commentary, the `?? matching.first` fallthrough picked the commentary track anyway. Original-language ladder was only consulted when no preferred track existed. **Fix**: pure, unit-tested `MPVController.preferredAudioTrack(from:preferredLang:originalLanguage:)` — original-language-first for foreign titles, preferred-language dub only when original is absent, commentary only as last resort.
+- **Wrong-content root causes** (diff vs released beta.2 `76395c3`): blanket foreign-title immunity (conflicts never penalized when `originalLanguage != "en"`) + opaque-token URLs excluded from title analysis. **Mitigation shipped**: curated junk-token demotion in `evaluateTitleMatch` (−15,000 in title portion / −6,000 after the S/E marker; target-title words exempt) + size sanity in `computeCompositeRank` (advertised < 50MB episode / < 150MB movie → −8,000; unknown sizes never punished).
+- **Tests**: 188/188 green (8 new: 4 audio-selection, 4 junk/size).
+- **Do not re-fix**: the 1080p cap is already user-configured and strictly enforced in `selectFastStartCandidate`.
+- **Open roadmap (agreed)**: (1) measured ranged-GET racing to fix buffering; (2) TMDB `original_title` on `MediaItem` for precise foreign conflict detection; (3) instant-replay paths in `play()` still bypass the startup watchdog and skip torrent re-registration on the engine.
+
+## RESOLVED: Flux Mode Stall / No-Auto-Advance (Sep 20, 2026)
+### Incident: *My Name is Khan* Flux Mode Playback Failure vs Manual Source #2 Success — ROOT-CAUSED & FIXED
+- **Symptom**: Flux Mode auto-play stalled at 00:00 (Candidate #1 `proxied=true`, PenguPlay), while the manually picked Source #2 (`proxied=false`) played instantly. Generalized to most titles after the first successful playback of a session.
+- **Root Causes (3 stacked defects, all fixed)**:
+  1. **Stale `hasPlaybackStarted`**: set `true` by `markPlaybackStarted()` and never reset — after the first successful title, `attemptStream`'s startup watchdog bailed out instantly (`if self.hasPlaybackStarted { return false }`) and never auto-advanced. Now reset in `play()` and at the top of every `attemptStream`.
+  2. **Prefetch fast path had no watchdog at all**: `fetchAndRace`'s prefetch hit commits via `finishSelect(pf)` without `attemptStream`. Watchdog extracted into `armStartupWatchdog(for:)` and armed there too.
+  3. **Autoplay ranker ignored host reputation**: `computeCompositeRank` never subtracted `HostHealthTracker.penalty`, and failed HTTP hosts were never recorded. Ranker now applies the penalty; `advanceToStandbyFallback` records a strike (+ failed probeStatus) for the failed HTTP origin. Regression test: `selectFastStartCandidateDemotesHostsWithRecentFailures`.
+- **Expected behavior now**: a stalled candidate auto-advances within ~14s (HTTP connect timeout) or ~10s after bytes stop flowing, instead of hanging forever. Verify via unified log `⏱️` watchdog lines and `⚡ Seamlessly advancing to standby fallback` entries.
+- **Do not re-investigate the proxy first**: `StreamProxyManager` (watermarks, silent resume) was audited and is healthy; the hang was the disarmed watchdog + unrecorded host failures, not the pipe.
 
 ---
 

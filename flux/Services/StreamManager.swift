@@ -278,7 +278,314 @@ class StreamManager {
     func fetchStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async -> [Stream] {
         return await fetchStreamsRealtime(for: item, season: season, episode: episode, onStreamsUpdated: { _ in })
     }
+
+    // MARK: - Measured Throughput Race
+
+    /// Result of one ranged-GET throughput probe.
+    struct ThroughputProbe: Equatable {
+        /// Upstream served actual media (right content type, sane size).
+        let ok: Bool
+        /// Upstream served an HTML interstitial / JSON error / junk body.
+        let hijacked: Bool
+        /// Seconds until completion of the probe range (includes TTFB).
+        let ttfbSeconds: Double
+        /// Sustained throughput in KB/s across the probe range.
+        let throughputKBps: Double
+    }
+
+    /// Parallel ranged-GET probe race over HTTP candidates — the mechanism the
+    /// README has always advertised. Each candidate fetches 512KB with the
+    /// same headers the real playback path uses; we measure sustained
+    /// throughput and classify hijacks (HTML/JSON/tiny non-media bodies).
+    /// The first candidate whose measurement crosses `goodEnoughKBps` while
+    /// every better-ranked rival has already measured slower wins the early
+    /// commit; otherwise the caller re-ranks with the full measurement set.
+    /// Hard time-boxed: a candidate that cannot deliver 512KB inside the
+    /// budget is reported as failed (≈ < 170 KB/s is unusable for 1080p).
+    /// Torrents are never probed here — swarm metrics rank them already.
+    func raceThroughput(
+        for candidates: [Stream],
+        playableURL: @escaping (Stream) -> URL,
+        budgetSeconds: Double = 3.0,
+        goodEnoughKBps: Double = 800.0
+    ) async -> (probes: [String: ThroughputProbe], committedKey: String?) {
+        let httpCandidates = candidates.filter { !$0.isTorrent }
+        guard !httpCandidates.isEmpty else { return ([:], nil) }
+
+        var probes: [String: ThroughputProbe] = [:]
+        var reported = Set<String>()
+        var committedKey: String?
+
+        await withTaskGroup(of: (String, ThroughputProbe?).self) { group in
+            for stream in httpCandidates {
+                let key = stream.stableKey
+                let url = playableURL(stream)
+                let headers = stream.proxyHeaders
+                group.addTask {
+                    let probe = await Self.probeThroughput(
+                        url: url,
+                        headers: headers,
+                        budgetSeconds: budgetSeconds
+                    )
+                    return (key, probe)
+                }
+            }
+
+            for await (key, probe) in group {
+                guard let probe else { continue }
+                reported.insert(key)
+                probes[key] = probe
+
+                let crossesBar = probe.ok && !probe.hijacked && probe.throughputKBps >= goodEnoughKBps
+                guard crossesBar, committedKey == nil else { continue }
+                // Respect metadata order: only early-commit when no better-ranked
+                // candidate is still racing (they may yet cross the bar too).
+                let index = httpCandidates.firstIndex { $0.stableKey == key } ?? 0
+                let higherPending = httpCandidates.prefix(index).contains { !reported.contains($0.stableKey) }
+                if !higherPending {
+                    committedKey = key
+                    group.cancelAll()
+                    break
+                }
+            }
+        }
+
+        return (probes, committedKey)
+    }
+
+    /// Single-candidate probe: 512KB ranged GET through the real delivery path
+    /// (custom headers included; loopback proxy URLs carry their headers
+    /// server-side). Measures aggregate time → KB/s; classifies hijacks.
+    private static func probeThroughput(
+        url: URL,
+        headers: [String: String]?,
+        budgetSeconds: Double
+    ) async -> ThroughputProbe {
+        var request = URLRequest(url: url)
+        request.setValue("bytes=0-524287", forHTTPHeaderField: "Range")
+        request.timeoutInterval = budgetSeconds
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
+        if !isLoopback {
+            for (key, value) in headers ?? [:] {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            }
+        }
+
+        let start = CFAbsoluteTimeGetCurrent()
+        let isProxied = StreamRouteProxyManager.shared.shouldProxy(url: url)
+        let session: URLSession
+        if isProxied, let proxyDict = StreamRouteProxyManager.shared.proxyDictionary() {
+            let config = URLSessionConfiguration.ephemeral
+            config.connectionProxyDictionary = proxyDict
+            config.timeoutIntervalForRequest = budgetSeconds
+            config.timeoutIntervalForResource = budgetSeconds
+            session = URLSession(configuration: config)
+        } else {
+            session = URLSession.shared
+        }
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            let elapsed = max(0.05, CFAbsoluteTimeGetCurrent() - start)
+
+            guard let http = response as? HTTPURLResponse else {
+                return ThroughputProbe(ok: false, hijacked: false, ttfbSeconds: elapsed, throughputKBps: 0)
+            }
+
+            let mime = (http.mimeType ?? "").lowercased()
+            let bodyPrefix = String(data: data.prefix(512), encoding: .utf8)?.lowercased() ?? ""
+            let bodyLooksHTML = bodyPrefix.contains("<!doctype") || bodyPrefix.contains("<html")
+            let mediaMime = mime.hasPrefix("video") || mime.hasPrefix("audio")
+                || mime.hasPrefix("application/octet-stream") || mime.hasPrefix("application/vnd.apple.mpegurl")
+                || mime.isEmpty
+            // Tiny non-media bodies are promo/reel junk, not the title.
+            let hijacked = bodyLooksHTML || mime.contains("text/html") || mime.contains("json")
+                || (!mediaMime && data.count < 32_768)
+
+            guard (200...299).contains(http.statusCode), !hijacked else {
+                return ThroughputProbe(ok: false, hijacked: hijacked, ttfbSeconds: elapsed, throughputKBps: 0)
+            }
+
+            let kbps = (Double(data.count) / 1024.0) / elapsed
+            return ThroughputProbe(ok: true, hijacked: false, ttfbSeconds: elapsed, throughputKBps: kbps)
+        } catch {
+            if isProxied {
+                // Transparent direct fallback if proxy endpoint is offline
+                if let (fallbackData, fallbackResp) = try? await URLSession.shared.data(for: request),
+                   let fallbackHttp = fallbackResp as? HTTPURLResponse, (200...299).contains(fallbackHttp.statusCode) {
+                    let elapsed = max(0.05, CFAbsoluteTimeGetCurrent() - start)
+                    let kbps = (Double(fallbackData.count) / 1024.0) / elapsed
+                    return ThroughputProbe(ok: true, hijacked: false, ttfbSeconds: elapsed, throughputKBps: kbps)
+                }
+            }
+            let elapsed = max(0.05, CFAbsoluteTimeGetCurrent() - start)
+            // Timeout before any usable payload ≈ cannot sustain 512KB inside
+            // the budget (≈ < 170 KB/s) — unusable for 1080p, report failed.
+            return ThroughputProbe(ok: false, hijacked: false, ttfbSeconds: elapsed, throughputKBps: 0)
+        }
+    }
     
+    // MARK: - Fast Responsive 1-Byte Probe Race (Flux Mode)
+
+    /// Fast lightweight 1-byte range probe for HTTP streams.
+    /// Checks responsiveness, status code (200/206/3xx), and non-hijack media MIME type.
+    static func probeResponsive(
+        url: URL,
+        headers: [String: String]? = nil,
+        timeout: TimeInterval = 1.5
+    ) async -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("bytes=0-1", forHTTPHeaderField: "Range")
+        request.timeoutInterval = timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
+        if !isLoopback {
+            for (key, value) in headers ?? [:] {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            }
+        }
+
+        let isProxied = StreamRouteProxyManager.shared.shouldProxy(url: url)
+        let session: URLSession
+        if isProxied, let proxyDict = StreamRouteProxyManager.shared.proxyDictionary() {
+            let config = URLSessionConfiguration.ephemeral
+            config.connectionProxyDictionary = proxyDict
+            config.timeoutIntervalForRequest = timeout
+            config.timeoutIntervalForResource = timeout
+            session = URLSession(configuration: config)
+        } else {
+            session = URLSession.shared
+        }
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            guard (200...399).contains(http.statusCode) else { return false }
+
+            let mime = (http.mimeType ?? "").lowercased()
+            let bodyPrefix = String(data: data.prefix(256), encoding: .utf8)?.lowercased() ?? ""
+            let bodyLooksHTML = bodyPrefix.contains("<!doctype") || bodyPrefix.contains("<html")
+            let hijacked = bodyLooksHTML || mime.contains("text/html") || mime.contains("json")
+
+            return !hijacked
+        } catch {
+            if isProxied {
+                // Fallback to direct probe if proxy is unreachable
+                if let (fallbackData, fallbackResp) = try? await URLSession.shared.data(for: request),
+                   let fallbackHttp = fallbackResp as? HTTPURLResponse, (200...399).contains(fallbackHttp.statusCode) {
+                    let mime = (fallbackHttp.mimeType ?? "").lowercased()
+                    let bodyPrefix = String(data: fallbackData.prefix(256), encoding: .utf8)?.lowercased() ?? ""
+                    let bodyLooksHTML = bodyPrefix.contains("<!doctype") || bodyPrefix.contains("<html")
+                    let hijacked = bodyLooksHTML || mime.contains("text/html") || mime.contains("json")
+                    return !hijacked
+                }
+            }
+            return false
+        }
+    }
+
+    /// Parallel 1-byte probe race across top candidates. The first responsive candidate
+    /// wins immediately, cancelling any remaining in-flight probes.
+    func raceTopCandidates(
+        _ candidates: [Stream],
+        playableURL: @escaping (Stream) -> URL,
+        timeout: TimeInterval = 1.5
+    ) async -> (winner: Stream?, fallbacks: [Stream]) {
+        guard !candidates.isEmpty else { return (nil, []) }
+
+        let httpCandidates = candidates.filter { !$0.isTorrent }
+        if httpCandidates.isEmpty {
+            // Pure torrent selection: top candidate from Best Health wins
+            return (candidates.first, Array(candidates.dropFirst()))
+        }
+
+        var responsiveWinner: Stream?
+
+        await withTaskGroup(of: (Stream, Bool).self) { group in
+            for stream in httpCandidates {
+                let targetURL = playableURL(stream)
+                let headers = stream.proxyHeaders
+                group.addTask {
+                    let ok = await Self.probeResponsive(url: targetURL, headers: headers, timeout: timeout)
+                    return (stream, ok)
+                }
+            }
+
+            for await (stream, ok) in group {
+                if ok && responsiveWinner == nil {
+                    responsiveWinner = stream
+                    group.cancelAll()
+                    break
+                }
+            }
+        }
+
+        if let winner = responsiveWinner {
+            let fallbacks = candidates.filter { $0.stableKey != winner.stableKey }
+            return (winner, fallbacks)
+        } else {
+            // If no HTTP candidate responded within timeout, fallback to candidate #1
+            return (candidates.first, Array(candidates.dropFirst()))
+        }
+    }
+
+    /// Determines whether the currently collected streams have reached a quality quorum
+    /// sufficient for Flux Mode to commit without waiting for lagging scrapers.
+    func hasQualityQuorum(
+        streams: [Stream],
+        sourceMode: String,
+        preferredQuality: String = "1080p",
+        targetTitle: String? = nil
+    ) -> Bool {
+        guard !streams.isEmpty else { return false }
+        
+        let filtered: [Stream]
+        if sourceMode == "http" {
+            filtered = streams.filter { !$0.isTorrent }
+        } else if sourceMode == "torrent" {
+            filtered = streams.filter { $0.isTorrent }
+        } else {
+            filtered = streams
+        }
+        guard !filtered.isEmpty else { return false }
+        
+        let maxAllowed = qualityScore(preferredQuality)
+        let validCandidates = filtered.filter { s in
+            if qualityScore(s.quality) > maxAllowed && maxAllowed >= 3 {
+                return false
+            }
+            if let targetTitle, !targetTitle.isEmpty, Self.labelLooksLikeJunk(labelText: "\(s.cleanTitle) \(s.source)", targetTitle: targetTitle) {
+                return false
+            }
+            if isDolbyVisionProfile5(s) {
+                return false
+            }
+            if s.isTorrent {
+                return (s.seeders ?? 0) >= 15
+            } else {
+                return s.isDirectHTTP
+            }
+        }
+        
+        if sourceMode == "http" {
+            return validCandidates.count >= 1
+        } else if sourceMode == "torrent" {
+            return validCandidates.count >= 2
+        } else {
+            return validCandidates.count >= 2 || validCandidates.contains { $0.isDirectHTTP }
+        }
+    }
+
     func fetchStreamsRealtime(
         for item: MediaItem,
         season: Int? = nil,
@@ -387,13 +694,13 @@ class StreamManager {
         if isP2PSource(source, url: url) {
             return false
         }
-        return s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") || s.contains("http") || s.contains("direct")
+        return s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") || s.contains("http") || s.contains("direct") || s.contains("archive.org") || s.contains("archive")
     }
 
     /// Identifies whether a provider name or URL represents a known torrent/P2P addon
     static func isP2PSource(_ source: String, url: String? = nil) -> Bool {
         let s = "\(source) \(url ?? "")".lowercased()
-        if s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") {
+        if s.contains("pengu") || s.contains("webstream") || s.contains("stremify") || s.contains("easydebrid") || s.contains("archive.org") || s.contains("archive") {
             return false
         }
         // AIOStreams: classify by the individual stream URL
@@ -462,6 +769,9 @@ class StreamManager {
     /// In HTTP-only mode, P2P torrent addons are strictly bypassed.
     /// In Torrent-only mode, HTTP scraper addons are strictly bypassed.
     func shouldQueryAddon(_ addon: StremioAddon, sourceMode: String) -> Bool {
+        if addon.url.hasPrefix("flux://") || addon.id == "stock.stream-route-proxy" || addon.id == "opensubtitles3" {
+            return false
+        }
         if sourceMode == "both" { return true }
         let name = addon.name
         let url = addon.url
@@ -1095,11 +1405,44 @@ class StreamManager {
             if probeStatus[stream.stableKey]?.ok == true {
                 score += 1000.0
             }
+            // MEASURED THROUGHPUT (probe race): real bytes/sec outrank any
+            // metadata estimate. ≥800 KB/s sustains 1080p comfortably (+3500,
+            // scaling to +5500 for multi-MB/s origins); 170–800 KB/s ramps
+            // linearly; <170 KB/s cannot sustain even 480p and sinks below
+            // healthy torrents (their SSS caps at +5000); hijacked origins
+            // (HTML interstitials, JSON errors) are excluded outright.
+            if let probe = probeStatus[stream.stableKey] {
+                if probe.hijacked {
+                    score -= 25000.0
+                } else if let kbps = probe.throughputKBps {
+                    if kbps >= 800.0 {
+                        score += 3500.0 + min(2000.0, (kbps - 800.0) / 4.0)
+                    } else if kbps >= 170.0 {
+                        score += 1500.0 * (kbps - 170.0) / 630.0
+                    } else {
+                        score -= 4000.0
+                    }
+                }
+            }
         }
 
-        // Startup speed score contribution
+        // Delivery-reputation demotion (HostHealthTracker): origins that
+        // recently cut mid-stream or stalled startup sink in Flux Mode autoplay
+        // ranking too (mirrors healthScore). Without this, a freshly dead host
+        // keeps winning candidate #1 on every new title. Torrent/magnet hosts
+        // and loopback score zero.
+        score -= HostHealthTracker.shared.penalty(for: stream.url.host ?? "")
+
+        // Startup speed score contribution. For probed HTTP streams the
+        // MEASURED throughput above replaces this paper estimate entirely —
+        // that is the entire point of racing: actual delivery beats advertised
+        // speed, and a measured-slow origin must lose to healthy torrents no
+        // matter what its tags claim (HTTP SSS caps at +5000, which previously
+        // made even a trickle-speed link outrank a 200-seed swarm).
         let sss = computeStartupSpeedScore(stream)
-        score += min(sss, 5000.0)
+        if stream.isTorrent || probeStatus[stream.stableKey]?.throughputKBps == nil {
+            score += min(sss, 5000.0)
+        }
 
         // Quality tier bonus (higher quality within allowed cap gets strong weighting)
         score += Double(qualityScore(stream.quality)) * 500.0
@@ -1113,6 +1456,18 @@ class StreamManager {
         // Prefer HDR10, Profile 8 (hybrid), or SDR streams to avoid OpenGL magenta/green tint
         if isDolbyVisionProfile5(stream) {
             score -= 5000.0
+        }
+
+        // Size sanity: intros, promos, reviews and song reels are tiny.
+        // A sub-50MB "episode" or sub-150MB "movie" that ADVERTISES its size
+        // is near-certain wrong content (only when size is actually known —
+        // unknown sizes are never punished).
+        if !stream.isTorrent, let sizeGB = stream.parsedSizeInGB {
+            let isJunkSized = (targetEpisode != nil && sizeGB < 0.05)
+                || (targetEpisode == nil && sizeGB < 0.15)
+            if isJunkSized {
+                score -= 8000.0
+            }
         }
 
         // Source fidelity tiers (Flux-mode autoplay): pristine studio sources
@@ -1250,6 +1605,32 @@ class StreamManager {
     /// Returns a strong bonus if target title is confirmed, or a severe disqualifying penalty (-30,000.0)
     /// if an English release explicitly points to a different, conflicting title (e.g. "Head Over Heels" for "Overflow").
     /// Opaque CDN tokens and foreign releases (where release names use native/romanized titles) are never penalized.
+    /// Shared junk-brand detector for scraper labels (stream.title + stream.source).
+    /// Deliberately SEPARATE from the filename junkTokens: adds "dubbed",
+    /// "hindi-dub" style label brandings and streaming-brand noise that only
+    /// ever appears in scraper display labels, never in release filenames.
+    /// Returns true if any junk-brand token appears in the label that is not
+    /// also a word of the target title (so "Trailer Park Boys" stays safe).
+    public static func labelLooksLikeJunk(labelText: String, targetTitle: String?) -> Bool {
+        let labelJunkTokens: Set<String> = [
+            "moviebox", "review", "recap", "explained", "trailer", "teaser", "promo", "promos",
+            "intro", "outro", "reaction", "unboxing", "breakdown", "clip", "clips",
+            "sample", "shorts", "preview", "compilation", "interview", "jukebox", "songs"
+        ]
+        guard !labelText.isEmpty else { return false }
+        let cleaned = labelText.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]", with: " ", options: .regularExpression)
+        let words = Set(cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+        guard !words.isEmpty else { return false }
+        let targetWords: Set<String> = {
+            guard let t = targetTitle, !t.isEmpty else { return [] }
+            return Set(t.lowercased()
+                .replacingOccurrences(of: "[^a-z0-9]", with: " ", options: .regularExpression)
+                .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+        }()
+        return !words.intersection(labelJunkTokens).subtracting(targetWords).isEmpty
+    }
+
     func evaluateTitleMatch(stream: Stream, targetTitle: String?, originalLanguage: String? = nil) -> Double {
         guard let rawTarget = targetTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !rawTarget.isEmpty else {
             return 0.0
@@ -1276,6 +1657,16 @@ class StreamManager {
         if let fn = stream.filename, !fn.isEmpty {
             candidateStrings.append(fn)
         }
+
+        // Addon label + source name feed ONLY the junk scan (below) — they are
+        // scraper-provided labels, so they must not influence conflict logic,
+        // but junk brands hide there: scrapers label promos like
+        // "Coyote vs Acme (2026) MovieBox promo trailer" while the URL is an
+        // un-analyzable opaque CDN token. Without this the junk scan passed
+        // vacuously and the MovieBox trailer won the seat on speed alone.
+        // (Target-title subtraction still protects shows genuinely named
+        // "Trailer Park Boys" etc.)
+        let labelScanText = "\(stream.title) \(stream.source)"
 
         func isOpaqueToken(_ text: String) -> Bool {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1383,6 +1774,19 @@ class StreamManager {
 
         var sawExplicitConflict = false
         var sawTargetConfirmation = false
+        // Promo/review/intro-style uploads masquerading as the title (MovieBox
+        // intros, YouTube reviews and song reels behind CDN tokens). A junk
+        // word in the release text that is NOT part of the target title is a
+        // near-certain wrong-content signal in ANY language — it must outrank
+        // the foreign-title immunity below.
+        let junkTokens: Set<String> = [
+            "review", "recap", "explained", "trailer", "teaser", "promo", "promos",
+            "intro", "outro", "opening", "ending", "reaction", "unboxing", "breakdown",
+            "clip", "clips", "sample", "shorts", "preview", "compilation", "interview",
+            "easter", "egg", "eggs", "moviebox", "sneak", "peek", "song", "songs", "jukebox"
+        ]
+        var junkInTitlePortion = false
+        var junkAfterTitlePortion = false
 
         for text in candidateStrings {
             // Unescape percent-encoding and separators
@@ -1409,6 +1813,16 @@ class StreamManager {
                 .replacingOccurrences(of: "[-_\\.\\+\\/\\?&=#]", with: " ", options: .regularExpression)
                 .lowercased()
 
+            // Junk scan over the FULL text (episode titles legitimately sit
+            // after the S/E marker, so junk found there is only a soft signal,
+            // while junk inside the title portion is near-certain).
+            let fullWords = Set(unescaped
+                .replacingOccurrences(of: "[-_\\.\\+\\/\\?&=#]", with: " ", options: .regularExpression)
+                .lowercased()
+                .components(separatedBy: .whitespacesAndNewlines))
+            let fullJunk = fullWords.intersection(junkTokens).subtracting(targetTokens)
+            if !fullJunk.isEmpty { junkAfterTitlePortion = true }
+
             let rawWords = normalized.components(separatedBy: .whitespacesAndNewlines)
                 .filter { word in
                     guard word.count >= 2, !stopwords.contains(word), !noiseTokens.contains(word), Int(word) == nil else { return false }
@@ -1422,6 +1836,11 @@ class StreamManager {
                 }
 
             guard !rawWords.isEmpty else { continue }
+
+            // Junk words inside the title portion (before S/E / year /
+            // resolution markers) — the strongest wrong-content signal.
+            let titleJunk = Set(rawWords).intersection(junkTokens).subtracting(targetTokens)
+            if !titleJunk.isEmpty { junkInTitlePortion = true }
 
             // Check if any target token is present in the title portion
             let matchesTarget = targetTokens.contains { tToken in
@@ -1438,6 +1857,24 @@ class StreamManager {
                     sawExplicitConflict = true
                 }
             }
+        }
+
+        // Junk-content demotion outranks everything below: a "review" or
+        // "intro" upload must never win a seat regardless of language or
+        // confirmed title tokens ("3 Idiots Review" confirms the target —
+        // and is still not the movie).
+        if junkInTitlePortion { return -15000.0 }
+        if junkAfterTitlePortion { return -6000.0 }
+
+        // Scraper-label junk scan (stream.title + stream.source ONLY):
+        // scrapers brand promos like "Coyote vs. Acme (2026) MovieBox promo
+        // trailer" while the URL is an un-analyzable opaque CDN token — the
+        // filename-based scans above then pass vacuously and the junk wins on
+        // speed. Target-title words are still subtracted, so a source genuinely
+        // named after the show is untouched; junk brands in the label are a
+        // near-certain wrong-content signal in any language.
+        if StreamManager.labelLooksLikeJunk(labelText: labelScanText, targetTitle: rawTarget) {
+            return -15000.0
         }
 
         // Foreign titles (Anime, Bollywood/regional, K-drama, European cinema) use original/romanized
@@ -1862,7 +2299,7 @@ class StreamManager {
     }
 
     private func formatVideoSize(_ bytes: Int64?) -> String? {
-        guard let b = bytes, b > 0 else { return nil }
+        guard let b = bytes, b >= 5 * 1024 * 1024 else { return nil } // Ignore < 5MB manifests or stubs
         let gb = Double(b) / 1_073_741_824.0
         if gb >= 1.0 {
             return String(format: "%.2f GB", gb)
@@ -1878,22 +2315,38 @@ class StreamManager {
         return s.contains(t) || t.contains(s)
     }
     
-    private func parseSize(from title: String) -> String? {
-        let pattern = #"(?i)(\d+(?:\.\d+)?)\s*(TB|GB|MB)"#
+    func parseSize(from title: String) -> String? {
+        // Enforce word boundaries and exclude bitrate units (Mbps, Mb/s) so bitrates
+        // (~4.7 Mbps) are never mistaken for file sizes (4.7 MB). Supports GiB, MiB, TB, TiB.
+        let pattern = #"(?i)(\d+(?:\.\d+)?)\s*(TB|GB|MB|TiB|GiB|MiB)\b(?!ps|/s|b/s)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let ns = title as NSString
         let matches = regex.matches(in: title, range: NSRange(location: 0, length: ns.length))
+
+        func extractValidSize(from match: NSTextCheckingResult) -> String? {
+            guard match.numberOfRanges > 1 else { return nil }
+            let numStr = ns.substring(with: match.range(at: 1))
+            guard let val = Double(numStr), val > 0.0 else { return nil }
+            return ns.substring(with: match.range)
+        }
+
         // Prefer the size tagged with a disk/size marker (💾), else the LAST match —
         // addons like Torrentio put the authoritative size at the end of the title.
         for m in matches.reversed() {
             let lowerBound = max(0, m.range.location - 2)
             let prefix = ns.substring(with: NSRange(location: lowerBound, length: m.range.location - lowerBound))
             if prefix.contains("💾") || prefix.lowercased().contains("size") {
-                return ns.substring(with: m.range)
+                if let size = extractValidSize(from: m) {
+                    return size
+                }
             }
         }
-        guard let last = matches.last else { return nil }
-        return ns.substring(with: last.range)
+        for m in matches.reversed() {
+            if let size = extractValidSize(from: m) {
+                return size
+            }
+        }
+        return nil
     }
 
     /// Detects full-season / complete-series packs so the UI can label them and

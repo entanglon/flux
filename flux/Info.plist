@@ -30,5 +30,10 @@
 	<true/>
 	<key>SUPublicEDKey</key>
 	<string>iALMM9Gtvt2iwIaZGMffq0E8p3KH+AUfTL07vdJ37z8=</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

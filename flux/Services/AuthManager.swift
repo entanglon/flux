@@ -292,6 +292,23 @@ class AuthManager: ObservableObject {
             Logger.auth.error("DIAG syncNowInternal: ABORTED (token identity does not match stored userID — sign out/in to heal)")
             return
         }
+
+        var activeToken = token
+        // Proactively refresh session token if within 48 hours of expiration
+        if PocketBaseClient.isTokenExpired(token: activeToken, bufferSeconds: 172800) {
+            do {
+                let refreshResp = try await client.authRefresh(token: activeToken)
+                activeToken = refreshResp.token
+                KeychainManager.saveToken(activeToken)
+                Logger.auth.info("Auth token auto-refreshed successfully")
+            } catch {
+                if PocketBaseClient.isTokenExpired(token: activeToken, bufferSeconds: 0) {
+                    Logger.auth.error("Auth token expired and refresh failed (\(error.localizedDescription)). Please sign in again.")
+                    return
+                }
+            }
+        }
+
         do {
             var pulledNewer = false
             var hasLocalAdditionsToPush = false
@@ -301,7 +318,7 @@ class AuthManager: ObservableObject {
             var fetchError: String?
             if pullFirst {
                 do {
-                    remote = try await client.fetchData(token: token, userID: userID)
+                    remote = try await client.fetchData(token: activeToken, userID: userID)
                 } catch {
                     fetchError = error.localizedDescription
                 }
@@ -338,7 +355,7 @@ class AuthManager: ObservableObject {
 
             let now = Date().timeIntervalSince1970
             let newRecordID = try await client.pushData(
-                token: token,
+                token: activeToken,
                 userID: userID,
                 payload: payload,
                 updatedAt: now,

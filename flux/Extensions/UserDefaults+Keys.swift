@@ -15,6 +15,11 @@ extension UserDefaults {
         static let lastUsedSource = "lastUsedSource"
         static let activeTMDBID = "activeTMDBID"
 
+        // MARK: - Stream Route Proxy
+        static let streamRouteProxyEnabled = "streamRouteProxyEnabled"
+        static let streamRouteProxyEndpoint = "streamRouteProxyEndpoint"
+        static let streamRouteProxyTargetHosts = "streamRouteProxyTargetHosts"
+
         // MARK: - Player & PiP
         static let autoPlayNextEnabled = "autoPlayNextEnabled"
         static let defaultAudioLang = "defaultAudioLang"

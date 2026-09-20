@@ -1351,6 +1351,254 @@ struct StreamManagerTests {
         #expect(manager.healthScore(for: direct(badHost), probeOk: true) == 6000.0)
     }
 
+    @Test func selectFastStartCandidateDemotesHostsWithRecentFailures() {
+        // Flux Mode autoplay ranking must honor HostHealthTracker strikes:
+        // an origin that stalled/cut recently must lose its candidate #1 seat
+        // to an otherwise identical healthy competitor.
+        let tracker = HostHealthTracker.shared
+        let saved = tracker.defaults
+        tracker.defaults = UserDefaults(suiteName: "fluxTests.FluxRank")!
+        tracker.defaults.removePersistentDomain(forName: "fluxTests.FluxRank")
+        defer {
+            tracker.defaults.removePersistentDomain(forName: "fluxTests.FluxRank")
+            tracker.defaults = saved
+        }
+        let manager = StreamManager.shared
+        let badHost = "stall-\(UUID().uuidString).example"
+        let goodHost = "healthy-\(UUID().uuidString).example"
+        // The failing host carries a one-tier quality edge (1080p vs 720p, +500)
+        // so it wins the seat BEFORE any reputation strikes — proving the
+        // penalty is what flips the ranking afterwards.
+        func direct(_ host: String, _ quality: String) -> flux.Stream {
+            Stream(title: "Movie.\(quality).WEB-DL.DDP5.1.x264", cleanTitle: "Movie",
+                   url: URL(string: "https://\(host)/Movie.\(quality).WEB-DL.mkv")!,
+                   source: "PenguPlay", quality: quality)
+        }
+        let bad = direct(badHost, "1080p")
+        let good = direct(goodHost, "720p")
+
+        let (beforeWinner, _) = manager.selectFastStartCandidate(
+            from: [bad, good],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "English"
+        )
+        #expect(beforeWinner?.id == bad.id)
+
+        // Four strikes hit the 24h cap (6000) — far past the 500-point edge.
+        for _ in 0..<4 { tracker.recordFailure(host: badHost) }
+        let (afterWinner, fallbacks) = manager.selectFastStartCandidate(
+            from: [bad, good],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "English"
+        )
+        #expect(afterWinner?.id == good.id)
+        #expect(fallbacks.first?.id == bad.id)
+    }
+
+    @Test func evaluateTitleMatchDemotesReviewUploadsEvenForForeignTitles() {
+        // 3 Idiots incident: a review/reel upload masquerading under the
+        // movie's name. Foreign-title immunity must NOT rescue junk content.
+        let manager = StreamManager.shared
+        let junkStream = flux.Stream(
+            title: "3 Idiots Review 1080p",
+            cleanTitle: "3 Idiots Review",
+            url: URL(string: "https://cdn.example/3-idiots-review-1080p.mkv")!,
+            source: "WebStreamr",
+            quality: "1080p"
+        )
+        let score = manager.evaluateTitleMatch(stream: junkStream, targetTitle: "3 Idiots", originalLanguage: "hi")
+        #expect(score == -15000.0)
+    }
+
+    @Test func evaluateTitleMatchSoftDemotesJunkAfterEpisodeMarker() {
+        // Family Guy incident: junk sits AFTER the S/E marker (episode-title
+        // position), so it only earns the soft demotion — hard enough to lose
+        // the #1 seat without fully disqualifying the addon's whole catalog.
+        let manager = StreamManager.shared
+        let junkStream = flux.Stream(
+            title: "Family.Guy.S01E01.Intro.720p.mkv",
+            cleanTitle: "Family Guy",
+            url: URL(string: "https://embed.example/Family.Guy.S01E01.Intro.720p.mkv")!,
+            source: "PenguPlay",
+            quality: "720p"
+        )
+        let score = manager.evaluateTitleMatch(stream: junkStream, targetTitle: "Family Guy", originalLanguage: "en")
+        #expect(score == -6000.0)
+    }
+
+    @Test func evaluateTitleMatchExemptsJunkWordsThatArePartOfTheTitle() {
+        // "Trailer" inside the genuine show name must never demote the show.
+        let manager = StreamManager.shared
+        let legitStream = flux.Stream(
+            title: "Trailer.Park.Boys.S01E01.1080p.WEB-DL",
+            cleanTitle: "Trailer Park Boys",
+            url: URL(string: "https://cdn.example/Trailer.Park.Boys.S01E01.1080p.WEB-DL.mkv")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+        let score = manager.evaluateTitleMatch(stream: legitStream, targetTitle: "Trailer Park Boys", originalLanguage: "en")
+        #expect(score >= 0.0)
+    }
+
+    @Test func evaluateTitleMatchDemotesJunkBrandedSourceBehindOpaqueToken() {
+        // Coyote vs. Acme incident: the release label was clean but the
+        // addon source itself was the junk brand ("MovieBox"), behind an
+        // opaque CDN token URL the filename scanner can't analyze. The
+        // scraper-label junk scan must catch it.
+        let manager = StreamManager.shared
+        let junkStream = flux.Stream(
+            title: "Coyote vs. Acme 1080p WEB-DL",
+            cleanTitle: "Coyote vs. Acme",
+            url: URL(string: "https://pengu.uk/direct/external/94whtt7712ajfpjfs15hh0")!,
+            source: "MovieBox",
+            quality: "1080p"
+        )
+        let score = manager.evaluateTitleMatch(stream: junkStream, targetTitle: "Coyote vs. Acme", originalLanguage: "en")
+        #expect(score == -15000.0)
+    }
+
+    @Test func labelLooksLikeJunkGuardsReplayGate() {
+        // The instant-replay gate uses the shared detector: junk-branded
+        // cached labels are rejected; clean release labels and titles where
+        // the junk word IS the show name pass.
+        #expect(StreamManager.labelLooksLikeJunk(
+            labelText: "Coyote vs. Acme (2026) MovieBox promo trailer",
+            targetTitle: "Coyote vs. Acme"))
+        #expect(!StreamManager.labelLooksLikeJunk(
+            labelText: "Coyote vs. Acme (2026) 1080p WEB-DL DDP5.1",
+            targetTitle: "Coyote vs. Acme"))
+        // "Trailer" inside the genuine show name must never trip the gate.
+        #expect(!StreamManager.labelLooksLikeJunk(
+            labelText: "Trailer Park Boys (2001) Season 1 complete",
+            targetTitle: "Trailer Park Boys"))
+    }
+
+    @Test func tinyAdvertisedSizesSinkHTTPStreamsInFastStartRanking() {
+        // Intros/promos/reviews are tiny. Two otherwise-identical movie
+        // streams: the one advertising 30 MB must lose to the 800 MB one.
+        let manager = StreamManager.shared
+        func httpStream(_ host: String, size: String?) -> flux.Stream {
+            flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                        url: URL(string: "https://\(host)/Movie.2024.1080p.WEB-DL.mkv")!,
+                        source: "PenguPlay", quality: "1080p", size: size)
+        }
+        let tiny = httpStream("tiny-\(UUID().uuidString).example", size: "30 MB")
+        let healthy = httpStream("full-\(UUID().uuidString).example", size: "800 MB")
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [tiny, healthy],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English"
+        )
+        #expect(winner?.id == healthy.id)
+
+        // Unknown size is never punished: a size-less stream stays eligible.
+        let (unknownSizeWinner, _) = manager.selectFastStartCandidate(
+            from: [httpStream("mystery-\(UUID().uuidString).example", size: nil)],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English"
+        )
+        #expect(unknownSizeWinner != nil)
+    }
+
+    // MARK: - Measured Throughput Race Ranking
+
+    @Test func measuredThroughputRanksFastHTTPAboveSlow() {
+        let manager = StreamManager.shared
+        func http(_ host: String) -> flux.Stream {
+            flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                        url: URL(string: "https://\(host)/Movie.2024.1080p.WEB-DL.mkv")!,
+                        source: "PenguPlay", quality: "1080p")
+        }
+        let slow = http("trickle-\(UUID().uuidString).example")
+        let fast = http("speedy-\(UUID().uuidString).example")
+        var probes: [String: StreamProbeResult] = [:]
+        probes[slow.stableKey] = StreamProbeResult(ok: true, latency: 0.8, throughputKBps: 100)
+        probes[fast.stableKey] = StreamProbeResult(ok: true, latency: 0.2, throughputKBps: 1200)
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [slow, fast],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            probeStatus: probes
+        )
+        #expect(winner?.id == fast.id)
+    }
+
+    @Test func measuredSlowHTTPLosesToHealthyTorrent() {
+        // The user's core complaint: a trickle-speed HTTP source must NOT
+        // outrank a healthy torrent just for being "direct HTTP".
+        let manager = StreamManager.shared
+        let slowHTTP = flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                                   url: URL(string: "https://trickle-\(UUID().uuidString).example/Movie.2024.1080p.WEB-DL.mkv")!,
+                                   source: "PenguPlay", quality: "1080p")
+        let torrent = flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                                  url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+                                  source: "Torrentio", quality: "1080p", seeders: 200)
+        var probes: [String: StreamProbeResult] = [:]
+        probes[slowHTTP.stableKey] = StreamProbeResult(ok: true, latency: 1.2, throughputKBps: 100)
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [slowHTTP, torrent],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            probeStatus: probes
+        )
+        #expect(winner?.id == torrent.id)
+    }
+
+    @Test func measuredFastHTTPBeatsHighlySeededTorrent() {
+        // And the inverse: genuinely fast measured delivery should win even
+        // against a strong swarm.
+        let manager = StreamManager.shared
+        let fastHTTP = flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                                   url: URL(string: "https://speedy-\(UUID().uuidString).example/Movie.2024.1080p.WEB-DL.mkv")!,
+                                   source: "PenguPlay", quality: "1080p")
+        let torrent = flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                                  url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+                                  source: "Torrentio", quality: "1080p", seeders: 200)
+        var probes: [String: StreamProbeResult] = [:]
+        probes[fastHTTP.stableKey] = StreamProbeResult(ok: true, latency: 0.15, throughputKBps: 2000)
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [fastHTTP, torrent],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            probeStatus: probes
+        )
+        #expect(winner?.id == fastHTTP.id)
+    }
+
+    @Test func hijackedProbeResultExcludesStreamFromFastStart() {
+        // An origin that served an HTML interstitial to the probe race must
+        // never win Flux Mode autoplay, no matter its paper quality.
+        let manager = StreamManager.shared
+        let hijacked = flux.Stream(title: "Movie.2024.2160p.REMUX", cleanTitle: "Movie",
+                                   url: URL(string: "https://hijack-\(UUID().uuidString).example/Movie.2024.2160p.REMUX.mkv")!,
+                                   source: "PenguPlay", quality: "4K")
+        let honest = flux.Stream(title: "Movie.2024.1080p.WEB-DL", cleanTitle: "Movie",
+                                 url: URL(string: "https://honest-\(UUID().uuidString).example/Movie.2024.1080p.WEB-DL.mkv")!,
+                                 source: "WebStreamr", quality: "1080p")
+        var probes: [String: StreamProbeResult] = [:]
+        probes[hijacked.stableKey] = StreamProbeResult(ok: false, latency: 0.3, throughputKBps: 5000, hijacked: true)
+
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [hijacked, honest],
+            sourceMode: "both",
+            preferredQuality: "4K",
+            preferredLang: "English",
+            probeStatus: probes
+        )
+        #expect(winner?.id == honest.id)
+    }
+
     @Test func sourceFidelityAdjustmentTiers() {
         let manager = StreamManager.shared
         func stream(_ title: String) -> flux.Stream {
@@ -1466,6 +1714,131 @@ struct StreamManagerTests {
         #expect(StreamManager.cleanReleaseTitle(title: "Server 1", itemTitle: "Avatar") == "Avatar • Server 1")
         #expect(StreamManager.cleanReleaseTitle(title: nil, itemTitle: "Interstellar") == "Interstellar")
     }
+
+    @Test func shouldQueryAddonModeGating() {
+        let manager = StreamManager.shared
+        let torrentio = StremioAddon(id: "torrentio", name: "Torrentio", url: "https://torrentio.strem.fun/manifest.json", transportUrl: "https://torrentio.strem.fun/manifest.json", isEnabled: true)
+        let meteor = StremioAddon(id: "meteor", name: "Meteor", url: "https://meteor.example/manifest.json", transportUrl: "https://meteor.example/manifest.json", isEnabled: true)
+        let pengu = StremioAddon(id: "pengu", name: "PenguPlay", url: "https://pengu.uk/manifest.json", transportUrl: "https://pengu.uk/manifest.json", isEnabled: true)
+        let webstreamr = StremioAddon(id: "webstreamr", name: "WebStreamrMBG", url: "https://webstreamr.example/manifest.json", transportUrl: "https://webstreamr.example/manifest.json", isEnabled: true)
+        let aiostreams = StremioAddon(id: "aiostreams", name: "AIOStreams", url: "https://aiostreams.example/manifest.json", transportUrl: "https://aiostreams.example/manifest.json", isEnabled: true)
+
+        // In HTTP mode: torrent addons are strictly bypassed
+        #expect(!manager.shouldQueryAddon(torrentio, sourceMode: "http"))
+        #expect(!manager.shouldQueryAddon(meteor, sourceMode: "http"))
+        #expect(manager.shouldQueryAddon(pengu, sourceMode: "http"))
+        #expect(manager.shouldQueryAddon(webstreamr, sourceMode: "http"))
+        #expect(manager.shouldQueryAddon(aiostreams, sourceMode: "http"))
+
+        // In Torrent mode: HTTP scraper addons are strictly bypassed
+        #expect(manager.shouldQueryAddon(torrentio, sourceMode: "torrent"))
+        #expect(manager.shouldQueryAddon(meteor, sourceMode: "torrent"))
+        #expect(!manager.shouldQueryAddon(pengu, sourceMode: "torrent"))
+        #expect(!manager.shouldQueryAddon(webstreamr, sourceMode: "torrent"))
+        #expect(manager.shouldQueryAddon(aiostreams, sourceMode: "torrent"))
+
+        // In Both mode: all enabled addons are queried
+        #expect(manager.shouldQueryAddon(torrentio, sourceMode: "both"))
+        #expect(manager.shouldQueryAddon(meteor, sourceMode: "both"))
+        #expect(manager.shouldQueryAddon(pengu, sourceMode: "both"))
+        #expect(manager.shouldQueryAddon(webstreamr, sourceMode: "both"))
+        #expect(manager.shouldQueryAddon(aiostreams, sourceMode: "both"))
+    }
+
+    @Test func hasQualityQuorumCriteria() {
+        let manager = StreamManager.shared
+        let validHTTP = flux.Stream(
+            title: "Inception.2010.1080p.WEB-DL.mkv",
+            cleanTitle: "Inception",
+            url: URL(string: "https://pengu.uk/direct/file1.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let junkHTTP = flux.Stream(
+            title: "Inception (2010) MovieBox promo trailer",
+            cleanTitle: "Inception",
+            url: URL(string: "https://pengu.uk/direct/file2.mkv")!,
+            source: "MovieBox",
+            quality: "1080p"
+        )
+        let dvProfile5 = flux.Stream(
+            title: "Inception.2010.1080p.DV.Profile.5.mkv",
+            cleanTitle: "Inception",
+            url: URL(string: "https://pengu.uk/direct/file3.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let strongTorrent1 = flux.Stream(
+            title: "Inception.2010.1080p.BluRay.x264",
+            cleanTitle: "Inception",
+            url: URL(string: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 50
+        )
+        let strongTorrent2 = flux.Stream(
+            title: "Inception.2010.1080p.WEB-DL.DDP5.1",
+            cleanTitle: "Inception",
+            url: URL(string: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222")!,
+            source: "Meteor",
+            quality: "1080p",
+            seeders: 30
+        )
+
+        // Empty list has no quorum
+        #expect(!manager.hasQualityQuorum(streams: [], sourceMode: "http", targetTitle: "Inception"))
+
+        // Junk & DV5 do not meet quorum
+        #expect(!manager.hasQualityQuorum(streams: [junkHTTP, dvProfile5], sourceMode: "http", targetTitle: "Inception"))
+
+        // 1 valid direct HTTP stream meets quorum in HTTP mode
+        #expect(manager.hasQualityQuorum(streams: [validHTTP], sourceMode: "http", targetTitle: "Inception"))
+
+        // 1 torrent stream does not meet torrent quorum (requires 2 healthy swarms)
+        #expect(!manager.hasQualityQuorum(streams: [strongTorrent1], sourceMode: "torrent", targetTitle: "Inception"))
+        #expect(manager.hasQualityQuorum(streams: [strongTorrent1, strongTorrent2], sourceMode: "torrent", targetTitle: "Inception"))
+    }
+
+    @Test func raceTopCandidatesPureTorrentsReturnsTopImmediately() async {
+        let manager = StreamManager.shared
+        let torrent1 = flux.Stream(
+            title: "Film.1080p.BluRay",
+            cleanTitle: "Film",
+            url: URL(string: "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 150
+        )
+        let torrent2 = flux.Stream(
+            title: "Film.1080p.WEB-DL",
+            cleanTitle: "Film",
+            url: URL(string: "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 80
+        )
+
+        let (winner, fallbacks) = await manager.raceTopCandidates([torrent1, torrent2], playableURL: { $0.url })
+        #expect(winner?.id == torrent1.id)
+        #expect(fallbacks.count == 1)
+        #expect(fallbacks.first?.id == torrent2.id)
+    }
+    @Test func parseSizeExtractsLegitimateSizesAndIgnoresBitrates() {
+        let manager = StreamManager.shared
+
+        // Bitrates must NEVER be extracted as file sizes
+        #expect(manager.parseSize(from: "🍿 Colony (2026) • 🎞️ 1080p • MKV • WEB-DL • x264 • AAC 5.1 • ~4.7 Mbps • 🛰️ 4KHDHub") == nil)
+        #expect(manager.parseSize(from: "Mickey Mouse • S01E01 • 🎞️ 1080p • WEBRip • ~5.5 Mbps • 🛰️ VAPlayer") == nil)
+        #expect(manager.parseSize(from: "Doraemon 720p HLS 2.4 Mb/s") == nil)
+        #expect(manager.parseSize(from: "Video 0 MB") == nil)
+
+        // Valid sizes with MB, GB, MiB, GiB
+        #expect(manager.parseSize(from: "👤 4 💾 850.91 MB ⚙️ NyaaSi") == "850.91 MB")
+        #expect(manager.parseSize(from: "Doraemon (2005) 1.25 GiB x264") == "1.25 GiB")
+        #expect(manager.parseSize(from: "Anime Episode 750 MiB") == "750 MiB")
+        #expect(manager.parseSize(from: "Movie 2024 1080p 2.4 GB") == "2.4 GB")
+    }
 }
+
 
 
