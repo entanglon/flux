@@ -86,6 +86,8 @@ struct Stream: Identifiable, Codable, Hashable, Equatable {
     var infoHash: String? = nil
     /// Underlying release source or indexer (e.g. 1337x, YTS, TorrentGalaxy, Server 1)
     var indexer: String? = nil
+    /// Underlying release filename from behaviorHints or scraper metadata (if available)
+    var filename: String? = nil
 
     /// True for magnet or torrent-swarm backed releases
     var isTorrent: Bool {
@@ -1059,9 +1061,9 @@ class StreamManager {
     ) -> Double {
         var score = 0.0
 
-        // Target title match & mismatch penalty (cross-validates underlying URL/Referer)
+        // Target title match & mismatch penalty (cross-validates underlying URL/Referer/Filename)
         if let title = targetTitle, !title.isEmpty {
-            score += evaluateTitleMatch(stream: stream, targetTitle: title)
+            score += evaluateTitleMatch(stream: stream, targetTitle: title, originalLanguage: originalLanguage)
         }
 
         // Episode match & Season Pack gating for TV shows
@@ -1069,14 +1071,14 @@ class StreamManager {
             score += evaluateEpisodeMatch(stream: stream, targetSeason: targetSeason, targetEpisode: targetEpisode)
         }
 
-        // Preferred Audio Language bonus / Foreign Dub penalty
-        let matchesPrimary = matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
-        let matchesOriginal = (originalLanguage != nil && !originalLanguage!.isEmpty)
-            ? matchesPreferredLanguage(stream, preferred: originalLanguage!, originalLanguage: originalLanguage, enableLanguageFilter: true)
-            : false
-        let isForeign = isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage)
-
+        // Preferred Audio Language bonus / Foreign Dub penalty (ONLY when Language Filter in Flux Mode is enabled!)
         if enableLanguageFilter {
+            let matchesPrimary = matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            let matchesOriginal = (originalLanguage != nil && !originalLanguage!.isEmpty)
+                ? matchesPreferredLanguage(stream, preferred: originalLanguage!, originalLanguage: originalLanguage, enableLanguageFilter: true)
+                : false
+            let isForeign = isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage)
+
             if matchesPrimary {
                 score += 5000.0
             } else if matchesOriginal {
@@ -1084,14 +1086,8 @@ class StreamManager {
             } else if isForeign {
                 score -= 3500.0
             }
-        } else {
-            // Language filter is OFF: softly prioritize preferred language without discarding or penalizing any streams
-            if matchesPrimary {
-                score += 2000.0
-            } else if matchesOriginal {
-                score += 1000.0
-            }
         }
+        // When enableLanguageFilter is false: ZERO language bias, zero language scoring, zero language penalties.
 
         // Direct HTTP instant bonus
         if !stream.isTorrent {
@@ -1250,10 +1246,11 @@ class StreamManager {
         return 0.0
     }
 
-    /// Evaluates title consistency between the target media and the underlying stream URL / Referer header.
+    /// Evaluates title consistency between the target media and the underlying stream URL / Referer header / release filename.
     /// Returns a strong bonus if target title is confirmed, or a severe disqualifying penalty (-30,000.0)
-    /// if the stream's URL or Referer explicitly points to a different, conflicting title (e.g. "Head Over Heels" for "Overflow").
-    func evaluateTitleMatch(stream: Stream, targetTitle: String?) -> Double {
+    /// if an English release explicitly points to a different, conflicting title (e.g. "Head Over Heels" for "Overflow").
+    /// Opaque CDN tokens and foreign releases (where release names use native/romanized titles) are never penalized.
+    func evaluateTitleMatch(stream: Stream, targetTitle: String?, originalLanguage: String? = nil) -> Double {
         guard let rawTarget = targetTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !rawTarget.isEmpty else {
             return 0.0
         }
@@ -1273,22 +1270,67 @@ class StreamManager {
         let targetTokens = extractMeaningfulTokens(rawTarget)
         guard !targetTokens.isEmpty else { return 0.0 }
 
-        // Gather candidate filenames/slugs from media filename in URL and path slug in Referer header
+        // Gather candidate filenames/slugs from release filename, media filename in URL, and Referer header
         var candidateStrings: [String] = []
 
-        func extractFilenameOrSlug(from urlString: String) {
-            guard let url = URL(string: urlString) else {
-                if let lastSlash = urlString.components(separatedBy: "/").last, !lastSlash.isEmpty {
-                    candidateStrings.append(lastSlash.components(separatedBy: "?").first ?? lastSlash)
-                }
-                return
-            }
+        if let fn = stream.filename, !fn.isEmpty {
+            candidateStrings.append(fn)
+        }
 
+        func isOpaqueToken(_ text: String) -> Bool {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return true }
+            // Media extensions and release space encodings are never opaque tokens
+            if trimmed.contains(".mkv") || trimmed.contains(".mp4") || trimmed.contains(".avi") ||
+               trimmed.contains("-20-") || trimmed.contains("-20") || trimmed.contains("%20") {
+                return false
+            }
+            let lower = trimmed.lowercased()
+            if lower.contains("1080p") || lower.contains("720p") || lower.contains("2160p") || lower.contains("web-dl") || lower.contains("bluray") {
+                return false
+            }
+            // If the text contains separators (- or _ or .), check if the chunks look like words or hash fragments
+            let chunks = trimmed.components(separatedBy: CharacterSet(charactersIn: "-_."))
+                .filter { !$0.isEmpty }
+            if chunks.count > 1 {
+                // If chunks contain words with purely letters of length >= 3 (e.g. "head", "over", "heels", "season")
+                let wordChunks = chunks.filter { chunk in
+                    chunk.count >= 3 &&
+                    chunk.rangeOfCharacter(from: .letters) != nil &&
+                    chunk.rangeOfCharacter(from: .decimalDigits) == nil
+                }
+                if wordChunks.count >= 2 {
+                    return false // Human-readable slug with actual words
+                }
+            }
+            // Cryptographic session hashes, CDN tokens, or high-entropy hex/base64 strings (e.g. aJFpjFS15-94WhTt...)
+            let hasLetters = trimmed.rangeOfCharacter(from: .letters) != nil
+            let hasDigits = trimmed.rangeOfCharacter(from: .decimalDigits) != nil
+            if trimmed.count >= 20 && hasLetters && hasDigits && !trimmed.contains(" ") {
+                return true
+            }
+            if trimmed.count > 28 && !trimmed.contains(" ") && !trimmed.contains("-") && !trimmed.contains(".") {
+                return true
+            }
+            return false
+        }
+
+        func extractFilenameOrSlug(from urlString: String) {
             // Magnet URIs: extract display name 'dn' parameter
             if urlString.hasPrefix("magnet:") {
                 if let components = URLComponents(string: urlString),
                    let dn = components.queryItems?.first(where: { $0.name == "dn" })?.value {
                     candidateStrings.append(dn)
+                }
+                return
+            }
+
+            guard let url = URL(string: urlString) else {
+                if let lastSlash = urlString.components(separatedBy: "/").last, !lastSlash.isEmpty {
+                    let cleaned = lastSlash.components(separatedBy: "?").first ?? lastSlash
+                    if !isOpaqueToken(cleaned) {
+                        candidateStrings.append(cleaned)
+                    }
                 }
                 return
             }
@@ -1303,7 +1345,7 @@ class StreamManager {
             }
 
             let lastComponent = url.lastPathComponent
-            if !lastComponent.isEmpty && lastComponent != "/" {
+            if !lastComponent.isEmpty && lastComponent != "/" && !isOpaqueToken(lastComponent) {
                 candidateStrings.append(lastComponent)
             }
         }
@@ -1313,12 +1355,15 @@ class StreamManager {
         if let ref = stream.proxyHeaders?["Referer"] ?? stream.proxyHeaders?["referer"] {
             if let refURL = URL(string: ref) {
                 let slug = refURL.lastPathComponent
-                if !slug.isEmpty && slug != "/" {
+                if !slug.isEmpty && slug != "/" && !isOpaqueToken(slug) {
                     candidateStrings.append(slug)
                 }
             } else {
                 if let lastSlash = ref.components(separatedBy: "/").last, !lastSlash.isEmpty {
-                    candidateStrings.append(lastSlash)
+                    let cleaned = lastSlash.components(separatedBy: "?").first ?? lastSlash
+                    if !isOpaqueToken(cleaned) {
+                        candidateStrings.append(cleaned)
+                    }
                 }
             }
         }
@@ -1341,10 +1386,9 @@ class StreamManager {
 
         for text in candidateStrings {
             // Unescape percent-encoding and separators
-            let unescaped = text
-                .removingPercentEncoding?
-                .replacingOccurrences(of: "-20-", with: " ")
-                .replacingOccurrences(of: "%20", with: " ") ?? text
+            let rawUnescaped = text.removingPercentEncoding ?? text
+            let unescaped = rawUnescaped
+                .replacingOccurrences(of: #"(?i)(?:-20-|-20|%20)"#, with: " ", options: .regularExpression)
 
             // In release filenames/slugs, the media title is located BEFORE the season/episode pattern,
             // year, or resolution tag (e.g. "CINEFREAK.TOP - Head Over Heels - S01E02..." -> "CINEFREAK.TOP - Head Over Heels")
@@ -1368,6 +1412,11 @@ class StreamManager {
             let rawWords = normalized.components(separatedBy: .whitespacesAndNewlines)
                 .filter { word in
                     guard word.count >= 2, !stopwords.contains(word), !noiseTokens.contains(word), Int(word) == nil else { return false }
+                    // Filter out alphanumeric hash fragments (e.g. 94whtt, ajfpjfs15)
+                    if word.count > 18 { return false }
+                    let hasL = word.rangeOfCharacter(from: .letters) != nil
+                    let hasD = word.rangeOfCharacter(from: .decimalDigits) != nil
+                    if hasL && hasD { return false }
                     if word.range(of: #"^(s\d+e\d+|\d+x\d+|e\d+|ep\d+)$"#, options: .regularExpression) != nil { return false }
                     return true
                 }
@@ -1391,8 +1440,16 @@ class StreamManager {
             }
         }
 
+        // Foreign titles (Anime, Bollywood/regional, K-drama, European cinema) use original/romanized
+        // names in releases (e.g. "Kimetsu no Yaiba", "Hey Sinamika", "Chup", "Sarangui Bulsichak").
+        // These will naturally differ from TMDB English titles — NEVER disqualify them with a -30,000 penalty!
+        let isForeignTitle = originalLanguage != nil && !originalLanguage!.isEmpty && originalLanguage!.lowercased() != "en"
+        if isForeignTitle {
+            return sawTargetConfirmation ? 1500.0 : 0.0
+        }
+
         if sawExplicitConflict && !sawTargetConfirmation {
-            // Severe disqualification penalty: the underlying stream/referer explicitly points to another show!
+            // Severe disqualification penalty: the underlying stream/referer explicitly points to another English show!
             return -30000.0
         }
 
@@ -1544,7 +1601,8 @@ class StreamManager {
                     isSeasonPack: detectSeasonPack(name: nameHeader, title: rawTitle),
                     proxyHeaders: headers,
                     infoHash: torrentHash,
-                    indexer: indexer
+                    indexer: indexer,
+                    filename: stream.behaviorHints?.filename
                 )
             }
             print("[\(sourceName)] Found \(streams.count) streams")

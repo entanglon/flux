@@ -1508,7 +1508,7 @@ class PlayerManager: ObservableObject {
             return
         }
 
-        guard let idx = availableStreams.firstIndex(where: { $0.id == failed.id }) else {
+        guard let idx = availableStreams.firstIndex(where: { $0.stableKey == failed.stableKey || $0.id == failed.id }) else {
             errorMessage = "Unable to play video. Please try another source."
             return
         }

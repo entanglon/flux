@@ -671,7 +671,7 @@ struct StreamManagerTests {
         )
         #expect(winnerWithFilter?.id == moderateEnglishStream.id)
 
-        // 2. With language filter OFF: English stream is still softly preferred over a foreign dub
+        // 2. With language filter OFF: Zero language bias; stream with higher seeders wins strictly on health
         let (winnerWithoutFilter, _) = manager.selectFastStartCandidate(
             from: [fastForeignStream, moderateEnglishStream],
             sourceMode: "both",
@@ -680,7 +680,7 @@ struct StreamManagerTests {
             originalLanguage: "en",
             enableLanguageFilter: false
         )
-        #expect(winnerWithoutFilter?.id == moderateEnglishStream.id)
+        #expect(winnerWithoutFilter?.id == fastForeignStream.id)
     }
 
     @Test func languageFilterDisabledSoftlyPrefersLanguagesWithoutDiscardingOthers() {
@@ -1240,6 +1240,68 @@ struct StreamManagerTests {
         )
 
         #expect(primary?.stableKey == genuineStream.stableKey)
+    }
+
+    @Test func evaluateTitleMatchDoesNotPenalizeOpaquePenguPlayTokens() {
+        let manager = StreamManager.shared
+        let penguStream = Stream(
+            title: "📡 Hey! Sinamika (2022) • 🎞️ 1080p • MKV",
+            cleanTitle: "Hey! Sinamika",
+            url: URL(string: "https://pengu.uk/direct/external/aJFpjFS15-94WhTt_mubqRffK7bLh-p8zB4k0123456789")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+
+        let score = manager.evaluateTitleMatch(stream: penguStream, targetTitle: "Hey! Sinamika", originalLanguage: "ta")
+        #expect(score == 0.0)
+    }
+
+    @Test func evaluateTitleMatchUsesBehaviorHintsFilename() {
+        let manager = StreamManager.shared
+        let streamWithFilename = Stream(
+            title: "Direct Stream",
+            cleanTitle: "Hey! Sinamika",
+            url: URL(string: "https://pengu.uk/direct/external/aJFpjFS15-94WhTt_mubqRffK7bLh-p8zB4k0123456789")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            filename: "Hey.Sinamika.2022.1080p.mkv"
+        )
+
+        let score = manager.evaluateTitleMatch(stream: streamWithFilename, targetTitle: "Hey! Sinamika", originalLanguage: "ta")
+        #expect(score == 1500.0)
+    }
+
+    @Test func evaluateTitleMatchProtectsForeignTitlesFromMismatchPenalty() {
+        let manager = StreamManager.shared
+        let animeStream = Stream(
+            title: "Kimetsu.no.Yaiba.S01E01.1080p.mkv",
+            cleanTitle: "Demon Slayer • S01E01",
+            url: URL(string: "https://cdn.example.com/Kimetsu.no.Yaiba.S01E01.1080p.mkv")!,
+            source: "Torrentio",
+            quality: "1080p"
+        )
+
+        // For Japanese anime with originalLanguage "ja", romanized title differing from English TMDB title NEVER receives -30,000 penalty
+        let score = manager.evaluateTitleMatch(stream: animeStream, targetTitle: "Demon Slayer", originalLanguage: "ja")
+        #expect(score >= 0.0)
+    }
+
+    @Test func evaluateTitleMatchStillDisqualifiesDeceptiveEnglishHijacks() {
+        let manager = StreamManager.shared
+        let hijackedStream = Stream(
+            title: "📡 Overflow • S01E02",
+            cleanTitle: "Overflow • S01E02",
+            url: URL(string: "https://cdn.example.com/CINEFREAK.TOP-20--20Head-20Over-20Heels-20-S01E02-20WEB-DL.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            proxyHeaders: [
+                "Referer": "https://cinefreak.net/head-over-heels-2025-season-1"
+            ]
+        )
+
+        // English release explicitly hijacking a different show gets disqualified with -30,000 penalty
+        let score = manager.evaluateTitleMatch(stream: hijackedStream, targetTitle: "Overflow", originalLanguage: "en")
+        #expect(score <= -25000.0)
     }
 
     @Test func hostHealthTrackerDemotesCutHappyHosts() {
