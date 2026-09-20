@@ -10,6 +10,27 @@
 
 ---
 
+## CURRENT TOP PRIORITY INVESTIGATION (Sep 20, 2026)
+### Incident: *My Name is Khan* Flux Mode Playback Failure vs Manual Source #2 Success
+- **Reproduction**:
+  1. User attempted to play *My Name is Khan* (TMDB ID: `26022` / IMDb ID: `tt1188996`) in Flux Mode.
+  2. Auto-play failed / stalled at 00:00.
+  3. User opened the manual stream picker and selected the **second listed source**.
+  4. Source #2 played immediately and smoothly.
+- **Unified Log Findings**:
+  - `14:07:58.399 [Stream] Attempting stream (proxied=true) from PenguPlay` (Flux Mode Candidate #1)
+  - `14:08:27.671 [Stream] Attempting stream (proxied=false) from PenguPlay` (User Manual Source #2)
+- **What Freebuff Needs to Research & Fix**:
+  1. **Why was Candidate #1 `proxied=true`?**
+     - Check `StreamManager.swift` for the stream metadata of *My Name is Khan*. Candidate #1 had `proxyHeaders` (e.g. `Referer: https://cinefreak...` or similar) that routed it through `StreamProxyManager` (`127.0.0.1:51547`).
+     - Is `StreamProxyManager.swift` failing to pipe data to mpv, or did the remote host reject the proxy?
+     - Or is Candidate #1 an inaccessible/dead host that should NOT be ranked #1 above healthy direct streams?
+  2. **Auto-Fallback Failure**:
+     - When Candidate #1 failed to play, why did Flux Mode stall rather than seamlessly falling back to Candidate #2 via `PlayerManager.advanceToStandbyFallback()`?
+     - Inspect `PlayerManager.swift:1322-1363` (startup stall watchdog) and `advancePast()`.
+
+---
+
 ## 1. MANDATORY: Localization-First Development
 Whenever creating or modifying any user-facing UI in Flux (views, sheets, alerts, settings, navigation items, buttons, badges, diagnostic overlays, menus, or error messages):
 1. **Zero Hardcoded Strings**: Every user-visible string must use `.localized` or `String.localizedFormat(...)` / `"...".localizedFormat(...)`. Never render raw English string literals directly in SwiftUI views.
