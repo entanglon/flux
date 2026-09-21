@@ -11,6 +11,8 @@ extension Notification.Name {
     static let fluxShowShortcuts = Notification.Name("fluxShowShortcuts")
     /// Broadcast when network connectivity is restored after an offline period.
     static let fluxNetworkRestored = Notification.Name("fluxNetworkRestored")
+    /// Navigate directly to a specific media title's detail page.
+    static let fluxNavigateToMedia = Notification.Name("fluxNavigateToMedia")
 }
 
 struct GenreNavigation: Hashable {

@@ -76,6 +76,36 @@ struct MediaItem: Identifiable, Hashable, Codable {
         return raw
     }
     
+    /// Infers the ISO 639-1 language code from a country name or ISO 3166-1 alpha-2 country code.
+    public static func inferLanguageCode(fromCountry country: String?) -> String? {
+        guard let country = country?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !country.isEmpty else { return nil }
+        if country.contains("india") || country == "in" { return "hi" }
+        if country.contains("japan") || country == "jp" { return "ja" }
+        if country.contains("korea") || country == "kr" { return "ko" }
+        if country.contains("france") || country == "fr" { return "fr" }
+        if country.contains("germany") || country == "de" { return "de" }
+        if country.contains("italy") || country == "it" { return "it" }
+        if country.contains("spain") || country.contains("mexico") || country.contains("argentina") || country.contains("colombia") || country == "es" || country == "mx" || country == "ar" || country == "co" { return "es" }
+        if country.contains("china") || country.contains("taiwan") || country.contains("hong kong") || country == "cn" || country == "tw" || country == "hk" { return "zh" }
+        if country.contains("russia") || country == "ru" { return "ru" }
+        if country.contains("united states") || country.contains("united kingdom") || country.contains("canada") || country.contains("australia") || country == "us" || country == "gb" || country == "uk" || country == "ca" || country == "au" {
+            return "en"
+        }
+        return nil
+    }
+
+    /// Resolves the authentic original language code (ISO 639-1) of the media item,
+    /// falling back to country of origin inference if originalLanguage is missing.
+    public var effectiveOriginalLanguage: String {
+        if let code = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty {
+            return code
+        }
+        if let inferred = Self.inferLanguageCode(fromCountry: originCountry) {
+            return inferred
+        }
+        return "en"
+    }
+
     /// Localized display name for the original language (e.g. "Korean", "Japanese", "English").
     /// Falls back to country-based language inference when explicit language is missing.
     var displayOriginalLanguage: String? {
@@ -86,19 +116,11 @@ struct MediaItem: Identifiable, Hashable, Codable {
             if code.count > 2 { return code.capitalized }
         }
         // Fallback: infer language from country of origin
-        if let country = originCountry?.lowercased() {
-            if country.contains("united states") || country.contains("united kingdom") || country.contains("canada") || country.contains("australia") || country == "us" || country == "gb" || country == "uk" || country == "ca" || country == "au" {
-                return "English"
+        if let inferred = Self.inferLanguageCode(fromCountry: originCountry) {
+            if let name = Locale.current.localizedString(forLanguageCode: inferred)?.localizedCapitalized, !name.isEmpty {
+                return name
             }
-            if country.contains("japan") || country == "jp" { return "Japanese" }
-            if country.contains("korea") || country == "kr" { return "Korean" }
-            if country.contains("france") || country == "fr" { return "French" }
-            if country.contains("germany") || country == "de" { return "German" }
-            if country.contains("italy") || country == "it" { return "Italian" }
-            if country.contains("spain") || country.contains("mexico") || country.contains("argentina") || country == "es" || country == "mx" { return "Spanish" }
-            if country.contains("india") || country == "in" { return "Hindi" }
-            if country.contains("china") || country.contains("taiwan") || country == "cn" || country == "tw" { return "Mandarin" }
-            if country.contains("russia") || country == "ru" { return "Russian" }
+            return inferred.capitalized
         }
         return "English"
     }

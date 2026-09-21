@@ -20,6 +20,9 @@ extension UserDefaults {
         static let streamRouteProxyEndpoint = "streamRouteProxyEndpoint"
         static let streamRouteProxyTargetHosts = "streamRouteProxyTargetHosts"
 
+        // MARK: - Stream Languages
+        static let preferredStreamLanguages = "preferredStreamLanguages"
+
         // MARK: - Player & PiP
         static let autoPlayNextEnabled = "autoPlayNextEnabled"
         static let defaultAudioLang = "defaultAudioLang"

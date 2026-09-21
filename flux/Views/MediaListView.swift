@@ -166,7 +166,7 @@ struct MediaListView: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 24)], spacing: 32) {
                     ForEach(continueItems) { item in
-                        Button(action: {
+                        ContinueWatchingCard(item: item, mode: .continueWatching) {
                             PlayerManager.shared.play(
                                 item,
                                 season: item.lastSeason,
@@ -174,12 +174,8 @@ struct MediaListView: View {
                                 episodeImage: item.lastEpisodeImage,
                                 fromContinueWatching: true
                             )
-                            openWindow(id: "player", value: item.id)
-                        }) {
-                            ContinueWatchingCard(item: item, mode: .continueWatching)
+                            PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                         }
-                        .buttonStyle(.plain)
-                        .focusEffectDisabled()
                     }
                 }
             }

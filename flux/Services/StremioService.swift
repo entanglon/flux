@@ -397,6 +397,7 @@ fileprivate func logoURL(_ raw: String?, imdbID: String) -> URL? {
 
 extension StremioMetaPreview {
     func toMediaItem() -> MediaItem {
+        let inferredLang = MediaItem.inferLanguageCode(fromCountry: self.country)
         return MediaItem(
             id: self.id,
             title: self.name,
@@ -411,6 +412,7 @@ extension StremioMetaPreview {
             genres: self.genres,
             popularity: self.popularity ?? ((Double(self.imdbRating ?? "0") ?? 0) * 10),
             releaseDate: self.releaseInfo,
+            originalLanguage: inferredLang,
             originCountry: self.country,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil
         )
@@ -465,6 +467,7 @@ extension StremioMetaDetail {
             }.sorted { $0.seasonNumber < $1.seasonNumber }
         }
         
+        let inferredLang = MediaItem.inferLanguageCode(fromCountry: self.country)
         return MediaItem(
             id: self.id,
             title: self.name,
@@ -483,6 +486,7 @@ extension StremioMetaDetail {
             genres: self.genres,
             popularity: self.popularity ?? ((Double(self.imdbRating ?? "0") ?? 0) * 10),
             releaseDate: self.releaseInfo,
+            originalLanguage: inferredLang,
             originCountry: self.country,
             voteAverage: (Double(self.imdbRating ?? "0") ?? 0) > 0 ? Double(self.imdbRating ?? "0") : nil,
             episodes: episodesArray

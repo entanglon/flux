@@ -8,6 +8,7 @@ struct MultiSearchResult: Sendable {
 }
 
 actor TMDBClient {
+    static let shared = TMDBClient()
     private let apiKeyProvider: @Sendable () -> String
     private let session: URLSession
 

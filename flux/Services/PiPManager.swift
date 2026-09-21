@@ -6,6 +6,23 @@ import SwiftUI
 /// PiPManager can reopen the player window when expanding.
 enum PlayerWindowRouter {
     static var openPlayer: ((MediaItem.ID) -> Void)?
+
+    @MainActor
+    static func openPlayerWindow(itemID: MediaItem.ID, openWindow: OpenWindowAction? = nil) {
+        if let existing = NSApp.windows.first(where: {
+            $0.identifier?.rawValue == "playerWindow" || $0.title.lowercased().contains("player")
+        }) {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        if let openWindow = openWindow {
+            openWindow(id: "player", value: itemID)
+        } else {
+            openPlayer?(itemID)
+        }
+    }
 }
 
 // MARK: - PiPManager

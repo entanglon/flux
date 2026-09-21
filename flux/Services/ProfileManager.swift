@@ -319,6 +319,7 @@ final class ProfileManager: ObservableObject {
     var playbackSettingKeys: [String] {
         ["autoPlayNextEnabled", "useHardwareAcceleration", "enableAudioPassthrough",
          "defaultAudioLang", "defaultSubLang", "preferredQuality",
+         UserDefaults.Key.preferredStreamLanguages,
          "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB",
          "appLanguage",
          UserDefaults.Key.streamRouteProxyEnabled, UserDefaults.Key.streamRouteProxyEndpoint, UserDefaults.Key.streamRouteProxyTargetHosts]
@@ -355,12 +356,28 @@ final class ProfileManager: ObservableObject {
     private func restoreSettings(for profileID: UUID) {
         if let snap = UserDefaults.standard.dictionary(forKey: "profile.\(profileID.uuidString).settings") {
             for (key, value) in snap {
+                if key == UserDefaults.Key.streamRouteProxyEndpoint {
+                    let ep = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !ep.isEmpty {
+                        UserDefaults.standard.set(ep, forKey: key)
+                    } else if let cur = UserDefaults.standard.string(forKey: key), !cur.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // Keep current valid endpoint
+                    } else if let recovered = StreamRouteProxyManager.recoverConfiguredEndpoint(), !recovered.isEmpty {
+                        UserDefaults.standard.set(recovered, forKey: key)
+                    }
+                    continue
+                }
                 UserDefaults.standard.set(value, forKey: key)
             }
             if let lang = snap["appLanguage"] as? String {
                 LanguageManager.shared.syncFromProfile(lang)
             }
             if snap[UserDefaults.Key.streamRouteProxyEnabled] == nil {
+                snapshotSettings(for: profileID)
+            }
+            if snap[UserDefaults.Key.preferredStreamLanguages] == nil {
+                let defaultAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+                UserDefaults.standard.set([defaultAudio], forKey: UserDefaults.Key.preferredStreamLanguages)
                 snapshotSettings(for: profileID)
             }
             StreamRouteProxyManager.shared.reloadFromUserDefaults()
@@ -520,11 +537,39 @@ final class ProfileManager: ObservableObject {
             if let remoteSettings = dict["settings"] as? [String: Any] {
                 var localSnap = UserDefaults.standard.dictionary(forKey: "profile.\(id.uuidString).settings") ?? [:]
                 for (k, v) in remoteSettings {
+                    if k == UserDefaults.Key.streamRouteProxyEndpoint {
+                        let remoteEp = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let localEp = (localSnap[k] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !remoteEp.isEmpty {
+                            localSnap[k] = remoteEp
+                        } else if !localEp.isEmpty {
+                            localSnap[k] = localEp
+                        } else if let recovered = StreamRouteProxyManager.recoverConfiguredEndpoint(), !recovered.isEmpty {
+                            localSnap[k] = recovered
+                        }
+                        continue
+                    }
+                    if k == UserDefaults.Key.streamRouteProxyEnabled {
+                        let remoteEnabled = v as? Bool ?? false
+                        let localEnabled = localSnap[k] as? Bool ?? false
+                        let currentEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+                        let hasEndpoint = !((localSnap[UserDefaults.Key.streamRouteProxyEndpoint] as? String) ?? "").isEmpty
+                        if remoteEnabled {
+                            localSnap[k] = true
+                        } else if (localEnabled || currentEnabled) && hasEndpoint {
+                            localSnap[k] = true
+                        } else {
+                            localSnap[k] = remoteEnabled
+                        }
+                        continue
+                    }
                     localSnap[k] = v
                 }
-                if remoteSettings[UserDefaults.Key.streamRouteProxyEnabled] == nil,
-                   let localProxyVal = localSnap[UserDefaults.Key.streamRouteProxyEnabled] {
-                    localSnap[UserDefaults.Key.streamRouteProxyEnabled] = localProxyVal
+                if localSnap[UserDefaults.Key.streamRouteProxyEndpoint] == nil || ((localSnap[UserDefaults.Key.streamRouteProxyEndpoint] as? String)?.isEmpty ?? true) {
+                    if let recovered = StreamRouteProxyManager.recoverConfiguredEndpoint(), !recovered.isEmpty {
+                        localSnap[UserDefaults.Key.streamRouteProxyEndpoint] = recovered
+                        localSnap[UserDefaults.Key.streamRouteProxyEnabled] = true
+                    }
                 }
                 UserDefaults.standard.set(localSnap, forKey: "profile.\(id.uuidString).settings")
             }
@@ -634,6 +679,26 @@ final class ProfileManager: ObservableObject {
                         if targetSearch == nil,
                            let localSearch = UserDefaults.standard.data(forKey: sourcePrefix + "recentSearches") {
                             UserDefaults.standard.set(localSearch, forKey: targetPrefix + "recentSearches")
+                        }
+                        let targetSettings = (UserDefaults.standard.dictionary(forKey: targetPrefix + "settings") as? [String: Any]) ?? [:]
+                        if let localSettings = UserDefaults.standard.dictionary(forKey: sourcePrefix + "settings") as? [String: Any], !localSettings.isEmpty {
+                            var mergedSettings = targetSettings
+                            for (sk, sv) in localSettings {
+                                if mergedSettings[sk] == nil {
+                                    mergedSettings[sk] = sv
+                                } else if sk == UserDefaults.Key.streamRouteProxyEndpoint {
+                                    let tEp = (mergedSettings[sk] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                    let sEp = (sv as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                    if tEp.isEmpty && !sEp.isEmpty {
+                                        mergedSettings[sk] = sEp
+                                    }
+                                } else if sk == UserDefaults.Key.streamRouteProxyEnabled {
+                                    if let sBool = sv as? Bool, sBool {
+                                        mergedSettings[sk] = true
+                                    }
+                                }
+                            }
+                            UserDefaults.standard.set(mergedSettings, forKey: targetPrefix + "settings")
                         }
                         for key in [sourcePrefix + "history", sourcePrefix + "watchlist", sourcePrefix + "loved", sourcePrefix + "watchSnaps", sourcePrefix + "settings", sourcePrefix + "collections", sourcePrefix + "episodeProgress", sourcePrefix + "recentSearches"] {
                             UserDefaults.standard.removeObject(forKey: key)

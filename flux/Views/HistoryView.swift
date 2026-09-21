@@ -144,7 +144,7 @@ struct HistoryView: View {
                              LazyVGrid(columns: columns, spacing: 32) {
                                  ForEach(filteredItems) { item in
                                      let isItemInProgress = (activeFilter == .inProgress || (activeFilter == .all && !userData.isWatched(item)))
-                                     Button(action: {
+                                     ContinueWatchingCard(item: item, mode: isItemInProgress ? .continueWatching : .recentlyWatched) {
                                          PlayerManager.shared.play(
                                              item,
                                              season: item.lastSeason,
@@ -152,12 +152,8 @@ struct HistoryView: View {
                                              episodeImage: item.lastEpisodeImage,
                                              fromContinueWatching: isItemInProgress
                                          )
-                                         openWindow(id: "player", value: item.id)
-                                     }) {
-                                         ContinueWatchingCard(item: item, mode: isItemInProgress ? .continueWatching : .recentlyWatched)
+                                         PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                                      }
-                                     .buttonStyle(.plain)
-                                     .focusEffectDisabled()
                                  }
                              }
                          }

@@ -879,7 +879,123 @@ struct StreamManagerTests {
         #expect(!manager.matchesPreferredLanguage(bracketStream, preferred: "Spanish", originalLanguage: "en", enableLanguageFilter: true))
     }
 
-    @Test func selectFastStartCandidateStrictGatingPrioritizesLanguageOverHigherSeededForeignStream() {
+    @Test func parseLanguageDetectsDualAudioAndMultiAudioTags() {
+        let manager = StreamManager.shared
+        
+        let dualStream = "Squid.Game.S02.1080p.Dual-Audio.[Eng+Kor].x265"
+        let parsedDual = manager.parseLanguage(from: dualStream)
+        #expect(parsedDual != nil)
+        #expect(parsedDual?.contains("EN") == true)
+        #expect(parsedDual?.contains("KO") == true)
+        #expect(parsedDual?.contains("DUAL") == true || parsedDual?.contains("MULTI") == true)
+
+        let multiStream = "Demon.Slayer.2024.1080p.Multi-Audio.HEVC"
+        let parsedMulti = manager.parseLanguage(from: multiStream)
+        #expect(parsedMulti != nil)
+        #expect(parsedMulti?.contains("MULTI") == true)
+
+        let bracketIndian = "Jawan.2023.1080p.Hindi.[Hin+Tam+Tel].Dual.Audio"
+        let parsedIndian = manager.parseLanguage(from: bracketIndian)
+        #expect(parsedIndian != nil)
+        #expect(parsedIndian?.contains("HI") == true)
+        #expect(parsedIndian?.contains("TAM") == true)
+        #expect(parsedIndian?.contains("TEL") == true)
+    }
+
+    @Test func matchesAnyPreferredLanguageMatchesMultiplePreferences() {
+        let manager = StreamManager.shared
+
+        let koreanStream = Stream(
+            title: "Parasite.2019.1080p.BluRay.Korean.DTS",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111")!,
+            source: "Torrentio",
+            quality: "1080p",
+            language: "KO"
+        )
+        let frenchDubStream = Stream(
+            title: "Parasite.2019.1080p.FRENCH.TRUEFRENCH.x264",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222")!,
+            source: "Torrentio",
+            quality: "1080p",
+            language: "FR"
+        )
+        let dualAudioStream = Stream(
+            title: "Parasite.2019.1080p.Dual-Audio.[Eng+Kor].x265",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:3333333333333333333333333333333333333333")!,
+            source: "Torrentio",
+            quality: "1080p",
+            language: "EN, KO, DUAL, MULTI"
+        )
+
+        let userPreferences = ["English", "Korean"]
+
+        // Korean stream matches Korean preference
+        #expect(manager.matchesAnyPreferredLanguage(koreanStream, preferredLanguages: userPreferences, originalLanguage: "ko", enableLanguageFilter: true) == true)
+
+        // Dual audio stream matches English & Korean preferences
+        #expect(manager.matchesAnyPreferredLanguage(dualAudioStream, preferredLanguages: userPreferences, originalLanguage: "ko", enableLanguageFilter: true) == true)
+
+        // French dub has neither English nor Korean: disqualified
+        #expect(manager.matchesAnyPreferredLanguage(frenchDubStream, preferredLanguages: userPreferences, originalLanguage: "ko", enableLanguageFilter: true) == false)
+    }
+
+    @Test func selectFastStartCandidateRacesAcrossMultiplePreferredLanguages() {
+        let manager = StreamManager.shared
+
+        let highSeedFrenchDub = Stream(
+            title: "Parasite.2019.1080p.FRENCH.TRUEFRENCH.x264",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:4444444444444444444444444444444444444444")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "10.0 GB",
+            language: "FR",
+            seeders: 600
+        )
+        let modestKoreanOriginal = Stream(
+            title: "Parasite.2019.1080p.Korean.Original.x264",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:5555555555555555555555555555555555555555")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "3.5 GB",
+            language: "KO",
+            seeders: 45
+        )
+        let modestEnglishDub = Stream(
+            title: "Parasite.2019.1080p.English.Dub.x264",
+            cleanTitle: "Parasite",
+            url: URL(string: "magnet:?xt=urn:btih:6666666666666666666666666666666666666666")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "3.2 GB",
+            language: "EN",
+            seeders: 50
+        )
+
+        // With Preferred Languages = ["English", "Korean"] and defaultAudioLang = "English":
+        // 1. English dub receives top primary preference (+5000)
+        // 2. Korean original receives secondary preference (+4200)
+        // 3. French dub (600 seeds) is demoted (-3500) below preferred languages but preserved in fallbacks
+        let (winner, fallbacks) = manager.selectFastStartCandidate(
+            from: [highSeedFrenchDub, modestKoreanOriginal, modestEnglishDub],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            preferredLanguages: ["English", "Korean"],
+            originalLanguage: "ko",
+            enableLanguageFilter: true
+        )
+
+        #expect(winner?.id == modestEnglishDub.id)
+        #expect(fallbacks.first?.id == modestKoreanOriginal.id)
+        #expect(fallbacks.contains(where: { $0.id == highSeedFrenchDub.id }))
+    }
+
+        @Test func selectFastStartCandidateStrictGatingPrioritizesLanguageOverHigherSeededForeignStream() {
         let manager = StreamManager.shared
 
         let highSeedEnglishStream = Stream(
@@ -902,7 +1018,7 @@ struct StreamManagerTests {
         )
 
         // With language filter ON and Hindi preference: 1080p Hindi MUST beat 4K 500-seed English stream!
-        let (winnerHindi, _) = manager.selectFastStartCandidate(
+        let (winnerHindi, fallbacksHindi) = manager.selectFastStartCandidate(
             from: [highSeedEnglishStream, modestHindiStream],
             sourceMode: "both",
             preferredQuality: "4K",
@@ -911,6 +1027,8 @@ struct StreamManagerTests {
             enableLanguageFilter: true
         )
         #expect(winnerHindi?.id == modestHindiStream.id)
+        // English stream is not discarded; preserved in fallbacks
+        #expect(fallbacksHindi.contains(where: { $0.id == highSeedEnglishStream.id }))
 
         // If no Hindi stream exists, it falls back to the general pool (English stream)
         let (fallbackWinner, _) = manager.selectFastStartCandidate(
@@ -1838,7 +1956,157 @@ struct StreamManagerTests {
         #expect(manager.parseSize(from: "Anime Episode 750 MiB") == "750 MiB")
         #expect(manager.parseSize(from: "Movie 2024 1080p 2.4 GB") == "2.4 GB")
     }
+
+    @Test func selectFastStartCandidatePreservesAndRanksUntaggedOriginalAudioIndianShow() {
+        let manager = StreamManager.shared
+
+        // Show is Guns & Gulaabs, country is India (effective originalLanguage: "hi")
+        // User preferred languages: ["Hindi"]
+        let untaggedHindiStream = Stream(
+            title: "Guns.and.Gulaabs.S01E01.1080p.NF.WEB-DL.AAC2.0.x264",
+            cleanTitle: "Guns & Gulaabs S01E01",
+            url: URL(string: "https://mediafusion.site/stream/1")!,
+            source: "MediaFusion",
+            quality: "1080p",
+            size: "1.2 GB"
+        )
+        let foreignDubStream = Stream(
+            title: "Guns.and.Gulaabs.S01E01.1080p.RUSSIAN.DUBBED.x264",
+            cleanTitle: "Guns & Gulaabs S01E01",
+            url: URL(string: "https://torrentio.site/stream/2")!,
+            source: "Torrentio",
+            quality: "1080p",
+            size: "1.5 GB",
+            seeders: 100
+        )
+
+        let (winner, fallbacks) = manager.selectFastStartCandidate(
+            from: [foreignDubStream, untaggedHindiStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "Hindi",
+            preferredLanguages: ["Hindi"],
+            originalLanguage: "hi",
+            enableLanguageFilter: true
+        )
+
+        // Untagged Indian release must be recognized as authentic original Hindi audio and win over high-seeded foreign dub
+        #expect(winner?.id == untaggedHindiStream.id)
+        // Foreign dub stream is not discarded, but preserved as fallback
+        #expect(fallbacks.contains(where: { $0.id == foreignDubStream.id }))
+    }
+
+    @Test func mediaItemInfersEffectiveOriginalLanguageFromCountry() {
+        let indianShow = MediaItem(
+            seed: "tt6473300",
+            title: "Guns & Gulaabs",
+            category: "series"
+        )
+        var itemWithCountry = indianShow
+        itemWithCountry.originCountry = "India"
+        #expect(itemWithCountry.effectiveOriginalLanguage == "hi")
+        #expect(itemWithCountry.displayOriginalLanguage == "Hindi")
+
+        var itemWithExplicitLang = indianShow
+        itemWithExplicitLang.originCountry = "India"
+        itemWithExplicitLang.originalLanguage = "hi"
+        #expect(itemWithExplicitLang.effectiveOriginalLanguage == "hi")
+
+        var koreanShow = indianShow
+        koreanShow.originCountry = "South Korea"
+        #expect(koreanShow.effectiveOriginalLanguage == "ko")
+    }
+
+    @Test func raceTopCandidatesWithResultsExcludesDeadHTTPStream() async {
+        let manager = StreamManager.shared
+        // Candidate 1: dead host returning failure
+        let deadHTTP = flux.Stream(
+            title: "Special.Ops.S01E01.1080p.Dead",
+            cleanTitle: "Special Ops S01E01",
+            url: URL(string: "https://127.0.0.1:9999/dead.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        // Candidate 2: torrent fallback
+        let backupTorrent = flux.Stream(
+            title: "Special.Ops.S01E01.1080p.Backup",
+            cleanTitle: "Special Ops S01E01",
+            url: URL(string: "magnet:?xt=urn:btih:3333333333333333333333333333333333333333")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 50
+        )
+
+        // Race with 0.1s timeout where deadHTTP fails immediately
+        let (winner, fallbacks, results) = await manager.raceTopCandidatesWithResults(
+            [deadHTTP, backupTorrent],
+            playableURL: { _ in URL(string: "https://127.0.0.1:9999/nonexistent")! },
+            timeout: 0.1
+        )
+
+        // Dead HTTP stream probe returned false and recorded failure
+        #expect(results[deadHTTP.stableKey] == false)
+        // Viable non-failed candidate (backupTorrent) is selected instead of the dead HTTP candidate!
+        #expect(winner?.id == backupTorrent.id)
+        #expect(fallbacks.contains(where: { $0.id == deadHTTP.id }))
+    }
+
+    @Test func languageMatchingIgnoresSubtitleClauses() {
+        let manager = StreamManager.shared
+        // Stream has Hindi audio, but lists English in subtitles tag
+        let stream = flux.Stream(
+            title: "Special.Ops.S01E01.1080p.Hindi • 📝 Subtitles: English - eng",
+            cleanTitle: "Special Ops S01E01",
+            url: URL(string: "https://example.com/stream.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            language: "Hindi"
+        )
+
+        // Matches Hindi audio
+        #expect(manager.matchesPreferredLanguage(stream, preferred: "Hindi", originalLanguage: "hi", enableLanguageFilter: true))
+        // Does NOT match English as audio language just because "English" is in subtitles clause
+        let englishAudioMatch = manager.matchesPreferredLanguage(stream, preferred: "English", originalLanguage: "hi", enableLanguageFilter: true)
+        #expect(!englishAudioMatch)
+    }
+
+    @Test func titleMatchDisqualifiesConflictingMultiTokenTitles() {
+        let manager = StreamManager.shared
+        // "The First Order" scraped deceptively for "Law & Order"
+        let deceptiveFirstOrder = flux.Stream(
+            title: "CINEFREAK.TOP - The First Order - S01E01-05 WEB-DL Hindi ORG",
+            cleanTitle: "The First Order",
+            url: URL(string: "https://pengu.uk/direct/external/abc/CINEFREAK.TOP-20--20The-20First-20Order-20-S01E01-05-20WEB-DL-20-Hindi-20ORG-201")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        // Genuine Law & Order release
+        let genuineLawAndOrder = flux.Stream(
+            title: "Law & Order (1990) Season 1 S01 (720p WEB-DL x265)",
+            cleanTitle: "Law & Order S01E02",
+            url: URL(string: "magnet:?xt=urn:btih:4444444444444444444444444444444444444444")!,
+            source: "Torrentio",
+            quality: "720p"
+        )
+
+        let conflictScore = manager.evaluateTitleMatch(stream: deceptiveFirstOrder, targetTitle: "Law & Order", originalLanguage: "en")
+        #expect(conflictScore <= -25000.0)
+
+        let genuineScore = manager.evaluateTitleMatch(stream: genuineLawAndOrder, targetTitle: "Law & Order", originalLanguage: "en")
+        #expect(genuineScore >= 0.0)
+    }
+
+    @Test @MainActor func cancelAllPlaybackAndRacesResetsPlaybackStateAndFlags() {
+        let playerManager = PlayerManager.shared
+        playerManager.currentStreamURL = URL(string: "https://example.com/video.mp4")
+        playerManager.forceStreamPicker = false
+        playerManager.isStreamPickerPresented = false
+
+        playerManager.cancelAllPlaybackAndRaces()
+
+        #expect(playerManager.forceStreamPicker == true)
+        #expect(playerManager.isStreamPickerPresented == true)
+        #expect(playerManager.currentStreamURL == nil)
+        #expect(playerManager.currentSelectedStream == nil)
+    }
 }
-
-
-

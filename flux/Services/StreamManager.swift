@@ -255,6 +255,10 @@ class StreamManager {
     // In-memory cache (Actor-isolated)
     let cacheActor = StreamCacheActor()
     
+    // In-flight stream fetch deduplication
+    private let inFlightLock = NSLock()
+    private var inFlightFetches: [String: Task<[Stream], Never>] = [:]
+    
     func preloadStreams(for item: MediaItem, season: Int? = nil, episode: Int? = nil) async {
         _ = await fetchStreams(for: item, season: season, episode: episode)
     }
@@ -499,17 +503,29 @@ class StreamManager {
     func raceTopCandidates(
         _ candidates: [Stream],
         playableURL: @escaping (Stream) -> URL,
-        timeout: TimeInterval = 1.5
+        timeout: TimeInterval = 2.5
     ) async -> (winner: Stream?, fallbacks: [Stream]) {
-        guard !candidates.isEmpty else { return (nil, []) }
+        let (winner, fallbacks, _) = await raceTopCandidatesWithResults(candidates, playableURL: playableURL, timeout: timeout)
+        return (winner, fallbacks)
+    }
+
+    /// Parallel 1-byte probe race across top candidates with detailed probe results.
+    func raceTopCandidatesWithResults(
+        _ candidates: [Stream],
+        playableURL: @escaping (Stream) -> URL,
+        timeout: TimeInterval = 2.5
+    ) async -> (winner: Stream?, fallbacks: [Stream], probeResults: [String: Bool]) {
+        guard !candidates.isEmpty else { return (nil, [], [:]) }
 
         let httpCandidates = candidates.filter { !$0.isTorrent }
         if httpCandidates.isEmpty {
             // Pure torrent selection: top candidate from Best Health wins
-            return (candidates.first, Array(candidates.dropFirst()))
+            return (candidates.first, Array(candidates.dropFirst()), [:])
         }
 
         var responsiveWinner: Stream?
+        var probeResults: [String: Bool] = [:]
+        var failedKeys = Set<String>()
 
         await withTaskGroup(of: (Stream, Bool).self) { group in
             for stream in httpCandidates {
@@ -522,20 +538,36 @@ class StreamManager {
             }
 
             for await (stream, ok) in group {
-                if ok && responsiveWinner == nil {
-                    responsiveWinner = stream
-                    group.cancelAll()
-                    break
+                probeResults[stream.stableKey] = ok
+                if ok {
+                    if responsiveWinner == nil {
+                        responsiveWinner = stream
+                        group.cancelAll()
+                        break
+                    }
+                } else {
+                    failedKeys.insert(stream.stableKey)
+                    if let host = stream.url.host, !host.isEmpty {
+                        HostHealthTracker.shared.recordFailure(host: host)
+                    }
                 }
             }
         }
 
         if let winner = responsiveWinner {
-            let fallbacks = candidates.filter { $0.stableKey != winner.stableKey }
-            return (winner, fallbacks)
+            let remaining = candidates.filter { $0.stableKey != winner.stableKey }
+            let nonFailed = remaining.filter { !failedKeys.contains($0.stableKey) }
+            let failed = remaining.filter { failedKeys.contains($0.stableKey) }
+            return (winner, nonFailed + failed, probeResults)
         } else {
-            // If no HTTP candidate responded within timeout, fallback to candidate #1
-            return (candidates.first, Array(candidates.dropFirst()))
+            // If no HTTP candidate responded within timeout, fallback to the top candidate
+            // that did NOT explicitly fail the probe!
+            let viable = candidates.filter { !failedKeys.contains($0.stableKey) }
+            let winner = viable.first ?? candidates.first
+            let remaining = candidates.filter { $0.stableKey != winner?.stableKey }
+            let nonFailed = remaining.filter { !failedKeys.contains($0.stableKey) }
+            let failed = remaining.filter { failedKeys.contains($0.stableKey) }
+            return (winner, nonFailed + failed, probeResults)
         }
     }
 
@@ -612,61 +644,94 @@ class StreamManager {
             onStreamsUpdated(filtered)
             return filtered
         }
-        
-        // Resolve IMDb ID (Stremio addons expect tt... IDs)
-        let resolvedImdbID = await resolveImdbID(for: item, type: type)
-        
-        var allStreams: [Stream] = []
 
-        let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled && self.shouldQueryAddon($0, sourceMode: sourceMode) }
-        var pendingNames = enabledAddons.map { $0.name }
-        let totalCount = enabledAddons.count
-        var loadedCount = 0
-
-        onProgress?(loadedCount, totalCount, pendingNames)
-
-        await withTaskGroup(of: (String, [Stream]).self) { group in
-            for addon in enabledAddons {
-                let cleanBaseURL = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
-                let name = addon.name
-
-                group.addTask {
-                    let baseID = resolvedImdbID ?? item.id
-                    let targetID = isSeries ? "\(baseID):\(s):\(e)" : baseID
-                    let streams = await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: name)
-                    return (name, streams)
-                }
+        // Deduplicate concurrent in-flight fetches for the same item/season/episode
+        // to strictly avoid hammering scrapers (PenguPlay, WebStreamr, etc.) with duplicate parallel requests.
+        if !forceRefresh {
+            let existingTask: Task<[Stream], Never>? = inFlightLock.withLock {
+                inFlightFetches[cacheKey]
             }
+            if let running = existingTask {
+                print("[StreamManager] Sharing in-flight stream fetch for: \(cacheKey)")
+                let fetched = await running.value
+                let filtered = fetched.filter { s in
+                    if sourceMode == "http" { return !s.isTorrent }
+                    if sourceMode == "torrent" { return s.isTorrent }
+                    return true
+                }
+                onProgress?(1, 1, [])
+                onStreamsUpdated(filtered)
+                return filtered
+            }
+        }
 
-            for await (name, result) in group {
-                loadedCount += 1
-                pendingNames.removeAll { $0 == name }
-                onProgress?(loadedCount, totalCount, pendingNames)
+        let fetchTask = Task<[Stream], Never> {
+            // Resolve IMDb ID (Stremio addons expect tt... IDs)
+            let resolvedImdbID = await self.resolveImdbID(for: item, type: type)
+            
+            var allStreams: [Stream] = []
 
-                if !result.isEmpty {
-                    allStreams.append(contentsOf: result)
-                    let currentDeduped = self.deduped(allStreams)
-                    let currentSorted = currentDeduped.sorted { self.streamSortComparator($0, $1) }
-                    let currentFiltered = currentSorted.filter { s in
-                        if sourceMode == "http" { return !s.isTorrent }
-                        if sourceMode == "torrent" { return s.isTorrent }
-                        return true
+            let enabledAddons = AddonManager.shared.addons.filter { $0.isEnabled && self.shouldQueryAddon($0, sourceMode: sourceMode) }
+            var pendingNames = enabledAddons.map { $0.name }
+            let totalCount = enabledAddons.count
+            var loadedCount = 0
+
+            onProgress?(loadedCount, totalCount, pendingNames)
+
+            await withTaskGroup(of: (String, [Stream]).self) { group in
+                for addon in enabledAddons {
+                    let cleanBaseURL = addon.url.replacingOccurrences(of: "/manifest.json", with: "")
+                    let name = addon.name
+
+                    group.addTask {
+                        let baseID = resolvedImdbID ?? item.id
+                        let targetID = isSeries ? "\(baseID):\(s):\(e)" : baseID
+                        let streams = await self.fetchFromAddon(baseURL: cleanBaseURL, type: type, id: targetID, sourceName: name)
+                        return (name, streams)
                     }
-                    onStreamsUpdated(currentFiltered)
+                }
+
+                for await (name, result) in group {
+                    loadedCount += 1
+                    pendingNames.removeAll { $0 == name }
+                    onProgress?(loadedCount, totalCount, pendingNames)
+
+                    if !result.isEmpty {
+                        allStreams.append(contentsOf: result)
+                        let currentDeduped = self.deduped(allStreams)
+                        let currentSorted = currentDeduped.sorted { self.streamSortComparator($0, $1, originalLanguage: item.effectiveOriginalLanguage) }
+                        let currentFiltered = currentSorted.filter { s in
+                            if sourceMode == "http" { return !s.isTorrent }
+                            if sourceMode == "torrent" { return s.isTorrent }
+                            return true
+                        }
+                        onStreamsUpdated(currentFiltered)
+                    }
                 }
             }
-        }
-        
-        // Preserve all discovered streams across all resolutions (4K, 1080p, 720p, SD).
-        // Resolution preferences are applied dynamically in Flux Mode auto-play,
-        // while the Stream Picker and cache retain all options for user choice.
-        let sortedStreams = deduped(allStreams).sorted { s1, s2 in
-            streamSortComparator(s1, s2)
+            
+            // Preserve all discovered streams across all resolutions (4K, 1080p, 720p, SD).
+            // Resolution preferences are applied dynamically in Flux Mode auto-play,
+            // while the Stream Picker and cache retain all options for user choice.
+            let sortedStreams = self.deduped(allStreams).sorted { s1, s2 in
+                self.streamSortComparator(s1, s2, originalLanguage: item.effectiveOriginalLanguage)
+            }
+
+            // Cache the UNFILTERED (by source mode) result so switching between
+            // http/torrent/both doesn't require re-fetching from all addons.
+            await self.cacheActor.set(key: cacheKey, streams: sortedStreams)
+            return sortedStreams
         }
 
-        // Cache the UNFILTERED (by source mode) result so switching between
-        // http/torrent/both doesn't require re-fetching from all addons.
-        await cacheActor.set(key: cacheKey, streams: sortedStreams)
+        inFlightLock.withLock {
+            inFlightFetches[cacheKey] = fetchTask
+        }
+
+        let sortedStreams = await fetchTask.value
+
+        inFlightLock.withLock {
+            _ = inFlightFetches.removeValue(forKey: cacheKey)
+        }
 
         // Apply source mode filter AFTER caching
         let modeFiltered = sortedStreams.filter { s in
@@ -728,12 +793,39 @@ class StreamManager {
         }
 
         // 1. Try TMDB external_ids
-        if let tmdbImdb = await TMDBEnricher.shared.getImdbID(tmdbID: item.id, type: type), !tmdbImdb.isEmpty {
+        let cleanID = item.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+        if let tmdbImdb = await TMDBEnricher.shared.getImdbID(tmdbID: cleanID, type: type), !tmdbImdb.isEmpty {
             return tmdbImdb
         }
 
-        // 2. Fallback: Query Cinemeta catalog search by title
         let cleanTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 2. When TMDB enrichment is active, search TMDB by title before any Cinemeta fallback
+        // (Cinemeta is disabled when TMDB is active to respect user setting and prevent conflicts)
+        if TMDBEnricher.shared.hasKey && !cleanTitle.isEmpty {
+            if let searchResult = try? await TMDBClient.shared.multiSearch(query: cleanTitle) {
+                let candidates = searchResult.candidates
+                if let bestMatch = candidates.first(where: {
+                    $0.title.caseInsensitiveCompare(cleanTitle) == .orderedSame ||
+                    $0.title.lowercased().contains(cleanTitle.lowercased())
+                }) ?? candidates.first {
+                    if let directImdb = bestMatch.imdbID, directImdb.starts(with: "tt") {
+                        print("[StreamManager] Resolved IMDb ID directly from TMDB candidate: \(cleanTitle) -> \(directImdb)")
+                        return directImdb
+                    }
+                    let tmdbID = bestMatch.id.replacingOccurrences(of: "tmdb-", with: "").replacingOccurrences(of: "tmdb:", with: "")
+                    let mediaType = (type == "series" || bestMatch.mediaType == .tvSeries) ? "tv" : "movie"
+                    if let imdb = await TMDBEnricher.shared.getImdbID(tmdbID: tmdbID, type: mediaType), !imdb.isEmpty {
+                        print("[StreamManager] Resolved IMDb ID via TMDB title search: \(cleanTitle) -> \(imdb)")
+                        return imdb
+                    }
+                }
+            }
+            // Strict rule: when TMDB is active, Cinemeta catalog search is bypassed
+            return nil
+        }
+
+        // 3. Fallback: Query Cinemeta catalog search by title (only when TMDB is NOT active)
         guard !cleanTitle.isEmpty,
               let encoded = cleanTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let searchURL = URL(string: "https://v3-cinemeta.strem.io/catalog/\(type)/top/search=\(encoded).json") else {
@@ -856,10 +948,13 @@ class StreamManager {
         let isFilterActive = enableLanguageFilter ?? UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
         if isFilterActive {
             let defaultLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            let prefLangs = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [defaultLang]
             if matchesPreferredLanguage(stream, preferred: defaultLang, originalLanguage: originalLanguage, enableLanguageFilter: true) {
                 score += 3000.0 // Major priority boost for matching the user's preferred audio language
+            } else if matchesAnyPreferredLanguage(stream, preferredLanguages: prefLangs, originalLanguage: originalLanguage, enableLanguageFilter: true) {
+                score += 2500.0 // Strong boost for matching secondary preferred languages
             } else {
-                // Demote releases that lack the preferred language
+                // Demote releases that lack any preferred language
                 score *= 0.40
             }
         }
@@ -940,6 +1035,8 @@ class StreamManager {
         case "RUSSIAN", "RU", "RUS": return "RU"
         case "CHINESE", "ZH", "CHI", "ZHO": return "ZH"
         case "PORTUGUESE", "PT", "POR": return "PT"
+        case "ARABIC", "AR", "ARA": return "AR"
+        case "TURKISH", "TR", "TUR": return "TR"
         default: return u
         }
     }
@@ -957,7 +1054,9 @@ class StreamManager {
         "IT": (["ITALIAN", "ITA", "ITALIANO"], ["🇮🇹"]),
         "RU": (["RUSSIAN", "RUS"], ["🇷🇺"]),
         "ZH": (["CHINESE", "CHI", "MANDARIN", "CANTONESE"], ["🇨🇳", "🇭🇰", "🇹🇼"]),
-        "PT": (["PORTUGUESE", "POR", "PT-BR", "DUBLADO"], ["🇧🇷", "🇵🇹"])
+        "PT": (["PORTUGUESE", "POR", "PT-BR", "DUBLADO"], ["🇧🇷", "🇵🇹"]),
+        "AR": (["ARABIC", "ARA", "AR"], ["🇸🇦", "🇦🇪", "🇪🇬"]),
+        "TR": (["TURKISH", "TUR", "TR"], ["🇹🇷"])
     ]
 
     /// Checks if a stream contains or matches the user's preferred audio language,
@@ -980,24 +1079,34 @@ class StreamManager {
         let upperLang = (stream.language ?? "").uppercased()
         let combined = "\(upperTitle) \(upperLang)"
 
+        // Strip out subtitles clauses (e.g. "📝 Subtitles: English - eng", "Subs: English")
+        // so that subtitle language is not mistaken for audio language.
+        var audioTitle = combined
+        if let subIdx = audioTitle.range(of: "SUBTITLE", options: .caseInsensitive) {
+            audioTitle = String(audioTitle[..<subIdx.lowerBound])
+        }
+        if let subIdx = audioTitle.range(of: "SUBS:", options: .caseInsensitive) {
+            audioTitle = String(audioTitle[..<subIdx.lowerBound])
+        }
+
         // Check if stream is multi-audio / dual-audio (contains original audio + regional track)
         let isMultiOrDual = upperLang.contains("MULTI") ||
-                            combined.contains("MULTI") ||
-                            combined.contains("DUAL") ||
-                            combined.contains("MVO") ||
-                            combined.contains("DVO")
+                            audioTitle.contains("MULTI") ||
+                            audioTitle.contains("DUAL") ||
+                            audioTitle.contains("MVO") ||
+                            audioTitle.contains("DVO")
 
         // 1. Check for explicit keywords or country flag emojis matching target language
         let (keywords, flags) = Self.languageKeywordsAndFlags[targetCode] ?? ([targetCode], [])
-        let hasFlagMatch = flags.contains { stream.title.contains($0) }
+        let hasFlagMatch = flags.contains { audioTitle.contains($0) }
         let hasKeywordMatch = keywords.contains { kw in
             // Guard short 2-character keywords (like EN, HI, FR, ES) with boundary check
             if kw.count <= 2 {
                 let pattern = #"(?i)[\.\[\(\s/_-]\#(kw)[\.\]\)\s/_-]"#
-                return combined.range(of: pattern, options: .regularExpression) != nil ||
+                return audioTitle.range(of: pattern, options: .regularExpression) != nil ||
                        upperLang.components(separatedBy: ", ").contains(kw)
             } else {
-                return combined.contains(kw)
+                return audioTitle.contains(kw)
             }
         }
         let hasExplicitMatch = hasFlagMatch || hasKeywordMatch
@@ -1057,6 +1166,20 @@ class StreamManager {
         return false
     }
 
+    /// Checks if a stream contains or matches ANY of the user's preferred stream audio languages.
+    func matchesAnyPreferredLanguage(
+        _ stream: Stream,
+        preferredLanguages: [String],
+        originalLanguage: String? = nil,
+        enableLanguageFilter: Bool = true
+    ) -> Bool {
+        guard enableLanguageFilter else { return true }
+        let langs = preferredLanguages.isEmpty ? ["English"] : preferredLanguages
+        return langs.contains { lang in
+            matchesPreferredLanguage(stream, preferred: lang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+        }
+    }
+
     /// True when the release is a hard foreign DUB (no original audio advertised).
     /// Multi-audio releases that include original audio are not penalized.
     private func isForeignDub(_ lang: String, title: String, originalLanguage: String? = nil) -> Bool {
@@ -1093,13 +1216,13 @@ class StreamManager {
     
     /// Primary sort: Quality tier (1080p > 720p > SD).
     /// Secondary sort within tier: Health descending (healthiest first).
-    func streamSortComparator(_ s1: Stream, _ s2: Stream) -> Bool {
+    func streamSortComparator(_ s1: Stream, _ s2: Stream, originalLanguage: String? = nil) -> Bool {
         let q1 = qualityScore(s1.quality)
         let q2 = qualityScore(s2.quality)
         if q1 != q2 {
             return q1 > q2
         }
-        return computeStreamHealthScore(s1) > computeStreamHealthScore(s2)
+        return computeStreamHealthScore(s1, originalLanguage: originalLanguage) > computeStreamHealthScore(s2, originalLanguage: originalLanguage)
     }
 
     /// Startup Speed Score (SSS): Estimates time-to-first-playable-byte.
@@ -1256,6 +1379,7 @@ class StreamManager {
         sourceMode: String,
         preferredQuality: String,
         preferredLang: String,
+        preferredLanguages: [String]? = nil,
         originalLanguage: String? = nil,
         enableLanguageFilter: Bool = false,
         probeStatus: [String: StreamProbeResult] = [:],
@@ -1288,42 +1412,19 @@ class StreamManager {
         let qualityCandidates = qualityCapped.isEmpty ? modeFiltered : qualityCapped
         var candidates = qualityCandidates
 
-        // 3. Strict Language Gating when language filter is enabled
+        let langList = (preferredLanguages != nil && !preferredLanguages!.isEmpty)
+            ? preferredLanguages!
+            : [preferredLang]
+
+        // 3. Preferred Languages Soft-Ranking (Never discard sources)
+        // Matching streams receive substantial priority boosts (+5000 for primary, +4200 for secondary)
+        // in computeCompositeRank, ensuring preferred audio releases rise to the top while preserving
+        // all healthy candidates as standby fallbacks and in the stream picker.
         if enableLanguageFilter {
-            let matchedQuality = qualityCandidates.filter {
-                matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
-            }
-            if !matchedQuality.isEmpty {
-                print("[StreamManager] 🌐 Language Filter: found \(matchedQuality.count) candidate(s) matching audio (\(preferredLang)) within quality cap")
-                candidates = matchedQuality
-            } else {
-                let matchedAll = modeFiltered.filter {
-                    matchesPreferredLanguage($0, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
-                }
-                if !matchedAll.isEmpty {
-                    print("[StreamManager] 🌐 Language Filter: found \(matchedAll.count) candidate(s) matching audio (\(preferredLang)) (outside quality cap)")
-                    candidates = matchedAll
-                } else {
-                    // Language Inavailability Safeguard:
-                    // If preferred audio is completely unavailable (e.g. niche foreign cinema or Japanese anime with no dub),
-                    // gracefully fall back to original audio candidates or the general quality-capped pool!
-                    if let orig = originalLanguage, !orig.isEmpty {
-                        let matchedOrig = qualityCandidates.filter {
-                            matchesPreferredLanguage($0, preferred: orig, originalLanguage: originalLanguage, enableLanguageFilter: true)
-                        }
-                        if !matchedOrig.isEmpty {
-                            print("[StreamManager] 🌐 Language Filter: preferred audio (\(preferredLang)) unavailable. Falling back to original audio (\(orig))")
-                            candidates = matchedOrig
-                        } else {
-                            print("[StreamManager] ⚠️ Language Filter: zero candidates matched (\(preferredLang)). Falling back to general pool.")
-                            candidates = qualityCandidates
-                        }
-                    } else {
-                        print("[StreamManager] ⚠️ Language Filter: zero candidates matched (\(preferredLang)). Falling back to general pool.")
-                        candidates = qualityCandidates
-                    }
-                }
-            }
+            let matchedCount = candidates.filter {
+                matchesAnyPreferredLanguage($0, preferredLanguages: langList, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            }.count
+            print("[StreamManager] 🌐 Language Filter: \(matchedCount)/\(candidates.count) candidate(s) match preferred languages (\(langList.joined(separator: ", "))) [orig: \(originalLanguage ?? "unknown")]")
         }
 
         // 4. Composite score calculation
@@ -1331,6 +1432,7 @@ class StreamManager {
             let score1 = computeCompositeRank(
                 s1,
                 preferredLang: preferredLang,
+                preferredLanguages: langList,
                 originalLanguage: originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: probeStatus,
@@ -1341,6 +1443,7 @@ class StreamManager {
             let score2 = computeCompositeRank(
                 s2,
                 preferredLang: preferredLang,
+                preferredLanguages: langList,
                 originalLanguage: originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: probeStatus,
@@ -1355,13 +1458,14 @@ class StreamManager {
         }
 
         let primary = ranked.first
-        let fallbacks = Array(ranked.dropFirst().prefix(4))
+        let fallbacks = Array(ranked.dropFirst().prefix(6))
         return (primary, fallbacks)
     }
 
     private func computeCompositeRank(
         _ stream: Stream,
         preferredLang: String,
+        preferredLanguages: [String] = [],
         originalLanguage: String? = nil,
         enableLanguageFilter: Bool = false,
         probeStatus: [String: StreamProbeResult],
@@ -1384,17 +1488,22 @@ class StreamManager {
         // Preferred Audio Language bonus / Foreign Dub penalty (ONLY when Language Filter in Flux Mode is enabled!)
         if enableLanguageFilter {
             let matchesPrimary = matchesPreferredLanguage(stream, preferred: preferredLang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            let matchesSecondary = preferredLanguages.contains { lang in
+                lang != preferredLang && matchesPreferredLanguage(stream, preferred: lang, originalLanguage: originalLanguage, enableLanguageFilter: true)
+            }
             let matchesOriginal = (originalLanguage != nil && !originalLanguage!.isEmpty)
                 ? matchesPreferredLanguage(stream, preferred: originalLanguage!, originalLanguage: originalLanguage, enableLanguageFilter: true)
                 : false
             let isForeign = isForeignDub(stream.language ?? "", title: stream.title, originalLanguage: originalLanguage)
 
             if matchesPrimary {
-                score += 5000.0
+                score += 5000.0 // User's primary default audio language
+            } else if matchesSecondary {
+                score += 4200.0 // User's secondary preferred audio language
             } else if matchesOriginal {
-                score += 2500.0
+                score += 2500.0 // Original authentic audio
             } else if isForeign {
-                score -= 3500.0
+                score -= 3500.0 // Foreign dub not matching any preferred language
             }
         }
         // When enableLanguageFilter is false: ZERO language bias, zero language scoring, zero language penalties.
@@ -1412,7 +1521,7 @@ class StreamManager {
             // healthy torrents (their SSS caps at +5000); hijacked origins
             // (HTML interstitials, JSON errors) are excluded outright.
             if let probe = probeStatus[stream.stableKey] {
-                if probe.hijacked {
+                if probe.hijacked || !probe.ok {
                     score -= 25000.0
                 } else if let kbps = probe.throughputKBps {
                     if kbps >= 800.0 {
@@ -1842,18 +1951,26 @@ class StreamManager {
             let titleJunk = Set(rawWords).intersection(junkTokens).subtracting(targetTokens)
             if !titleJunk.isEmpty { junkInTitlePortion = true }
 
-            // Check if any target token is present in the title portion
-            let matchesTarget = targetTokens.contains { tToken in
-                rawWords.contains(where: { $0 == tToken })
-            }
+            // Check title match coverage and conflict detection
+            let targetSet = Set(targetTokens)
+            let candidateSet = Set(rawWords)
+            let commonTokens = targetSet.intersection(candidateSet)
+            let targetCoverage = Double(commonTokens.count) / Double(targetTokens.count)
 
-            if matchesTarget {
-                sawTargetConfirmation = true
+            if targetTokens.count == 1 {
+                if commonTokens.count == 1 {
+                    sawTargetConfirmation = true
+                } else if candidateSet.count >= 2 {
+                    sawExplicitConflict = true
+                }
             } else {
-                // If the title portion has 2 or more distinct words (e.g. ["head", "heels"])
-                // and none of the target keywords are present, this candidate is an explicitly different show!
-                let distinctWords = Set(rawWords)
-                if distinctWords.count >= 2 {
+                // Multi-token target (e.g. "Law & Order", "Special Ops", "Game of Thrones")
+                // Requires strong coverage to confirm (all tokens for 2-word titles, or >= 65% for longer titles)
+                if (targetTokens.count == 2 && commonTokens.count == 2) || (targetTokens.count > 2 && targetCoverage >= 0.65) {
+                    sawTargetConfirmation = true
+                } else if commonTokens.isEmpty || (targetCoverage <= 0.5 && candidateSet.count >= 2) {
+                    // Conflicting title: e.g. "The First Order" vs "Law & Order"
+                    // Candidate has 2+ words and only <= 50% target token overlap with conflicting words present
                     sawExplicitConflict = true
                 }
             }
@@ -1921,7 +2038,14 @@ class StreamManager {
 
         do {
             let (data, response) = try await self.session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 429 {
+                    print("[\(sourceName)] ⚠️ Rate limited (HTTP 429) for \(urlString)")
+                }
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    return []
+                }
+            } else {
                 return []
             }
 
@@ -1999,6 +2123,9 @@ class StreamManager {
                 let rawTitle = stream.description ?? stream.title ?? stream.name ?? "Unknown Stream"
                 let nameHeader = stream.name ?? ""
                 let combinedTitle = "\(nameHeader) \(rawTitle)"
+                let allMetadataText = [stream.name, stream.title, stream.description]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
                 let lowerCheck = "\(combinedTitle) \(finalURLStr)".lowercased()
                 if lowerCheck.contains("sign in") || lowerCheck.contains("signin") ||
                    lowerCheck.contains("log in") || lowerCheck.contains("login") ||
@@ -2009,7 +2136,7 @@ class StreamManager {
                 }
                 let quality = parseQuality(name: nameHeader, title: rawTitle, filename: stream.behaviorHints?.filename)
                 let size = parseSize(from: rawTitle) ?? formatVideoSize(stream.behaviorHints?.videoSize)
-                let language = parseLanguage(from: combinedTitle)
+                let language = parseLanguage(from: allMetadataText)
                 let codec = parseCodec(from: combinedTitle)
                 let bitrate = parseBitrate(from: combinedTitle)
                 let subtitles = parseSubtitles(from: combinedTitle)
@@ -2406,12 +2533,21 @@ class StreamManager {
         if hasLang(["PT", "POR"], full: "PORTUGUESE", flags: ["🇧🇷", "🇵🇹"]) || audioPart.contains("DUBLADO") { languages.append("PT") }
         if hasLang(["TA", "TAM"], full: "TAMIL") { languages.append("TAM") }
         if hasLang(["TE", "TEL"], full: "TELUGU") { languages.append("TEL") }
+        if hasLang(["AR", "ARA"], full: "ARABIC", flags: ["🇸🇦", "🇦🇪", "🇪🇬"]) { languages.append("AR") }
+        if hasLang(["TR", "TUR"], full: "TURKISH", flags: ["🇹🇷"]) { languages.append("TR") }
 
         let hasExplicitHindi = audioPart.contains("HINDI") || tokens.contains("HI") || tokens.contains("HIN")
         let isIndianFlag = rawAudioPart.contains("🇮🇳")
         if hasExplicitHindi || (isIndianFlag && !languages.contains("TAM") && !languages.contains("TEL")) {
             if !languages.contains("HI") {
                 languages.append("HI")
+            }
+        }
+        
+        if audioPart.contains("DUAL") || tokens.contains("DUAL") ||
+           audioPart.contains("DUAL-AUDIO") || audioPart.contains("DVO") {
+            if !languages.contains("DUAL") {
+                languages.append("DUAL")
             }
         }
         

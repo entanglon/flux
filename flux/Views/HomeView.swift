@@ -65,7 +65,7 @@ struct HomeView: View {
                             .padding(.trailing, 40)
                         
                         CarouselView(items: itemsToDisplay, spacing: 16, itemWidth: 290) { item in
-                            Button(action: {
+                            ContinueWatchingCard(item: item, mode: .continueWatching) {
                                 PlayerManager.shared.play(
                                     item,
                                     season: item.lastSeason,
@@ -73,12 +73,8 @@ struct HomeView: View {
                                     episodeImage: item.lastEpisodeImage,
                                     fromContinueWatching: true
                                 )
-                                openWindow(id: "player", value: item.id)
-                            }) {
-                                ContinueWatchingCard(item: item, mode: .continueWatching)
+                                PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                             }
-                            .buttonStyle(.plain)
-                            .focusEffectDisabled()
                         }
                     }
                     .padding(.bottom, 16)
@@ -436,7 +432,7 @@ struct HomeView: View {
                     .padding(.trailing, 40)
                 
                 CarouselView(items: items, spacing: 16, itemWidth: 290) { item in
-                    Button(action: {
+                    ContinueWatchingCard(item: item, mode: .recentlyWatched) {
                         PlayerManager.shared.play(
                             item,
                             season: item.lastSeason,
@@ -444,12 +440,8 @@ struct HomeView: View {
                             episodeImage: item.lastEpisodeImage,
                             fromContinueWatching: false
                         )
-                        openWindow(id: "player", value: item.id)
-                    }) {
-                        ContinueWatchingCard(item: item, mode: .recentlyWatched)
+                        PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                     }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
                 }
             }
             .padding(.bottom, 16)

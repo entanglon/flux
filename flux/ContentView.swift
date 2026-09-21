@@ -79,6 +79,11 @@ struct ContentView: View {
             .onAppear {
                 PlayerWindowRouter.openPlayer = { openWindow(id: "player", value: $0) }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .fluxNavigateToMedia)) { note in
+                if let item = note.object as? MediaItem {
+                    path.append(item)
+                }
+            }
             
             // MARK: - System Sidebar Material
             VStack(alignment: .leading, spacing: 0) {                // Traffic light clearance height

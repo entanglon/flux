@@ -524,6 +524,13 @@ struct StreamingSettingsView: View {
     @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
     @AppStorage("enableFluxLanguageFilter") private var enableFluxLanguageFilter = false
     @State private var showProxySheet = false
+    @State private var preferredLanguages: [String] = []
+
+    let availableLanguages = [
+        "English", "Japanese", "Spanish", "French", "German",
+        "Italian", "Portuguese", "Korean", "Hindi", "Chinese",
+        "Russian", "Tamil", "Telugu"
+    ]
     
     var body: some View {
         Form {
@@ -584,17 +591,92 @@ struct StreamingSettingsView: View {
                 Toggle(L10n.tr("Language Filter in Flux Mode"), isOn: $enableFluxLanguageFilter)
                     .disabled(!enableFluxMode)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
-                Text("When enabled, Flux Mode strictly filters streams to match your Default Audio. When disabled, it races the fastest and healthiest stream provided by your addons.".localized)
+                Text("When enabled, Flux Mode strictly filters streams to match your Preferred Languages. When disabled, it races the fastest and healthiest stream provided by your addons.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .opacity(enableFluxMode ? 1.0 : 0.6)
+
+                if enableFluxLanguageFilter && enableFluxMode {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.tr("Preferred Languages"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        
+                        Text("Select languages Flux Mode should prefer for stream selection and playback.".localized)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 6)], spacing: 6) {
+                            ForEach(availableLanguages, id: \.self) { lang in
+                                let isSelected = preferredLanguages.contains(lang)
+                                Button {
+                                    toggleLanguage(lang)
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
+                                        Text(lang.localized)
+                                            .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .stroke(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                    .padding(.vertical, 4)
+                }
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            loadPreferredLanguages()
+        }
         .onChange(of: streamingSourceMode) { _, _ in persistSettings() }
         .onChange(of: enableFluxMode) { _, _ in persistSettings() }
         .onChange(of: preferredQuality) { _, _ in persistSettings() }
         .onChange(of: enableFluxLanguageFilter) { _, _ in persistSettings() }
+    }
+
+    private func loadPreferredLanguages() {
+        if let saved = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages), !saved.isEmpty {
+            preferredLanguages = saved
+        } else {
+            let defaultAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            preferredLanguages = [defaultAudio]
+            UserDefaults.standard.set(preferredLanguages, forKey: UserDefaults.Key.preferredStreamLanguages)
+        }
+    }
+
+    private func toggleLanguage(_ lang: String) {
+        var current = preferredLanguages
+        if current.contains(lang) {
+            if current.count > 1 {
+                current.removeAll { $0 == lang }
+            }
+        } else {
+            current.append(lang)
+        }
+        preferredLanguages = current
+        UserDefaults.standard.set(current, forKey: UserDefaults.Key.preferredStreamLanguages)
+
+        let currentDefault = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        if currentDefault != "Original Audio" && !current.contains(currentDefault) {
+            UserDefaults.standard.set(current.first ?? "English", forKey: "defaultAudioLang")
+        }
+
+        persistSettings()
     }
 
     private func persistSettings() {
@@ -612,8 +694,18 @@ struct PlaybackSettingsView: View {
     @AppStorage("defaultAudioLang") private var defaultAudioLang = "English"
     @AppStorage("defaultSubLang") private var defaultSubLang = "English"
 
-    let audioLanguages = ["English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese", "Korean", "Hindi", "Chinese"]
-    let subtitleLanguages = ["Off", "English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese", "Korean", "Hindi", "Chinese"]
+    private var audioLanguages: [String] {
+        let preferred = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? ["English"]
+        var list = ["Original Audio"]
+        for lang in preferred {
+            if !list.contains(lang) {
+                list.append(lang)
+            }
+        }
+        return list
+    }
+
+    let subtitleLanguages = ["Off", "English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese", "Korean", "Hindi", "Chinese", "Russian", "Tamil", "Telugu"]
 
     var body: some View {
         Form {
@@ -639,11 +731,22 @@ struct PlaybackSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            validateDefaultAudio()
+        }
         .onChange(of: useHardwareAcceleration) { _, _ in persistSettings() }
         .onChange(of: autoPlayNextEnabled) { _, _ in persistSettings() }
         .onChange(of: enableAudioPassthrough) { _, _ in persistSettings() }
         .onChange(of: defaultAudioLang) { _, _ in persistSettings() }
         .onChange(of: defaultSubLang) { _, _ in persistSettings() }
+    }
+
+    private func validateDefaultAudio() {
+        if !audioLanguages.contains(defaultAudioLang) {
+            defaultAudioLang = audioLanguages.first(where: { $0 != "Original Audio" }) ?? "English"
+            UserDefaults.standard.set(defaultAudioLang, forKey: "defaultAudioLang")
+            persistSettings()
+        }
     }
 
     private func persistSettings() {

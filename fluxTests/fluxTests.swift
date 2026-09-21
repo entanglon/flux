@@ -213,6 +213,60 @@ struct fluxTests {
         #expect(pick?.id == engCommentary.id)
     }
 
+    @Test func preferredAudioTrackPicksEnglishDialogueOverOriginalKoreanWhenPreferredIsEnglish() {
+        // User-reported bug: Korean title (originalLanguage == "ko"), user's Default Audio is "English".
+        // When container provides both Korean dialogue and English dialogue, English dialogue MUST win!
+        let koreanDialogue = Track(id: 1, type: "audio", title: "Korean (Original)", lang: "kor", isSelected: false, isDefault: true)
+        let englishDialogue = Track(id: 2, type: "audio", title: "English Dub", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [koreanDialogue, englishDialogue],
+            preferredLang: "English",
+            originalLanguage: "ko"
+        )
+        #expect(pick?.id == englishDialogue.id)
+    }
+
+    @Test func preferredAudioTrackDefersToContainerDefaultWhenPreferredAudioUnavailable() {
+        // When user's preferred audio language is not in the file, player defers to MPV / container default
+        let koreanDialogue = Track(id: 1, type: "audio", title: "Korean (Original)", lang: "kor", isSelected: false, isDefault: true)
+        let spanishDialogue = Track(id: 2, type: "audio", title: "Spanish", lang: "spa", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [koreanDialogue, spanishDialogue],
+            preferredLang: "English",
+            originalLanguage: "ko"
+        )
+        #expect(pick?.id == koreanDialogue.id)
+    }
+
+    @Test func preferredAudioTrackRespectsOriginalAudioPreference() {
+        // User explicitly set Default Audio to "Original Audio"
+        let koreanDialogue = Track(id: 1, type: "audio", title: "Korean (Original)", lang: "kor", isSelected: false)
+        let englishDialogue = Track(id: 2, type: "audio", title: "English", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [koreanDialogue, englishDialogue],
+            preferredLang: "Original Audio",
+            originalLanguage: "ko"
+        )
+        #expect(pick?.id == koreanDialogue.id)
+    }
+
+    @Test func preferredAudioTrackChecksSecondaryPreferredLanguages() {
+        // Primary preferred: French (not in container), Secondary preferred: English (in container)
+        let japaneseDialogue = Track(id: 1, type: "audio", title: "Japanese", lang: "jpn", isSelected: false, isDefault: true)
+        let englishDialogue = Track(id: 2, type: "audio", title: "English Dub", lang: "eng", isSelected: false)
+
+        let pick = MPVController.preferredAudioTrack(
+            from: [japaneseDialogue, englishDialogue],
+            preferredLang: "French",
+            secondaryPreferredLangs: ["French", "English", "Japanese"],
+            originalLanguage: "ja"
+        )
+        #expect(pick?.id == englishDialogue.id)
+    }
+
     // MARK: - Actor Search & Person Candidate Tests
 
     @Test func personCandidateConvertsToMediaItem() {

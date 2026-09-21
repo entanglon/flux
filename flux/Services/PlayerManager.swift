@@ -79,6 +79,8 @@ class PlayerManager: ObservableObject {
     private var warmCore: WarmPlaybackCore?
     private var warmCoreDiscardTask: AsyncTask<Void, Never>?
     @Published var standbyFallbacks: [Stream] = []
+    @MainActor private var isAutoPlayRaceActive: Bool = false
+    @MainActor private var hasCommittedAutoPlayWinner: Bool = false
     @Published var hasPlaybackStarted: Bool = false
     private var startupWatchdogTask: Task<Void, Never>?
     private var lastTelemetryProgressTime: Date?
@@ -508,6 +510,30 @@ class PlayerManager: ObservableObject {
         )
     }
 
+    /// Cancels any active playback, stream probing, or auto-play race.
+    /// Used when the user opens the stream picker to ensure background
+    /// processes don't unexpectedly start playing a video under them.
+    func cancelAllPlaybackAndRaces() {
+        print("[PlayerManager] Cancelling all active playback and background auto-play races.")
+        self.fetchAndRaceTask?.cancel()
+        self.fetchAndRaceTask = nil
+        self.startupWatchdogTask?.cancel()
+        self.startupWatchdogTask = nil
+        self.isAutoPlayRaceActive = false
+        self.hasCommittedAutoPlayWinner = false
+        self.currentStreamURL = nil
+        self.currentSelectedStream = nil
+        self.forceStreamPicker = true
+        self.isStreamPickerPresented = true
+        self.isManualSelection = true
+        self.isLoading = false
+        self.sessionController?.stop()
+        if let hash = activeTorrentHash {
+            StremioServerManager.shared.removeTorrent(infoHash: hash)
+            activeTorrentHash = nil
+        }
+    }
+
     /// Purges cached stream when playback fails or when the source cannot be loaded.
     func invalidateCachedStream(for item: MediaItem?, season: Int?, episode: Int?) {
         guard let item = item else { return }
@@ -718,10 +744,17 @@ class PlayerManager: ObservableObject {
         self.lastStartupTimePos = 0.0
         self.startupThroughputSamples.removeAll()
         self.slowStartStrikes = 0
+        self.isAutoPlayRaceActive = false
+        self.hasCommittedAutoPlayWinner = false
         if forceStreamPicker {
             self.forceStreamPicker = true
             self.isManualSelection = true
             self.isStreamPickerPresented = true
+            self.hasCommittedAutoPlayWinner = false
+            self.isAutoPlayRaceActive = false
+            self.currentStreamURL = nil
+            self.currentSelectedStream = nil
+            self.sessionController?.stop()
         } else {
             self.forceStreamPicker = false
             self.isManualSelection = false
@@ -1038,7 +1071,7 @@ class PlayerManager: ObservableObject {
             let isDetailHit = (self.prefetchedKey == key && self.prefetchedStream != nil)
             let isNextHit = (self.prefetchedNextKey == key && self.prefetchedNextStream != nil)
             
-            if !forceStreamPicker, isFluxEnabled, (isDetailHit || isNextHit) {
+            if !forceStreamPicker && !self.forceStreamPicker && !self.isStreamPickerPresented, isFluxEnabled, (isDetailHit || isNextHit) {
                 guard await isStillCurrentTarget() else { return }
                 let pf = isDetailHit ? self.prefetchedStream! : self.prefetchedNextStream!
                 let subs = (isDetailHit ? self.prefetchedSubtitles : self.prefetchedNextSubtitles) ?? []
@@ -1099,15 +1132,22 @@ class PlayerManager: ObservableObject {
 
                     // Early Quorum Commit: If in Flux Mode and no stream is selected yet,
                     // check if incoming streams already meet Quality Quorum!
-                    if isFluxEnabled && !forceStreamPicker && self.currentSelectedStream == nil && self.currentStreamURL == nil {
+                    if isFluxEnabled && !forceStreamPicker && !self.forceStreamPicker && !self.isStreamPickerPresented && !self.isAutoPlayRaceActive && !self.hasCommittedAutoPlayWinner && self.currentSelectedStream == nil && self.currentStreamURL == nil {
                         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
                         let prefQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
                         if StreamManager.shared.hasQualityQuorum(streams: updatedStreams, sourceMode: sourceMode, preferredQuality: prefQuality, targetTitle: item.title) {
+                            self.isAutoPlayRaceActive = true
                             AsyncTask {
+                                defer {
+                                    Task { @MainActor in
+                                        self.isAutoPlayRaceActive = false
+                                    }
+                                }
                                 if let fastWinner = await self.raceBestStream(from: updatedStreams, item: item, season: season, episode: episode) {
                                     await MainActor.run {
                                         guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
-                                        guard self.currentSelectedStream == nil && self.currentStreamURL == nil else { return }
+                                        guard !self.hasCommittedAutoPlayWinner && !self.forceStreamPicker && !self.isStreamPickerPresented && self.currentSelectedStream == nil && self.currentStreamURL == nil else { return }
+                                        self.hasCommittedAutoPlayWinner = true
                                         print("[PlayerManager] ⚡ Quorum reached early (\(updatedStreams.count) streams)! Committing winner: \(fastWinner.cleanTitle)")
                                         self.isManualSelection = false
                                         self.attemptStream(fastWinner)
@@ -1153,7 +1193,7 @@ class PlayerManager: ObservableObject {
             }
 
             // If user or caller requested the Stream Selector UI and hasn't yet made a selection:
-            if forceStreamPicker || self.forceStreamPicker {
+            if forceStreamPicker || self.forceStreamPicker || self.isStreamPickerPresented {
                 await MainActor.run {
                     self.isLoading = false
                     self.isStreamPickerPresented = true
@@ -1180,25 +1220,32 @@ class PlayerManager: ObservableObject {
             }
 
             // Flux Mode Auto-Play Engine
-            if isFluxEnabled, !streams.isEmpty {
-                if let winner = await self.raceBestStream(from: streams, item: item, season: season, episode: episode) {
-                    guard await isStillCurrentTarget() else {
-                        print("[PlayerManager] Discarding Flux Mode stream winner because user selected another title/episode.")
+            if isFluxEnabled, !streams.isEmpty, !forceStreamPicker, !self.forceStreamPicker, !self.isStreamPickerPresented {
+                let alreadyCommitted = await MainActor.run { () -> Bool in
+                    return self.hasCommittedAutoPlayWinner || self.currentSelectedStream != nil || self.currentStreamURL != nil || self.forceStreamPicker || self.isStreamPickerPresented
+                }
+                if !alreadyCommitted {
+                    if let winner = await self.raceBestStream(from: streams, item: item, season: season, episode: episode) {
+                        guard await isStillCurrentTarget() else {
+                            print("[PlayerManager] Discarding Flux Mode stream winner because user selected another title/episode.")
+                            return
+                        }
+                        let selectionMade = await MainActor.run { () -> Bool in
+                            return self.hasCommittedAutoPlayWinner || self.currentSelectedStream != nil || self.currentStreamURL != nil || self.forceStreamPicker || self.isStreamPickerPresented
+                        }
+                        if selectionMade {
+                            print("[PlayerManager] Stream already selected manually or stream picker open; discarding auto-play winner.")
+                            return
+                        }
+                        print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
+                        await MainActor.run {
+                            guard !self.forceStreamPicker && !self.isStreamPickerPresented else { return }
+                            self.hasCommittedAutoPlayWinner = true
+                            self.isManualSelection = false
+                            self.attemptStream(winner)
+                        }
                         return
                     }
-                    let selectionMade = await MainActor.run { () -> Bool in
-                        return self.currentSelectedStream != nil || self.currentStreamURL != nil
-                    }
-                    if selectionMade {
-                        print("[PlayerManager] Stream already selected manually; discarding auto-play winner.")
-                        return
-                    }
-                    print("[PlayerManager] Flux Mode selected stream: \(winner.cleanTitle) (\(winner.source))")
-                    await MainActor.run {
-                        self.isManualSelection = false
-                        self.attemptStream(winner)
-                    }
-                    return
                 }
             }
             
@@ -1222,6 +1269,11 @@ class PlayerManager: ObservableObject {
     // Immediately commits to the highest-scoring candidate and stashes standby fallbacks
     // for seamless watchdog auto-advancement without blocking playback on artificial network probes.
     private func raceBestStream(from streams: [Stream], item: MediaItem? = nil, season: Int? = nil, episode: Int? = nil) async -> Stream? {
+        let isPickerActive = await MainActor.run { self.forceStreamPicker || self.isStreamPickerPresented }
+        if isPickerActive {
+            print("[PlayerManager] Stream picker active; cancelling race.")
+            return nil
+        }
         let healthy = streams.filter { !isHashRecentlyDead($0) }
         guard !healthy.isEmpty else { return nil }
 
@@ -1232,6 +1284,7 @@ class PlayerManager: ObservableObject {
         let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
         let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
         let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredLang]
         let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
         let (primary, fallbacks) = StreamManager.shared.selectFastStartCandidate(
@@ -1239,7 +1292,8 @@ class PlayerManager: ObservableObject {
             sourceMode: sourceMode,
             preferredQuality: preferredQuality,
             preferredLang: preferredLang,
-            originalLanguage: targetItem?.originalLanguage,
+            preferredLanguages: preferredLanguages,
+            originalLanguage: targetItem?.effectiveOriginalLanguage ?? targetItem?.originalLanguage,
             enableLanguageFilter: enableLanguageFilter,
             probeStatus: self.probeStatus,
             targetSeason: targetSeason,
@@ -1249,19 +1303,28 @@ class PlayerManager: ObservableObject {
 
         guard let firstPass = primary else { return nil }
 
-        let top5Candidates = Array(([firstPass] + fallbacks).prefix(5))
+        let top3Candidates = Array(([firstPass] + fallbacks).prefix(3))
 
-        let (winner, standby) = await StreamManager.shared.raceTopCandidates(
-            top5Candidates,
+        let (winner, standby, probeResults) = await StreamManager.shared.raceTopCandidatesWithResults(
+            top3Candidates,
             playableURL: { self.getPlayableURL(for: $0) },
-            timeout: 1.5
+            timeout: 2.5
         )
 
         let winnerCandidate = winner ?? firstPass
         let finalStandby = standby.isEmpty ? fallbacks : standby
 
         await MainActor.run {
+            for (key, ok) in probeResults {
+                self.probeStatus[key] = StreamProbeResult(ok: ok, latency: 0.0)
+            }
             self.standbyFallbacks = finalStandby
+        }
+
+        let isPickerStillActive = await MainActor.run { self.forceStreamPicker || self.isStreamPickerPresented }
+        if isPickerStillActive {
+            print("[PlayerManager] Stream picker active; discarding race winner.")
+            return nil
         }
 
         print("[PlayerManager] ⚡ Flux Mode selected best candidate: \(winnerCandidate.cleanTitle) (\(winnerCandidate.quality)) via \(winnerCandidate.source)")
@@ -1419,6 +1482,8 @@ class PlayerManager: ObservableObject {
     /// then the URL is handed to mpv. Dead sources fail and fall through to next candidate.
     private func attemptStream(_ stream: Stream) {
         self.currentSelectedStream = stream
+        self.hasCommittedAutoPlayWinner = true
+        self.isAutoPlayRaceActive = false
         // Single telemetry line per committed attempt (error channel persists;
         // per-candidate logging would spam). Proxied = loopback routing intent.
         let routedViaProxy = (stream.proxyHeaders?.isEmpty == false) && !stream.isTorrent && StreamProxyManager.shared.isRunning
@@ -1652,6 +1717,7 @@ class PlayerManager: ObservableObject {
             } else if !oldStream.isTorrent {
                 markHashDead(oldStream)
                 HostHealthTracker.shared.recordFailure(host: oldStream.url.host ?? "")
+                self.probeStatus[oldStream.stableKey] = StreamProbeResult(ok: false, latency: 3.0)
             }
         }
 
@@ -1697,11 +1763,13 @@ class PlayerManager: ObservableObject {
             statusText = nil
             isLoading = false
             currentStreamURL = nil
+            isStreamPickerPresented = true
             return
         }
 
         guard let idx = availableStreams.firstIndex(where: { $0.stableKey == failed.stableKey || $0.id == failed.id }) else {
             errorMessage = "Unable to play video. Please try another source."
+            isStreamPickerPresented = true
             return
         }
         let next = idx + 1
@@ -1714,6 +1782,7 @@ class PlayerManager: ObservableObject {
             statusText = nil
             isLoading = false
             currentStreamURL = nil
+            isStreamPickerPresented = true
         }
     }
     
@@ -2133,6 +2202,7 @@ class PlayerManager: ObservableObject {
             let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
             let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
             let preferredLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredLang]
             let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
             let (bestNext, _) = StreamManager.shared.selectFastStartCandidate(
@@ -2140,7 +2210,8 @@ class PlayerManager: ObservableObject {
                 sourceMode: sourceMode,
                 preferredQuality: preferredQuality,
                 preferredLang: preferredLang,
-                originalLanguage: item.originalLanguage,
+                preferredLanguages: preferredLanguages,
+                originalLanguage: item.effectiveOriginalLanguage ?? item.originalLanguage,
                 enableLanguageFilter: enableLanguageFilter,
                 probeStatus: await MainActor.run { self.probeStatus },
                 targetSeason: next.season,

@@ -698,9 +698,16 @@ class MPVController: ObservableObject {
     /// preferred language — directors' commentary is tagged `eng`, so a naive
     /// preferred-language match hijacked *3 Idiots* with English commentary.
     /// Commentary tracks never win while any dialogue track exists.
+    /// Selects the optimal audio track according to user preferences:
+    /// 1. If "Original Audio" is selected, authentic original dialogue wins.
+    /// 2. Primary priority: User's explicitly preferred default audio language (dialogue only, commentary excluded).
+    /// 3. Secondary priority: Any secondary preferred languages selected in stream settings (dialogue only).
+    /// 4. Fallback: If no preferred language track is available in the container, gracefully defer
+    ///    to container default dialogue, original dialogue, or MPV preference (never forced to wrong dub).
     static func preferredAudioTrack(
         from tracks: [Track],
         preferredLang: String,
+        secondaryPreferredLangs: [String] = [],
         originalLanguage: String?
     ) -> Track? {
         guard !tracks.isEmpty else { return nil }
@@ -708,26 +715,37 @@ class MPVController: ObservableObject {
         func isCommentary(_ t: Track) -> Bool { t.title.lowercased().contains("commentary") }
 
         let original = (originalLanguage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        // Probe the original language with a dummy track so ISO codes ("hi",
-        // "ja", "ko") resolve through the same alias table as full names.
-        let originalProbe = Track(id: -1, type: "audio", title: "", lang: original, isSelected: false)
-        let originalDiffersFromPreferred = !original.isEmpty
-            && !trackMatchesLanguage(track: originalProbe, targetLang: preferredLang)
-
         let origMatches = !original.isEmpty
             ? tracks.filter { trackMatchesLanguage(track: $0, targetLang: original) }
             : []
         let origDialogue = origMatches.first(where: { !isCommentary($0) }) ?? origMatches.first
-        let preferredDialogue = tracks.first { trackMatchesLanguage(track: $0, targetLang: preferredLang) && !isCommentary($0) }
 
-        if originalDiffersFromPreferred, let pick = origDialogue ?? preferredDialogue {
-            // Foreign title: original dialogue wins; a preferred-language dub
-            // only when the container lacks the original audio entirely.
-            return pick
+        // If the user explicitly selects "Original" or "Original Audio", authentic original dialogue wins
+        if preferredLang.lowercased().contains("original") {
+            return origDialogue
+                ?? tracks.first(where: { $0.isDefault && !isCommentary($0) })
+                ?? tracks.first(where: { !isCommentary($0) })
+                ?? tracks.first(where: { $0.isDefault })
+                ?? tracks.first
         }
 
-        return preferredDialogue
-            ?? tracks.first(where: { $0.isDefault && !isCommentary($0) })
+        // 1. Primary priority: User's explicitly preferred default audio language (dialogue only)
+        if let preferredDialogue = tracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredLang) && !isCommentary($0) }) {
+            return preferredDialogue
+        }
+
+        // 2. Secondary priority: Check any other preferred languages specified by the user (dialogue only)
+        for secLang in secondaryPreferredLangs where secLang != preferredLang {
+            if let secDialogue = tracks.first(where: { trackMatchesLanguage(track: $0, targetLang: secLang) && !isCommentary($0) }) {
+                return secDialogue
+            }
+        }
+
+        // 3. Fallback: Preferred audio is not available for this source.
+        // User directive: "if the preferred default audio isn't available for the source, the player should ignore it and select whatever mpv prefers."
+        // Defer to container default dialogue, original dialogue, or MPV first dialogue.
+        return tracks.first(where: { $0.isDefault && !isCommentary($0) })
+            ?? origDialogue
             ?? tracks.first(where: { !isCommentary($0) })
             ?? tracks.first(where: { $0.isDefault })
             ?? tracks.first
@@ -740,15 +758,17 @@ class MPVController: ObservableObject {
 
         let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
         let preferredSub = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
+        let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredAudio]
 
         // 1. Audio Track Selection — pure decision helper (see doc comment).
         let activeAudio = audioTracks.first(where: { $0.isSelected })
         var selectedTrack: Track? = nil
 
-        let currentOriginalLanguage = PlayerManager.shared.currentItem?.originalLanguage
+        let currentOriginalLanguage = PlayerManager.shared.currentItem?.effectiveOriginalLanguage ?? PlayerManager.shared.currentItem?.originalLanguage
         if let pick = Self.preferredAudioTrack(
             from: audioTracks,
             preferredLang: preferredAudio,
+            secondaryPreferredLangs: preferredLanguages,
             originalLanguage: currentOriginalLanguage
         ) {
             selectedTrack = pick
@@ -1317,6 +1337,7 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "sub-margin-y", "40")
 
         let audioLang = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+        let streamLangs = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [audioLang]
         let subLang = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
         
         func getIsoCode(_ lang: String) -> String {
@@ -1335,11 +1356,26 @@ final class MPVLayerView: NSView {
             case "Russian": return "rus,ru"
             case "Tamil": return "tam,ta"
             case "Telugu": return "tel,te"
+            case "Arabic": return "ara,ar"
+            case "Turkish": return "tur,tr"
+            case "Original Audio", "Original": return "und"
             default: return "eng,en"
             }
         }
         
-        mpv_set_property_string(mpv, "alang", getIsoCode(audioLang))
+        var alangList: [String] = []
+        if audioLang != "Original Audio" && audioLang != "Original" {
+            alangList.append(getIsoCode(audioLang))
+        }
+        for l in streamLangs where l != audioLang && l != "Original Audio" {
+            let code = getIsoCode(l)
+            if !alangList.contains(code) {
+                alangList.append(code)
+            }
+        }
+        if !alangList.isEmpty {
+            mpv_set_property_string(mpv, "alang", alangList.joined(separator: ","))
+        }
         if subLang == "Off" || subLang == "None" {
             mpv_set_property_string(mpv, "sid", "no")
             mpv_set_property_string(mpv, "slang", "no")
@@ -1694,8 +1730,9 @@ final class MPVLayerView: NSView {
                     let reason = endFile.pointee.reason
                     let error = endFile.pointee.error
                     print("[MPV EVENT] END_FILE reason:\(reason) error:\(error)")
-                    if reason == MPV_END_FILE_REASON_ERROR && !self.isIntentionallySwitchingFile {
+                    if reason == MPV_END_FILE_REASON_ERROR {
                         print("[MPV] Error: End File Reason ERROR (code: \(error))")
+                        self.isIntentionallySwitchingFile = false
                         DispatchQueue.main.async { self.onPlaybackError?() }
                     } else if reason == MPV_END_FILE_REASON_EOF && !self.isIntentionallySwitchingFile {
                         print("[MPV] Natural end of file reached")

@@ -8,6 +8,7 @@ struct ContinueWatchingCard: View {
 
     let item: MediaItem
     var mode: Mode = .continueWatching
+    var onPlay: (() -> Void)? = nil
 
     @State private var isHovering = false
     @ObservedObject private var userData = UserDataService.shared
@@ -229,6 +230,12 @@ struct ContinueWatchingCard: View {
                     // Ellipsis Context Menu Button
                     Menu {
                         Button {
+                            NotificationCenter.default.post(name: .fluxNavigateToMedia, object: item)
+                        } label: {
+                            Label((item.category == "Movie" ? "Go to Movie" : "Go to Show").localized, systemImage: "info.circle")
+                        }
+
+                        Button {
                             PlayerManager.shared.play(
                                 item,
                                 season: item.lastSeason,
@@ -236,7 +243,7 @@ struct ContinueWatchingCard: View {
                                 episodeImage: item.lastEpisodeImage,
                                 fromContinueWatching: true
                             )
-                            openWindow(id: "player", value: item.id)
+                            PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                         } label: {
                             Label((mode == .continueWatching ? "Resume" : "Play Again").localized,
                                   systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
@@ -251,7 +258,7 @@ struct ContinueWatchingCard: View {
                                 fromContinueWatching: false,
                                 forceStreamPicker: true
                             )
-                            openWindow(id: "player", value: item.id)
+                            PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
                         } label: {
                             Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
                         }
@@ -308,12 +315,26 @@ struct ContinueWatchingCard: View {
         )
         .shadow(color: Color.black.opacity(isHovering ? 0.45 : 0.20), radius: isHovering ? 14 : 5, x: 0, y: isHovering ? 7 : 2)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture {
+            if let onPlay = onPlay {
+                onPlay()
+            } else {
+                PlayerManager.shared.play(
+                    item,
+                    season: item.lastSeason,
+                    episode: item.lastEpisode,
+                    episodeImage: item.lastEpisodeImage,
+                    fromContinueWatching: mode == .continueWatching
+                )
+                PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
+            }
+        }
         .animation(.easeOut(duration: 0.2), value: isHovering)
         .onHover { isHovering = $0 }
         .contextMenu {
-            // Right-click parity with the ellipsis menu, plus the missing
-            // Go-to-title entry title cards have.
-            NavigationLink(value: item) {
+            Button {
+                NotificationCenter.default.post(name: .fluxNavigateToMedia, object: item)
+            } label: {
                 Label((item.category == "Movie" ? "Go to Movie" : "Go to Show").localized, systemImage: "info.circle")
             }
             Button {
@@ -324,7 +345,7 @@ struct ContinueWatchingCard: View {
                     episodeImage: item.lastEpisodeImage,
                     fromContinueWatching: true
                 )
-                openWindow(id: "player", value: item.id)
+                PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
             } label: {
                 Label((mode == .continueWatching ? "Resume" : "Play Again").localized,
                       systemImage: mode == .continueWatching ? "play.fill" : "arrow.counterclockwise")
@@ -338,7 +359,7 @@ struct ContinueWatchingCard: View {
                     fromContinueWatching: false,
                     forceStreamPicker: true
                 )
-                openWindow(id: "player", value: item.id)
+                PlayerWindowRouter.openPlayerWindow(itemID: item.id, openWindow: openWindow)
             } label: {
                 Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
             }
@@ -360,7 +381,6 @@ struct ContinueWatchingCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(mode == .continueWatching ? "Continue watching" : "Recently watched"), \(subtitleText)")
         .accessibilityHint("Resumes playback")
-        .id("\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)-\(Int((item.progress ?? 0) * 100))-\(item.isNewEpisode == true)")
         .task(id: "\(item.id)-\(item.lastSeason ?? 0)-\(item.lastEpisode ?? 0)") {
             let isTV = item.category == "TV Show" || item.lastSeason != nil
             let type = isTV ? "tv" : "movie"

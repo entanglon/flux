@@ -1367,10 +1367,30 @@ class UserDataService: ObservableObject {
             }
             if let remoteSettings {
                 for (key, val) in remoteSettings {
+                    if key == UserDefaults.Key.streamRouteProxyEndpoint {
+                        let remoteEp = (val as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let localEp = UserDefaults.standard.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !remoteEp.isEmpty {
+                            UserDefaults.standard.set(remoteEp, forKey: key)
+                        } else if !localEp.isEmpty {
+                            // Keep local configured endpoint
+                        } else if let rec = StreamRouteProxyManager.recoverConfiguredEndpoint() {
+                            UserDefaults.standard.set(rec, forKey: key)
+                        }
+                        continue
+                    }
+                    if key == UserDefaults.Key.streamRouteProxyEnabled {
+                        let rBool = val as? Bool ?? false
+                        let lBool = UserDefaults.standard.bool(forKey: key)
+                        let hasEp = !(UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? "").isEmpty
+                        UserDefaults.standard.set(rBool || (lBool && hasEp), forKey: key)
+                        continue
+                    }
                     if UserDefaults.standard.object(forKey: key) == nil {
                         UserDefaults.standard.set(val, forKey: key)
                     }
                 }
+                StreamRouteProxyManager.shared.reloadFromUserDefaults()
             }
             if let remoteEpProgress {
                 var localEpProgress = UserDefaults.standard.dictionary(forKey: self.episodeProgressKey) as? [String: [String: Any]] ?? [:]
@@ -1402,7 +1422,15 @@ class UserDataService: ObservableObject {
         let hasLocalWatchlistAdditions = mergedWatchlist.count > remoteWatchlist.count
         let hasLocalCollectionAdditions = mergedCollections.count > imported.count
 
-        let hasLocalAdditionsToPush = missingTmdbInCloud || missingNameInCloud || hasLocalHistoryAdditions || hasLocalWatchlistAdditions || hasLocalCollectionAdditions
+        let remoteSettingsDict = payload["settings"] as? [String: Any]
+        let remoteProxyEp = (remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEndpoint] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localProxyEp = (UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let missingProxyInCloud = remoteProxyEp.isEmpty && !localProxyEp.isEmpty
+        let remoteProxyEnabled = remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool ?? false
+        let localProxyEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        let proxyEnabledMismatch = localProxyEnabled && !remoteProxyEnabled && !localProxyEp.isEmpty
+
+        let hasLocalAdditionsToPush = missingTmdbInCloud || missingNameInCloud || hasLocalHistoryAdditions || hasLocalWatchlistAdditions || hasLocalCollectionAdditions || missingProxyInCloud || proxyEnabledMismatch
 
         if Thread.isMainThread {
             applyUIUpdates()

@@ -160,6 +160,7 @@ struct PlayerView: View {
             PlayerWindowAccessor { window in
                 if self.hostWindow !== window {
                     self.hostWindow = window
+                    window.identifier = NSUserInterfaceItemIdentifier("playerWindow")
                     self.setupContextMenuMonitor(for: window)
                     self.setupKeyMonitor(for: window)
                 }
@@ -1523,6 +1524,7 @@ struct PlayerView: View {
         contextMenuMonitor = nil
         mpv.stop()
         playerManager.close()
+        hostWindow?.identifier = nil
         dismiss()
     }
 
@@ -1740,6 +1742,10 @@ struct PlayerView: View {
             isEnabled: true
         ) {
             DispatchQueue.main.async {
+                PlayerManager.shared.cancelAllPlaybackAndRaces()
+                mpv.stop()
+                PlayerManager.shared.forceStreamPicker = true
+                PlayerManager.shared.isStreamPickerPresented = true
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                     self.showManualStreamPicker = true
                 }
@@ -2123,6 +2129,8 @@ struct PlayerView: View {
                         .buttonStyle(.plain)
                     } else {
                         Button {
+                            playerManager.cancelAllPlaybackAndRaces()
+                            mpv.stop()
                             playerManager.errorMessage = nil
                             playerManager.currentStreamURL = nil
                             playerManager.forceStreamPicker = true
@@ -2131,9 +2139,11 @@ struct PlayerView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "list.bullet.rectangle")
-                                Text("Choose Another Source".localized)
+                                Text("Choose Source".localized)
                             }
                             .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .background(playerManager.currentSelectedStream != nil ? Color.white.opacity(0.15) : Color.white, in: Capsule())
@@ -2894,20 +2904,51 @@ struct PlayerView: View {
                                 Image(systemName: "film.stack")
                                     .font(.system(size: 36))
                                     .foregroundStyle(.white.opacity(0.3))
-                                Text("No streams match your filter".localized)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.8))
-                                if selectedCategoryFilter != .all || selectedQualityFilter != "All" || selectedSourceFilter != "All" || !searchText.isEmpty {
-                                    Button("Reset Filters".localized) {
+                                
+                                let torrentCount = rawAllStreams.filter { $0.isTorrent }.count
+                                if sourceMode == "http" && torrentCount > 0 {
+                                    Text("No HTTP streams available for this title".localized)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                    
+                                    Text(String.localizedFormat("%d torrent streams available", torrentCount))
+                                        .font(.system(size: 12, weight: .regular))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                    
+                                    Button {
                                         withAnimation {
+                                            UserDefaults.standard.set("both", forKey: UserDefaults.Key.streamingSourceMode)
                                             selectedCategoryFilter = .all
-                                            selectedQualityFilter = "All"
-                                            selectedSourceFilter = "All"
-                                            searchText = ""
                                         }
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                            Text("Show Torrent Sources".localized)
+                                        }
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(Color.white.opacity(0.15), in: Capsule())
+                                        .foregroundColor(.white)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
+                                    .buttonStyle(.plain)
+                                    .padding(.top, 4)
+                                } else {
+                                    Text("No streams match your filter".localized)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                    if selectedCategoryFilter != .all || selectedQualityFilter != "All" || selectedSourceFilter != "All" || !searchText.isEmpty {
+                                        Button("Reset Filters".localized) {
+                                            withAnimation {
+                                                selectedCategoryFilter = .all
+                                                selectedQualityFilter = "All"
+                                                selectedSourceFilter = "All"
+                                                searchText = ""
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
                                 }
                             }
                             .padding(.vertical, 80)

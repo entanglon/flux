@@ -49,9 +49,37 @@ final class StreamRouteProxyManager: ObservableObject {
     public static let defaultEndpoint = ""
     public static let defaultTargetHosts = ["2peckle", "peckle", "febbox", "shegu", "pengu", "cinefreak", "fcdn"]
 
+    /// Scans existing profile snapshots and settings dictionaries to recover any previously configured proxy endpoint.
+    public static func recoverConfiguredEndpoint() -> String? {
+        let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
+        var candidateEndpoints: [String] = []
+        for key in allKeys {
+            if key.hasPrefix("profile.") && key.hasSuffix(".settings"),
+               let dict = UserDefaults.standard.dictionary(forKey: key),
+               let ep = dict[UserDefaults.Key.streamRouteProxyEndpoint] as? String,
+               !ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                candidateEndpoints.append(ep.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        if let mostCommon = candidateEndpoints.reduce(into: [String: Int](), { $0[$1, default: 0] += 1 }).max(by: { $0.value < $1.value })?.key {
+            return mostCommon
+        }
+        return nil
+    }
+
     private init() {
-        self.isEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-        self.endpointURL = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
+        var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
+        var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        if ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
+                ep = recovered
+                UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+                UserDefaults.standard.set(true, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+                enabled = true
+            }
+        }
+        self.endpointURL = ep
+        self.isEnabled = enabled
         var hosts = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.streamRouteProxyTargetHosts) ?? Self.defaultTargetHosts
         var changed = false
         for h in Self.defaultTargetHosts {
@@ -69,8 +97,18 @@ final class StreamRouteProxyManager: ObservableObject {
     func reloadFromUserDefaults() {
         isReloading = true
         defer { isReloading = false }
-        self.isEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-        self.endpointURL = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
+        var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
+        var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        if ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
+                ep = recovered
+                UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+                UserDefaults.standard.set(true, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+                enabled = true
+            }
+        }
+        self.endpointURL = ep
+        self.isEnabled = enabled
         var hosts = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.streamRouteProxyTargetHosts) ?? Self.defaultTargetHosts
         var changed = false
         for h in Self.defaultTargetHosts {
@@ -101,7 +139,7 @@ final class StreamRouteProxyManager: ObservableObject {
         if Thread.isMainThread {
             apply()
         } else {
-            DispatchQueue.main.sync(execute: apply)
+            DispatchQueue.main.async(execute: apply)
         }
     }
 

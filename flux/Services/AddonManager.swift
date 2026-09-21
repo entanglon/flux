@@ -120,12 +120,20 @@ class AddonManager: ObservableObject {
             if let local = map[id] {
                 var updated = local
                 if id == "stock.stream-route-proxy" {
-                    updated.isEnabled = StreamRouteProxyManager.shared.isEnabled || isEnabled
+                    let effective = StreamRouteProxyManager.shared.isEnabled || isEnabled
+                    updated.isEnabled = effective
+                    if StreamRouteProxyManager.shared.isEnabled != effective {
+                        StreamRouteProxyManager.shared.isEnabled = effective
+                    }
                 } else {
                     updated.isEnabled = isEnabled
                 }
                 map[id] = updated
             } else {
+                let proxyEnabled = (id == "stock.stream-route-proxy") ? (StreamRouteProxyManager.shared.isEnabled || isEnabled) : isEnabled
+                if id == "stock.stream-route-proxy" && proxyEnabled != StreamRouteProxyManager.shared.isEnabled {
+                    StreamRouteProxyManager.shared.isEnabled = proxyEnabled
+                }
                 let newAddon = StremioAddon(
                     id: id,
                     name: name,
@@ -135,7 +143,7 @@ class AddonManager: ObservableObject {
                     iconURL: iconURL,
                     url: url,
                     transportUrl: url,
-                    isEnabled: (id == "stock.stream-route-proxy") ? (StreamRouteProxyManager.shared.isEnabled || isEnabled) : isEnabled,
+                    isEnabled: proxyEnabled,
                     isStock: isStock,
                     category: category
                 )
@@ -183,48 +191,43 @@ class AddonManager: ObservableObject {
                 description: "Official multi-language subtitle search",
                 version: "1.0.0",
                 logoURL: "https://www.strem.io/images/addons/opensubtitles-logo.png",
+                iconURL: nil,
                 url: openSubtitlesHost,
                 transportUrl: openSubtitlesHost,
                 isEnabled: true,
                 isStock: true,
-                category: AddonCategory.subtitles.rawValue,
+                category: AddonCategory.official.rawValue,
                 catalogs: nil,
                 resources: ["subtitles"]
             )
             addons.append(openSubs)
         }
-
-        // Cinemeta — stock metadata & catalog addon (fallback when no TMDB key)
+        
+        // Cinemeta — stock non-deletable fallback metadata provider
         let cinemetaID = "cinemeta"
         let cinemetaHost = "https://v3-cinemeta.strem.io"
-        let cinemetaCatalogs: [StremioCatalog] = [
-            StremioCatalog(type: "movie", id: "top", name: "Top Movies"),
-            StremioCatalog(type: "movie", id: "imdbRating", name: "Top Rated"),
-            StremioCatalog(type: "series", id: "top", name: "Top Series"),
-            StremioCatalog(type: "series", id: "imdbRating", name: "Top Rated Series")
-        ]
-
+        
         if let existingIdx = addons.firstIndex(where: { $0.id == cinemetaID || $0.url.contains("cinemeta") }) {
             addons[existingIdx].id = cinemetaID
             addons[existingIdx].isStock = true
             addons[existingIdx].url = cinemetaHost
             addons[existingIdx].transportUrl = cinemetaHost
-            addons[existingIdx].logoURL = "https://www.strem.io/images/addons/cinemeta-logo.png"
-            addons[existingIdx].catalogs = cinemetaCatalogs
+            addons[existingIdx].logoURL = "https://v3-cinemeta.strem.io/favicon.ico"
         } else {
             let cinemeta = StremioAddon(
                 id: cinemetaID,
                 name: "Cinemeta",
-                description: "Free movies & series metadata catalog (Stremio stock addon)",
-                version: "4.0.0",
-                logoURL: "https://www.strem.io/images/addons/cinemeta-logo.png",
+                description: "Official IMDb-backed catalog for Movies and Series",
+                version: "3.0.12",
+                logoURL: "https://v3-cinemeta.strem.io/favicon.ico",
+                iconURL: nil,
                 url: cinemetaHost,
                 transportUrl: cinemetaHost,
                 isEnabled: true,
                 isStock: true,
                 category: AddonCategory.official.rawValue,
-                catalogs: cinemetaCatalogs,
-                resources: ["catalog", "meta", "stream"]
+                catalogs: nil,
+                resources: ["catalog", "meta"]
             )
             addons.append(cinemeta)
         }
@@ -236,7 +239,11 @@ class AddonManager: ObservableObject {
             addons[existingIdx].isStock = true
             addons[existingIdx].name = "Stream Route Proxy"
             addons[existingIdx].description = "Route throttled HTTP scraper hosts through a high-speed private forward proxy (e.g. Tailscale / Tinyproxy)"
-            addons[existingIdx].isEnabled = StreamRouteProxyManager.shared.isEnabled
+            let effective = StreamRouteProxyManager.shared.isEnabled || addons[existingIdx].isEnabled
+            addons[existingIdx].isEnabled = effective
+            if StreamRouteProxyManager.shared.isEnabled != effective {
+                StreamRouteProxyManager.shared.isEnabled = effective
+            }
         } else {
             let proxyAddon = StremioAddon(
                 id: streamProxyID,
@@ -255,8 +262,7 @@ class AddonManager: ObservableObject {
             )
             addons.append(proxyAddon)
         }
-
-        sortAddonsDeterministically()
+        
         saveAddons()
     }
 
@@ -370,6 +376,7 @@ class AddonManager: ObservableObject {
                 ProfileManager.shared.saveCurrentProfileSettings()
             }
             saveAddons()
+            AuthManager.shared.syncNow(forcePull: false)
         }
     }
     
