@@ -66,17 +66,13 @@ Whenever building or modifying any user-facing feature for Flux (new views, shee
    - Root cause to address: When playing a release with both Korean and English audio tracks, Korean was selected by default even though Default Audio was English.
    - Fix `MPVController.preferredAudioTrack`: ensure user's preferred default audio language strictly wins over container default flags (`isDefault = true` on the original language track must not override explicit user preference when the preferred language track exists).
    - Graceful fallback: If the preferred default audio language is not available in the selected container, ignore and fall back cleanly to MPV's native selection / container default.
-5. **Stream Route Proxy PocketBase Sync & Addon Persistence Fix**:
-   - Root cause to address: Every time changes are applied and the app is rebuilt/relaunched, the Stream Route Proxy addon gets toggled off.
-     1. Toggling the proxy switch in Settings or the configuration sheet did not call `ProfileManager.shared.saveCurrentProfileSettings()` or `AuthManager.shared.scheduleAutoSync()`.
-     2. The active profile snapshot (`profile.<UUID>.settings`) and PocketBase cloud user record never received the updated `streamRouteProxyEnabled: true` state.
-     3. On app rebuild/relaunch, `AuthManager` restored the PocketBase session; `UserDataService.syncWithCloud()` pulled down the remote cloud payload where `stock.stream-route-proxy` was disabled (or absent).
-     4. `AddonManager.syncWithCloudAddons()` and `ProfileManager.applyCloudProfilesData()` blindly overwrote the local toggle with `false`.
-   - Fix Strategy:
-     1. In `StreamRouteProxyManager.isEnabled.didSet`: Call `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()`.
-     2. In `AddonManager.toggleAddon(_:)`: Ensure toggling `stock.stream-route-proxy` calls `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()`.
-     3. In `AddonManager.syncWithCloudAddons(_:)`: Protect `stock.stream-route-proxy` so that if `StreamRouteProxyManager.shared.isEnabled` is `true`, a stale `false` from PocketBase does not silently disable it (`updated.isEnabled = StreamRouteProxyManager.shared.isEnabled || isEnabled`).
-     4. In `ProfileManager.restoreSettings(for:)`: Ensure that if a profile snapshot lacks `streamRouteProxyEnabled`, it does not clobber an already active preference.
+5. **Stream Route Proxy PocketBase Sync & Addon Persistence Fix (COMPLETED & VERIFIED)**:
+   - Fixed auto-toggle off and cloud wipe:
+     1. In `StreamRouteProxyManager.isEnabled.didSet`: Added `isReloading` guard, calls `ProfileManager.shared.saveCurrentProfileSettings()` and `AuthManager.shared.scheduleAutoSync()`.
+     2. In `AddonManager.toggleAddon(_:)`: Toggling `stock.stream-route-proxy` immediately snapshots profile settings and triggers auto-sync.
+     3. In `AddonManager.syncWithCloudAddons(_:)`: Protected `stock.stream-route-proxy` so an active local proxy setting is preserved (`updated.isEnabled = StreamRouteProxyManager.shared.isEnabled || isEnabled`).
+     4. In `ProfileManager.restoreSettings(for:)` & `applyCloudProfilesData`: Profile snapshots preserve the enabled state and merge cloud dictionaries safely without clobbering.
+     5. Added unit test `cloudSyncPreservesLocallyEnabledProxy` in `StreamRouteProxyTests.swift`. All 6 proxy tests and 32 user data tests pass cleanly.
 
 ---
 
