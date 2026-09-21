@@ -10,24 +10,38 @@ import SwiftUI
 final class StreamRouteProxyManager: ObservableObject {
     static let shared = StreamRouteProxyManager()
 
+    private var isReloading = false
+
     // MARK: - Published Configuration State
 
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
             syncWithStockAddon()
+            if !isReloading {
+                ProfileManager.shared.saveCurrentProfileSettings()
+                AuthManager.shared.scheduleAutoSync()
+            }
         }
     }
 
     @Published var endpointURL: String {
         didSet {
             UserDefaults.standard.set(endpointURL, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            if !isReloading {
+                ProfileManager.shared.saveCurrentProfileSettings()
+                AuthManager.shared.scheduleAutoSync()
+            }
         }
     }
 
     @Published var targetHosts: [String] {
         didSet {
             UserDefaults.standard.set(targetHosts, forKey: UserDefaults.Key.streamRouteProxyTargetHosts)
+            if !isReloading {
+                ProfileManager.shared.saveCurrentProfileSettings()
+                AuthManager.shared.scheduleAutoSync()
+            }
         }
     }
 
@@ -53,6 +67,8 @@ final class StreamRouteProxyManager: ObservableObject {
     }
 
     func reloadFromUserDefaults() {
+        isReloading = true
+        defer { isReloading = false }
         self.isEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
         self.endpointURL = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
         var hosts = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.streamRouteProxyTargetHosts) ?? Self.defaultTargetHosts
@@ -76,7 +92,10 @@ final class StreamRouteProxyManager: ObservableObject {
         let stockID = "stock.stream-route-proxy"
         let apply = {
             if let idx = AddonManager.shared.addons.firstIndex(where: { $0.id == stockID }) {
-                AddonManager.shared.addons[idx].isEnabled = self.isEnabled
+                if AddonManager.shared.addons[idx].isEnabled != self.isEnabled {
+                    AddonManager.shared.addons[idx].isEnabled = self.isEnabled
+                    AddonManager.shared.saveAddons()
+                }
             }
         }
         if Thread.isMainThread {

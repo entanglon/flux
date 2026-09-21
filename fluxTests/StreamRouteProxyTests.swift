@@ -121,4 +121,36 @@ struct StreamRouteProxyTests {
         proxyManager.isEnabled = false
         #expect(addonManager.installedAddon(for: "stock.stream-route-proxy")?.isEnabled == false)
     }
+
+    @Test @MainActor func cloudSyncPreservesLocallyEnabledProxy() {
+        let proxyManager = StreamRouteProxyManager.shared
+        let addonManager = AddonManager.shared
+        let profileManager = ProfileManager.shared
+
+        if profileManager.currentProfile == nil {
+            profileManager.ensureDefaultProfile(name: "TestUser")
+        }
+        proxyManager.isEnabled = true
+        #expect(UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled) == true)
+        if let current = profileManager.currentProfile {
+            let snap = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+            #expect(snap?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == true)
+        }
+
+        let staleAddonsPayload: [[String: Any]] = [
+            [
+                "id": "stock.stream-route-proxy",
+                "name": "Stream Route Proxy",
+                "url": "flux://stream-route-proxy",
+                "isEnabled": false,
+                "isStock": true
+            ]
+        ]
+        addonManager.syncWithCloudAddons(staleAddonsPayload)
+        #expect(addonManager.installedAddon(for: "stock.stream-route-proxy")?.isEnabled == true)
+        #expect(proxyManager.isEnabled == true)
+
+        proxyManager.isEnabled = false
+        #expect(proxyManager.isEnabled == false)
+    }
 }

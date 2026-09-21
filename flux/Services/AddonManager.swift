@@ -119,7 +119,11 @@ class AddonManager: ObservableObject {
             
             if let local = map[id] {
                 var updated = local
-                updated.isEnabled = isEnabled
+                if id == "stock.stream-route-proxy" {
+                    updated.isEnabled = StreamRouteProxyManager.shared.isEnabled || isEnabled
+                } else {
+                    updated.isEnabled = isEnabled
+                }
                 map[id] = updated
             } else {
                 let newAddon = StremioAddon(
@@ -131,7 +135,7 @@ class AddonManager: ObservableObject {
                     iconURL: iconURL,
                     url: url,
                     transportUrl: url,
-                    isEnabled: isEnabled,
+                    isEnabled: (id == "stock.stream-route-proxy") ? (StreamRouteProxyManager.shared.isEnabled || isEnabled) : isEnabled,
                     isStock: isStock,
                     category: category
                 )
@@ -289,7 +293,7 @@ class AddonManager: ObservableObject {
         }
     }
     
-    private func saveAddons() {
+    func saveAddons() {
         if let encoded = try? JSONEncoder().encode(addons) {
             UserDefaults.standard.set(encoded, forKey: storageKey)
         }
@@ -363,6 +367,7 @@ class AddonManager: ObservableObject {
             addons[idx].isEnabled.toggle()
             if addon.id == "stock.stream-route-proxy" {
                 StreamRouteProxyManager.shared.isEnabled = addons[idx].isEnabled
+                ProfileManager.shared.saveCurrentProfileSettings()
             }
             saveAddons()
         }

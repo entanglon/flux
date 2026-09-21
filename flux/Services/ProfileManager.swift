@@ -360,6 +360,9 @@ final class ProfileManager: ObservableObject {
             if let lang = snap["appLanguage"] as? String {
                 LanguageManager.shared.syncFromProfile(lang)
             }
+            if snap[UserDefaults.Key.streamRouteProxyEnabled] == nil {
+                snapshotSettings(for: profileID)
+            }
             StreamRouteProxyManager.shared.reloadFromUserDefaults()
         } else {
             // First time loading this profile: snapshot current settings so active preferences persist
@@ -515,7 +518,15 @@ final class ProfileManager: ObservableObject {
             let isStock = (dict["isStock"] as? Bool) ?? isKids
             imported.append(UserProfile(id: id, name: name, avatarID: avatarID, createdAt: created, isKids: isKids, isStock: isStock))
             if let remoteSettings = dict["settings"] as? [String: Any] {
-                UserDefaults.standard.set(remoteSettings, forKey: "profile.\(id.uuidString).settings")
+                var localSnap = UserDefaults.standard.dictionary(forKey: "profile.\(id.uuidString).settings") ?? [:]
+                for (k, v) in remoteSettings {
+                    localSnap[k] = v
+                }
+                if remoteSettings[UserDefaults.Key.streamRouteProxyEnabled] == nil,
+                   let localProxyVal = localSnap[UserDefaults.Key.streamRouteProxyEnabled] {
+                    localSnap[UserDefaults.Key.streamRouteProxyEnabled] = localProxyVal
+                }
+                UserDefaults.standard.set(localSnap, forKey: "profile.\(id.uuidString).settings")
             }
             let histKey = "profile.\(id.uuidString).history"
             if let remoteHist = dict["history"] as? [[String: Any]], !remoteHist.isEmpty {
