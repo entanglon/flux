@@ -159,6 +159,8 @@ class PlayerManager: ObservableObject {
     private var startupThroughputSamples: [(date: Date, kbps: Double)] = []
     private var lastStartupTimePos: Double = 0.0
     private var slowStartStrikes: Int = 0
+    private var lastFallbackAttemptDate: Date = .distantPast
+    private var fallbackThrottleTask: Task<Void, Never>?
 
     // Next-Episode preloading state (AIOStreams style)
     private var prefetchedNextKey: String?
@@ -801,6 +803,8 @@ class PlayerManager: ObservableObject {
             sessionController?.stop()
             self.fetchAndRaceTask?.cancel()
             self.fetchAndRaceTask = nil
+            self.fallbackThrottleTask?.cancel()
+            self.fallbackThrottleTask = nil
             if warmCore?.key != playbackKey {
                 self.discardWarmCore()
             }
@@ -1846,12 +1850,26 @@ class PlayerManager: ObservableObject {
         guard !isManualSelection else { return }
         startupWatchdogTask?.cancel()
         startupWatchdogTask = nil
+        fallbackThrottleTask?.cancel()
+        fallbackThrottleTask = nil
 
         guard !standbyFallbacks.isEmpty else {
             print("[PlayerManager] No standby fallbacks remaining — falling back to standard next stream.")
             tryNextStream()
             return
         }
+
+        let timeSinceLast = Date().timeIntervalSince(lastFallbackAttemptDate)
+        if timeSinceLast < 0.8 {
+            print("[PlayerManager] ⏳ Fallback throttled (occurred within \(String(format: "%.2f", timeSinceLast))s) — scheduling smooth transition...")
+            fallbackThrottleTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled, let self = self else { return }
+                self.advanceToStandbyFallback()
+            }
+            return
+        }
+        lastFallbackAttemptDate = Date()
 
         let fallback = standbyFallbacks.removeFirst()
         print("[PlayerManager] ⚡ Seamlessly advancing to standby fallback: \(fallback.cleanTitle) (\(fallback.source))")

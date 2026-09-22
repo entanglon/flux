@@ -763,6 +763,8 @@ struct AdvancedSettingsView: View {
     @State private var usedBytes: Int64 = 0
     @State private var isClearingImages = false
     @State private var isClearingTorrents = false
+    @State private var showClearWatchConfirm = false
+    @State private var showClearSearchConfirm = false
     @ObservedObject private var updateManager = UpdateManager.shared
 
     /// Mirrors Stremio's cache size options (disk LRU — oldest torrents evicted first).
@@ -858,6 +860,36 @@ struct AdvancedSettingsView: View {
                 .padding(.top, 2)
             }
 
+            Section(
+                header: Text("History & Privacy".localized),
+                footer: Text("Clearing history removes your viewing progress and recent searches across all devices synced to this account.".localized)
+            ) {
+                HStack(spacing: 12) {
+                    Button(action: {
+                        showClearWatchConfirm = true
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "clock.arrow.circlepath")
+                            Text("Clear Watch History".localized)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        showClearSearchConfirm = true
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "magnifyingglass")
+                            Text("Clear Search History".localized)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, 2)
+            }
+
             Section(header: Text("About".localized)) {
                 HStack(spacing: 14) {
                     Image(nsImage: NSApp.applicationIconImage)
@@ -893,6 +925,22 @@ struct AdvancedSettingsView: View {
         .formStyle(.grouped)
         .task {
             await refreshCacheUsage()
+        }
+        .alert("Clear Watch History?".localized, isPresented: $showClearWatchConfirm) {
+            Button("Clear All".localized, role: .destructive) {
+                UserDataService.shared.clearHistory()
+            }
+            Button("Cancel".localized, role: .cancel) {}
+        } message: {
+            Text("This will permanently remove your watch history and continue watching progress across all synced devices.".localized)
+        }
+        .alert("Clear Search History?".localized, isPresented: $showClearSearchConfirm) {
+            Button("Clear All".localized, role: .destructive) {
+                RecentSearchManager.shared.clear()
+            }
+            Button("Cancel".localized, role: .cancel) {}
+        } message: {
+            Text("This will clear all recent searches and search queries across all synced devices.".localized)
         }
     }
 

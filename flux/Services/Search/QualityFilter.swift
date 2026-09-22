@@ -14,7 +14,7 @@ struct QualityGateConfig: Sendable, Equatable {
         recentReleaseGraceDays: Int = 60,
         minPopularityFloor: Double = 1.0,
         requirePoster: Bool = true,
-        requireOverview: Bool = true
+        requireOverview: Bool = false
     ) {
         self.minVoteCountThreshold = minVoteCountThreshold
         self.recentReleaseGraceDays = recentReleaseGraceDays
@@ -34,13 +34,23 @@ struct QualityFilter: Sendable {
         self.config = config
     }
 
-    nonisolated func isEligible(_ candidate: MediaCandidate, now: Date = Date()) -> Bool {
+    nonisolated func isEligible(_ candidate: MediaCandidate, query: String? = nil, now: Date = Date()) -> Bool {
         guard !candidate.isAdult else { return false }
 
-        // Prune commentary and audio riff tracks (e.g. "Rifftrax: Avengers: Endgame")
         let lowerTitle = candidate.title.lowercased()
+        let lowerQuery = query?.lowercased() ?? ""
+
+        // Prune commentary and audio riff tracks (e.g. "Rifftrax: Avengers: Endgame")
         if lowerTitle.hasPrefix("rifftrax:") || lowerTitle.hasPrefix("rifftrax -") {
             return false
+        }
+
+        // Prune trash/exploitation keywords unless explicitly queried
+        let junkKeywords = ["bikini", "parody", "xxx", "porn", "erotic", "mockbuster", "spoof"]
+        for kw in junkKeywords {
+            if lowerTitle.contains(kw) && !lowerQuery.contains(kw) {
+                return false
+            }
         }
 
         // Require valid poster artwork across all sources
@@ -48,23 +58,32 @@ struct QualityFilter: Sendable {
             guard let poster = candidate.posterPath, !poster.isEmpty else { return false }
         }
         
-        // Cinemeta search results do not bundle an overview/synopsis in the search index;
-        // do not reject them if source is cinemeta.
-        if candidate.source != .cinemeta {
-            if config.requireOverview,
-               (candidate.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                return false
-            }
-        }
-
         let releaseAgeDays = candidate.releaseDate.map { now.timeIntervalSince($0) / 86_400 }
         let isFreshRelease = (releaseAgeDays ?? .infinity) <= Double(config.recentReleaseGraceDays)
             && (releaseAgeDays ?? -1) >= 0
         let isUpcomingRelease = (releaseAgeDays ?? 0) < 0
 
+        // New releases, upcoming releases, and verified Cinemeta catalog items are exempt from the vote-count/popularity floor
         if isFreshRelease || isUpcomingRelease || candidate.source == .cinemeta {
-            // New releases, upcoming releases, and verified Cinemeta catalog items are exempt from the vote-count/popularity floor
             return true
+        }
+
+        // Exact title matches are exempt from the vote-count floor
+        if let query = query {
+            let normQuery = query.normalizedForSearch.articleStripped
+            if candidate.articleStrippedTitle == normQuery || candidate.normalizedTitle == query.normalizedForSearch {
+                return true
+            }
+        }
+
+        // Prune poorly-rated titles (< 5.0 with low popularity)
+        if candidate.voteAverage > 0 && candidate.voteAverage < 5.0 && candidate.popularity < 10.0 {
+            return false
+        }
+
+        // Prune obscure long-tail items with negligible popularity and low votes
+        if candidate.popularity < 2.5 && candidate.voteCount < 150 && candidate.source != .cinemeta {
+            return false
         }
 
         if candidate.voteCount < config.minVoteCountThreshold { return false }
@@ -73,7 +92,7 @@ struct QualityFilter: Sendable {
         return true
     }
 
-    nonisolated func filter(_ candidates: [MediaCandidate]) -> [MediaCandidate] {
-        candidates.filter { isEligible($0) }
+    nonisolated func filter(_ candidates: [MediaCandidate], query: String? = nil) -> [MediaCandidate] {
+        candidates.filter { isEligible($0, query: query) }
     }
 }

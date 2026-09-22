@@ -5,10 +5,18 @@ class RecentSearchManager: ObservableObject {
     static let shared = RecentSearchManager()
     
     @Published var recentItems: [MediaItem] = []
+    @Published var recentQueries: [String] = []
+    
     private var currentProfileID: UUID?
-    private var key: String? {
+    
+    private var itemsKey: String? {
         guard let id = currentProfileID else { return nil }
         return "profile.\(id.uuidString).recentSearches"
+    }
+    
+    private var queriesKey: String? {
+        guard let id = currentProfileID else { return nil }
+        return "profile.\(id.uuidString).searchHistory"
     }
     
     private init() {
@@ -22,17 +30,51 @@ class RecentSearchManager: ObservableObject {
     func switchProfile(to profile: UserProfile?) {
         currentProfileID = profile?.id
         recentItems = []
+        recentQueries = []
         load()
-        if let profile, recentItems.isEmpty, !profile.isKids {
+        if let profile, !profile.isKids {
             // Carry forward legacy global searches if profile has no searches yet
-            if let legacyData = UserDefaults.standard.data(forKey: "flux_recent_searches"),
+            if recentItems.isEmpty,
+               let legacyData = UserDefaults.standard.data(forKey: "flux_recent_searches"),
                let legacy = try? JSONDecoder().decode([MediaItem].self, from: legacyData),
                !legacy.isEmpty {
                 recentItems = legacy
-                save()
+                saveItems()
+            }
+            if recentQueries.isEmpty,
+               let legacyQueries = UserDefaults.standard.stringArray(forKey: "flux_search_history"),
+               !legacyQueries.isEmpty {
+                recentQueries = legacyQueries
+                saveQueries()
             }
         }
     }
+    
+    // MARK: - Query History
+    
+    func addQuery(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        recentQueries.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        recentQueries.insert(trimmed, at: 0)
+        if recentQueries.count > 20 {
+            recentQueries = Array(recentQueries.prefix(20))
+        }
+        saveQueries()
+        if !AppEnvironment.isRunningTests {
+            AuthManager.shared.scheduleAutoSync()
+        }
+    }
+    
+    func removeQuery(_ query: String) {
+        recentQueries.removeAll { $0.caseInsensitiveCompare(query) == .orderedSame }
+        saveQueries()
+        if !AppEnvironment.isRunningTests {
+            AuthManager.shared.scheduleAutoSync()
+        }
+    }
+    
+    // MARK: - Media Item History
     
     func add(_ item: MediaItem) {
         guard !item.id.hasPrefix("tt_test_") && !item.id.hasPrefix("test_") else { return }
@@ -41,15 +83,39 @@ class RecentSearchManager: ObservableObject {
         if recentItems.count > 15 {
             recentItems = Array(recentItems.prefix(15))
         }
-        save()
+        saveItems()
         if !AppEnvironment.isRunningTests {
             AuthManager.shared.scheduleAutoSync()
         }
     }
     
+    func removeItem(_ item: MediaItem) {
+        recentItems.removeAll { $0.id == item.id }
+        saveItems()
+        if !AppEnvironment.isRunningTests {
+            AuthManager.shared.scheduleAutoSync()
+        }
+    }
+    
+    // MARK: - Clear
+    
     func clear() {
+        clearSearchHistory()
+    }
+    
+    func clearSearchHistory() {
         recentItems.removeAll()
-        save()
+        recentQueries.removeAll()
+        saveItems()
+        saveQueries()
+        if !AppEnvironment.isRunningTests {
+            AuthManager.shared.scheduleAutoSync()
+        }
+    }
+    
+    func clearQueries() {
+        recentQueries.removeAll()
+        saveQueries()
         if !AppEnvironment.isRunningTests {
             AuthManager.shared.scheduleAutoSync()
         }
@@ -57,24 +123,37 @@ class RecentSearchManager: ObservableObject {
     
     func setRecentItems(_ items: [MediaItem]) {
         recentItems = items
-        save()
+        saveItems()
     }
     
-    private func save() {
-        guard !AppEnvironment.isRunningTests, let key = key else { return }
+    // MARK: - Persistence
+    
+    private func saveItems() {
+        guard !AppEnvironment.isRunningTests, let key = itemsKey else { return }
         if let encoded = try? JSONEncoder().encode(recentItems) {
             UserDefaults.standard.set(encoded, forKey: key)
         }
     }
     
-    private func load() {
-        guard let key = key else {
-            recentItems = []
-            return
-        }
-        if let data = UserDefaults.standard.data(forKey: key),
+    private func saveQueries() {
+        guard !AppEnvironment.isRunningTests, let key = queriesKey else { return }
+        UserDefaults.standard.set(recentQueries, forKey: key)
+    }
+    
+    func load() {
+        if let key = itemsKey,
+           let data = UserDefaults.standard.data(forKey: key),
            let decoded = try? JSONDecoder().decode([MediaItem].self, from: data) {
             recentItems = decoded
+        } else {
+            recentItems = []
+        }
+        
+        if let key = queriesKey,
+           let queries = UserDefaults.standard.stringArray(forKey: key) {
+            recentQueries = queries
+        } else {
+            recentQueries = []
         }
     }
 }

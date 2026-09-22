@@ -5,7 +5,7 @@ import AppKit
 class TMDBEnricher {
     static let shared = TMDBEnricher()
     
-    private let baseURL = "https://api.themoviedb.org/3"
+    private let baseURL = "https://api.tmdb.org/3"
     
     // MARK: - Caching Layer (Actor-isolated)
     private let memoryCache = TMDBMemoryCacheActor()

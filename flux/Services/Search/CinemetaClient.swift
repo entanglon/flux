@@ -11,8 +11,11 @@ actor CinemetaClient {
     }
 
     func search(query: String) async throws -> [MediaCandidate] {
-        async let movies = (try? fetch(type: "movie", query: query)) ?? []
-        async let series = (try? fetch(type: "series", query: query)) ?? []
+        let parsed = SearchQueryParser.parse(query)
+        let searchQuery = parsed.targetYear != nil ? parsed.cleanQuery : query
+
+        async let movies = (try? fetch(type: "movie", query: searchQuery)) ?? []
+        async let series = (try? fetch(type: "series", query: searchQuery)) ?? []
         let (movieResults, seriesResults) = await (movies, series)
         return movieResults + seriesResults
     }

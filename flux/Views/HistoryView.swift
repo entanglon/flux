@@ -1,32 +1,31 @@
 import SwiftUI
 
 struct HistoryView: View {
-    @ObservedObject private var userData = UserDataService.shared
-    
-    var showAsContinueWatching: Bool = false
+    @ObservedObject var userData = UserDataService.shared
+    @ObservedObject var languageManager = LanguageManager.shared
     @Environment(\.openWindow) private var openWindow
+    @State private var activeFilter: Filter = .all
     @State private var showClearConfirm = false
-    
-    enum Filter: String, CaseIterable {
-        case all = "All"
-        case inProgress = "In Progress"
-        case completed = "Watched"
 
-        var localizedTitle: String { rawValue.localized }
+    /// The user requested Continue Watching and History be the same thing.
+    /// Defaulting this view to display Continue Watching styles and headers!
+    var showAsContinueWatching: Bool = true
+
+    enum Filter: CaseIterable {
+        case all
+        case inProgress
+        case completed
+
+        var localizedTitle: String {
+            switch self {
+            case .all: return "All".localized
+            case .inProgress: return "In Progress".localized
+            case .completed: return "Completed".localized
+            }
+        }
     }
-    
-    @State private var activeFilter: Filter
-    
-    init(showAsContinueWatching: Bool = false) {
-        self.showAsContinueWatching = showAsContinueWatching
-        _activeFilter = State(initialValue: showAsContinueWatching ? .inProgress : .all)
-    }
-    
-    var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 280), spacing: 24)]
-    }
-    
-    private var filteredItems: [MediaItem] {
+
+    var filteredItems: [MediaItem] {
         switch activeFilter {
         case .all:
             return userData.history
@@ -36,7 +35,11 @@ struct HistoryView: View {
             return userData.recentlyWatched
         }
     }
-    
+
+    let columns = [
+        GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 20)
+    ]
+
     var body: some View {
         Group {
             if userData.history.isEmpty {
@@ -170,8 +173,8 @@ struct HistoryView: View {
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .alert("Clear Watch History?".localized, isPresented: $showClearConfirm) {
             Button("Clear All".localized, role: .destructive) {
-                for item in userData.history {
-                    userData.removeFromHistory(item)
+                withAnimation {
+                    userData.clearHistory()
                 }
             }
             Button("Cancel".localized, role: .cancel) {}

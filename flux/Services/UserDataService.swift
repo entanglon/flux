@@ -17,11 +17,24 @@ class UserDataService: ObservableObject {
     private var historyKey = "localHistoryDataStremio"
     private var collectionsKey = "localCollectionsData"
     var episodeProgressKey = "globalEpisodeProgress"
+    private(set) var currentProfileID: UUID?
+
+    var historyClearedAtKey: String {
+        if let id = currentProfileID {
+            return "profile.\(id.uuidString).historyClearedAt"
+        }
+        return "flux_history_cleared_at"
+    }
+
+    var historyClearedAt: Double {
+        UserDefaults.standard.double(forKey: historyClearedAtKey)
+    }
 
     /// Scopes all history/watchlist storage to a profile. When `migrateLegacyData`
     /// is set (first profile ever created), pre-profile data is carried over so
     /// nobody loses their library.
     func switchProfile(to profile: UserProfile?) {
+        currentProfileID = profile?.id
         if let profile {
             historyKey = "profile.\(profile.id.uuidString).history"
             watchlistKey = "profile.\(profile.id.uuidString).watchlist"
@@ -829,6 +842,30 @@ class UserDataService: ObservableObject {
     func removeFromHistory(_ item: MediaItem) {
         removeFromList(key: historyKey, item: item, target: \.history)
     }
+
+    // MARK: - Clear Watch History
+
+    func clearHistory() {
+        UserDefaults.standard.removeObject(forKey: historyKey)
+        UserDefaults.standard.removeObject(forKey: episodeProgressKey)
+        if ProfileManager.shared.currentProfile?.isKids != true {
+            UserDefaults.standard.removeObject(forKey: "localHistoryDataStremio")
+            UserDefaults.standard.removeObject(forKey: "globalEpisodeProgress")
+        }
+        let now = Date().timeIntervalSince1970
+        UserDefaults.standard.set(now, forKey: historyClearedAtKey)
+        UserDefaults.standard.synchronize()
+
+        if Thread.isMainThread {
+            self.history = []
+        } else {
+            DispatchQueue.main.async {
+                self.history = []
+            }
+        }
+        NotificationCenter.default.post(name: .fluxRefresh, object: nil)
+        AuthManager.shared.scheduleAutoSync(delay: 0.1)
+    }
     
     private func removeFromList(key: String, item: MediaItem, target: ReferenceWritableKeyPath<UserDataService, [MediaItem]>) {
         var currentData = UserDefaults.standard.array(forKey: key) as? [[String: Any]] ?? []
@@ -1033,10 +1070,17 @@ class UserDataService: ObservableObject {
         let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
         let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
 
+        let primaryClearedAtKey = primaryPrefix.map { $0 + "historyClearedAt" } ?? historyClearedAtKey
+        let primaryClearedAt = UserDefaults.standard.double(forKey: primaryClearedAtKey)
+        let rootClearedAt = max(primaryClearedAt, historyClearedAt)
+
         return [
             "version": 3,
             "watchlist": sanitizedWatchlist,
             "history": sanitizedHistory,
+            "historyClearedAt": rootClearedAt,
+            "searchHistory": RecentSearchManager.shared.recentQueries,
+            "recentSearches": RecentSearchManager.shared.recentItems.map { itemDict($0) },
             "settings": ProfileManager.shared.exportGlobalSettings(),
             "episodeProgress": epProgress,
             "collections": collections.map { c in
@@ -1079,13 +1123,24 @@ class UserDataService: ObservableObject {
     }
 
     func mergeHistoryData(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
+        let clearedAt = self.historyClearedAt
+        let filteredRemote = remote.filter { dict in
+            if clearedAt > 0 {
+                let ts = dict["timestamp"] as? Double ?? 0
+                if ts <= clearedAt {
+                    return false
+                }
+            }
+            return true
+        }
+
         var map: [String: [String: Any]] = [:]
         for item in local {
             guard let _ = item["id"] as? String else { continue }
             let key = canonicalIdentityKey(for: item)
             map[key] = item
         }
-        for item in remote {
+        for item in filteredRemote {
             guard let _ = item["id"] as? String else { continue }
             let key = canonicalIdentityKey(for: item)
             if let localItem = map[key] {
@@ -1269,7 +1324,23 @@ class UserDataService: ObservableObject {
             }
         }
 
-        // 5. Merge history & watchlist for the now-active profile
+        // 5. Restore History Cleared Timestamp & Search History
+        if let remoteClearedAt = payload["historyClearedAt"] as? Double, remoteClearedAt > self.historyClearedAt {
+            UserDefaults.standard.set(remoteClearedAt, forKey: historyClearedAtKey)
+        }
+        if let remoteQueries = payload["searchHistory"] as? [String], !remoteQueries.isEmpty {
+            for q in remoteQueries.reversed() {
+                RecentSearchManager.shared.addQuery(q)
+            }
+        }
+        if let remoteSearches = payload["recentSearches"] as? [[String: Any]], !remoteSearches.isEmpty {
+            let parsedSearches = parseItems(remoteSearches)
+            for item in parsedSearches.reversed() {
+                RecentSearchManager.shared.add(item)
+            }
+        }
+
+        // 6. Merge history & watchlist for the now-active profile
         let remoteWatchlist = payload["watchlist"] as? [[String: Any]] ?? []
         let remoteHistory = payload["history"] as? [[String: Any]] ?? []
         let isCurrentKids = ProfileManager.shared.currentProfile?.isKids == true

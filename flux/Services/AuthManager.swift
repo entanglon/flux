@@ -355,10 +355,15 @@ class AuthManager: ObservableObject {
             let payload = UserDataService.shared.exportCloudPayload()
             
             // Cloud Anti-Regression Shield:
-            // Never allow an empty or wiped local history to overwrite a populated remote history!
+            // Never allow an empty or wiped local history to overwrite a populated remote history,
+            // UNLESS the user intentionally and explicitly cleared their watch history!
             let localHistoryCount = (payload["history"] as? [[String: Any]])?.count ?? 0
             let remoteHistoryCount = (remote?.payload["history"] as? [[String: Any]])?.count ?? 0
-            if remoteHistoryCount > 0 && localHistoryCount == 0 {
+            let localClearedAt = payload["historyClearedAt"] as? Double ?? 0
+            let remoteUpdatedAt = remote?.updatedAt ?? 0
+            let isExplicitlyCleared = localClearedAt > 0 && localClearedAt >= (remoteUpdatedAt - 10.0)
+
+            if remoteHistoryCount > 0 && localHistoryCount == 0 && !isExplicitlyCleared {
                 Logger.auth.error("Cloud push aborted: local history is unexpectedly empty while remote has \(remoteHistoryCount) items!")
                 return
             }

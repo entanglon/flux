@@ -2,9 +2,23 @@ import Foundation
 
 // MARK: - TMDB /3/search/multi Client with Cooperative Task Cancellation
 
+enum DominantSearchType: Sendable {
+    case movie
+    case tv
+    case person
+    case unknown
+}
+
 struct MultiSearchResult: Sendable {
     let candidates: [MediaCandidate]
     let people: [PersonCandidate]
+    let dominantType: DominantSearchType
+
+    init(candidates: [MediaCandidate] = [], people: [PersonCandidate] = [], dominantType: DominantSearchType = .unknown) {
+        self.candidates = candidates
+        self.people = people
+        self.dominantType = dominantType
+    }
 }
 
 actor TMDBClient {
@@ -63,56 +77,74 @@ actor TMDBClient {
             }
         }
 
-        return MultiSearchResult(candidates: [], people: [])
+        return MultiSearchResult(candidates: [], people: [], dominantType: .unknown)
     }
 
     private func performMultiSearch(query: String) async throws -> MultiSearchResult {
         let key = apiKeyProvider()
-        guard !key.isEmpty else { return MultiSearchResult(candidates: [], people: []) }
+        guard !key.isEmpty else { return MultiSearchResult(candidates: [], people: [], dominantType: .unknown) }
         
         let tmdbLang = await MainActor.run {
             let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
             return AppLanguage(rawValue: appLang)?.tmdbCode ?? "en-US"
         }
-        var components = URLComponents(string: "https://api.themoviedb.org/3/search/multi")
-        components?.queryItems = [
-            URLQueryItem(name: "query", value: query),
-            URLQueryItem(name: "include_adult", value: "false"),
-            URLQueryItem(name: "language", value: tmdbLang),
-            URLQueryItem(name: "api_key", value: key)
-        ]
 
-        guard let url = components?.url else { throw SearchClientError.invalidURL }
+        // Primary: api.tmdb.org (official CDN unblocked by ISPs), Fallback: api.themoviedb.org
+        let hosts = ["api.tmdb.org", "api.themoviedb.org"]
+        var lastError: Error = SearchClientError.invalidURL
 
-        // `data(from:)` cooperatively observes Task cancellation and throws
-        // promptly rather than letting superseded requests execute to completion.
-        let (data, response) = try await session.data(from: url)
+        for host in hosts {
+            var components = URLComponents(string: "https://\(host)/3/search/multi")
+            components?.queryItems = [
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "include_adult", value: "false"),
+                URLQueryItem(name: "language", value: tmdbLang),
+                URLQueryItem(name: "api_key", value: key)
+            ]
 
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SearchClientError.badStatusCode((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
+            guard let url = components?.url else { continue }
 
-        let decoded = try JSONDecoder().decode(TMDBMultiSearchResponse.self, from: data)
-        var candidates: [MediaCandidate] = []
-        var people: [PersonCandidate] = []
+            do {
+                // `data(from:)` cooperatively observes Task cancellation and throws
+                // promptly rather than letting superseded requests execute to completion.
+                let (data, response) = try await session.data(from: url)
 
-        for res in decoded.results {
-            if let candidate = res.asMediaCandidate {
-                candidates.append(candidate)
-            } else if let person = res.asPersonCandidate {
-                people.append(person)
-                // Surface the actor's top known_for titles into the candidates list
-                if let known = res.knownFor {
-                    for k in known {
-                        if let knownCand = k.asMediaCandidate {
-                            candidates.append(knownCand)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    lastError = SearchClientError.badStatusCode((response as? HTTPURLResponse)?.statusCode ?? -1)
+                    continue
+                }
+
+                let decoded = try JSONDecoder().decode(TMDBMultiSearchResponse.self, from: data)
+                var candidates: [MediaCandidate] = []
+                var people: [PersonCandidate] = []
+                var dominantType: DominantSearchType = .unknown
+
+                for (idx, res) in decoded.results.enumerated() {
+                    if idx == 0 {
+                        if res.mediaType == "person" {
+                            dominantType = .person
+                        } else if res.mediaType == "tv" {
+                            dominantType = .tv
+                        } else if res.mediaType == "movie" {
+                            dominantType = .movie
                         }
                     }
+
+                    if let candidate = res.asMediaCandidate {
+                        candidates.append(candidate)
+                    } else if let person = res.asPersonCandidate {
+                        people.append(person)
+                    }
                 }
+
+                return MultiSearchResult(candidates: candidates, people: people, dominantType: dominantType)
+            } catch {
+                lastError = error
+                continue
             }
         }
 
-        return MultiSearchResult(candidates: candidates, people: people)
+        throw lastError
     }
 }
 

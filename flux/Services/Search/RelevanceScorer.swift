@@ -1,10 +1,35 @@
 import Foundation
 
+// MARK: - Search Query Parser (Year & Intent Separation)
+
+struct SearchQueryParser: Sendable {
+    struct ParsedQuery: Equatable, Sendable {
+        let cleanQuery: String
+        let targetYear: Int?
+    }
+
+    static func parse(_ raw: String) -> ParsedQuery {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Detect trailing 4-digit release year (e.g. "Dark 2017", "Gladiator 2000", "Batman 1989")
+        if let match = trimmed.range(of: #"\s+((?:19|20)\d{2})$"#, options: .regularExpression) {
+            let yearString = String(trimmed[match]).trimmingCharacters(in: .whitespaces)
+            let base = String(trimmed[..<match.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if !base.isEmpty, let y = Int(yearString) {
+                return ParsedQuery(cleanQuery: base, targetYear: y)
+            }
+        }
+        return ParsedQuery(cleanQuery: trimmed, targetYear: nil)
+    }
+}
+
 // MARK: - Mathematical Relevance Scoring, Franchise Stems & Relative Mockbuster Demotion
 
 struct RelevanceScorer: Sendable {
     enum Weight {
-        static let exactMatch: Double = 10_000
+        /// Exact title matches receive top-tier weighting so popular prefix matches (e.g. "The Dark Knight")
+        /// can never mathematically supersede the exact queried title (e.g. "Dark").
+        static let exactMatch: Double = 100_000
+        static let yearMatch: Double = 50_000
         static let franchiseStemExact: Double = 10_000
         static let prefixMatch: Double = 6_000
         static let allTokensMatch: Double = 3_500
@@ -41,7 +66,10 @@ struct RelevanceScorer: Sendable {
 
     /// `batchContext` is the full, already-quality-filtered result set for this query.
     nonisolated func score(candidate: MediaCandidate, query: String, batchContext: [MediaCandidate]) -> Double {
-        let normalizedQuery = query.normalizedForSearch
+        let parsed = SearchQueryParser.parse(query)
+        let effectiveQuery = parsed.targetYear != nil ? parsed.cleanQuery : query
+
+        let normalizedQuery = effectiveQuery.normalizedForSearch
         let queryArticleStripped = normalizedQuery.articleStripped
         guard !normalizedQuery.isEmpty else { return -.infinity }
 
@@ -58,7 +86,9 @@ struct RelevanceScorer: Sendable {
 
         let isExactMatch: Bool = {
             if candidate.articleStrippedTitle == queryArticleStripped ||
-               candidate.normalizedTitle == normalizedQuery {
+               candidate.normalizedTitle == normalizedQuery ||
+               candidate.articleStrippedTitle == query.normalizedForSearch.articleStripped ||
+               candidate.normalizedTitle == query.normalizedForSearch {
                 return true
             }
             // Token-level exact match with plural/singular stemming (e.g. "game of throne" == "game of thrones")
@@ -107,7 +137,7 @@ struct RelevanceScorer: Sendable {
         }
         // TIER 3: All Query Tokens Match (Exact, Plural, or Minor Typo Tolerant)
         else {
-            let qTokens = query.searchTokens.map(String.init)
+            let qTokens = effectiveQuery.searchTokens.map(String.init)
             let tTokens = candidate.title.searchTokens.map(String.init)
             let nonStopQTokens = qTokens.filter { !Self.stopWords.contains($0) }
 
@@ -165,15 +195,22 @@ struct RelevanceScorer: Sendable {
 
         guard matched else { return -.infinity }
 
+        // Explicit Year Match bonus (e.g. query "Dark 2017" or "Batman 1989")
+        if let targetYear = parsed.targetYear, let releaseYear = releaseYear {
+            if releaseYear == targetYear {
+                score += Weight.yearMatch
+            }
+        }
+
         // Vintage TV series demotion: only for television series older than 1980 on ambiguous single-word queries (e.g. 1961 The Avengers)
-        if candidate.mediaType == .tvSeries && queryArticleStripped.searchTokens.count == 1 {
+        if candidate.mediaType == .tvSeries && queryArticleStripped.searchTokens.count == 1 && parsed.targetYear == nil {
             if let year = releaseYear, year < 1980 {
-                score -= 1500.0
+                score -= (Weight.exactMatch - Weight.prefixMatch + 1500.0)
             }
         }
 
         // Upcoming release modifier: ensure already-released blockbusters rank ahead of future announcements
-        if isUpcoming {
+        if isUpcoming && parsed.targetYear == nil {
             score -= 2500.0
         }
 

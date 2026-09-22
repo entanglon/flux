@@ -838,6 +838,145 @@ struct SearchEngineTests {
         // Game of Thrones (the flagship series) must rank #1 even with singular "throne" query
         #expect(ranked.first?.id == "tt0944947")
     }
+
+    @Test func qualityFilterPrunesTrashKeywordsAndLowRatingJunk() {
+        let filter = QualityFilter()
+
+        let bikiniAvengers = MediaCandidate(
+            id: "tmdb-345",
+            title: "Bikini Avengers",
+            mediaType: .movie,
+            popularity: 1.8,
+            voteCount: 34,
+            voteAverage: 5.9,
+            posterPath: "/bikini.jpg",
+            backdropPath: nil,
+            overview: "Spoof comedy.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2015, month: 1, day: 1)),
+            isAdult: false,
+            imdbID: nil,
+            source: .tmdb
+        )
+
+        let avengersGrimm = MediaCandidate(
+            id: "tmdb-678",
+            title: "Avengers Grimm",
+            mediaType: .movie,
+            popularity: 3.0,
+            voteCount: 133,
+            voteAverage: 4.1,
+            posterPath: "/grimm.jpg",
+            backdropPath: nil,
+            overview: "Asylum mockbuster.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2015, month: 1, day: 1)),
+            isAdult: false,
+            imdbID: nil,
+            source: .tmdb
+        )
+
+        let crippledAvengers = MediaCandidate(
+            id: "tmdb-890",
+            title: "Crippled Avengers",
+            mediaType: .movie,
+            popularity: 1.9,
+            voteCount: 108,
+            voteAverage: 6.8,
+            posterPath: "/crippled.jpg",
+            backdropPath: nil,
+            overview: "Old martial arts film.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 1978, month: 1, day: 1)),
+            isAdult: false,
+            imdbID: nil,
+            source: .tmdb
+        )
+
+        let endgame = MediaCandidate(
+            id: "tmdb-299534",
+            title: "Avengers: Endgame",
+            mediaType: .movie,
+            popularity: 86.0,
+            voteCount: 28000,
+            voteAverage: 8.3,
+            posterPath: "/endgame.jpg",
+            backdropPath: nil,
+            overview: "The MCU epic conclusion.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2019, month: 4, day: 26)),
+            isAdult: false,
+            imdbID: "tt4154796",
+            source: .tmdb
+        )
+
+        let candidates = [bikiniAvengers, avengersGrimm, crippledAvengers, endgame]
+        let filtered = filter.filter(candidates, query: "avengers")
+
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.id == "tmdb-299534")
+    }
+
+    @Test func tmdbSearchPreservesNativeOrderWithoutRerankingDisturbance() {
+        let filter = QualityFilter()
+
+        // TMDB native order for "avengers":
+        // 1. Avengers: Endgame (2019)
+        // 2. The Avengers (2012)
+        // 3. Avengers: Infinity War (2018)
+        let endgame = MediaCandidate(
+            id: "tmdb-299534",
+            title: "Avengers: Endgame",
+            mediaType: .movie,
+            popularity: 86.0,
+            voteCount: 28000,
+            voteAverage: 8.3,
+            posterPath: "/endgame.jpg",
+            backdropPath: nil,
+            overview: "The MCU epic conclusion.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2019, month: 4, day: 26)),
+            isAdult: false,
+            imdbID: "tt4154796",
+            source: .tmdb
+        )
+
+        let theAvengers = MediaCandidate(
+            id: "tmdb-24428",
+            title: "The Avengers",
+            mediaType: .movie,
+            popularity: 68.0,
+            voteCount: 30000,
+            voteAverage: 8.1,
+            posterPath: "/avengers2012.jpg",
+            backdropPath: nil,
+            overview: "Earth's mightiest heroes.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2012, month: 5, day: 4)),
+            isAdult: false,
+            imdbID: "tt0848228",
+            source: .tmdb
+        )
+
+        let infinityWar = MediaCandidate(
+            id: "tmdb-299536",
+            title: "Avengers: Infinity War",
+            mediaType: .movie,
+            popularity: 93.0,
+            voteCount: 32000,
+            voteAverage: 8.3,
+            posterPath: "/infinity.jpg",
+            backdropPath: nil,
+            overview: "Thanos strikes.",
+            releaseDate: Calendar(identifier: .gregorian).date(from: DateComponents(year: 2018, month: 4, day: 27)),
+            isAdult: false,
+            imdbID: "tt4154756",
+            source: .tmdb
+        )
+
+        let tmdbResults = [endgame, theAvengers, infinityWar]
+        let deduped = SearchEngine.deduplicate(tmdbResults)
+        let eligible = filter.filter(deduped, query: "avengers")
+
+        // Crucial: The order MUST be identical to TMDB's native response:
+        // Endgame (#1), The Avengers (#2), Infinity War (#3)
+        #expect(eligible.count == 3)
+        #expect(eligible[0].id == "tmdb-299534")
+        #expect(eligible[1].id == "tmdb-24428")
+        #expect(eligible[2].id == "tmdb-299536")
+    }
 }
-
-

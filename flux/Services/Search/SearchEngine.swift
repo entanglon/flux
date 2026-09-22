@@ -61,31 +61,10 @@ actor SearchEngine {
             return localResults
         }
 
-        // Determine if local fuzzy found a high-confidence correction to rewrite the remote query
-        let remoteQueryTarget: String = {
-            if trimmed.count >= 4 {
-                let normTrimmed = trimmed.normalizedForSearch.articleStripped
-                for hit in localResults.prefix(3) {
-                    let hitNorm = hit.title.normalizedForSearch.articleStripped
-                    let dist = DamerauLevenshtein.distance(normTrimmed, hitNorm)
-                    if dist <= (normTrimmed.count >= 6 ? 2 : 1) {
-                        return hit.title
-                    }
-                    let words = hitNorm.split(separator: " ").map(String.init)
-                    for w in words {
-                        if abs(w.count - normTrimmed.count) <= 1 && DamerauLevenshtein.distance(normTrimmed, w) <= 1 {
-                            return hit.title
-                        }
-                    }
-                }
-            }
-            return trimmed
-        }()
-
         activeTask = Task { [debounceNanoseconds] in
             try? await Task.sleep(nanoseconds: debounceNanoseconds)
             guard !Task.isCancelled else { return }
-            await self.performRemoteSearch(query: remoteQueryTarget, originalQuery: trimmed, onResults: onRemoteResults)
+            await self.performRemoteSearch(query: trimmed, originalQuery: trimmed, onResults: onRemoteResults)
         }
 
         return localResults
@@ -99,32 +78,63 @@ actor SearchEngine {
         guard !Task.isCancelled else { return }
 
         let hasTMDB = TMDBEnricher.shared.hasKey
-        let candidates: [MediaCandidate]
+        var candidates: [MediaCandidate] = []
         var people: [PersonCandidate] = []
 
+        let parsed = SearchQueryParser.parse(query)
+        let searchQuery = parsed.targetYear != nil ? parsed.cleanQuery : query
+
         if hasTMDB {
-            // TMDB enrichment mode: Query TMDB directly and exclusively.
-            // Eliminates 500-1500ms Cinemeta latency and prevents conflicting Cinemeta metadata from polluting results.
-            var searchRes = (try? await tmdbClient.multiSearch(query: query)) ?? MultiSearchResult(candidates: [], people: [])
-            if searchRes.candidates.isEmpty && searchRes.people.isEmpty && query != originalQuery {
-                searchRes = (try? await tmdbClient.multiSearch(query: originalQuery)) ?? MultiSearchResult(candidates: [], people: [])
+            // TMDB enrichment mode: Query TMDB multiSearch directly
+            var searchRes = (try? await tmdbClient.multiSearch(query: searchQuery)) ?? MultiSearchResult(candidates: [], people: [], dominantType: .unknown)
+            if searchRes.candidates.isEmpty && searchRes.people.isEmpty && searchQuery != originalQuery {
+                searchRes = (try? await tmdbClient.multiSearch(query: originalQuery)) ?? MultiSearchResult(candidates: [], people: [], dominantType: .unknown)
             }
             candidates = searchRes.candidates
             people = searchRes.people
+
+            // Resilient Fallback: If TMDB returns empty (due to network failure, ISP connection resets,
+            // rate limiting, or titles not indexed), seamlessly query Cinemeta catalog so search never fails.
+            if candidates.isEmpty && people.isEmpty {
+                candidates = (try? await cinemetaClient.search(query: originalQuery)) ?? []
+                guard !Task.isCancelled else { return }
+                let deduped = Self.deduplicate(candidates)
+                let eligible = filter.filter(deduped, query: originalQuery)
+                let ranked = scorer.rank(candidates: eligible, query: originalQuery)
+                onResults(ranked, [])
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+
+            // TMDB provides natively-ranked search results.
+            // Deduplicate and filter out stubs/junk while strictly preserving TMDB's exact ordering!
+            let deduped = Self.deduplicate(candidates)
+            let eligible = filter.filter(deduped, query: originalQuery)
+
+            // If user explicitly specified a release year in the search (e.g. "Dark 2017"),
+            // ensure the exact matching year release is elevated to position #1
+            let finalCandidates: [MediaCandidate]
+            if let targetYear = parsed.targetYear,
+               let matchIdx = eligible.firstIndex(where: { $0.releaseYear == targetYear }) {
+                var reordered = eligible
+                let matched = reordered.remove(at: matchIdx)
+                reordered.insert(matched, at: 0)
+                finalCandidates = reordered
+            } else {
+                finalCandidates = eligible
+            }
+
+            onResults(finalCandidates, people)
         } else {
-            // Non-TMDB mode: Query Cinemeta catalog
-            candidates = (try? await cinemetaClient.search(query: query)) ?? []
+            // Non-TMDB mode (Stremio Cinemeta mechanism): Query Cinemeta catalog directly
+            candidates = (try? await cinemetaClient.search(query: originalQuery)) ?? []
+            guard !Task.isCancelled else { return }
+            let deduped = Self.deduplicate(candidates)
+            let eligible = filter.filter(deduped, query: originalQuery)
+            let ranked = scorer.rank(candidates: eligible, query: originalQuery)
+            onResults(ranked, [])
         }
-
-        // Dual-Layer Cancellation Check: guarantees no stale responses overwrite newer queries
-        guard !Task.isCancelled else { return }
-
-        let deduped = Self.deduplicate(candidates)
-        let eligible = filter.filter(deduped)
-        let ranked = scorer.rank(candidates: eligible, query: originalQuery)
-        let sortedPeople = people.sorted { $0.popularity > $1.popularity }
-
-        onResults(ranked, sortedPeople)
     }
     
     /// Clears the trie and re-indexes only public trending titles, purging any previous user data.

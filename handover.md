@@ -101,3 +101,76 @@
 - `flux/Services/PlayerManager.swift`: Routed forward-proxied HTTP streams through `StreamProxyManager`; tuned startup watchdog timeouts for proxied streams.
 - `flux/Views/MPVVideoView.swift`: Fixed MPV `loadfile` pause syntax (`mpv_set_property_string(mpv, "pause", ...)`).
 - `flux/Services/StreamManager.swift`: Dynamic candidate probe timeouts for forward proxying.
+
+### H. TMDB-First Search Engine Refactoring
+- **Context & Feedback**:
+  - The user noted that when TMDB was enabled, searches like *Dark (2017)* were missing or poorly ranked because of over-engineered pre-filtering, token intersection drops, and strict Levenshtein pruning in local pipeline layers.
+  - The direct request: When TMDB is enabled, rely directly on TMDB's rich search catalog and scoring. When disabled, fall back cleanly to Cinemeta/Stremio.
+- **Implementation**:
+  - In `SearchEngine.swift` & `TMDBClient.swift`:
+    - Refactored the search pipeline to prioritize TMDB directly when an active API key or keyless TMDB catalog is enabled.
+    - TMDB multi-search results are directly mapped to `MediaItem` models with poster, backdrop, overview, release dates, and vote average preserved.
+    - Removed overly-restrictive local pre-filtering and token drop logic that excluded valid international hits like *Dark*.
+    - Maintained Cinemeta/Stremio search as the resilient fallback when TMDB is unavailable or returns 0 results.
+  - In `SearchViewModel.swift`:
+    - Wired search submissions directly to the optimized search engine.
+    - Integrated automatic search query history recording upon user submission.
+
+### I. Bidirectional Carousel Liquid Glass Chevrons
+- **Context & Feedback**:
+  - Horizontal carousels only displayed the right (forward) arrow, missing the left (backward) arrow. Cards were not tucking under the sidebar smoothly.
+- **Implementation**:
+  - In `CarouselView.swift`:
+    - Added preference keys (`CarouselLeadingMinXKey`, `CarouselTrailingMaxXKey`, and `CarouselWidthKey`) to continuously track content coordinates against the viewport in `carouselScroll_<UUID>` coordinate space.
+    - Dynamic offset detection: `canScrollLeft` enables immediately when `minX < 260` (content swiped or scrolled left).
+    - Added smooth backward chevron navigation that steps back by `scrollStep = 3`.
+    - Retained modern liquid glass styling with spring animations and viewport edge fades.
+
+### J. Search Query History & History Clearing UI
+- **Implementation**:
+  - In `RecentSearchManager.swift`:
+    - Added `@Published var recentQueries: [String]` persisted per-profile under `profile.<uuid>.searchHistory`.
+    - Added `addQuery(_:)`, `removeQuery(_:)`, `clearQueries()`, and `clearSearchHistory()`.
+  - In `SearchView.swift`:
+    - Added horizontal chip rail for recent search queries above the "Recently Viewed" carousel.
+    - Each query chip features instant click-to-search and an individual `xmark` delete button.
+    - Added a "Clear All" button to remove search history.
+  - In `HistoryView.swift`:
+    - Updated "Clear All" confirmation alert to atomically call `UserDataService.shared.clearHistory()`.
+  - In `SettingsView.swift`:
+    - Added a **"History & Privacy"** section under Advanced Settings with **"Clear Watch History"** and **"Clear Search History"** buttons, accompanied by destructive confirmation alerts.
+
+### K. PocketBase Cloud Database Syncing & Shield Update
+- **Implementation**:
+  - In `UserDataService.swift`:
+    - Added `historyClearedAtKey`, `historyClearedAt: Double`, and `currentProfileID`.
+    - Implemented `clearHistory()`: atomic removal of `history` and `episodeProgress` in `UserDefaults`, updates `historyClearedAt = Date().timeIntervalSince1970`, sets `@Published var history = []`, notifies `.fluxRefresh`, and schedules cloud auto-sync.
+    - `exportCloudPayload()` now includes `"historyClearedAt"`, `"searchHistory"`, and `"recentSearches"`.
+    - `mergeHistoryData()` filters out remote history items older than or equal to `historyClearedAt`.
+    - `applyCloudPayload()` updates `historyClearedAt` and imports `searchHistory`.
+  - In `ProfileManager.swift`:
+    - Namespaced export and import of `historyClearedAt` and `searchHistory` in `exportProfilesData()` and `applyCloudProfilesData()`.
+    - Updated profile deletion and sign-out methods to clear namespaced keys.
+  - In `AuthManager.swift`:
+    - Resolved the Cloud Anti-Regression Shield: When `localHistoryCount == 0`, the system checks `isExplicitlyCleared` (`localClearedAt > 0 && localClearedAt >= remoteUpdatedAt - 10.0`). Deliberate history clears are no longer blocked and successfully push to PocketBase so all devices sync the cleared state.
+
+---
+
+## 4. Diagnostics & Crash Investigation
+
+### Symptoms Observed
+1. **Immediate Exit upon Launch**:
+   - `[flux] Another instance is already running — exiting`
+   - *Root Cause*: An earlier debug instance of `flux` (PID `84095`) was running in the background from 1:21 AM. Flux's single-instance guard intentionally terminated newly launched instances immediately to prevent port/state conflicts.
+   - *Fix*: Killed lingering PID `84095`. Launched fresh app (PID `84986`), which started up cleanly, connected to the local Go engine, pulled/pushed cloud data, and ran without issue.
+2. **Crash Reports in DiagnosticReports (`UserDataService.renameCollection` / `collectionIDs`)**:
+   - `flux-2026-09-23-013616.ips`, `flux-2026-09-23-013614.ips`, `flux-2026-09-23-013607.ips`
+   - *Root Cause*: During app-hosted test runs (`xcodebuild test`), concurrent test threads in Swift Testing simultaneously mutated (`renameCollection`) and read (`collectionIDs`) the unisolated `collections` array in `UserDataService`.
+   - *Action Item for Tomorrow*: Add `@MainActor` or serial queue/lock protection to collection mutations in `UserDataService` to prevent data races during concurrent execution.
+
+---
+
+## 5. Next Steps for Tomorrow
+1. Audit `UserDataService` for thread-safety (`@MainActor` annotation or explicit lock on collections array).
+2. Verify cross-device search history sync and watch history clear behavior against a live PocketBase instance.
+3. Test edge case scenarios in TMDB search with non-Latin script queries and regional titles.

@@ -168,7 +168,7 @@ final class StreamRouteProxyManager: ObservableObject {
         }
 
         // 3. Strict Bypass: Critical metadata & app infrastructure
-        if host.contains("themoviedb.org") ||
+        if host.contains("themoviedb.org") || host.contains("tmdb.org") ||
             host.contains("cinemeta") ||
             host.contains("opensubtitles") ||
             host.contains("github.com") ||

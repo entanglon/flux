@@ -253,7 +253,7 @@ final class ProfileManager: ObservableObject {
         }
         for profile in profiles {
             let prefix = "profile.\(profile.id.uuidString)."
-            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches"] {
+            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches", prefix + "searchHistory", prefix + "historyClearedAt"] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -413,7 +413,7 @@ final class ProfileManager: ObservableObject {
         // Wipe the profile's namespaced data
         if !AppEnvironment.isRunningTests {
             let prefix = "profile.\(profile.id.uuidString)."
-            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches"] {
+            for key in [prefix + "history", prefix + "watchlist", prefix + "loved", prefix + "watchSnaps", prefix + "settings", prefix + "collections", prefix + "episodeProgress", prefix + "recentSearches", prefix + "searchHistory", prefix + "historyClearedAt"] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -488,6 +488,13 @@ final class ProfileManager: ObservableObject {
                let raw = try? JSONSerialization.jsonObject(with: recSearch) {
                 dict["recentSearches"] = raw
             }
+            let clearedAt = UserDefaults.standard.double(forKey: prefix + "historyClearedAt")
+            if clearedAt > 0 {
+                dict["historyClearedAt"] = clearedAt
+            }
+            if let searchHist = UserDefaults.standard.stringArray(forKey: prefix + "searchHistory") {
+                dict["searchHistory"] = searchHist
+            }
             return dict
         }
     }
@@ -541,6 +548,15 @@ final class ProfileManager: ObservableObject {
                 if let recSearch = item["recentSearches"],
                    let data = try? JSONSerialization.data(withJSONObject: recSearch) {
                     UserDefaults.standard.set(data, forKey: prefix + "recentSearches")
+                }
+                if let clearedAt = item["historyClearedAt"] as? Double, clearedAt > 0 {
+                    let localCleared = UserDefaults.standard.double(forKey: prefix + "historyClearedAt")
+                    if clearedAt > localCleared {
+                        UserDefaults.standard.set(clearedAt, forKey: prefix + "historyClearedAt")
+                    }
+                }
+                if let searchHist = item["searchHistory"] as? [String] {
+                    UserDefaults.standard.set(searchHist, forKey: prefix + "searchHistory")
                 }
             }
 
@@ -646,6 +662,7 @@ final class ProfileManager: ObservableObject {
                     self.currentProfile = matching
                     self.saveCurrentProfile()
                     self.restoreSettings(for: matching.id)
+                    self.applyProfileDataScope(matching)
                 } else if let first = sanitized.first {
                     self.selectProfile(first)
                 } else {

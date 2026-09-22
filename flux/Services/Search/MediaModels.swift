@@ -111,6 +111,11 @@ struct MediaCandidate: Identifiable, Hashable, Sendable {
         self.subtitle = decomposed.subtitle
     }
     
+    var releaseYear: Int? {
+        guard let releaseDate else { return nil }
+        return Calendar(identifier: .gregorian).component(.year, from: releaseDate)
+    }
+
     var releaseDateString: String? {
         guard let date = releaseDate else { return nil }
         let formatter = DateFormatter()
