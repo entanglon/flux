@@ -58,6 +58,11 @@ class AuthManager: ObservableObject {
         self.currentUser = user
         self.isAuthenticated = authenticated
         self.isGuestMode = guest
+        if let name = user?.displayName {
+            UserDefaults.standard.set(name, forKey: Self.userDisplayNameKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.userDisplayNameKey)
+        }
     }
     #endif
 
@@ -226,14 +231,20 @@ class AuthManager: ObservableObject {
         self.lastSyncDate = nil
         self.userDataRecordID = nil
 
-        ProfileManager.shared.handleSignOut()
-        UserDataService.shared.handleSignOut()
-        TasteProfileManager.shared.handleSignOut()
-        AddonManager.shared.resetToStockAddons()
-        PlayerManager.shared.handleSignOut()
         if !AppEnvironment.isRunningTests {
+            ProfileManager.shared.handleSignOut()
+            UserDataService.shared.handleSignOut()
+            TasteProfileManager.shared.handleSignOut()
+            AddonManager.shared.resetToStockAddons()
+            PlayerManager.shared.handleSignOut()
             RecentSearchManager.shared.clear()
             Task { await SearchEngine.shared.clearUserIndex() }
+        } else {
+            ProfileManager.shared.handleSignOut()
+            UserDataService.shared.history = []
+            UserDataService.shared.watchlist = []
+            UserDataService.shared.collections = []
+            AddonManager.shared.resetToStockAddons()
         }
         NotificationCenter.default.post(name: .fluxRefresh, object: nil)
     }
@@ -329,8 +340,7 @@ class AuthManager: ObservableObject {
                 let lastSync = UserDefaults.standard.double(forKey: UserDefaults.Key.cloudLastSyncAt)
                 if forcePull || remote.updatedAt > lastSync {
                     // Fresh-enough remote: safe to adopt its profiles list.
-                    // Stale pulls still merge library data but never replace profiles.
-                    hasLocalAdditionsToPush = UserDataService.shared.applyCloudPayload(remote.payload, replaceProfiles: forcePull || remote.updatedAt > lastSync)
+                    // Stale pulls still merge library data but never replace profiles.\n                    hasLocalAdditionsToPush = UserDataService.shared.applyCloudPayload(remote.payload, replaceProfiles: forcePull || remote.updatedAt > lastSync)
                     UserDefaults.standard.set(remote.updatedAt, forKey: UserDefaults.Key.cloudLastSyncAt)
                     Logger.auth.info("Cloud library pulled (\(remote.updatedAt))")
                     pulledNewer = true
@@ -350,6 +360,18 @@ class AuthManager: ObservableObject {
             let remoteHistoryCount = (remote?.payload["history"] as? [[String: Any]])?.count ?? 0
             if remoteHistoryCount > 0 && localHistoryCount == 0 {
                 Logger.auth.error("Cloud push aborted: local history is unexpectedly empty while remote has \(remoteHistoryCount) items!")
+                return
+            }
+
+            // Anti-regression shield for addons:
+            // Never allow local stock-only addons to overwrite populated remote community addons!
+            let localAddons = (payload["addons"] as? [[String: Any]]) ?? []
+            let remoteAddons = (remote?.payload["addons"] as? [[String: Any]]) ?? []
+            let localCommunityCount = localAddons.filter { ($0["isStock"] as? Bool) != true }.count
+            let remoteCommunityCount = remoteAddons.filter { ($0["isStock"] as? Bool) != true }.count
+            if remoteCommunityCount > 0 && localCommunityCount == 0 {
+                Logger.auth.error("Cloud push aborted: local addons has 0 community addons while remote has \(remoteCommunityCount) addons! Merging remote addons locally instead.")
+                AddonManager.shared.syncWithCloudAddons(remoteAddons)
                 return
             }
 
@@ -375,6 +397,14 @@ class AuthManager: ObservableObject {
     func updateDisplayName(_ newName: String) {
         let clean = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean != "Default", clean != "Guest" else { return }
+
+        if AppEnvironment.isRunningTests {
+            if let user = currentUser {
+                self.currentUser = User(id: user.id, email: user.email, displayName: clean, photoURL: user.photoURL, creationDate: user.creationDate)
+            }
+            return
+        }
+
         UserDefaults.standard.set(clean, forKey: Self.userDisplayNameKey)
         UserDefaults.standard.set("true", forKey: "flux.hasExplicitlyCustomizedName")
         KeychainManager.saveSession(

@@ -1305,17 +1305,16 @@ final class MPVLayerView: NSView {
 
         // Network stream auto-reconnection and keep-alive (FFmpeg libavformat)
         // Prevents dropped playback when CDNs/hosts terminate idle TCP connections after demuxer cache fills
-        mpv_set_property_string(mpv, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,reconnect_on_http_error=4xx,5xx")
-        mpv_set_property_string(mpv, "demuxer-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2")
+        // Reconnect only on 5xx server errors and network drops (never loop retrying 4xx client errors)
+        mpv_set_property_string(mpv, "stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5,reconnect_on_http_error=5xx")
+        mpv_set_property_string(mpv, "demuxer-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5")
         mpv_set_property_string(mpv, "cache", "yes")
-        mpv_set_property_string(mpv, "demuxer-max-bytes", "157286400") // 150 MiB standard
-        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "52428800") // 50 MiB
-        mpv_set_property_string(mpv, "demuxer-readahead-secs", "30")
-        // Cache stall protection: buffer at least 3 seconds before resuming playback
-        // to prevent rapid stall/resume stutter loops.
-        // cache-pause-initial prevents premature playback before buffer fills at start.
+        mpv_set_property_string(mpv, "demuxer-max-bytes", "314572800") // 300 MiB high-throughput buffer for 1080p/4K HDR
+        mpv_set_property_string(mpv, "demuxer-max-back-bytes", "104857600") // 100 MiB backward buffer for instant rewind
+        mpv_set_property_string(mpv, "demuxer-readahead-secs", "60") // Read 60s ahead for jitter immunity
+        // Cache stall protection: buffer 1.0s before resuming playback to eliminate stutter loops
         mpv_set_property_string(mpv, "cache-pause", "yes")
-        mpv_set_property_string(mpv, "cache-pause-wait", "3.0")
+        mpv_set_property_string(mpv, "cache-pause-wait", "1.0")
         mpv_set_property_string(mpv, "cache-pause-initial", "yes")
         // Use standard vo framedrop and disable framedrop on high-res seek:
         // Prevents unbounded 5x-10x fast-forward speedup after buffer underruns
@@ -1323,8 +1322,9 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "framedrop", "vo")
         mpv_set_property_string(mpv, "hr-seek-framedrop", "no")
 
-        mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        mpv_set_property_string(mpv, "referrer", "https://flux.app/")
+        mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        // Do not force a global synthetic referrer — streaming CDNs often reject or throttle requests with unrecognized external referrers.
+        mpv_set_property_string(mpv, "referrer", "")
 
         // Dolby Atmos / DTS bitstream passthrough (E-AC-3 JOC & TrueHD carry Atmos)
         if UserDefaults.standard.bool(forKey: "enableAudioPassthrough") {
@@ -1446,20 +1446,18 @@ final class MPVLayerView: NSView {
             pendingPaused = false
             print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
             if let mpv = self.mpv {
+                let isLoopback = urlToLoad.host == "127.0.0.1" || urlToLoad.host == "localhost"
                 let selectedStream = PlayerManager.shared.currentSelectedStream
                 let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-                if let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) {
+                if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) {
                     print("[MPV] Routing pending stream through forward proxy: \(proxyURL)")
                     mpv_set_property_string(mpv, "http-proxy", proxyURL)
                 } else {
                     mpv_set_property_string(mpv, "http-proxy", "")
                 }
+                mpv_set_property_string(mpv, "pause", shouldPause ? "yes" : "no")
             }
-            if shouldPause {
-                command("loadfile", urlToLoad.absoluteString, "replace", "pause=yes")
-            } else {
-                command("loadfile", urlToLoad.absoluteString)
-            }
+            command("loadfile", urlToLoad.absoluteString)
         }
     }
     
@@ -1469,16 +1467,18 @@ final class MPVLayerView: NSView {
         print("[MPV] loadFile called: \(url.absoluteString) (paused: \(paused))")
         isIntentionallySwitchingFile = true
 
-        // Configure MPV forward proxy property dynamically for scoped direct HTTP streams
+        // Configure MPV forward proxy property dynamically for scoped direct HTTP streams (strictly bypass loopback)
         if let mpv = self.mpv {
+            let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
             let selectedStream = PlayerManager.shared.currentSelectedStream
             let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-            if let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) {
+            if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) {
                 print("[MPV] Routing stream through forward proxy: \(proxyURL)")
                 mpv_set_property_string(mpv, "http-proxy", proxyURL)
             } else {
                 mpv_set_property_string(mpv, "http-proxy", "")
             }
+            mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
         }
 
         if mpvGL == nil {
@@ -1489,11 +1489,7 @@ final class MPVLayerView: NSView {
             pendingURL = nil
             pendingPaused = false
             print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
-            if paused {
-                command("loadfile", url.absoluteString, "replace", "pause=yes")
-            } else {
-                command("loadfile", url.absoluteString)
-            }
+            command("loadfile", url.absoluteString)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.isIntentionallySwitchingFile = false

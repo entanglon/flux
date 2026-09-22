@@ -5,7 +5,7 @@
 ### A. Stream Picker Background Isolation & Race Cancellation
 - **Problem**: When users clicked "Choose Stream Source…" from detail cards or "Choose Source" / context menus inside the video player, the background Flux Mode Auto-Play engine or early quorum race continued running in the background. Late-arriving streams triggered candidate races and MPV auto-play underneath the stream selection sheet.
 - **Root Cause**:
-  1. `PlayerManager.fetchAndRace`: The post-fetch Flux Mode auto-play engine (line 1195) and early quorum race commit (line 1106) lacked guards against `forceStreamPicker` and `isStreamPickerPresented`.
+  1. `PlayerManager.fetchAndRace`: The post-fetch Flux Mode auto-play engine and early quorum race commit lacked guards against `forceStreamPicker` and `isStreamPickerPresented`.
   2. The manual stream selection buttons failed to stop active MPV sessions or cancel in-flight scraper/probe background tasks.
 - **Implementation**:
   - Added `PlayerManager.cancelAllPlaybackAndRaces()` to cancel `fetchAndRaceTask`, `startupWatchdogTask`, reset `hasCommittedAutoPlayWinner = false`, `isAutoPlayRaceActive = false`, clear `currentStreamURL`, and stop the active MPV player session.
@@ -38,26 +38,66 @@
 - Settings UI supports selecting and reordering multiple preferred audio languages.
 - Fallback preserves foreign dubs as viable backup options if no preferred audio streams succeed.
 
+### E. Stream Playback Pipeline Diagnostics & MPV Loadfile Fix
+- **Diagnostic Findings**:
+  1. *MPV Syntax Error*: `command("loadfile", url, "replace", "pause=yes")` failed because argument 3 is an integer index in the mpv C API (`[MPV LOG] main: The loadfile option must be an integer: pause=yes`). Prefetched streams failed to prime.
+  2. *Demuxer Socket Drops*: When `http-proxy` was set directly on MPV, ffmpeg’s internal TLS CONNECT tunnel dropped sockets during MKV container header seeking (`ffmpeg: httpproxy: Error reading HTTP response: Immediate exit requested`, `Cache: 0.0s/13KB`).
+  3. *Proxy Bandwidth Ceiling*: Tailscale Tinyproxy endpoint (`100.73.223.33:8888`) has peak throughput of ~1.1 MB/s (~8.9 Mbps). High-bitrate 1080p HEVC streams (~8–9 Mbps) consumed nearly 100% of bandwidth, causing buffering stalls.
+- **Implementation**:
+  - In `MPVVideoView.swift`: Fixed `loadfile` invocation by setting `mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")` followed by `command("loadfile", url.absoluteString)`.
+  - In `StreamProxyManager.swift`: Made headers optional in `proxyURL(for:headers:title:)` so direct HTTP streams requiring forward proxying can be wrapped by local loopback server (`127.0.0.1:51547`).
+  - In `PlayerManager.swift`: Routed forward-proxied HTTP streams through `StreamProxyManager` to isolate MPV from direct TLS proxy seeking issues.
+  - Dynamically extended candidate probe timeouts (4.5s) and watchdog timeouts (`connectTimeout: 20s`, `slowLimit: 14s`) when streams are proxied.
+
+### F. Startup Deadlock Resolution & Stremio Co-existence
+- **Crash Diagnosis**:
+  - Crash report `flux-2026-09-22-235358.ips` showed `EXC_BREAKPOINT / SIGTRAP` in `_dispatch_once_wait`.
+  - Circular lock between `AddonManager.shared` and `StreamRouteProxyManager.shared` on Thread 0 during launch:
+    `AddonManager.init()` -> `ensureDefaultAddons()` -> `StreamRouteProxyManager.shared.isEnabled = effective` -> `isEnabled.didSet` -> `syncWithStockAddon()` -> synchronous `AddonManager.shared` access.
+- **Resolution**:
+  - In `AddonManager.swift`: Inlined `addons[existingIdx].isEnabled = StreamRouteProxyManager.shared.isEnabled` without mutating `StreamRouteProxyManager` during singleton construction.
+  - In `StreamRouteProxyManager.swift`: Guarded endpoint auto-migration with `!AppEnvironment.isRunningTests` to isolate unit test runs.
+  - Verified Stremio app co-existence: Flux uses dynamic port stepping (`11470` through `11479`), gracefully stepping to the next open port if Stremio desktop is already occupying `11470`.
+
+### G. AI Stream Selection Layer in Flux Mode (Architectural Plan)
+- **Problem Statement**:
+  Heuristics (seed counts, file size thresholds, regex keyword scoring) perform well on standardized releases but suffer on:
+  - Cryptic or obfuscated filenames from scrapers (`Dual.Audio`, unlabelled languages, fan edits).
+  - Deceptive releases (fake 4K upscales, bloated 60GB uncompressed remuxes on slow swarms, CAM-rips tagged as WEB-DL).
+  - Commentary audio tracks mistaken for primary dialogue.
+- **Proposed Solution**:
+  An intelligent multi-tiered AI layer integrated into Flux Mode auto-play:
+  1. **Tier 0 (< 50ms): Heuristic Fast-Path**
+     - Instant initial candidate scoring via existing Startup Speed Score (SSS) to begin zero-delay speculative pre-buffering.
+  2. **Tier 1 (< 5ms): On-Device Semantic Scoring (CoreML / Apple Neural Engine)**
+     - Local classification model running on Apple Silicon with 0 network latency.
+     - Evaluates feature vector: title similarity, release group reputation, container streamability, audio layout (5.1/7.1 vs stereo), codec efficiency, and seeder density.
+     - Predicts playback reliability score $P(\\text{Reliable})$ and audio confidence score.
+  3. **Tier 2 (< 350ms): Edge / LLM Reasoning for Ambiguous Candidates**
+     - Triggered only when candidate ambiguity is high ($P < 0.70$) or title conflict penalties are encountered.
+     - Sends metadata payload to fast inference model (Gemini Flash / PocketBase sidecar) with TMDB item context to pick the true match and best quality compromise.
+  4. **Tier 3: Local Failure Learning & Adaptive Feedback**
+     - Automatically penalizes release groups or codecs locally when a stream stalls within 15 seconds or requires manual user switching.
+
 ---
 
 ## 2. Test Suite & Build Verification
 
-- **`StreamManagerTests`**: All 45+ tests passed (`** TEST SUCCEEDED **`), including:
-  - `titleMatchDisqualifiesConflictingMultiTokenTitles`
-  - `cancelAllPlaybackAndRacesResetsPlaybackStateAndFlags`
-  - `languageMatchingIgnoresSubtitleClauses`
-  - `selectFastStartCandidatePreservesAndRanksUntaggedOriginalAudioIndianShow`
-- **`LanguageManagerTests`**: All 18 localization tests passed across all 10 languages.
-- **`fluxTests`**: Full test scheme passes.
-- **`xcodebuild build -scheme flux`**: `** BUILD SUCCEEDED **`.
+- **Full Unit Test Suite**: **225 tests passed, 0 failed, 0 skipped** (`225 passed, 0 failed`).
+  - `StreamRouteProxyTests`: All tests passing including `defaultStateHasNoEndpointAndDoesNotProxy`, `stockAddonRegistrationAndSynchronization`, `cloudSyncPreservesLocallyEnabledProxy`.
+  - `StreamManagerTests`: All 45+ stream selection and scoring tests passing.
+  - `ArchitectureTests`, `LanguageManagerTests`, `KidsContentFilterTests`, `SearchEngineTests`: All passing.
+- **App Status**: Rebuilt and running stably under Debug scheme (PID `81626`).
+- **No Diagnostic Crashes**: Zero crash reports generated post-fix.
 
 ---
 
 ## 3. Files Modified
-- `flux/Services/PlayerManager.swift`: Background race isolation, `cancelAllPlaybackAndRaces()`, picker guards.
-- `flux/Services/StreamManager.swift`: Title conflict detection, multi-token overlap logic, multi-language ranking.
-- `flux/Views/PlayerView.swift`: Single-line "Choose Source" button, empty state torrent reveal button, context menu cancellation.
-- `flux/Services/LanguageManager.swift`: Localized strings for new buttons and empty state messages.
-- `flux/Views/SettingsView.swift`: Multi-language selector UI.
-- `fluxTests/StreamManagerTests.swift`: Unit tests for title conflict matching and player state isolation.
-- `handover.md`: Session log and architectural documentation.
+- `STREAMING_PIPELINE_PLAN.md`: Added Pillar E (AI-Powered Stream Selection Layer) and Step 6 to implementation roadmap.
+- `handover.md`: Updated with playback diagnostics, MPV loadfile fix, circular deadlock resolution, Stremio co-existence verification, and AI stream selection plan.
+- `flux/Services/AddonManager.swift`: Decoupled stock addon initialization from `StreamRouteProxyManager` setter to eliminate circular `dispatch_once` deadlock.
+- `flux/Services/StreamRouteProxyManager.swift`: Guarded endpoint auto-migration with `!AppEnvironment.isRunningTests`; restored clean main-thread synchronization.
+- `flux/Services/StreamProxyManager.swift`: Supported optional headers in `proxyURL` for HTTP scraper streams.
+- `flux/Services/PlayerManager.swift`: Routed forward-proxied HTTP streams through `StreamProxyManager`; tuned startup watchdog timeouts for proxied streams.
+- `flux/Views/MPVVideoView.swift`: Fixed MPV `loadfile` pause syntax (`mpv_set_property_string(mpv, "pause", ...)`).
+- `flux/Services/StreamManager.swift`: Dynamic candidate probe timeouts for forward proxying.

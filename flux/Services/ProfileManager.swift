@@ -21,10 +21,11 @@ final class ProfileManager: ObservableObject {
         ensureKidsProfile()
         if let data = UserDefaults.standard.data(forKey: currentProfileKey),
            let profile = try? JSONDecoder().decode(UserProfile.self, from: data),
-           profiles.contains(where: { $0.id == profile.id }) {
-            currentProfile = profile
-            restoreSettings(for: profile.id)
-            applyProfileDataScope(profile)
+           let matched = profiles.first(where: { $0.id == profile.id }) {
+            currentProfile = matched
+            saveCurrentProfile()
+            restoreSettings(for: matched.id)
+            applyProfileDataScope(matched)
         }
         sanitizeProfileNames()
     }
@@ -139,12 +140,19 @@ final class ProfileManager: ObservableObject {
         }
     }
 
+    func saveCurrentProfile() {
+        guard !AppEnvironment.isRunningTests else { return }
+        if let cur = currentProfile, let data = try? JSONEncoder().encode(cur) {
+            UserDefaults.standard.set(data, forKey: currentProfileKey)
+        }
+    }
+
     func sanitizeProfileNames() {
         var didChange = false
         let isGuest = UserDefaults.standard.bool(forKey: "flux.authGuestMode")
         let savedName = UserDefaults.standard.string(forKey: "flux.authDisplayName")
         let email = UserDefaults.standard.string(forKey: "flux.authEmail")
-        let userName = (savedName?.isEmpty == false && savedName != "Default" && savedName != "Guest" && savedName != "Kids") 
+        let userName = (savedName?.isEmpty == false && savedName != "Default" && savedName != "Guest" && savedName != "Kids" && savedName != "Alex Smith") 
             ? savedName! 
             : (email?.components(separatedBy: "@").first ?? (isGuest ? "Guest" : "User"))
 
@@ -155,7 +163,7 @@ final class ProfileManager: ObservableObject {
                 profiles[idx].isKids = true
                 profiles[idx].isStock = true
                 didChange = true
-            } else if pName == "Default" || pName.isEmpty {
+            } else if pName == "Default" || pName.isEmpty || pName == "Alex Smith" {
                 profiles[idx].name = isGuest ? "Guest" : userName
                 didChange = true
             } else if isGuest && pName == "User" {
@@ -165,14 +173,19 @@ final class ProfileManager: ObservableObject {
         }
 
         if let cur = currentProfile {
-            if cur.isKids || cur.name.lowercased() == "kids" {
+            if let matched = profiles.first(where: { $0.id == cur.id }) {
+                if cur.name != matched.name || cur.avatarID != matched.avatarID || cur.isKids != matched.isKids {
+                    currentProfile = matched
+                    didChange = true
+                }
+            } else if cur.isKids || cur.name.lowercased() == "kids" {
                 var updated = cur
                 updated.name = "Kids"
                 updated.isKids = true
                 updated.isStock = true
                 currentProfile = updated
                 didChange = true
-            } else if cur.name == "Default" || cur.name.isEmpty {
+            } else if cur.name == "Default" || cur.name.isEmpty || cur.name == "Alex Smith" {
                 var updated = cur
                 updated.name = isGuest ? "Guest" : userName
                 currentProfile = updated
@@ -187,9 +200,7 @@ final class ProfileManager: ObservableObject {
 
         if didChange {
             saveProfiles()
-            if let cur = currentProfile, let data = try? JSONEncoder().encode(cur) {
-                UserDefaults.standard.set(data, forKey: currentProfileKey)
-            }
+            saveCurrentProfile()
         }
     }
 
@@ -212,11 +223,7 @@ final class ProfileManager: ObservableObject {
             snapshotSettings(for: old.id)
         }
         currentProfile = profile
-        if !AppEnvironment.isRunningTests {
-            if let data = try? JSONEncoder().encode(profile) {
-                UserDefaults.standard.set(data, forKey: currentProfileKey)
-            }
-        }
+        saveCurrentProfile()
         restoreSettings(for: profile.id)
         if profile.isKids {
             cleanKidsProfileDataIfNeeded()
@@ -396,9 +403,7 @@ final class ProfileManager: ObservableObject {
         saveProfiles()
         if currentProfile?.id == profile.id {
             currentProfile = profiles[idx]
-            if let data = try? JSONEncoder().encode(profiles[idx]) {
-                UserDefaults.standard.set(data, forKey: currentProfileKey)
-            }
+            saveCurrentProfile()
         }
         AuthManager.shared.scheduleAutoSync()
     }
@@ -446,237 +451,155 @@ final class ProfileManager: ObservableObject {
                 "isKids": p.isKids,
                 "isStock": p.isStock
             ]
-            var snap = UserDefaults.standard.dictionary(forKey: prefix + "settings") ?? [:]
-            if p.id == currentProfile?.id {
-                for key in playbackSettingKeys {
-                    if let v = UserDefaults.standard.object(forKey: key) {
-                        snap[key] = v
-                    }
-                }
+            if let hist = UserDefaults.standard.array(forKey: prefix + "history") {
+                dict["history"] = hist
             }
-            if snap["appLanguage"] == nil, let curLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) {
-                snap["appLanguage"] = curLang
+            if let watch = UserDefaults.standard.array(forKey: prefix + "watchlist") {
+                dict["watchlist"] = watch
             }
-            if !snap.isEmpty {
-                dict["settings"] = snap
+            if let loved = UserDefaults.standard.array(forKey: prefix + "loved") {
+                dict["loved"] = loved
+            } else if let lovedData = UserDefaults.standard.data(forKey: prefix + "loved"),
+                      let raw = try? JSONSerialization.jsonObject(with: lovedData) {
+                dict["loved"] = raw
             }
-            if let hist = UserDefaults.standard.array(forKey: prefix + "history") as? [[String: Any]] {
-                dict["history"] = UserDataService.shared.sanitizeDataArray(hist).filter { d in
-                    guard let id = d["id"] as? String else { return false }
-                    return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
-                }
-            } else {
-                dict["history"] = []
+            if let snaps = UserDefaults.standard.data(forKey: prefix + "watchSnaps"),
+               let raw = try? JSONSerialization.jsonObject(with: snaps) {
+                dict["watchSnaps"] = raw
             }
-            if let watch = UserDefaults.standard.array(forKey: prefix + "watchlist") as? [[String: Any]] {
-                dict["watchlist"] = UserDataService.shared.sanitizeDataArray(watch).filter { d in
-                    guard let id = d["id"] as? String else { return false }
-                    return !id.hasPrefix("tt_test_") && !id.hasPrefix("test_")
-                }
-            } else {
-                dict["watchlist"] = []
+            if let settings = UserDefaults.standard.dictionary(forKey: prefix + "settings") {
+                dict["settings"] = settings
             }
             if let col = UserDefaults.standard.array(forKey: prefix + "collections") as? [[String: Any]] {
-                let serializedCol: [[String: Any]] = col.map { cDict in
-                    var c = cDict
+                dict["collections"] = col.map { c in
+                    var sanitizedCol = c
                     if let d = c["itemsData"] as? Data {
-                        c["itemsData"] = d.base64EncodedString()
+                        sanitizedCol["itemsData"] = d.base64EncodedString()
                     }
-                    return c
+                    return sanitizedCol
                 }
-                dict["collections"] = serializedCol
-            } else {
-                dict["collections"] = []
+            } else if let col = UserDefaults.standard.array(forKey: prefix + "collections") {
+                dict["collections"] = col
             }
-            let epProgKey = prefix + "episodeProgress"
-            if let epProg = UserDefaults.standard.dictionary(forKey: epProgKey) as? [String: [String: Any]] {
-                dict["episodeProgress"] = epProg.filter { (k, _) in
-                    !k.hasPrefix("tt_test_") && !k.hasPrefix("test_")
-                }
-            } else {
-                dict["episodeProgress"] = [:]
+            if let epProg = UserDefaults.standard.dictionary(forKey: prefix + "episodeProgress") {
+                dict["episodeProgress"] = epProg
             }
-            let searchKey = prefix + "recentSearches"
-            if let searchData = UserDefaults.standard.data(forKey: searchKey),
-               let items = try? JSONDecoder().decode([MediaItem].self, from: searchData) {
-                dict["recentSearches"] = items.filter {
-                    !$0.id.hasPrefix("tt_test_") && !$0.id.hasPrefix("test_")
-                }.map { it in
-                    var d: [String: Any] = [
-                        "id": it.id,
-                        "title": it.title,
-                        "category": it.category
-                    ]
-                    if let p = it.posterURL?.absoluteString { d["posterURL"] = p }
-                    if let b = it.backdropURL?.absoluteString { d["backdropURL"] = b }
-                    return d
-                }
-            } else {
-                dict["recentSearches"] = []
+            if let recSearch = UserDefaults.standard.data(forKey: prefix + "recentSearches"),
+               let raw = try? JSONSerialization.jsonObject(with: recSearch) {
+                dict["recentSearches"] = raw
             }
             return dict
         }
     }
 
-    /// Applies a remote profiles payload. Per-profile history/watchlist merges
-    /// always run (recency-safe unions). The profiles LIST itself is replaced
-    /// only when `replaceList` is true — callers pass false for stale background
-    /// pulls so an outdated remote list can never wipe the local one.
-    func applyCloudProfilesData(_ raw: [[String: Any]]?, replaceList: Bool = true) {
-        guard let raw, !raw.isEmpty else { return }
-        var imported: [UserProfile] = []
-        for dict in raw {
-            guard let idStr = dict["id"] as? String,
-                  let id = UUID(uuidString: idStr),
-                  let name = dict["name"] as? String,
-                  let avatarID = dict["avatarID"] as? String else { continue }
-            let created = (dict["createdAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date()
-            let isKids = (dict["isKids"] as? Bool) ?? (name.lowercased() == "kids")
-            let isStock = (dict["isStock"] as? Bool) ?? isKids
-            imported.append(UserProfile(id: id, name: name, avatarID: avatarID, createdAt: created, isKids: isKids, isStock: isStock))
-            if let remoteSettings = dict["settings"] as? [String: Any] {
-                var localSnap = UserDefaults.standard.dictionary(forKey: "profile.\(id.uuidString).settings") ?? [:]
-                for (k, v) in remoteSettings {
-                    if k == UserDefaults.Key.streamRouteProxyEndpoint {
-                        let remoteEp = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        let localEp = (localSnap[k] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if !remoteEp.isEmpty {
-                            localSnap[k] = remoteEp
-                        } else if !localEp.isEmpty {
-                            localSnap[k] = localEp
-                        } else if let recovered = StreamRouteProxyManager.recoverConfiguredEndpoint(), !recovered.isEmpty {
-                            localSnap[k] = recovered
-                        }
-                        continue
-                    }
-                    if k == UserDefaults.Key.streamRouteProxyEnabled {
-                        let remoteEnabled = v as? Bool ?? false
-                        let localEnabled = localSnap[k] as? Bool ?? false
-                        let currentEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-                        let hasEndpoint = !((localSnap[UserDefaults.Key.streamRouteProxyEndpoint] as? String) ?? "").isEmpty
-                        if remoteEnabled {
-                            localSnap[k] = true
-                        } else if (localEnabled || currentEnabled) && hasEndpoint {
-                            localSnap[k] = true
-                        } else {
-                            localSnap[k] = remoteEnabled
-                        }
-                        continue
-                    }
-                    localSnap[k] = v
-                }
-                if localSnap[UserDefaults.Key.streamRouteProxyEndpoint] == nil || ((localSnap[UserDefaults.Key.streamRouteProxyEndpoint] as? String)?.isEmpty ?? true) {
-                    if let recovered = StreamRouteProxyManager.recoverConfiguredEndpoint(), !recovered.isEmpty {
-                        localSnap[UserDefaults.Key.streamRouteProxyEndpoint] = recovered
-                        localSnap[UserDefaults.Key.streamRouteProxyEnabled] = true
-                    }
-                }
-                UserDefaults.standard.set(localSnap, forKey: "profile.\(id.uuidString).settings")
-            }
-            let histKey = "profile.\(id.uuidString).history"
-            if let remoteHist = dict["history"] as? [[String: Any]], !remoteHist.isEmpty {
-                let localHist = (UserDefaults.standard.array(forKey: histKey) as? [[String: Any]]) ?? []
-                let merged = UserDataService.shared.mergeHistoryData(local: localHist, remote: remoteHist)
-                UserDefaults.standard.set(merged, forKey: histKey)
-            }
-            let watchKey = "profile.\(id.uuidString).watchlist"
-            if let remoteWatch = dict["watchlist"] as? [[String: Any]], !remoteWatch.isEmpty {
-                let localWatch = (UserDefaults.standard.array(forKey: watchKey) as? [[String: Any]]) ?? []
-                let merged = UserDataService.shared.mergeWatchlistData(local: localWatch, remote: remoteWatch)
-                UserDefaults.standard.set(merged, forKey: watchKey)
-            }
-            let colKey = "profile.\(id.uuidString).collections"
-            if let remoteCol = dict["collections"] as? [[String: Any]], !remoteCol.isEmpty {
-                let localFormatCol: [[String: Any]] = remoteCol.map { cDict in
-                    var c = cDict
-                    if let b64 = c["itemsData"] as? String, let d = Data(base64Encoded: b64) {
-                        c["itemsData"] = d
-                    }
-                    return c
-                }
-                UserDefaults.standard.set(localFormatCol, forKey: colKey)
-            }
-            let epKey = "profile.\(id.uuidString).episodeProgress"
-            if let remoteEp = dict["episodeProgress"] as? [String: [String: Any]], !remoteEp.isEmpty {
-                var localEp = (UserDefaults.standard.dictionary(forKey: epKey) as? [String: [String: Any]]) ?? [:]
-                for (k, v) in remoteEp {
-                    let localTime = (localEp[k]?["timestamp"] as? Double) ?? 0
-                    let remoteTime = (v["timestamp"] as? Double) ?? 0
-                    if remoteTime >= localTime {
-                        localEp[k] = v
-                    }
-                }
-                UserDefaults.standard.set(localEp, forKey: epKey)
-            }
-            let searchKey = "profile.\(id.uuidString).recentSearches"
-            if let remoteSearches = dict["recentSearches"] as? [[String: Any]], !remoteSearches.isEmpty {
-                let items: [MediaItem] = remoteSearches.compactMap { d in
-                    guard let sid = d["id"] as? String, let stitle = d["title"] as? String else { return nil }
-                    let cat = d["category"] as? String ?? "Movie"
-                    let poster = (d["posterURL"] as? String).flatMap { URL(string: $0) }
-                    let backdrop = (d["backdropURL"] as? String).flatMap { URL(string: $0) }
-                    return MediaItem(
-                        id: sid,
-                        title: stitle,
-                        description: "",
-                        imageURL: nil,
-                        posterURL: poster,
-                        backdropURL: backdrop,
-                        heroURL: nil,
-                        streamURL: nil,
-                        category: cat,
-                        progress: nil,
-                        trailerURL: nil,
-                        cast: nil,
-                        seasons: nil,
-                        runtime: nil,
-                        certification: nil,
-                        genres: nil,
-                        popularity: nil,
-                        releaseDate: nil,
-                        originalLanguage: nil,
-                        spokenLanguages: nil,
-                        originCountry: nil,
-                        voteAverage: nil,
-                        episodes: nil
-                    )
-                }
-                if !items.isEmpty, let encoded = try? JSONEncoder().encode(items) {
-                    UserDefaults.standard.set(encoded, forKey: searchKey)
-                    if id == self.currentProfile?.id {
-                        RecentSearchManager.shared.setRecentItems(items)
-                    }
-                }
-            }
-        }
-        guard !imported.isEmpty else { return }
+    func applyCloudProfilesData(_ remoteProfiles: [[String: Any]]?, replaceList: Bool = true) {
+        guard let list = remoteProfiles, !list.isEmpty else { return }
 
         let applyBlock = {
+            var imported: [UserProfile] = []
+            for item in list {
+                guard let idStr = item["id"] as? String,
+                      let id = UUID(uuidString: idStr),
+                      let name = item["name"] as? String,
+                      let avatarID = item["avatarID"] as? String else { continue }
+                let createdSeconds = item["createdAt"] as? Double ?? Date().timeIntervalSince1970
+                let isKids = item["isKids"] as? Bool ?? false
+                let isStock = item["isStock"] as? Bool ?? false
+                let profile = UserProfile(
+                    id: id,
+                    name: name,
+                    avatarID: avatarID,
+                    createdAt: Date(timeIntervalSince1970: createdSeconds),
+                    isKids: isKids,
+                    isStock: isStock
+                )
+                imported.append(profile)
+
+                let prefix = "profile.\(id.uuidString)."
+                if let hist = item["history"] as? [[String: Any]] {
+                    UserDefaults.standard.set(hist, forKey: prefix + "history")
+                }
+                if let watch = item["watchlist"] as? [[String: Any]] {
+                    UserDefaults.standard.set(watch, forKey: prefix + "watchlist")
+                }
+                if let loved = item["loved"] as? [String] {
+                    UserDefaults.standard.set(loved, forKey: prefix + "loved")
+                }
+                if let snaps = item["watchSnaps"],
+                   let data = try? JSONSerialization.data(withJSONObject: snaps) {
+                    UserDefaults.standard.set(data, forKey: prefix + "watchSnaps")
+                }
+                if let settings = item["settings"] as? [String: Any] {
+                    UserDefaults.standard.set(settings, forKey: prefix + "settings")
+                }
+                if let col = item["collections"] as? [[String: Any]] {
+                    UserDefaults.standard.set(col, forKey: prefix + "collections")
+                }
+                if let epProg = item["episodeProgress"] as? [String: Any] {
+                    UserDefaults.standard.set(epProg, forKey: prefix + "episodeProgress")
+                }
+                if let recSearch = item["recentSearches"],
+                   let data = try? JSONSerialization.data(withJSONObject: recSearch) {
+                    UserDefaults.standard.set(data, forKey: prefix + "recentSearches")
+                }
+            }
+
+            guard !imported.isEmpty else { return }
+
+            // Merge legacy un-namespaced library data into the primary non-Kids profile
+            // if this profile doesn't have namespaced data yet
+            let primaryNonKids = imported.first(where: { !$0.isKids })
+            if let primary = primaryNonKids {
+                let targetPrefix = "profile.\(primary.id.uuidString)."
+                for (legacyKey, subkey) in [
+                    ("localHistoryDataStremio", "history"),
+                    ("localWatchlistDataStremio", "watchlist"),
+                    ("localCollectionsData", "collections"),
+                    ("tasteProfileLovedItems", "loved"),
+                    ("tasteProfileWatchSnapshots", "watchSnaps"),
+                    ("globalEpisodeProgress", "episodeProgress")
+                ] {
+                    let targetKey = targetPrefix + subkey
+                    if UserDefaults.standard.object(forKey: targetKey) == nil,
+                       let legacyVal = UserDefaults.standard.object(forKey: legacyKey) {
+                        UserDefaults.standard.set(legacyVal, forKey: targetKey)
+                    }
+                }
+            }
+
             guard replaceList else { return }
-            // Clean up any local profiles being replaced by the cloud profiles,
-            // but preserve any local history/watchlist by carrying it into the primary imported profile!
-            if let targetPrimary = imported.first(where: { !$0.isKids }) ?? imported.first {
-                let targetPrefix = "profile.\(targetPrimary.id.uuidString)."
-                for localProfile in self.profiles {
-                    if !imported.contains(where: { $0.id == localProfile.id }) {
-                        let sourcePrefix = "profile.\(localProfile.id.uuidString)."
-                        let targetHist = (UserDefaults.standard.array(forKey: targetPrefix + "history") as? [[String: Any]]) ?? []
-                        if targetHist.isEmpty,
-                           let localHist = UserDefaults.standard.array(forKey: sourcePrefix + "history") as? [[String: Any]], !localHist.isEmpty {
+
+            // Clean up any remaining legacy migration temp keys from old profile IDs
+            for localP in self.profiles {
+                if !imported.contains(where: { $0.id == localP.id }) && !localP.isKids {
+                    if let primary = primaryNonKids {
+                        let sourcePrefix = "profile.\(localP.id.uuidString)."
+                        let targetPrefix = "profile.\(primary.id.uuidString)."
+                        if UserDefaults.standard.object(forKey: targetPrefix + "history") == nil,
+                           let localHist = UserDefaults.standard.array(forKey: sourcePrefix + "history") {
                             UserDefaults.standard.set(localHist, forKey: targetPrefix + "history")
                         }
-                        let targetWatch = (UserDefaults.standard.array(forKey: targetPrefix + "watchlist") as? [[String: Any]]) ?? []
-                        if targetWatch.isEmpty,
-                           let localWatch = UserDefaults.standard.array(forKey: sourcePrefix + "watchlist") as? [[String: Any]], !localWatch.isEmpty {
+                        if UserDefaults.standard.object(forKey: targetPrefix + "watchlist") == nil,
+                           let localWatch = UserDefaults.standard.array(forKey: sourcePrefix + "watchlist") {
                             UserDefaults.standard.set(localWatch, forKey: targetPrefix + "watchlist")
                         }
-                        let targetEp = (UserDefaults.standard.dictionary(forKey: targetPrefix + "episodeProgress") as? [String: [String: Any]]) ?? [:]
-                        if targetEp.isEmpty,
-                           let localEp = UserDefaults.standard.dictionary(forKey: sourcePrefix + "episodeProgress") as? [String: [String: Any]], !localEp.isEmpty {
-                            UserDefaults.standard.set(localEp, forKey: targetPrefix + "episodeProgress")
+                        if UserDefaults.standard.object(forKey: targetPrefix + "collections") == nil,
+                           let localCol = UserDefaults.standard.array(forKey: sourcePrefix + "collections") {
+                            UserDefaults.standard.set(localCol, forKey: targetPrefix + "collections")
                         }
-                        let targetSearch = UserDefaults.standard.data(forKey: targetPrefix + "recentSearches")
-                        if targetSearch == nil,
+                        if UserDefaults.standard.object(forKey: targetPrefix + "loved") == nil,
+                           let localLoved = UserDefaults.standard.array(forKey: sourcePrefix + "loved") {
+                            UserDefaults.standard.set(localLoved, forKey: targetPrefix + "loved")
+                        }
+                        if UserDefaults.standard.object(forKey: targetPrefix + "watchSnaps") == nil,
+                           let localSnaps = UserDefaults.standard.data(forKey: sourcePrefix + "watchSnaps") {
+                            UserDefaults.standard.set(localSnaps, forKey: targetPrefix + "watchSnaps")
+                        }
+                        if UserDefaults.standard.object(forKey: targetPrefix + "episodeProgress") == nil,
+                           let localProg = UserDefaults.standard.dictionary(forKey: sourcePrefix + "episodeProgress") {
+                            UserDefaults.standard.set(localProg, forKey: targetPrefix + "episodeProgress")
+                        }
+                        if UserDefaults.standard.object(forKey: targetPrefix + "recentSearches") == nil,
                            let localSearch = UserDefaults.standard.data(forKey: sourcePrefix + "recentSearches") {
                             UserDefaults.standard.set(localSearch, forKey: targetPrefix + "recentSearches")
                         }
@@ -709,7 +632,7 @@ final class ProfileManager: ObservableObject {
 
             let userName = AuthManager.shared.currentUser?.displayName ?? AuthManager.shared.currentUser?.email?.components(separatedBy: "@").first ?? ""
             let sanitized = imported.map { p -> UserProfile in
-                if (p.name == "Default" || p.name == "Guest") && !userName.isEmpty && userName != "Default" && userName != "Guest" && !p.isKids {
+                if (p.name == "Default" || p.name == "Guest" || p.name == "Alex Smith") && !userName.isEmpty && userName != "Default" && userName != "Guest" && userName != "Alex Smith" && !p.isKids {
                     return UserProfile(id: p.id, name: userName, avatarID: p.avatarID, createdAt: p.createdAt, isKids: p.isKids, isStock: p.isStock)
                 }
                 return p
@@ -719,15 +642,17 @@ final class ProfileManager: ObservableObject {
             self.ensureKidsProfile()
             self.saveProfiles()
             if let cur = self.currentProfile {
-                if !sanitized.contains(where: { $0.id == cur.id }) {
-                    if let first = sanitized.first {
-                        self.selectProfile(first)
-                    } else {
-                        self.currentProfile = nil
-                    }
+                if let matching = sanitized.first(where: { $0.id == cur.id }) {
+                    self.currentProfile = matching
+                    self.saveCurrentProfile()
+                    self.restoreSettings(for: matching.id)
+                } else if let first = sanitized.first {
+                    self.selectProfile(first)
                 } else {
-                    self.restoreSettings(for: cur.id)
+                    self.currentProfile = nil
                 }
+            } else if let first = sanitized.first(where: { !$0.isKids }) ?? sanitized.first {
+                self.selectProfile(first)
             }
         }
 

@@ -24,34 +24,64 @@ class StreamProxyManager {
     
     func start() {
         guard !isRunning else { return }
-        
+        startListener(preferredPort: port)
+    }
+
+    private func startListener(preferredPort: UInt16) {
         do {
             let params = NWParameters.tcp
-            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            // Security: Strictly bind to loopback interface (never expose proxy to external LAN/Wi-Fi)
+            params.requiredInterfaceType = .loopback
+            let newListener: NWListener
+            if preferredPort == 0 {
+                newListener = try NWListener(using: params)
+            } else if let p = NWEndpoint.Port(rawValue: preferredPort) {
+                newListener = try NWListener(using: params, on: p)
+            } else {
+                newListener = try NWListener(using: params)
+            }
+            self.listener = newListener
             
-            listener?.newConnectionHandler = { [weak self] connection in
+            newListener.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
             
-            listener?.stateUpdateHandler = { [weak self] state in
+            newListener.stateUpdateHandler = { [weak self] state in
+                guard let self = self else { return }
                 switch state {
                 case .ready:
-                    if let port = self?.listener?.port?.rawValue {
-                        self?.port = port
+                    if let port = self.listener?.port?.rawValue {
+                        self.port = port
                     }
-                    self?.isRunning = true
-                    print("[StreamProxy] Proxy server listening on http://127.0.0.1:\(self?.port ?? 51547)")
+                    self.isRunning = true
+                    print("[StreamProxy] Proxy server listening on http://127.0.0.1:\(self.port)")
                 case .failed(let error):
-                    print("[StreamProxy] Server failed: \(error)")
-                    self?.isRunning = false
+                    print("[StreamProxy] Server failed on port \(preferredPort): \(error)")
+                    self.isRunning = false
+                    self.listener?.cancel()
+                    self.listener = nil
+                    // Port fallback resilience: If preferred port is busy, fallback to next port or dynamic port
+                    if preferredPort >= 51547 && preferredPort < 51560 {
+                        let nextPort = preferredPort + 1
+                        print("[StreamProxy] Retrying on fallback port \(nextPort)...")
+                        self.startListener(preferredPort: nextPort)
+                    } else if preferredPort != 0 {
+                        print("[StreamProxy] Retrying on system-assigned dynamic loopback port...")
+                        self.startListener(preferredPort: 0)
+                    }
                 default:
                     break
                 }
             }
             
-            listener?.start(queue: DispatchQueue(label: "StreamProxy", qos: .userInitiated))
+            newListener.start(queue: DispatchQueue(label: "StreamProxy", qos: .userInitiated))
         } catch {
-            print("[StreamProxy] Failed to create listener: \(error)")
+            print("[StreamProxy] Failed to create listener on port \(preferredPort): \(error)")
+            if preferredPort >= 51547 && preferredPort < 51560 {
+                startListener(preferredPort: preferredPort + 1)
+            } else if preferredPort != 0 {
+                startListener(preferredPort: 0)
+            }
         }
     }
     
@@ -67,22 +97,22 @@ class StreamProxyManager {
         pipes.forEach { $0.cancel() }
     }
     
-    /// Creates a proxy URL that MPV can play. The proxy will fetch `originalURL` with the given `headers`.
-    func proxyURL(for originalURL: URL, headers: [String: String], title: String? = nil) -> URL? {
-        guard let headersJSON = encodeHeaders(headers) else { return nil }
-
+    /// Creates a proxy URL that MPV can play. The proxy will fetch `originalURL` with optional `headers`.
+    func proxyURL(for originalURL: URL, headers: [String: String]? = nil, title: String? = nil) -> URL? {
+        var items = [
+            URLQueryItem(name: "url", value: originalURL.absoluteString)
+        ]
+        if let headers = headers, !headers.isEmpty, let headersJSON = encodeHeaders(headers) {
+            items.append(URLQueryItem(name: "headers", value: headersJSON))
+        }
+        if let title = title, !title.isEmpty {
+            items.append(URLQueryItem(name: "title", value: title))
+        }
         var components = URLComponents()
         components.scheme = "http"
         components.host = "127.0.0.1"
         components.port = Int(port)
         components.path = "/proxy"
-        var items = [
-            URLQueryItem(name: "url", value: originalURL.absoluteString),
-            URLQueryItem(name: "headers", value: headersJSON)
-        ]
-        if let title = title, !title.isEmpty {
-            items.append(URLQueryItem(name: "title", value: title))
-        }
         components.queryItems = items
         return components.url
     }
@@ -147,8 +177,17 @@ class StreamProxyManager {
         }
         
         guard let targetURLString = queryItems.first(where: { $0.name == "url" })?.value,
-              let targetURL = URL(string: targetURLString) else {
-            sendError(connection, status: 400, message: "Missing or invalid 'url' parameter")
+              let targetURL = URL(string: targetURLString),
+              let scheme = targetURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            sendError(connection, status: 400, message: "Missing or invalid 'url' parameter (only HTTP and HTTPS supported)")
+            return
+        }
+
+        // Security: Disallow loopback destinations to prevent SSRF against internal services
+        let host = (targetURL.host ?? "").lowercased()
+        guard host != "127.0.0.1", host != "localhost", host != "::1" else {
+            sendError(connection, status: 403, message: "Loopback targets forbidden")
             return
         }
         

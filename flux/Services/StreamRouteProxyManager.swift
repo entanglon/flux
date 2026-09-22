@@ -17,8 +17,8 @@ final class StreamRouteProxyManager: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
-            syncWithStockAddon()
             if !isReloading {
+                syncWithStockAddon()
                 ProfileManager.shared.saveCurrentProfileSettings()
                 AuthManager.shared.scheduleAutoSync()
             }
@@ -70,7 +70,7 @@ final class StreamRouteProxyManager: ObservableObject {
     private init() {
         var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
         var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-        if ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !AppEnvironment.isRunningTests, ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
                 ep = recovered
                 UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
@@ -99,7 +99,7 @@ final class StreamRouteProxyManager: ObservableObject {
         defer { isReloading = false }
         var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
         var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-        if ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !AppEnvironment.isRunningTests, ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
                 ep = recovered
                 UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)

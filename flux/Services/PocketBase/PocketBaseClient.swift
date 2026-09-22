@@ -212,7 +212,8 @@ struct PocketBaseClient {
         req.timeoutInterval = AppConfig.pushTimeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let sanitizedBody = Self.sanitizeForJSON(body) as? [String: Any] ?? body
+        req.httpBody = try JSONSerialization.data(withJSONObject: sanitizedBody)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw PocketBaseError.network }
         if http.statusCode == 404 { return nil }
@@ -241,5 +242,34 @@ struct PocketBaseClient {
         }
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return req
+    }
+    /// Recursively converts raw Data to base64 strings and ensures all objects are valid JSON types.
+    static func sanitizeForJSON(_ object: Any) -> Any {
+        if let data = object as? Data {
+            return data.base64EncodedString()
+        }
+        if let dict = object as? [String: Any] {
+            var sanitized: [String: Any] = [:]
+            for (k, v) in dict {
+                sanitized[k] = sanitizeForJSON(v)
+            }
+            return sanitized
+        }
+        if let array = object as? [Any] {
+            return array.map { sanitizeForJSON($0) }
+        }
+        if object is String || object is NSNumber || object is Bool || object is Int || object is Double || object is Float {
+            return object
+        }
+        if let url = object as? URL {
+            return url.absoluteString
+        }
+        if let uuid = object as? UUID {
+            return uuid.uuidString
+        }
+        if let date = object as? Date {
+            return date.timeIntervalSince1970
+        }
+        return "\(object)"
     }
 }

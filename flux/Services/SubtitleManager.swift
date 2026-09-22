@@ -33,10 +33,14 @@ class SubtitleManager: ObservableObject {
                         let (data, _) = try await URLSession.shared.data(from: url)
                         let response = try JSONDecoder().decode(StremioSubtitleResponse.self, from: data)
                         return response.subtitles.compactMap { sub in
-                            guard let subURL = sub.url, let subLang = sub.lang else { return nil }
+                            guard let subURL = sub.url,
+                                  let subLang = sub.lang,
+                                  let parsedURL = URL(string: subURL) ?? URL(string: subURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") else {
+                                return nil
+                            }
                             return StremioSubtitleTrack(
                                 id: sub.id ?? subURL,
-                                url: URL(string: subURL) ?? url,
+                                url: parsedURL,
                                 language: subLang,
                                 source: addon.name
                             )

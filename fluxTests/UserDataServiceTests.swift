@@ -26,6 +26,18 @@ struct UserDataServiceTests {
         let savedEpProgressDefaults: Any?
         let savedRecentSearches: [MediaItem]
         let savedAddons: [StremioAddon]
+        let savedDisplayName: String?
+        let savedLegacyDisplayName: String?
+        let savedProfilesData: Data?
+        let savedCurrentProfileData: Data?
+        let savedAddonsData: Data?
+        let savedStreamingSourceMode: String?
+        let savedHasCustomizedName: Any?
+        let savedKeychainToken: String?
+        let savedKeychainUserID: String?
+        let savedKeychainEmail: String?
+        let savedKeychainDisplayName: String?
+        let savedKeychainAvatar: String?
 
         init() {
             savedProfiles = ProfileManager.shared.profiles
@@ -41,6 +53,18 @@ struct UserDataServiceTests {
             savedIsGuest = AuthManager.shared.isGuestMode
             savedLanguage = LanguageManager.shared.currentLanguage
             savedTmdb = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey)
+            savedDisplayName = UserDefaults.standard.string(forKey: "flux.authDisplayName")
+            savedLegacyDisplayName = UserDefaults.standard.string(forKey: "userDisplayName")
+            savedProfilesData = UserDefaults.standard.data(forKey: "fluxProfiles")
+            savedCurrentProfileData = UserDefaults.standard.data(forKey: "fluxCurrentProfile")
+            savedAddonsData = UserDefaults.standard.data(forKey: "StremioConfiguredAddons")
+            savedStreamingSourceMode = UserDefaults.standard.string(forKey: "streamingSourceMode")
+            savedHasCustomizedName = UserDefaults.standard.object(forKey: "flux.hasExplicitlyCustomizedName")
+            savedKeychainToken = KeychainManager.getToken()
+            savedKeychainUserID = KeychainManager.getUserID()
+            savedKeychainEmail = KeychainManager.getEmail()
+            savedKeychainDisplayName = KeychainManager.getDisplayName()
+            savedKeychainAvatar = KeychainManager.getAvatarURL()
             let profileID = ProfileManager.shared.currentProfile?.id.uuidString ?? ""
             savedHistoryKey = profileID.isEmpty ? "localHistoryDataStremio" : "profile.\(profileID).history"
             savedWatchlistKey = profileID.isEmpty ? "localWatchlistDataStremio" : "profile.\(profileID).watchlist"
@@ -85,6 +109,18 @@ struct UserDataServiceTests {
             } else {
                 UserDefaults.standard.removeObject(forKey: savedEpProgressKey)
             }
+            if let val = savedAddonsData {
+                UserDefaults.standard.set(val, forKey: "StremioConfiguredAddons")
+            }
+            if let val = savedProfilesData {
+                UserDefaults.standard.set(val, forKey: "fluxProfiles")
+            }
+            if let val = savedCurrentProfileData {
+                UserDefaults.standard.set(val, forKey: "fluxCurrentProfile")
+            }
+            if let val = savedStreamingSourceMode {
+                UserDefaults.standard.set(val, forKey: "streamingSourceMode")
+            }
 
             // 3. Restore profiles and currentProfile
             ProfileManager.shared.profiles = savedProfiles
@@ -99,6 +135,28 @@ struct UserDataServiceTests {
             AddonManager.shared.addons = savedAddons
 
             AuthManager.shared.resetStateForTesting(user: savedUser, authenticated: savedIsAuth, guest: savedIsGuest)
+            if let name = savedDisplayName {
+                UserDefaults.standard.set(name, forKey: "flux.authDisplayName")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "flux.authDisplayName")
+            }
+            if let legName = savedLegacyDisplayName {
+                UserDefaults.standard.set(legName, forKey: "userDisplayName")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "userDisplayName")
+            }
+            if let custom = savedHasCustomizedName {
+                UserDefaults.standard.set(custom, forKey: "flux.hasExplicitlyCustomizedName")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "flux.hasExplicitlyCustomizedName")
+            }
+            KeychainManager.saveSession(
+                token: savedKeychainToken ?? "",
+                userID: savedKeychainUserID ?? "",
+                email: savedKeychainEmail,
+                displayName: savedKeychainDisplayName,
+                avatarURL: savedKeychainAvatar
+            )
             LanguageManager.shared.setLanguage(savedLanguage)
             if let tmdb = savedTmdb {
                 UserDefaults.standard.set(tmdb, forKey: UserDefaults.Key.tmdbApiKey)

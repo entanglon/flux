@@ -14,9 +14,12 @@ enum BundleMigrationService {
 
         let hasMigrated = UserDefaults.standard.bool(forKey: migrationKey)
         let currentTmdb = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
+        let targetAddonData = UserDefaults.standard.data(forKey: "StremioConfiguredAddons")
+        let targetAddons = targetAddonData.flatMap { try? JSONDecoder().decode([StremioAddon].self, from: $0) } ?? []
+        let targetCommunityAddonCount = targetAddons.filter { !$0.isStock }.count
         
-        // If already migrated and user has a populated TMDB key or library, no need to re-migrate
-        if hasMigrated && !currentTmdb.isEmpty {
+        // If already migrated and user has a populated TMDB key and community addons, no need to re-migrate
+        if hasMigrated && !currentTmdb.isEmpty && targetCommunityAddonCount > 0 {
             return
         }
 
@@ -58,8 +61,23 @@ enum BundleMigrationService {
                 let targetAddons = targetData.flatMap { try? JSONDecoder().decode([StremioAddon].self, from: $0) } ?? []
                 let sourceData = value as? Data
                 let sourceAddons = sourceData.flatMap { try? JSONDecoder().decode([StremioAddon].self, from: $0) } ?? []
-                // Only skip if target has at least as many configured addons as source and has streaming addons
-                if targetAddons.count >= sourceAddons.count && targetAddons.count > 2 {
+                let targetCommunity = targetAddons.filter { !$0.isStock }.count
+                let sourceCommunity = sourceAddons.filter { !$0.isStock }.count
+                // Only skip if target has at least as many community addons as source
+                if targetCommunity >= sourceCommunity && targetCommunity > 0 {
+                    continue
+                }
+            } else if key == "fluxCurrentProfile" {
+                // If target has "Alex Smith", force restore from source
+                if let targetData = UserDefaults.standard.data(forKey: key),
+                   let prof = try? JSONDecoder().decode(UserProfile.self, from: targetData),
+                   prof.name != "Alex Smith" {
+                    continue
+                }
+            } else if key == "streamingSourceMode" {
+                // If target has "both" but source had explicit "http", restore "http"
+                if let targetMode = UserDefaults.standard.string(forKey: key),
+                   targetMode != "both" {
                     continue
                 }
             } else {

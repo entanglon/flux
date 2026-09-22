@@ -48,6 +48,7 @@ struct SecretPlayerHUDView: View {
 
     @State private var activeSection: Section = .diagnostics
     @State private var diagnostics = PlaybackDiagnostics()
+    @State private var torrentStats: StremioServerManager.TorrentStats? = nil
     @State private var timer: Timer? = nil
 
     // Performance-isolated local state (prevents main-thread rendering lag from player position ticks)
@@ -133,15 +134,8 @@ struct SecretPlayerHUDView: View {
     private func startDiagnosticsTimer() {
         stopDiagnosticsTimer()
         guard activeSection == .diagnostics else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak mpv] _ in
-            guard let mpv = mpv else { return }
-            Task.detached(priority: .utility) { [weak mpv] in
-                guard let mpv = mpv else { return }
-                let d = mpv.getPlaybackDiagnostics()
-                await MainActor.run {
-                    self.diagnostics = d
-                }
-            }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            refreshDiagnostics()
         }
     }
 
@@ -265,8 +259,15 @@ struct SecretPlayerHUDView: View {
         Task.detached(priority: .utility) { [weak mpv] in
             guard let mpv = mpv else { return }
             let d = mpv.getPlaybackDiagnostics()
+            var tStats: StremioServerManager.TorrentStats? = nil
+            if let stream = await MainActor.run(body: { PlayerManager.shared.currentSelectedStream }),
+               stream.isTorrent,
+               let hash = await MainActor.run(body: { PlayerManager.shared.torrentHash(stream) }) {
+                tStats = await StremioServerManager.shared.fetchTorrentStats(infoHash: hash, fileIdx: stream.fileIdx ?? -1)
+            }
             await MainActor.run {
                 self.diagnostics = d
+                self.torrentStats = tStats
             }
         }
     }
@@ -311,6 +312,44 @@ struct SecretPlayerHUDView: View {
             }
             if diagnostics.audioBitrate > 0 {
                 diagnosticRow(label: "Audio Bitrate", value: String(format: "%.1f kbps", diagnostics.audioBitrate))
+            }
+
+            if let ts = torrentStats {
+                Divider().background(Color.white.opacity(0.1))
+
+                HStack(spacing: 6) {
+                    Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.cyan)
+                    Text("P2P Swarm Diagnostics".localized)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.cyan)
+                }
+
+                let peers = ts.peers ?? 0
+                let unchoked = ts.unchoked ?? 0
+                let peersStr = "\(peers) connected (\(unchoked) unchoked)"
+                diagnosticRow(label: "Swarm Peers", value: peersStr, badgeColor: unchoked > 0 ? .green : .orange)
+
+                let dl = ts.downloadSpeed ?? 0
+                if dl > 0 {
+                    let dlStr = ByteCountFormatter.string(fromByteCount: Int64(dl), countStyle: .file) + "/s"
+                    diagnosticRow(label: "P2P Download Speed", value: dlStr, badgeColor: .green)
+                } else {
+                    diagnosticRow(label: "P2P Download Speed", value: "0 B/s")
+                }
+
+                let ul = ts.uploadSpeed ?? 0
+                if ul > 0 {
+                    let ulStr = ByteCountFormatter.string(fromByteCount: Int64(ul), countStyle: .file) + "/s"
+                    diagnosticRow(label: "P2P Seeding Speed", value: ulStr)
+                }
+
+                if let downloaded = ts.downloaded, downloaded > 0 {
+                    let prog = ts.streamProgress.flatMap { $0 > 0 ? String(format: " (%.1f%%)", $0 * 100) : nil } ?? ""
+                    let downloadedStr = ByteCountFormatter.string(fromByteCount: downloaded, countStyle: .file) + prog
+                    diagnosticRow(label: "Downloaded to Cache", value: downloadedStr)
+                }
             }
         }
     }

@@ -27,7 +27,11 @@ class AddonManager: ObservableObject {
     // Background sync to heal older addons that have missing catalogs
     private func syncAddonManifests() async {
         for addon in addons {
+            guard !addon.isStock, addon.url.hasPrefix("http") else { continue }
             if addon.catalogs == nil || addon.catalogs!.isEmpty {
+                if let resources = addon.resources, !resources.isEmpty, !resources.contains("catalog") {
+                    continue
+                }
                 do {
                     try await addAddon(url: addon.url)
                 } catch {
@@ -155,7 +159,7 @@ class AddonManager: ObservableObject {
         self.addons = Array(map.values)
         ensureDefaultAddons()
         sortAddonsDeterministically()
-        if let encoded = try? JSONEncoder().encode(self.addons) {
+        if !AppEnvironment.isRunningTests, let encoded = try? JSONEncoder().encode(self.addons) {
             UserDefaults.standard.set(encoded, forKey: storageKey)
         }
     }
@@ -166,6 +170,19 @@ class AddonManager: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([StremioAddon].self, from: data) {
             self.addons = decoded
+        }
+        
+        // Healing: If target has only stock addons, check if production bundle has community addons
+        if !AppEnvironment.isRunningTests, self.addons.filter({ !$0.isStock }).isEmpty {
+            if let prodDefaults = UserDefaults(suiteName: "com.entanglon.flux"),
+               let prodData = prodDefaults.data(forKey: storageKey),
+               let prodAddons = try? JSONDecoder().decode([StremioAddon].self, from: prodData),
+               !prodAddons.filter({ !$0.isStock }).isEmpty {
+                self.addons = prodAddons
+                if let encoded = try? JSONEncoder().encode(self.addons) {
+                    UserDefaults.standard.set(encoded, forKey: storageKey)
+                }
+            }
         }
         
         // Always ensure essential default/stock addons are present
@@ -239,11 +256,7 @@ class AddonManager: ObservableObject {
             addons[existingIdx].isStock = true
             addons[existingIdx].name = "Stream Route Proxy"
             addons[existingIdx].description = "Route throttled HTTP scraper hosts through a high-speed private forward proxy (e.g. Tailscale / Tinyproxy)"
-            let effective = StreamRouteProxyManager.shared.isEnabled || addons[existingIdx].isEnabled
-            addons[existingIdx].isEnabled = effective
-            if StreamRouteProxyManager.shared.isEnabled != effective {
-                StreamRouteProxyManager.shared.isEnabled = effective
-            }
+            addons[existingIdx].isEnabled = StreamRouteProxyManager.shared.isEnabled
         } else {
             let proxyAddon = StremioAddon(
                 id: streamProxyID,
@@ -300,6 +313,7 @@ class AddonManager: ObservableObject {
     }
     
     func saveAddons() {
+        guard !AppEnvironment.isRunningTests else { return }
         if let encoded = try? JSONEncoder().encode(addons) {
             UserDefaults.standard.set(encoded, forKey: storageKey)
         }

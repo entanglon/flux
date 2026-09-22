@@ -2109,4 +2109,300 @@ struct StreamManagerTests {
         #expect(playerManager.currentStreamURL == nil)
         #expect(playerManager.currentSelectedStream == nil)
     }
+
+    @Test func torrentSeasonPackWithMatchingEpisodeReceivesMatchBonus() {
+        let manager = StreamManager.shared
+        let torrentSeasonPackEp2 = flux.Stream(
+            title: "Game.of.Thrones.S01.1080p.BluRay.x265 - S01E02",
+            cleanTitle: "Game of Thrones S01E02",
+            url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+            source: "Torrentio",
+            quality: "1080p",
+            fileIdx: 1,
+            isSeasonPack: true
+        )
+
+        let bonus = manager.evaluateEpisodeMatch(stream: torrentSeasonPackEp2, targetSeason: 1, targetEpisode: 2)
+        #expect(bonus >= 3000.0)
+    }
+
+    @Test @MainActor func autoPlaySeasonPackPreservationAndSourceLinking() {
+        let playerManager = PlayerManager.shared
+        let testHash = "0123456789abcdef0123456789abcdef01234567"
+        let seasonPackEp1 = flux.Stream(
+            title: "Game.of.Thrones.S01.1080p.BluRay.x265 - S01E01",
+            cleanTitle: "Game of Thrones S01E01",
+            url: URL(string: "magnet:?xt=urn:btih:\(testHash)")!,
+            source: "Torrentio",
+            quality: "1080p",
+            fileIdx: 0,
+            isSeasonPack: true
+        )
+        playerManager.currentSelectedStream = seasonPackEp1
+
+        let item = MediaItem(
+            id: "tt0944947",
+            title: "Game of Thrones",
+            description: "",
+            streamURL: nil,
+            category: "Series"
+        )
+
+        // Manual play (isAutoAdvance == false) must NOT link to previous season pack
+        playerManager.play(item, season: 1, episode: 2, isAutoAdvance: false)
+        #expect(playerManager.linkedSeasonPackHash == nil)
+
+        // Auto-play (isAutoAdvance == true) while playing a season pack MUST link to that season pack
+        playerManager.currentSelectedStream = seasonPackEp1
+        playerManager.play(item, season: 1, episode: 2, isAutoAdvance: true)
+        #expect(playerManager.linkedSeasonPackHash?.lowercased() == testHash.lowercased())
+            #expect(playerManager.linkedSeasonPackHash?.lowercased() == testHash.lowercased())
+    }
+
+    @Test
+    @MainActor
+    func autoPlaySeasonPackHTTPDebridLinking() {
+        let playerManager = PlayerManager.shared
+        let debridHash = "aabbccddeeff00112233445566778899aabbccdd"
+        
+        let httpDebridEp1 = Stream(
+            title: "Succession S01 COMPLETE 1080p WEB-DL [RD+] - S01E01",
+            cleanTitle: "Succession S01 COMPLETE 1080p WEB-DL",
+            url: URL(string: "https://real-debrid.com/d/xyz123/Succession.S01E01.mkv")!,
+            source: "Torrentio [RD+]",
+            quality: "1080p",
+            fileIdx: 0,
+            isSeasonPack: true,
+            infoHash: debridHash
+        )
+        #expect(httpDebridEp1.isTorrent == false)
+        #expect(httpDebridEp1.isDirectHTTP == true)
+
+        let item = MediaItem(
+            id: "tt7660850",
+            title: "Succession",
+            description: "",
+            streamURL: nil,
+            category: "Series"
+        )
+
+        playerManager.currentSelectedStream = httpDebridEp1
+        playerManager.play(item, season: 1, episode: 2, isAutoAdvance: true)
+
+        #expect(playerManager.linkedSeasonPack != nil)
+        #expect(playerManager.linkedSeasonPackHash?.lowercased() == debridHash.lowercased())
+
+        let linked = playerManager.linkedSeasonPack!
+
+        // Same Debrid pack for Ep 2 MUST match
+        let httpDebridEp2 = Stream(
+            title: "Succession S01 COMPLETE 1080p WEB-DL [RD+] - S01E02",
+            cleanTitle: "Succession S01 COMPLETE 1080p WEB-DL",
+            url: URL(string: "https://real-debrid.com/d/xyz456/Succession.S01E02.mkv")!,
+            source: "Torrentio [RD+]",
+            quality: "1080p",
+            fileIdx: 1,
+            isSeasonPack: true,
+            infoHash: debridHash
+        )
+        #expect(linked.matches(httpDebridEp2) == true)
+
+        // Random other stream MUST NOT match
+        let otherStream = Stream(
+            title: "Succession S01E02 720p HDTV",
+            cleanTitle: "Succession S01E02 720p HDTV",
+            url: URL(string: "https://example.com/other.mkv")!,
+            source: "WebStreamr",
+            quality: "720p",
+            isSeasonPack: false
+        )
+        #expect(linked.matches(otherStream) == false)
+
+        // Manual selection clears link
+        playerManager.selectStream(otherStream)
+        #expect(playerManager.linkedSeasonPack == nil)
+        #expect(playerManager.linkedSeasonPackHash == nil)
+    }
+
+    @Test
+    @MainActor
+    func autoPlaySeasonPackHTTPDirectHosterLinking() {
+        let playerManager = PlayerManager.shared
+
+        let webStreamEp1 = Stream(
+            title: "Severance.S01.1080p.ATVP.WEB-DL - Episode 1",
+            cleanTitle: "Severance S01 1080p ATVP WEB-DL",
+            url: URL(string: "https://cdn.provider.com/severance/s01e01.mp4")!,
+            source: "WebStreamr [FastServer]",
+            quality: "1080p",
+            fileIdx: nil,
+            isSeasonPack: true,
+            infoHash: nil
+        )
+        #expect(webStreamEp1.isTorrent == false)
+
+        let item = MediaItem(
+            id: "tt11280740",
+            title: "Severance",
+            description: "",
+            streamURL: nil,
+            category: "Series"
+        )
+
+        playerManager.currentSelectedStream = webStreamEp1
+        playerManager.play(item, season: 1, episode: 2, isAutoAdvance: true)
+
+        #expect(playerManager.linkedSeasonPack != nil)
+        let linked = playerManager.linkedSeasonPack!
+
+        // Same provider + matching season pack release for Ep 2 MUST match
+        let webStreamEp2 = Stream(
+            title: "Severance.S01.1080p.ATVP.WEB-DL - Episode 2",
+            cleanTitle: "Severance S01 1080p ATVP WEB-DL",
+            url: URL(string: "https://cdn.provider.com/severance/s01e02.mp4")!,
+            source: "WebStreamr [FastServer]",
+            quality: "1080p",
+            fileIdx: nil,
+            isSeasonPack: true,
+            infoHash: nil
+        )
+        #expect(linked.matches(webStreamEp2) == true)
+
+        // Different provider or different quality MUST NOT match
+        let differentQuality = Stream(
+            title: "Severance.S01.720p.WEB-DL - Episode 2",
+            cleanTitle: "Severance S01 720p WEB-DL",
+            url: URL(string: "https://cdn.other.com/s01e02.mp4")!,
+            source: "WebStreamr [FastServer]",
+            quality: "720p",
+            isSeasonPack: true
+        )
+        #expect(linked.matches(differentQuality) == false)
+    }
+
+    @Test func movieBoxPromoMultiWordPhraseDetection() {
+        let manager = StreamManager.shared
+
+        // Multi-word phrase matching with various separators (spaces, dots, hyphens)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Movie Box 1080p Stream", targetTitle: "Inception") == true)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "PenguPlay 1080p • Movie-Box Promo", targetTitle: "Inception") == true)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Inception (2010) MovieBox promo trailer", targetTitle: "Inception") == true)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "MovieBoxPro 1080p Direct", targetTitle: "Inception") == true)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Exclusive Preview 1080p", targetTitle: "Inception") == true)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Sneak Peek 720p", targetTitle: "Inception") == true)
+
+        // Title target matching word preservation
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Trailer Park Boys S01E01 1080p", targetTitle: "Trailer Park Boys") == false)
+        #expect(StreamManager.labelLooksLikeJunk(labelText: "Cosmos A Personal Voyage 1080p WEB-DL", targetTitle: "Cosmos") == false)
+
+        // Scannable text includes addon name header
+        let promoStream = flux.Stream(
+            title: "Cosmos.S01E01.1080p.WEB-DL",
+            cleanTitle: "Cosmos",
+            url: URL(string: "https://example.com/stream.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p",
+            name: "PenguPlay • MovieBox"
+        )
+        #expect(promoStream.fullScannableText.contains("MovieBox"))
+        #expect(StreamManager.labelLooksLikeJunk(labelText: promoStream.fullScannableText, targetTitle: "Cosmos") == true)
+    }
+
+    @Test func junkStreamsStrictlyExcludedFromPrimaryFastStart() {
+        let manager = StreamManager.shared
+
+        let promoStream = flux.Stream(
+            title: "Cosmos.2014.1080p.MovieBox.promo.trailer",
+            cleanTitle: "Cosmos",
+            url: URL(string: "https://example.com/promo.mp4")!,
+            source: "MovieBox",
+            quality: "1080p"
+        )
+        let healthyTorrent = flux.Stream(
+            title: "Cosmos.A.Spacetime.Odyssey.S01E01.1080p.BluRay.x264",
+            cleanTitle: "Cosmos",
+            url: URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 85
+        )
+
+        let (winner, fallbacks) = manager.selectFastStartCandidate(
+            from: [promoStream, healthyTorrent],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            targetTitle: "Cosmos"
+        )
+
+        // The promo stream must NEVER be chosen as primary!
+        #expect(winner?.id == healthyTorrent.id)
+        #expect(!fallbacks.contains(where: { $0.id == promoStream.id }))
+
+        // If ONLY junk streams exist, primary candidate must be nil rather than auto-playing junk!
+        let (junkOnlyWinner, _) = manager.selectFastStartCandidate(
+            from: [promoStream],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            targetTitle: "Cosmos"
+        )
+        #expect(junkOnlyWinner == nil)
+    }
+
+    @Test func healthyTorrentBeatsUnmeasuredHTTPInBothMode() {
+        let manager = StreamManager.shared
+
+        let unmeasuredHTTP = flux.Stream(
+            title: "Cosmos.A.Spacetime.Odyssey.1080p.WEB-DL",
+            cleanTitle: "Cosmos",
+            url: URL(string: "https://example.com/cosmos.mkv")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let strongSwarmTorrent = flux.Stream(
+            title: "Cosmos.A.Spacetime.Odyssey.1080p.BluRay.x264",
+            cleanTitle: "Cosmos",
+            url: URL(string: "magnet:?xt=urn:btih:9999999999999999999999999999999999999999")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 120
+        )
+
+        // Without verified probe throughput, an 80+ seeder torrent swarm MUST outrank the unverified HTTP hoster!
+        let (winner, _) = manager.selectFastStartCandidate(
+            from: [unmeasuredHTTP, strongSwarmTorrent],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English",
+            targetTitle: "Cosmos"
+        )
+        #expect(winner?.id == strongSwarmTorrent.id)
+    }
+
+    @Test func quorumBalanceInBothModeWaitsForTorrents() {
+        let manager = StreamManager.shared
+
+        let singleHTTP = flux.Stream(
+            title: "Cosmos.1080p.WEB-DL",
+            cleanTitle: "Cosmos",
+            url: URL(string: "https://example.com/video.mp4")!,
+            source: "PenguPlay",
+            quality: "1080p"
+        )
+        let healthyTorrent = flux.Stream(
+            title: "Cosmos.1080p.BluRay",
+            cleanTitle: "Cosmos",
+            url: URL(string: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111")!,
+            source: "Torrentio",
+            quality: "1080p",
+            seeders: 50
+        )
+
+        // In "both" mode, a single unmeasured HTTP candidate must NOT declare early quorum
+        #expect(manager.hasQualityQuorum(streams: [singleHTTP], sourceMode: "both", targetTitle: "Cosmos") == false)
+
+        // When both a healthy torrent and HTTP candidate exist, quorum is satisfied
+        #expect(manager.hasQualityQuorum(streams: [singleHTTP, healthyTorrent], sourceMode: "both", targetTitle: "Cosmos") == true)
+    }
 }

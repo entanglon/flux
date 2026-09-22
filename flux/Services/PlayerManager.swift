@@ -16,6 +16,76 @@ struct StreamProbeResult {
     var hijacked: Bool = false
 }
 
+/// Stores information about an active season pack to link strictly for auto-playing the next episode.
+/// Works uniformly for BitTorrent swarms, Debrid-cached releases, and Direct HTTP hosters.
+struct LinkedSeasonPackSource: Equatable {
+    let infoHash: String?
+    let source: String
+    let cleanProvider: String
+    let quality: String
+    let indexer: String?
+    let releaseSignature: String
+    let isTorrent: Bool
+
+    init(stream: Stream, activeTorrentHash: String? = nil) {
+        self.isTorrent = stream.isTorrent
+        let hash = activeTorrentHash ?? stream.infoHash ?? PlayerManager.extractInfoHash(from: stream.url.absoluteString)
+        self.infoHash = hash?.lowercased()
+        self.source = stream.source
+        self.cleanProvider = StreamManager.cleanProviderName(stream.source)
+        self.quality = stream.quality
+        self.indexer = stream.indexer
+
+        let raw = stream.cleanTitle.isEmpty ? stream.title : stream.cleanTitle
+        let stripped = raw.replacingOccurrences(of: #"(?i)e\d{1,3}\b"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)episode\s*\d{1,3}\b"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        self.releaseSignature = stripped.uppercased()
+    }
+
+    /// Checks whether an incoming stream candidate for the next episode matches this season pack.
+    func matches(_ candidate: Stream) -> Bool {
+        // 1. Exact infoHash match (BitTorrent swarms and Debrid cached season packs)
+        if let targetHash = self.infoHash, !targetHash.isEmpty {
+            if let candHash = candidate.infoHash?.lowercased(), candHash == targetHash {
+                return true
+            }
+            if let candHash = PlayerManager.extractInfoHash(from: candidate.url.absoluteString)?.lowercased(), candHash == targetHash {
+                return true
+            }
+            if candidate.url.absoluteString.lowercased().contains(targetHash) {
+                return true
+            }
+        }
+
+        // 2. Direct HTTP hoster / Scraper match (when no infoHash is present)
+        if !self.isTorrent && !candidate.isTorrent {
+            let candProvider = StreamManager.cleanProviderName(candidate.source)
+            if candProvider == self.cleanProvider {
+                if let idx1 = self.indexer, let idx2 = candidate.indexer, !idx1.isEmpty, !idx2.isEmpty {
+                    if idx1.lowercased() != idx2.lowercased() {
+                        return false
+                    }
+                }
+                if candidate.quality == self.quality {
+                    if candidate.isSeasonPack {
+                        return true
+                    }
+                    let candRaw = candidate.cleanTitle.isEmpty ? candidate.title : candidate.cleanTitle
+                    let candStripped = candRaw.replacingOccurrences(of: #"(?i)e\d{1,3}\b"#, with: "", options: .regularExpression)
+                        .replacingOccurrences(of: #"(?i)episode\s*\d{1,3}\b"#, with: "", options: .regularExpression)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if candStripped.uppercased() == self.releaseSignature {
+                        return true
+                    }
+                }
+            }
+        }
+
+        return false
+    }
+}
+
 class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
 
@@ -96,6 +166,13 @@ class PlayerManager: ObservableObject {
     private var prefetchedNextSubtitles: [StremioSubtitleTrack]?
     private var prefetchedNextAt: Date?
     @Published var nextEpisode: Episode? = nil
+    /// Stores the active season pack source to prioritize linking strictly for auto-playing the next episode.
+    @Published private(set) var linkedSeasonPack: LinkedSeasonPackSource? = nil
+
+    /// Backward compatibility & diagnostic helper returning the active season pack infoHash if present.
+    var linkedSeasonPackHash: String? {
+        linkedSeasonPack?.infoHash
+    }
 
     private var fetchAndRaceTask: AsyncTask<Void, Never>?
 
@@ -556,16 +633,26 @@ class PlayerManager: ObservableObject {
         return true
     }
 
+    static func extractInfoHash(from string: String) -> String? {
+        if let range = string.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) {
+            let raw = String(string[range]).replacingOccurrences(of: "btih:", with: "")
+            if validInfoHash(raw) {
+                return raw.lowercased()
+            }
+        }
+        if string.count == 40 && string.range(of: #"^[a-fA-F0-9]{40}$"#, options: .regularExpression) != nil {
+            if validInfoHash(string) {
+                return string.lowercased()
+            }
+        }
+        return nil
+    }
+
     func torrentHash(_ stream: Stream) -> String? {
-        guard stream.isTorrent else { return nil }
-        let s = stream.url.absoluteString
-        guard let range = s.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) else { return nil }
-        // NOTE: must strip the "btih:" prefix — the raw match includes it, and
-        // "/btih:<hash>/create" is a 404 on the Stremio server.
-        let raw = String(s[range]).replacingOccurrences(of: "btih:", with: "")
-        // Normalize to canonical 40-hex; reject anything the engine can't take.
-        guard Self.validInfoHash(raw) else { return nil }
-        return raw
+        if let ih = stream.infoHash, !ih.isEmpty, Self.validInfoHash(ih) {
+            return ih.lowercased()
+        }
+        return Self.extractInfoHash(from: stream.url.absoluteString)
     }
 
     private func markHashDead(_ stream: Stream) {
@@ -696,7 +783,15 @@ class PlayerManager: ObservableObject {
         let playbackKey = prefetchKey(for: item, season: season, episode: episode)
 
         // Apple TV style single player window handoff:
-        // If an outgoing playback or loading session is active, cleanly flush its progress and stop it
+        // Auto-play Season Pack preservation:
+        // When auto-advancing to the next episode, preserve the active season pack source (P2P swarm or HTTP release)
+        // so the warm swarm is not torn down, and the next episode links directly to the same release.
+        var linkedSeasonPackToPreserve: LinkedSeasonPackSource?
+        if isAutoAdvance, let cur = currentSelectedStream, cur.isSeasonPack {
+            linkedSeasonPackToPreserve = LinkedSeasonPackSource(stream: cur, activeTorrentHash: activeTorrentHash)
+        }
+        self.linkedSeasonPack = linkedSeasonPackToPreserve
+
         if let _ = currentItem {
             let curTime = sessionController?.timePos ?? 0
             let curDur = sessionController?.duration ?? 0
@@ -709,7 +804,8 @@ class PlayerManager: ObservableObject {
             if warmCore?.key != playbackKey {
                 self.discardWarmCore()
             }
-            if let hash = activeTorrentHash, hash != prefetchTorrentHash {
+            let torrentHashToPreserve = linkedSeasonPackToPreserve?.isTorrent == true ? linkedSeasonPackToPreserve?.infoHash : nil
+            if let hash = activeTorrentHash, hash != prefetchTorrentHash, hash != torrentHashToPreserve {
                 StremioServerManager.shared.removeTorrent(infoHash: hash)
                 activeTorrentHash = nil
             }
@@ -977,7 +1073,7 @@ class PlayerManager: ObservableObject {
     /// will bury the source anyway.
     private func cachedStreamLabelLooksLikeJunk(_ stream: Stream?, item: MediaItem) -> Bool {
         guard let stream else { return false }
-        let label = "\(stream.title) \(stream.source)"
+        let label = stream.fullScannableText
         if StreamManager.labelLooksLikeJunk(labelText: label, targetTitle: item.title) {
             print("[PlayerManager] 🗑️ Cached stream label looks like junk promo — skipping replay: \(label)")
             return true
@@ -1129,6 +1225,19 @@ class PlayerManager: ObservableObject {
                     guard self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode else { return }
                     self.availableStreams = updatedStreams
                     self.verifyStreamHealth(updatedStreams)
+
+                    // Auto-Play Season Pack Direct Link:
+                    // If auto-playing next episode and the previous episode was playing from a season pack (P2P or HTTP),
+                    // link directly to that exact same season pack source as soon as it arrives!
+                    if isFluxEnabled && !forceStreamPicker && !self.forceStreamPicker && !self.isStreamPickerPresented && !self.isAutoPlayRaceActive && !self.hasCommittedAutoPlayWinner && self.currentSelectedStream == nil && self.currentStreamURL == nil,
+                       let linked = self.linkedSeasonPack,
+                       let matchingStream = updatedStreams.first(where: { linked.matches($0) }) {
+                        self.hasCommittedAutoPlayWinner = true
+                        print("[PlayerManager] ⚡ Linked next episode auto-play directly to active season pack (\(matchingStream.isTorrent ? "P2P" : "HTTP")): \(matchingStream.cleanTitle) (fileIdx: \(matchingStream.fileIdx ?? 0))")
+                        self.isManualSelection = false
+                        self.attemptStream(matchingStream)
+                        return
+                    }
 
                     // Early Quorum Commit: If in Flux Mode and no stream is selected yet,
                     // check if incoming streams already meet Quality Quorum!
@@ -1287,6 +1396,12 @@ class PlayerManager: ObservableObject {
         let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredLang]
         let enableLanguageFilter = UserDefaults.standard.bool(forKey: "enableFluxLanguageFilter")
 
+        if let linked = self.linkedSeasonPack,
+           let matchingStream = healthy.first(where: { linked.matches($0) }) {
+            print("[PlayerManager] ⚡ Flux Mode raceBestStream linked directly to active season pack (\(matchingStream.isTorrent ? "P2P" : "HTTP")): \(matchingStream.cleanTitle) (fileIdx: \(matchingStream.fileIdx ?? 0))")
+            return matchingStream
+        }
+
         let (primary, fallbacks) = StreamManager.shared.selectFastStartCandidate(
             from: healthy,
             sourceMode: sourceMode,
@@ -1406,31 +1521,35 @@ class PlayerManager: ObservableObject {
     /// serves the file at /{infoHash}/{fileIdx} (torrent must be registered via /create first).
     /// For HTTP streams with proxyHeaders, routes through the local proxy.
     func getPlayableURL(for stream: Stream) -> URL {
-        if stream.isTorrent {
-            let str = stream.url.absoluteString
-            if let hashRange = str.range(of: #"btih:([a-fA-F0-9]{32,40})"#, options: .regularExpression) {
-                let hash = String(str[hashRange]).replacingOccurrences(of: "btih:", with: "")
-                // Firewall: never construct engine URLs from unvalidated hashes.
-                guard Self.validInfoHash(hash) else { return stream.url }
-                var components = URLComponents()
-                components.scheme = "http"
-                components.host = "127.0.0.1"
-                components.port = StremioServerManager.shared.port
-                components.path = "/\(hash)/\(stream.fileIdx ?? 0)"
-                if let finalURL = components.url {
-                    return finalURL
-                }
+        if stream.isTorrent, let hash = torrentHash(stream) {
+            var components = URLComponents()
+            components.scheme = "http"
+            components.host = "127.0.0.1"
+            components.port = StremioServerManager.shared.port
+            components.path = "/\(hash)/\(stream.fileIdx ?? 0)"
+            if let finalURL = components.url {
+                return finalURL
             }
         }
 
         let target = stream.url
-        // Route HTTP streams with required headers through the local proxy
         let streamTitle = stream.cleanTitle.isEmpty ? stream.title : stream.cleanTitle
-        if let headers = stream.proxyHeaders, !headers.isEmpty, !stream.isTorrent,
-           StreamProxyManager.shared.isRunning,
-           let proxied = StreamProxyManager.shared.proxyURL(for: target, headers: headers, title: streamTitle) {
-            print("[PlayerManager] Routing through proxy for \(stream.source) (headers: \(headers.keys.joined(separator: ", ")))")
-            return proxied
+        let hasProxyHeaders = (stream.proxyHeaders != nil && !stream.proxyHeaders!.isEmpty)
+        let shouldRouteProxy = StreamRouteProxyManager.shared.shouldProxy(stream: stream)
+
+        // Route HTTP streams with required headers OR scoped forward proxy streams through the local proxy
+        if !stream.isTorrent && (hasProxyHeaders || shouldRouteProxy) {
+            if !StreamProxyManager.shared.isRunning {
+                StreamProxyManager.shared.start()
+            }
+            if let proxied = StreamProxyManager.shared.proxyURL(for: target, headers: stream.proxyHeaders, title: streamTitle) {
+                if shouldRouteProxy {
+                    print("[PlayerManager] Routing through StreamProxyManager via forward proxy for \(stream.source)")
+                } else {
+                    print("[PlayerManager] Routing through proxy for \(stream.source) (headers: \(stream.proxyHeaders?.keys.joined(separator: ", ") ?? ""))")
+                }
+                return proxied
+            }
         }
 
         return target
@@ -1438,6 +1557,7 @@ class PlayerManager: ObservableObject {
     
     func selectStream(_ stream: Stream) {
         print("Selected stream: \(stream.title) from \(stream.source)")
+        self.linkedSeasonPack = nil
         self.currentSelectedStream = stream
         self.isManualSelection = true
         self.forceStreamPicker = false
@@ -1564,6 +1684,24 @@ class PlayerManager: ObservableObject {
         } else {
             // HTTP stream — hand the URL directly to mpv (Stremio-style).
             finishSelect(stream)
+
+            // Speculative torrent pre-warming in "both" mode:
+            // If standby fallbacks include a healthy torrent, pre-register it with the Go engine
+            // so if HTTP buffers or stalls, the fallback torrent swarm is already connected and warm!
+            if isFluxEnabled, let standbyTorrent = self.standbyFallbacks.first(where: { $0.isTorrent }),
+               let hash = self.torrentHash(standbyTorrent) {
+                print("[PlayerManager] ⚡ Speculatively pre-warming standby torrent: \(standbyTorrent.cleanTitle) (\(standbyTorrent.seeders ?? 0) seeds)")
+                AsyncTask {
+                    let serverUp = await StremioServerManager.shared.ensureRunning()
+                    if serverUp {
+                        StremioServerManager.shared.trackCreate(
+                            infoHash: hash,
+                            magnetURL: standbyTorrent.url.absoluteString,
+                            fileIdx: standbyTorrent.fileIdx ?? 0
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -1581,7 +1719,8 @@ class PlayerManager: ObservableObject {
         startupThroughputSamples.removeAll()
         slowStartStrikes = 0
 
-        let connectTimeout: TimeInterval = stream.isTorrent ? 18.0 : 14.0
+        let isProxiedHTTP = !stream.isTorrent && StreamRouteProxyManager.shared.shouldProxy(stream: stream)
+        let connectTimeout: TimeInterval = stream.isTorrent ? 35.0 : (isProxiedHTTP ? 20.0 : 14.0)
         print("[PlayerManager] ⏱️ Armed startup stall watchdog for \(stream.cleanTitle) (\(stream.quality)): connect timeout \(Int(connectTimeout))s")
         let startedAt = Date()
         startupWatchdogTask = Task { [weak self] in
@@ -1595,19 +1734,30 @@ class PlayerManager: ObservableObject {
                     let elapsed = Date().timeIntervalSince(startedAt)
 
                     if self.hasPlaybackStarted {
+                        // Post-playback start monitor (first 30s of playback):
+                        // If user has watched < 15s, buffer is low (< 4s), and sustained throughput is < 150 KB/s:
+                        if self.lastStartupTimePos < 15.0, self.lastObservedCacheTime < 4.0 {
+                            if let speed = self.sustainedStartupThroughputKBps(window: 3.0), speed < 150.0 {
+                                self.slowStartStrikes += 1
+                                print("[PlayerManager] ⚠️ Post-start slow speed strike \(self.slowStartStrikes)/2 (speed: \(Int(speed)) KB/s, cache: \(String(format: "%.1f", self.lastObservedCacheTime))s)")
+                                if self.slowStartStrikes >= 2 {
+                                    print("[PlayerManager] 🐢 Unstable/throttled stream confirmed. Auto-advancing to standby fallback...")
+                                    self.advanceToStandbyFallback()
+                                    return true
+                                }
+                            }
+                        }
                         return false
                     }
 
                     // Slow-delivery / dead-origin detection — runs for BOTH
                     // zero-telemetry (dead origin: proxy accepted the socket,
-                    // upstream never sent a byte) and trickling sources. The
-                    // probe race pre-verifies the winner, so a healthy probed
-                    // source delivers its first demuxer data in ~1-3s; anything
-                    // still under the floor at 8s (HTTP) / 14s (torrent swarm
-                    // warmup) is dead or unusable. Advancing here instead of at
-                    // the 14s connect timeout cut a 4-dead-candidate worst case
-                    // from ~56s to ~32s.
-                    let slowLimit: TimeInterval = stream.isTorrent ? 14.0 : 8.0
+                    // upstream never sent a byte) and trickling sources.
+                    // For HTTP streams, 8s is plenty for CDN response.
+                    // For P2P swarms, allow 30s for DHT peer discovery, tracker
+                    // announces, piece bitfield handshake, and initial moov/header priming.
+                    let isProxiedHTTP = !stream.isTorrent && StreamRouteProxyManager.shared.shouldProxy(stream: stream)
+                    let slowLimit: TimeInterval = stream.isTorrent ? 30.0 : (isProxiedHTTP ? 14.0 : 8.0)
                     let slowMediaFloor: Double = stream.isTorrent ? 1.0 : 1.5
                     if elapsed >= slowLimit, self.lastObservedCacheTime < slowMediaFloor {
                         print("[PlayerManager] 🐌 Slow/dead source detected (only \(String(format: "%.1f", self.lastObservedCacheTime))s of media buffered in \(Int(elapsed))s). Auto-advancing to standby fallback...")
@@ -1619,7 +1769,7 @@ class PlayerManager: ObservableObject {
                     // If bytes have started flowing (telemetry received for this session):
                     if let lastProgress = self.lastTelemetryProgressTime, lastProgress >= startedAt {
                         let stallDuration = Date().timeIntervalSince(lastProgress)
-                        let stallTimeout: TimeInterval = stream.isTorrent ? 14.0 : 10.0
+                        let stallTimeout: TimeInterval = stream.isTorrent ? 20.0 : 10.0
                         if stallDuration >= stallTimeout {
                             print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
                             self.advanceToStandbyFallback()
@@ -1653,7 +1803,8 @@ class PlayerManager: ObservableObject {
 
     func markPlaybackStarted() {
         hasPlaybackStarted = true
-        cancelStartupWatchdog()
+        // Do NOT cancel the watchdog here: the watchdog monitors post-start stability
+        // for the first 30 seconds and exits on its own via monitorExpired.
     }
 
     func cancelStartupWatchdog() {
@@ -1730,6 +1881,7 @@ class PlayerManager: ObservableObject {
         self.currentStreamURL = targetURL
         let hash = stream.isTorrent ? torrentHash(stream) : nil
         if stream.isTorrent, let h = hash {
+            self.activeTorrentHash = h
             self.currentMagnetURL = stream.url.absoluteString.hasPrefix("magnet:") ? stream.url.absoluteString : "magnet:?xt=urn:btih:\(h)"
         } else {
             self.currentMagnetURL = nil
@@ -1745,6 +1897,7 @@ class PlayerManager: ObservableObject {
     /// stream picker instead of cascading silently for minutes.
     /// Never auto-advance when the user explicitly picked a source (manual mode).
     private func advancePast(_ failed: Stream) {
+        self.linkedSeasonPack = nil
         invalidateCachedStream(for: currentItem, season: currentSeason, episode: currentEpisode)
         guard !isManualSelection else {
             // Manual pick failed — surface error, don't silently swap sources.
@@ -1806,6 +1959,20 @@ class PlayerManager: ObservableObject {
     
     func updateWatchProgress(time: Double, duration: Double, isLightweightTick: Bool = false) {
         guard var item = currentItem, duration > 0 else { return }
+
+        // Duration Sanity Watchdog: Detect and block promos, trailers, and preview clips pretending to be full content.
+        // Movies are >= 40 minutes (2400s), but anything under 10 minutes (600s) is definitively a trailer/promo clip.
+        // TV episodes are >= 15 minutes (900s), but anything under 5 minutes (300s) is definitively an intro/preview/promo.
+        if !self.isManualSelection {
+            let isEpisodic = item.isSeries || item.category == "TV Show" || currentSeason != nil
+            let minDurationFloor: Double = isEpisodic ? 300.0 : 600.0
+            if duration < minDurationFloor {
+                print("[PlayerManager] ⚠️ Suspected promo/trailer detected: duration \(Int(duration))s is under threshold (\(Int(minDurationFloor))s) for \(item.title). Advancing to standby fallback...")
+                Logger.stream.error("Suspected promo/trailer detected: duration \(duration, privacy: .public)s for \(item.title, privacy: .public)")
+                self.advanceToStandbyFallback()
+                return
+            }
+        }
         let progress = time / duration
         if item.runtime == nil || item.runtime?.isEmpty == true {
             let totalMinutes = Int(duration) / 60
@@ -2198,6 +2365,35 @@ class PlayerManager: ObservableObject {
             async let subsTask = SubtitleManager.shared.fetchSubtitles(for: item, season: next.season, episode: next.episode)
             let streams = await StreamManager.shared.fetchStreamsRealtime(for: item, season: next.season, episode: next.episode) { _ in }
             guard !streams.isEmpty else { return }
+
+            // Auto-Play Season Pack Direct Link for Preloading:
+            // If the currently playing stream is a season pack (P2P or HTTP), link directly to that same source for the next episode.
+            let activePack: LinkedSeasonPackSource? = await MainActor.run {
+                guard let cur = self.currentSelectedStream, cur.isSeasonPack else { return nil }
+                return LinkedSeasonPackSource(stream: cur, activeTorrentHash: self.activeTorrentHash)
+            }
+
+            if let linked = activePack,
+               let matchingSeasonPackStream = streams.first(where: { linked.matches($0) }) {
+                print("[PlayerManager] ⚡ Smart preloading linked directly to active season pack (\(matchingSeasonPackStream.isTorrent ? "P2P" : "HTTP")): \(matchingSeasonPackStream.cleanTitle) (fileIdx: \(matchingSeasonPackStream.fileIdx ?? 0))")
+                if matchingSeasonPackStream.isTorrent, let packHash = linked.infoHash {
+                    StremioServerManager.shared.trackCreate(
+                        infoHash: packHash,
+                        magnetURL: matchingSeasonPackStream.url.absoluteString,
+                        fileIdx: matchingSeasonPackStream.fileIdx ?? 0
+                    )
+                    _ = await self.resolveTorrentStream(matchingSeasonPackStream)
+                }
+
+                let subs = await subsTask
+                await MainActor.run {
+                    self.prefetchedNextStream = matchingSeasonPackStream
+                    self.prefetchedNextSubtitles = subs
+                    self.prefetchedNextKey = nextKey
+                    self.prefetchedNextAt = Date()
+                }
+                return
+            }
 
             let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
             let preferredQuality = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"

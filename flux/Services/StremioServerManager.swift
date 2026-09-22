@@ -14,10 +14,11 @@ private func fluxEngineAtexit() {
 /// File-level PID storage for the atexit handler (C function pointer can't capture).
 private var _fluxEnginePID: Int32 = 0
 
-/// Manages Flux's own Stremio streaming server (server.js) instance.
-/// - Downloads server.js from Stremio's CDN on first run (bundling it is not permitted).
-/// - Runs it with node under Flux's own APP_PATH so it never touches a Stremio install.
-/// - Discovers the actual port (server.js binds 11470 and increments on conflict).
+/// Manages Flux's own Stremio streaming server (server.js / FluxEngine) instance.
+/// - Downloads server.js from Stremio's CDN on first run if no binary sidecar exists.
+/// - Bundles FluxEngine (high-performance pure-Go drop-in built on anacrolix/torrent).
+/// - Runs under Flux's own APP_PATH with Stremio's Ultra-Fast BitTorrent profile.
+/// - Discovers the actual port (FluxEngine binds explicitly, server.js self-increments on conflict).
 ///
 /// Torrent playback protocol (same as the real Stremio client):
 ///   1. GET /{infoHash}/create?torrent={magnet}   → registers the torrent in the engine
@@ -52,19 +53,57 @@ class StremioServerManager: ObservableObject {
         let fileIdx: Int
         let magnetURL: String
     }
+    private let registrationsLock = NSLock()
     private var activeRegistrations: [String: ActiveRegistration] = [:]
     private var engineIsFluxEngine = false
 
+    /// Live statistics returned by the streaming server for active torrents.
+    struct TorrentStats: Decodable {
+        let infoHash: String?
+        let name: String?
+        let peers: Int?
+        let unchoked: Int?
+        let queued: Int?
+        let unique: Int?
+        let connectionTries: Int?
+        let downloadSpeed: Double?
+        let uploadSpeed: Double?
+        let downloaded: Int64?
+        let uploaded: Int64?
+        let streamProgress: Double?
+        let peerSearchRunning: Bool?
+    }
+
+    /// Fetches live statistics for a specific active torrent.
+    func fetchTorrentStats(infoHash: String, fileIdx: Int = -1) async -> TorrentStats? {
+        guard isRunning else { return nil }
+        let endpoint = fileIdx >= 0
+            ? "http://127.0.0.1:\(port)/\(infoHash)/\(fileIdx)/stats.json"
+            : "http://127.0.0.1:\(port)/\(infoHash)/stats.json"
+        guard let url = URL(string: endpoint) else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 1.5
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            return nil
+        }
+        return try? JSONDecoder().decode(TorrentStats.self, from: data)
+    }
+
     /// Client firewall + registration tracking hook (called by PlayerManager).
     func trackCreate(infoHash: String, magnetURL: String, fileIdx: Int) {
+        registrationsLock.lock()
         activeRegistrations[infoHash] = ActiveRegistration(
             infoHash: infoHash, fileIdx: fileIdx, magnetURL: magnetURL
         )
+        registrationsLock.unlock()
     }
 
     /// Removes a specific torrent from the engine and stops its download.
     func removeTorrent(infoHash: String) {
+        registrationsLock.lock()
         activeRegistrations.removeValue(forKey: infoHash)
+        registrationsLock.unlock()
         guard let url = URL(string: "http://127.0.0.1:\(port)/\(infoHash)/remove") else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
@@ -74,7 +113,9 @@ class StremioServerManager: ObservableObject {
 
     /// Removes all torrents from the engine.
     func removeAllTorrents() {
+        registrationsLock.lock()
         activeRegistrations.removeAll()
+        registrationsLock.unlock()
         guard let url = URL(string: "http://127.0.0.1:\(port)/removeAll") else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
@@ -262,9 +303,12 @@ class StremioServerManager: ObservableObject {
     /// Re-registers torrents the client was streaming before an engine restart,
     /// fire-and-forget, so mpv's reconnect lands on a live swarm registration.
     private func replayActiveRegistrations() async {
-        guard !activeRegistrations.isEmpty else { return }
-        print("[StremioServer] Replaying \(activeRegistrations.count) active registration(s) after restart")
-        for reg in activeRegistrations.values {
+        registrationsLock.lock()
+        let registrations = Array(activeRegistrations.values)
+        registrationsLock.unlock()
+        guard !registrations.isEmpty else { return }
+        print("[StremioServer] Replaying \(registrations.count) active registration(s) after restart")
+        for reg in registrations {
             var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
             components?.path = "/\(reg.infoHash)/create"
             var query = [URLQueryItem(name: "torrent", value: reg.magnetURL)]
@@ -410,6 +454,28 @@ class StremioServerManager: ObservableObject {
         return nil
     }
 
+    /// Ensures `<appPath>/server-settings.json` is configured with Stremio's Ultra-Fast
+    /// streaming profile (unlimited download, 200 connections, high peer stability).
+    private func seedOrUpdateServerSettings(cacheGB: Int) {
+        let settingsFile = URL(fileURLWithPath: appPath).appendingPathComponent("server-settings.json")
+        var dict: [String: Any] = [:]
+        if let data = try? Data(contentsOf: settingsFile),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            dict = json
+        }
+        dict["cacheSize"] = Int64(cacheGB) * 1024 * 1024 * 1024
+        dict["btDownloadSpeedHardLimit"] = 0          // Unlimited (no download throttle)
+        dict["btDownloadSpeedSoftLimit"] = 104857600  // 100 MB/s soft limit before pausing peer discovery
+        dict["btMaxConnections"] = 200               // 200 simultaneous peer connections
+        dict["btMinPeersForStable"] = 15             // Minimum 15 peers for swarm stability
+        dict["btHandshakeTimeout"] = 20000           // 20s handshake timeout
+        dict["btRequestTimeout"] = 4000              // 4s request timeout
+        dict["seedingEnabled"] = true
+        if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted]) {
+            try? data.write(to: settingsFile)
+        }
+    }
+
     private func launchAndDiscoverPort() async {
         guard let engine = await resolveEngine() else {
             print("[StremioServer] Cannot launch: no engine available")
@@ -418,6 +484,8 @@ class StremioServerManager: ObservableObject {
         let before = await alivePorts()
 
         try? FileManager.default.createDirectory(atPath: appPath, withIntermediateDirectories: true)
+        let savedGB = UserDefaults.standard.object(forKey: "stremioCacheGB") as? Int ?? 2
+        seedOrUpdateServerSettings(cacheGB: savedGB)
 
         let task = Process()
         task.currentDirectoryURL = URL(fileURLWithPath: appPath)
@@ -430,11 +498,17 @@ class StremioServerManager: ObservableObject {
             env["HTTP_PORT"] = String(assignedPort)
             env["NO_CORS"] = "1"
             env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
-            env["STREMIO_MEM_LIMIT"] = "524288000"
-            env["GOMEMLIMIT"] = "524288000"
-            env["GOGC"] = "20"
+            // High-performance BitTorrent & peer peering configuration (matching Stremio Ultra Fast):
+            env["STREMIO_PEERS_PER_TORRENT"] = "150"
+            env["STREMIO_TRACKERS_MAX"] = "25"
+            env["STREMIO_DISABLE_WEBTORRENT"] = "0"
+            env["STREMIO_BT_ENCRYPTION"] = "prefer"
+            // Remove synthetic GC and memory constraints to allow unthrottled packet throughput
+            env.removeValue(forKey: "GOGC")
+            env.removeValue(forKey: "GOMEMLIMIT")
+            env.removeValue(forKey: "STREMIO_MEM_LIMIT")
             engineIsFluxEngine = true
-            print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort)")
+            print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort) with high-performance swarm settings")
         case .nodeJS(let nodePath):
             // server.js binds 11470 and increments itself on conflict; launch on
             // the first free port so discovery finds it.
@@ -519,10 +593,10 @@ class StremioServerManager: ObservableObject {
         }
     }
 
-    // MARK: - Cache Size (Stremio-style disk cache limiter)
+    // MARK: - Cache Size & Streaming Settings (Stremio-style)
 
-    /// Applies the user's disk-cache limit to the running server. The server
-    /// evicts least-recently-watched torrents once the limit is exceeded.
+    /// Applies the user's disk-cache limit and high-performance streaming settings to the running server.
+    /// The server evicts least-recently-watched torrents once the limit is exceeded.
     func setCacheSize(gigabytes: Int) async {
         guard await ensureRunning() else {
             print("[StremioServer] Cannot set cache size — server unavailable")
@@ -533,9 +607,19 @@ class StremioServerManager: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 5
         let bytes = Int64(gigabytes) * 1024 * 1024 * 1024
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["cacheSize": bytes])
+        let payload: [String: Any] = [
+            "cacheSize": bytes,
+            "btDownloadSpeedHardLimit": 0,          // Unlimited download rate (Stremio Ultra Fast profile)
+            "btDownloadSpeedSoftLimit": 104857600,  // 100 MB/s soft limit before pausing peer discovery
+            "btMaxConnections": 200,                // 200 simultaneous peer connections
+            "btMinPeersForStable": 15,              // Require 15 peers before considering swarm stable
+            "btHandshakeTimeout": 20000,            // 20s handshake timeout
+            "btRequestTimeout": 4000,               // 4s piece request timeout
+            "seedingEnabled": true
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         if let (_, resp) = try? await URLSession.shared.data(for: request) {
-            print("[StremioServer] cacheSize=\(gigabytes)GB → HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
+            print("[StremioServer] Applied high-performance streaming settings (cacheSize=\(gigabytes)GB, maxConns=200, dlCap=unlimited) → HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
         }
     }
 
@@ -637,9 +721,12 @@ class StremioServerManager: ObservableObject {
 
         for dir in dirs {
             guard freed < needToFree else { break }
-            // Don't evict the currently-active torrent
+            // Don't evict any currently-active torrent
             let hash = (dir.path as NSString).lastPathComponent
-            if hash == activeRegistrations.keys.first { continue }
+            registrationsLock.lock()
+            let isActive = activeRegistrations[hash] != nil
+            registrationsLock.unlock()
+            if isActive { continue }
             try? fm.removeItem(atPath: dir.path)
             freed += dir.size
             print("[StremioServer] Evicted cache: \(hash.prefix(12))… (\(ByteCountFormatter.string(fromByteCount: dir.size, countStyle: .file)))")
