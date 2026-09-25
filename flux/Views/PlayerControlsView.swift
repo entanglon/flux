@@ -91,7 +91,7 @@ struct PlayerControlsView: View {
                                 .background(Color.white.opacity(0.2))
                                 
                             Button(action: {
-                                let rawLink = PlayerManager.shared.currentMagnetURL ?? PlayerManager.shared.currentStreamURL?.absoluteString ?? ""
+                                let rawLink = PlayerManager.shared.currentStreamURL?.absoluteString ?? PlayerManager.shared.currentMagnetURL ?? ""
                                 let link = PlayerManager.shared.cleanPlayableURLString(from: rawLink)
                                 if !link.isEmpty {
                                     NSPasteboard.general.clearContents()
@@ -113,7 +113,7 @@ struct PlayerControlsView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help(isCopiedFeedback ? "Copied to clipboard!".localized : "Copy playing magnet / stream link".localized)
+                            .help(isCopiedFeedback ? "Copied to clipboard!".localized : "Copy Stream Link".localized)
                             .accessibilityLabel("Copy Stream Link".localized)
                         }
                         .glassEffect(.regular.interactive(), in: .capsule)

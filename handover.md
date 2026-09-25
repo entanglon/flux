@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 25, 2026 (10:15 PM IST)  
+**Updated**: September 25, 2026 (10:50 PM IST)  
 **Latest Git State**: Working tree verified, 234/234 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -103,6 +103,13 @@ The app has recently undergone major enhancements:
     - **Full Proxy Mode**: Added `proxyAllHTTP: Bool` (defaults to `true`) to `StreamRouteProxyManager.swift` and `UserDefaults.Key.streamRouteProxyAllHTTP`. When Route Proxy is turned ON, all external HTTP/HTTPS video playback routes through the proxy by default.
     - **Strict Firewall Preserved**: Torrents (`127.0.0.1:11470`), local stream proxy (`127.0.0.1:51547`), TMDB metadata, Cinemeta, OpenSubtitles, and PocketBase cloud sync NEVER route through the proxy.
     - **UI & Localization**: Added "Proxy All HTTP Streams" toggle card to `StreamRouteProxyConfigSheet.swift` with verified 10-language translations (zero duplicates across all 10 languages). All 234 unit tests passing.
+25. **Direct / P2P Streaming Terminology Alignment**:
+    - **Terminology Standardization**: Renamed all user-facing HTTP/Torrent mentions across Settings and Proxy Configuration to "Direct" and "P2P" ("Direct & P2P Streams", "Direct Streams Only", "P2P Streams Only", "P2P Cache Limit", "Purge P2P Cache", "Proxy All Direct Streams").
+    - **Localization Matrix**: Added 10-language translations across all supported languages with zero dictionary duplicate keys.
+26. **VideoToolbox Hardware Decoding, Stream vs Magnet Copy Separation & Mid-Playback Buffer Badge**:
+    - **Hardware Decoding Restoration**: Changed `hwdec` from `"auto"` to `"auto-safe"` in `MPVVideoView.swift`. With OpenGL `CAOpenGLLayer`, `auto` attempted zero-copy mapping (`videotoolbox`), which libmpv rejects on 10-bit HEVC (`Main 10`) surfaces and silently fell back to CPU software decoding. `auto-safe` uses copy-back (`videotoolbox-copy`), restoring native Apple Silicon hardware acceleration (`VideoToolbox (Hardware)`).
+    - **Stream Link vs. Magnet Link Separation**: Fixed `PlayerControlsView` and `PlayerView` (context menu & About Stream Source modal) which previously prioritized `currentMagnetURL` over `currentStreamURL`. "Copy Stream Link" now copies the playable stream URL (`http://127.0.0.1:11470/...` or CDN link), proving local streaming server activity. Added a dedicated "Copy Magnet Link" action button and context menu item when a torrent magnet exists, fully localized in all 10 languages with zero duplicate keys.
+    - **Mid-Playback Buffering UI & Interactive Controls**: Removed `if !sustainedBuffering` gating from `controlsLayer` so player controls remain mounted and accessible during stalls. Restored `midPlaybackLogoBufferingView` matching commit `7f458ce`: video frame pauses under a 35% dark vignette, displaying a floating liquid glass badge with the logo and a sleek horizontal capsule progress bar (`width: 140, height: 4`) reflecting live buffer fill for both direct HTTP and P2P torrent streams.
 
 ---
 

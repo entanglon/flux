@@ -1341,7 +1341,7 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "gpu-hwdec-interop", "auto")
 
         let useHW = UserDefaults.standard.object(forKey: "useHardwareAcceleration") as? Bool ?? true
-        mpv_set_property_string(mpv, "hwdec", useHW ? "auto" : "no")
+        mpv_set_property_string(mpv, "hwdec", useHW ? "auto-safe" : "no")
 
         // Audio output: low-latency, strictly hardware-synchronized CoreAudio driver
         // with AVFoundation fallback.

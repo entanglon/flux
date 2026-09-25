@@ -45,6 +45,7 @@ struct PlayerView: View {
     @State private var showManualStreamPicker = false
     @State private var showAboutStreamSource = false
     @State private var isLinkCopied = false
+    @State private var isMagnetCopied = false
     @State private var showPlayerHUD = false
     @State private var hostWindow: NSWindow?
     @State private var contextMenuMonitor: PlayerContextMenuMonitor?
@@ -127,10 +128,8 @@ struct PlayerView: View {
                 midPlaybackLogoBufferingView
             }
 
-            // 4. Controls Layer (Only active once playback has started, hidden during sustained buffering)
-            if !sustainedBuffering {
-                controlsLayer
-            }
+            // 4. Controls Layer (Only active once playback has started)
+            controlsLayer
             
             // 5. Exit Warning Overlay
             exitWarningOverlay
@@ -177,6 +176,7 @@ struct PlayerView: View {
             showManualStreamPicker = false
             showAboutStreamSource = false
             isLinkCopied = false
+            isMagnetCopied = false
             movieSuggestions = []
             isMovieSuggestionsDismissed = false
             isWatchingCreditsCleanly = false
@@ -385,6 +385,12 @@ struct PlayerView: View {
                 startUpNextCountdown()
             } else {
                 cancelUpNextCountdown()
+            }
+        }
+        .onChange(of: showAboutStreamSource) { _, isShowing in
+            if !isShowing {
+                isLinkCopied = false
+                isMagnetCopied = false
             }
         }
         .onChange(of: isPickerVisible) { _, visible in
@@ -1813,13 +1819,13 @@ struct PlayerView: View {
             }
         })
 
-        // 8. Copy Stream / Magnet Link
+        // 8. Copy Stream Link
         menu.addItem(ClosureMenuItem(
             title: "Copy Stream Link".localized,
             systemImage: "square.and.arrow.up",
-            isEnabled: isPlaybackEnabled
+            isEnabled: isPlaybackEnabled || playerManager.currentStreamURL != nil
         ) { [weak playerManager] in
-            let rawLink = playerManager?.currentMagnetURL ?? playerManager?.currentStreamURL?.absoluteString ?? ""
+            let rawLink = playerManager?.currentStreamURL?.absoluteString ?? playerManager?.currentMagnetURL ?? ""
             let link = playerManager?.cleanPlayableURLString(from: rawLink) ?? ""
             if !link.isEmpty {
                 DispatchQueue.main.async {
@@ -1828,6 +1834,22 @@ struct PlayerView: View {
                 }
             }
         })
+
+        // 8b. Copy Magnet Link (if torrent)
+        if playerManager.currentMagnetURL != nil {
+            menu.addItem(ClosureMenuItem(
+                title: "Copy Magnet Link".localized,
+                systemImage: "link",
+                isEnabled: true
+            ) { [weak playerManager] in
+                if let magnet = playerManager?.currentMagnetURL, !magnet.isEmpty {
+                    DispatchQueue.main.async {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(magnet, forType: .string)
+                    }
+                }
+            })
+        }
 
         // 9. About Stream Source…
         menu.addItem(ClosureMenuItem(
@@ -1993,21 +2015,98 @@ struct PlayerView: View {
             // Subtle dark vignette over the paused video frame
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
+                .allowsHitTesting(false)
 
-            // Direct mpv link — no stale fallback. The old
-            // `> 0.005 ? mpv : animatedProgress` fallback served the ~100%
-            // STARTUP value once mpv's telemetry dropped to 0 at stall start,
-            // so the bar showed FULL and then visibly jumped BACKWARD when
-            // the refill began. mpv's own cache-buffering-state (0-100%)
-            // ticks the refill honestly; cacheTime/5 covers the pre-fill gap.
+            // Direct mpv link & torrent engine stats
             let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
             let isTorrent = playerManager.currentSelectedStream?.isTorrent == true
             let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
             let realProgress = CGFloat(min(0.99, max(mpv.bufferProgress, bufferAhead / 5.0, engineProgress)))
 
-            if let media = activeItem {
-                loadingLogo(for: media, progress: realProgress)
+            VStack(spacing: 16) {
+                if let media = activeItem {
+                    let logoURL = resolvedLogoURL(for: media)
+
+                    ZStack {
+                        if let lURL = logoURL {
+                            // Base translucent watermark logo
+                            AsyncImage(url: lURL) { phase in
+                                switch phase {
+                                case .success(let img):
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 70)
+                                        .opacity(0.25)
+                                        .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
+                                default:
+                                    EmptyView()
+                                }
+                            }
+
+                            // Real progress fill logo (left-to-right fill)
+                            AsyncImage(url: lURL) { phase in
+                                switch phase {
+                                case .success(let img):
+                                    img.resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(maxHeight: 70)
+                                        .opacity(1.0)
+                                        .mask(
+                                            GeometryReader { geo in
+                                                Rectangle()
+                                                    .frame(width: max(0, geo.size.width * realProgress), alignment: .leading)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .animation(.linear(duration: 0.25), value: realProgress)
+                                            }
+                                        )
+                                        .shadow(color: .white.opacity(0.5), radius: 10, x: 0, y: 2)
+                                default:
+                                    EmptyView()
+                                }
+                            }
+                        } else {
+                            // Text fallback for media with no logo image
+                            Text(media.title.uppercased())
+                                .font(.system(size: 24, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.25))
+
+                            Text(media.title.uppercased())
+                                .font(.system(size: 24, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.white)
+                                .mask(
+                                    GeometryReader { geo in
+                                        Rectangle()
+                                            .frame(width: max(0, geo.size.width * realProgress), alignment: .leading)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .animation(.linear(duration: 0.25), value: realProgress)
+                                    }
+                                )
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                }
+
+                // Sleek progress bar under the logo
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 140, height: 4)
+
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: max(4, 140 * realProgress), height: 4)
+                        .animation(.linear(duration: 0.25), value: realProgress)
+                }
+                .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
             }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial.opacity(0.85))
+                    .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
+            )
+            .allowsHitTesting(false)
         }
         .transition(.opacity)
         .zIndex(15)
@@ -2294,8 +2393,9 @@ struct PlayerView: View {
             let dur = mediaInfo.bufferDuration ?? (mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos))
             return String(format: "%.1f sec", dur)
         }()
-        let rawLink = playerManager.currentMagnetURL ?? playerManager.currentStreamURL?.absoluteString ?? ""
+        let rawLink = playerManager.currentStreamURL?.absoluteString ?? playerManager.currentMagnetURL ?? ""
         let link = playerManager.cleanPlayableURLString(from: rawLink)
+        let magnetLink = playerManager.currentMagnetURL
 
         VStack(alignment: .leading, spacing: 16) {
             // Header
@@ -2424,7 +2524,7 @@ struct PlayerView: View {
                 .background(Color.white.opacity(0.12))
 
             // Action Buttons
-            HStack {
+            HStack(spacing: 10) {
                 if !link.isEmpty {
                     Button {
                         NSPasteboard.general.clearContents()
@@ -2445,6 +2545,36 @@ struct PlayerView: View {
                             Image(systemName: isLinkCopied ? "checkmark" : "doc.on.doc")
                                 .foregroundColor(isLinkCopied ? .green : .white)
                             Text(isLinkCopied ? "Copied!".localized : "Copy Stream Link".localized)
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let magnet = magnetLink, !magnet.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(magnet, forType: .string)
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isMagnetCopied = true
+                        }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            await MainActor.run {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    isMagnetCopied = false
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: isMagnetCopied ? "checkmark" : "link")
+                                .foregroundColor(isMagnetCopied ? .green : .white)
+                            Text(isMagnetCopied ? "Copied!".localized : "Copy Magnet Link".localized)
                         }
                         .font(.system(size: 12, weight: .semibold))
                         .padding(.horizontal, 14)
