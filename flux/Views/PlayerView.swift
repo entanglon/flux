@@ -801,15 +801,25 @@ struct PlayerView: View {
     @ViewBuilder
     private var exitWarningOverlay: some View {
         if showExitWarning {
-            Text("Press Esc again to exit".localized)
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding()
-                .glassEffect(.clear, in: .rect(cornerRadius: 12))
-                .cornerRadius(12)
-                .transition(.opacity)
-                .zIndex(200)
-                .allowsHitTesting(false)
+            VStack {
+                Text("Press Esc again to exit".localized)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .glassEffect(.regular, in: .capsule)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.75))
+                    .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
+                    .padding(.top, 36)
+                Spacer()
+            }
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .move(edge: .top)),
+                removal: .opacity
+            ))
+            .zIndex(200)
+            .allowsHitTesting(false)
         }
     }
 

@@ -330,7 +330,7 @@ final class ProfileManager: ObservableObject {
          "streamingSourceMode", "enableFluxMode", "enableFluxLanguageFilter", "enableFluxCatalogue", "stremioCacheGB",
          UserDefaults.Key.enableAIStreamSelection, UserDefaults.Key.geminiModel, UserDefaults.Key.geminiApiKey,
          "appLanguage",
-         UserDefaults.Key.streamRouteProxyEnabled, UserDefaults.Key.streamRouteProxyEndpoint, UserDefaults.Key.streamRouteProxyTargetHosts]
+         UserDefaults.Key.streamRouteProxyEnabled, UserDefaults.Key.streamRouteProxyEndpoint, UserDefaults.Key.streamRouteProxyTargetHosts, UserDefaults.Key.streamRouteProxyAllHTTP]
     }
 
     /// Persists current UserDefaults into the active profile's settings snapshot.

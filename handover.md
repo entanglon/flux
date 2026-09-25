@@ -98,6 +98,11 @@ The app has recently undergone major enhancements:
     - **Restoration**: Implemented two-press confirmation sequence: first press displays `"Press Esc again to exit".localized` in a liquid glass overlay and starts a 2-second auto-dismiss timeout; second press cancels the timer and exits via `closePlayer()`.
     - **Overlay Priority**: Overlays (diagnostics HUD, About Stream Source modal, manual Stream Picker) dismiss first on single Esc before the exit sequence begins.
     - **Dynamic Localization & State Cleanup**: Added `@ObservedObject private var languageManager = LanguageManager.shared` (Rule 1 compliance) and properly reset state in `onDisappear`, `onChange(of: currentPlaybackKey)`, and `closePlayer()`.
+    - **Top-Center Pill UI**: Re-anchored the prompt to a top-center liquid glass capsule (`Capsule`, `.padding(.top, 36)`) with asymmetric slide-down/fade transitions so it never blocks video action.
+24. **Full HTTP Stream Route Proxy Mode & Scope Expansion**:
+    - **Full Proxy Mode**: Added `proxyAllHTTP: Bool` (defaults to `true`) to `StreamRouteProxyManager.swift` and `UserDefaults.Key.streamRouteProxyAllHTTP`. When Route Proxy is turned ON, all external HTTP/HTTPS video playback routes through the proxy by default.
+    - **Strict Firewall Preserved**: Torrents (`127.0.0.1:11470`), local stream proxy (`127.0.0.1:51547`), TMDB metadata, Cinemeta, OpenSubtitles, and PocketBase cloud sync NEVER route through the proxy.
+    - **UI & Localization**: Added "Proxy All HTTP Streams" toggle card to `StreamRouteProxyConfigSheet.swift` with verified 10-language translations (zero duplicates across all 10 languages). All 234 unit tests passing.
 
 ---
 
@@ -330,14 +335,25 @@ The app has recently undergone major enhancements:
   3. In `StreamRouteProxyManager.swift`, purged mock IPs from persistent storage and added sanity checks rejecting test IPs.
   4. In `StreamRouteProxyTests.swift`, added `defer` cleanup restoring pre-test proxy settings.
 
-### Issue 10: Player Escape Key Single-Press Exit Regression [RESOLVED]
-- **Symptom**: Pressing the `Esc` key once during video playback immediately closed the player window instead of presenting the confirmation warning ("Press Esc again to exit") and requiring a second press to exit.
+### Issue 10: Player Escape Key Single-Press Exit Regression & Top-Center Pill [RESOLVED]
+- **Symptom**: Pressing the `Esc` key once during video playback immediately closed the player window instead of presenting the confirmation warning ("Press Esc again to exit") and requiring a second press to exit. Furthermore, the warning was initially rendered in the center of the screen, obscuring active video playback.
 - **Root Cause**: In `PlayerView.swift:handleEscapePress()`, the code previously handled HUD and modal dismissals but directly called `closePlayer()` on single press, bypassing `showExitWarning` and `exitWarningOverlay` completely.
 - **Resolution**:
   1. Added `@State private var exitWarningTask: Task<Void, Never>? = nil` and `@ObservedObject private var languageManager = LanguageManager.shared` (satisfying `AGENTS.md` Rule 1).
   2. Updated `handleEscapePress()`: if `showExitWarning` is active, it cancels the reset task and invokes `closePlayer()`. Otherwise, it displays `showExitWarning` with animation and launches a 2-second timeout task to auto-dismiss the warning.
-  3. Cleaned up `exitWarningTask` and reset `showExitWarning = false` in `closePlayer()`, `onDisappear`, and `onChange(of: currentPlaybackKey)`.
-  4. Added `.allowsHitTesting(false)` to `exitWarningOverlay` so underlying video controls remain interactable during prompt display.
+  3. Redesigned `exitWarningOverlay` as a sleek **top-center floating liquid glass pill** (`Capsule`, padding `.top: 36`, subtle border and drop shadow) with `.transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))` so it floats cleanly at the top of the screen between controls without obstructing the video or dialogue subtitles.
+  4. Cleaned up `exitWarningTask` and reset `showExitWarning = false` in `closePlayer()`, `onDisappear`, and `onChange(of: currentPlaybackKey)`.
+  5. Added `.allowsHitTesting(false)` to `exitWarningOverlay` so underlying video controls remain interactable during prompt display.
+
+### Issue 11: Full HTTP Stream Route Proxy Mode & Scope Expansion [RESOLVED]
+- **Symptom**: Previously, `StreamRouteProxyManager` only proxied streams whose URL or title matched a hardcoded token list (`targetHosts: ["2peckle", "peckle", "febbox", "shegu", "pengu", "cinefreak", "fcdn"]`). Any unlisted scraper hosts, CDNs, or direct HLS/DASH streams bypassed the proxy even when enabled.
+- **Root Cause**: The proxy manager lacked a full-playback proxy mode and was gated strictly on token matching.
+- **Resolution**:
+  1. Added `proxyAllHTTP: Bool` (defaults to `true`) to `StreamRouteProxyManager.swift` and registered `UserDefaults.Key.streamRouteProxyAllHTTP` across `ProfileManager.swift` and `UserDefaults+Keys.swift`.
+  2. When enabled, `shouldProxy(url:title:)` routes all external HTTP/HTTPS video playback through the proxy.
+  3. Preserved strict safety firewalls: BitTorrent swarms (`127.0.0.1`, port `11470`, port `51547`), local files (`file://`, `flux://`), TMDB metadata, Cinemeta catalogs, OpenSubtitles, and PocketBase cloud sync NEVER route through the proxy under any circumstances.
+  4. Added a "Proxy All HTTP Streams" toggle card to `StreamRouteProxyConfigSheet.swift` with full 10-language localization across all supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) with verified zero dictionary duplicates.
+  5. Added unit test `proxyAllHTTPModeProxiesAllExternalMedia()` verifying all external media routes through proxy while torrents and metadata strictly bypass. All 234 unit tests pass.
 
 ---
 

@@ -51,6 +51,18 @@ final class StreamRouteProxyManager: ObservableObject {
         }
     }
 
+    @Published var proxyAllHTTP: Bool {
+        didSet {
+            UserDefaults.standard.set(proxyAllHTTP, forKey: UserDefaults.Key.streamRouteProxyAllHTTP)
+            if !isReloading {
+                ProfileManager.shared.saveCurrentProfileSettings()
+                if !AppEnvironment.isRunningTests {
+                    AuthManager.shared.scheduleAutoSync(delay: 0.1)
+                }
+            }
+        }
+    }
+
     // Default Fallbacks
     public static let defaultEndpoint = ""
     public static let defaultTargetHosts = ["2peckle", "peckle", "febbox", "shegu", "pengu", "cinefreak", "fcdn"]
@@ -87,6 +99,7 @@ final class StreamRouteProxyManager: ObservableObject {
         }
         self.endpointURL = ep
         self.isEnabled = enabled
+        self.proxyAllHTTP = UserDefaults.standard.object(forKey: UserDefaults.Key.streamRouteProxyAllHTTP) as? Bool ?? true
         var hosts = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.streamRouteProxyTargetHosts) ?? Self.defaultTargetHosts
         var changed = false
         for h in Self.defaultTargetHosts {
@@ -114,6 +127,7 @@ final class StreamRouteProxyManager: ObservableObject {
         }
         self.endpointURL = ep
         self.isEnabled = enabled
+        self.proxyAllHTTP = UserDefaults.standard.object(forKey: UserDefaults.Key.streamRouteProxyAllHTTP) as? Bool ?? true
         var hosts = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.streamRouteProxyTargetHosts) ?? Self.defaultTargetHosts
         var changed = false
         for h in Self.defaultTargetHosts {
@@ -187,7 +201,12 @@ final class StreamRouteProxyManager: ObservableObject {
             return false
         }
 
-        // 5. Target Scope Matching (Tokens match host, URL, or stream candidate title)
+        // 5. Proxy all external HTTP media playback when full proxy mode is active
+        if proxyAllHTTP {
+            return true
+        }
+
+        // 6. Target Scope Matching (Tokens match host, URL, or stream candidate title)
         let normalizedHosts = targetHosts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }
         guard !normalizedHosts.isEmpty else { return false }
 

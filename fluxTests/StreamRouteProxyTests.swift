@@ -52,9 +52,11 @@ struct StreamRouteProxyTests {
         defer {
             manager.endpointURL = ""
             manager.isEnabled = false
+            manager.proxyAllHTTP = true
             UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
         }
         manager.endpointURL = "http://100.64.0.1:8888"
+        manager.proxyAllHTTP = false
         manager.targetHosts = ["2peckle", "peckle", "febbox"]
 
         // When disabled: no streams should be proxied
@@ -85,14 +87,39 @@ struct StreamRouteProxyTests {
         #expect(manager.shouldProxy(stream: directStream))
     }
 
+    @Test @MainActor func proxyAllHTTPModeProxiesAllExternalMedia() {
+        let manager = StreamRouteProxyManager.shared
+        defer {
+            manager.endpointURL = ""
+            manager.isEnabled = false
+            manager.proxyAllHTTP = true
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        }
+        manager.endpointURL = "http://100.64.0.1:8888"
+        manager.isEnabled = true
+        manager.proxyAllHTTP = true
+
+        // When proxyAllHTTP is enabled, all external media streams are proxied
+        #expect(manager.shouldProxy(url: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")))
+        #expect(manager.shouldProxy(url: URL(string: "https://archive.org/download/sample/movie.mp4")))
+        #expect(manager.shouldProxy(url: URL(string: "https://stream.2peckle.com/video.mp4")))
+
+        // Torrents and app metadata MUST still be strictly bypassed
+        #expect(!manager.shouldProxy(url: URL(string: "http://127.0.0.1:11470/stream/0")))
+        #expect(!manager.shouldProxy(url: URL(string: "https://api.themoviedb.org/3/movie/550")))
+        #expect(!manager.shouldProxy(url: URL(string: "https://opensubtitles-v3.strem.io/subtitles/movie/tt0137523.json")))
+    }
+
     @Test @MainActor func endpointComponentsAndProxyDictionary() {
         let manager = StreamRouteProxyManager.shared
         defer {
             manager.endpointURL = ""
             manager.isEnabled = false
+            manager.proxyAllHTTP = true
             UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
         }
         manager.endpointURL = "http://100.64.0.1:8888"
+        manager.proxyAllHTTP = false
         manager.targetHosts = ["2peckle", "peckle", "febbox"]
 
         let components = manager.endpointComponents()

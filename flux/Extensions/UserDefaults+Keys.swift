@@ -24,6 +24,7 @@ extension UserDefaults {
         static let streamRouteProxyEnabled = "streamRouteProxyEnabled"
         static let streamRouteProxyEndpoint = "streamRouteProxyEndpoint"
         static let streamRouteProxyTargetHosts = "streamRouteProxyTargetHosts"
+        static let streamRouteProxyAllHTTP = "streamRouteProxyAllHTTP"
 
         // MARK: - Stream Languages
         static let preferredStreamLanguages = "preferredStreamLanguages"

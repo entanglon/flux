@@ -790,6 +790,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "AI analyzing streams…",
+            "Proxy All HTTP Streams": "Proxy All HTTP Streams",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.",
         ],
 
         // 🇯🇵 Japanese
@@ -1423,6 +1425,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "AIがストリームを分析中…",
+            "Proxy All HTTP Streams": "すべてのHTTPストリームをプロキシ経由にする",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "有効にすると、すべての外部HTTP/HTTPSメディアストリームがプロキシを経由します。トレントやメタデータは常に直接接続されます。",
         ],
 
         // 🇪🇸 Spanish
@@ -2056,6 +2060,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "IA analizando streams…",
+            "Proxy All HTTP Streams": "Proxy para todas las transmisiones HTTP",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "Cuando está habilitado, todas las transmisiones multimedia HTTP/HTTPS externas pasan por el proxy. Los torrents y metadatos siempre se conectan directamente.",
         ],
 
         // 🇫🇷 French
@@ -2689,6 +2695,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "L'IA analyse les flux…",
+            "Proxy All HTTP Streams": "Proxy pour tous les flux HTTP",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "Lorsqu'il est activé, tous les flux multimédias HTTP/HTTPS externes passent par le proxy. Les torrents et les métadonnées passent toujours en direct.",
         ],
 
         // 🇩🇪 German
@@ -3322,6 +3330,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "KI analysiert Streams…",
+            "Proxy All HTTP Streams": "Proxy für alle HTTP-Streams",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "Wenn aktiviert, werden alle externen HTTP/HTTPS-Medienstreams über den Proxy geleitet. Torrents und Metadaten werden immer direkt übertragen.",
         ],
 
         // 🇮🇹 Italian
@@ -3955,6 +3965,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "L'IA sta analizzando gli stream…",
+            "Proxy All HTTP Streams": "Proxy per tutti i flussi HTTP",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "Quando abilitato, tutti i flussi multimediali HTTP/HTTPS esterni vengono instradati tramite il proxy. I torrent e i metadati viaggiano sempre direttamente.",
         ],
 
         // 🇧🇷 Portuguese
@@ -4588,6 +4600,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "IA analisando streams…",
+            "Proxy All HTTP Streams": "Proxy para todas as transmissões HTTP",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "Quando ativado, todas as transmissões de mídia HTTP/HTTPS externas passam pelo proxy. Torrents e metadados sempre passam diretamente.",
         ],
 
         // 🇰🇷 Korean
@@ -5221,6 +5235,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "AI가 스트림 분석 중…",
+            "Proxy All HTTP Streams": "모든 HTTP 스트림 프록시 사용",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "활성화하면 모든 외부 HTTP/HTTPS 미디어 스트림이 프록시를 통해 라우팅됩니다. 토렌트와 메타데이터는 항상 직접 라우팅됩니다.",
         ],
 
         // 🇮🇳 Hindi
@@ -5854,6 +5870,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "AI स्ट्रीम का विश्लेषण कर रहा है…",
+            "Proxy All HTTP Streams": "सभी HTTP स्ट्रीम को प्रॉक्सी करें",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "सक्षम होने पर, सभी बाहरी HTTP/HTTPS मीडिया स्ट्रीम प्रॉक्सी के माध्यम से रूट किए जाते हैं। टॉरेंट और मेटाडेटा हमेशा सीधे रूट होते हैं।",
         ],
 
         // 🇨🇳 Chinese (Simplified)
@@ -6485,6 +6503,8 @@ public struct L10n {
             "Gemini 2.5 Flash": "Gemini 2.5 Flash",
             "Gemini 3.1 Flash-Lite": "Gemini 3.1 Flash-Lite",
             "AI analyzing streams…": "AI正在分析流…",
+            "Proxy All HTTP Streams": "为所有 HTTP 流启用代理",
+            "When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.": "启用后，所有外部 HTTP/HTTPS 媒体流都会通过代理路由。种子流和元数据始终直接连接。",
             "Selection Engine": "选择引擎",
             "Choose between Flux's fast heuristic stream scoring algorithm and experimental LLM-powered selection via Google Gemini.": "在 Flux 的快速启发式流评分算法与通过 Google Gemini 驱动的实验性大语言模型流选择之间进行选择。",
         ]

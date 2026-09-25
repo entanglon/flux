@@ -144,7 +144,36 @@ struct StreamRouteProxyConfigSheet: View {
                             .stroke(Color.white.opacity(0.08), lineWidth: 1)
                     )
 
-                    // Card 3: Target Hosts / Scope
+                    // Card 3: Full HTTP Proxy Toggle
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Proxy All HTTP Streams".localized)
+                                    .font(.system(size: 13.5, weight: .medium))
+                                    .foregroundColor(.white)
+                                Text("When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.".localized)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.55))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Toggle("", isOn: $proxyManager.proxyAllHTTP)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                    }
+                    .background(Color.white.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+
+                    // Card 4: Target Hosts / Scope
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Target Hosts & Scraper Scope".localized)
                             .font(.system(size: 12.5, weight: .semibold))
