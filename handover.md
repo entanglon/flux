@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 25, 2026 (9:45 PM IST)  
-**Latest Git State**: Working tree verified, 233/233 Unit Tests Passing (100%)  
+**Updated**: September 25, 2026 (10:15 PM IST)  
+**Latest Git State**: Working tree verified, 234/234 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 
@@ -354,6 +354,15 @@ The app has recently undergone major enhancements:
   3. Preserved strict safety firewalls: BitTorrent swarms (`127.0.0.1`, port `11470`, port `51547`), local files (`file://`, `flux://`), TMDB metadata, Cinemeta catalogs, OpenSubtitles, and PocketBase cloud sync NEVER route through the proxy under any circumstances.
   4. Added a "Proxy All HTTP Streams" toggle card to `StreamRouteProxyConfigSheet.swift` with full 10-language localization across all supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) with verified zero dictionary duplicates.
   5. Added unit test `proxyAllHTTPModeProxiesAllExternalMedia()` verifying all external media routes through proxy while torrents and metadata strictly bypass. All 234 unit tests pass.
+
+### Issue 12: Exit Warning Fade-in Transition & Loading Logo Text Fallback [RESOLVED]
+- **Symptom**:
+  1. The "Press Esc again to exit" prompt performed a downward slide animation from the top edge, causing distracting motion near the menu bar area.
+  2. During stream buffering, if a title's logo image was still downloading/decoding via `CachedImage`, the placeholder rendered `Color.clear`, leaving a blank void where the user saw no progress fill until either the image arrived or playback started.
+- **Resolution**:
+  1. Replaced `.transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))` with `.transition(.opacity)` and `.easeInOut(duration: 0.15)` in `PlayerView.swift`, giving it an instantaneous, clean in-place appearance like Google Chrome's `Cmd+Q` quit prompt.
+  2. Updated `CachedImage` `default:` phase inside `loadingLogo` from `Color.clear.frame(...)` to `stylizedTextLogo(title: media.title, progress: progress)`. The user now immediately sees the title text with real-time progressive fill from the very first frame of buffering, which seamlessly transitions once the high-res PNG logo finishes downloading.
+  3. Confirmed all 234 unit tests pass and verified smooth playback logs across recent user tests (*Colony*, *Reacher*, *The Day of the Jackal*).
 
 ---
 

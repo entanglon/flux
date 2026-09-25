@@ -814,10 +814,7 @@ struct PlayerView: View {
                     .padding(.top, 36)
                 Spacer()
             }
-            .transition(.asymmetric(
-                insertion: .opacity.combined(with: .move(edge: .top)),
-                removal: .opacity
-            ))
+            .transition(.opacity)
             .zIndex(200)
             .allowsHitTesting(false)
         }
@@ -1540,14 +1537,14 @@ struct PlayerView: View {
             closePlayer()
         } else {
             exitWarningTask?.cancel()
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(.easeInOut(duration: 0.15)) {
                 showExitWarning = true
             }
             exitWarningTask = Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
                         showExitWarning = false
                     }
                 }
@@ -1948,7 +1945,7 @@ struct PlayerView: View {
                         case .failure:
                             stylizedTextLogo(title: media.title, progress: progress)
                         default:
-                            Color.clear.frame(maxWidth: 340, maxHeight: 120)
+                            stylizedTextLogo(title: media.title, progress: progress)
                         }
                     }
                 } else {
