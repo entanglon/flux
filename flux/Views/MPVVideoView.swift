@@ -481,9 +481,6 @@ class MPVController: ObservableObject {
             case "pause":
                 if let paused = value as? Bool {
                     self.isPlaying = !paused
-                    if !self.isBuffering {
-                        self.isUserPaused = paused
-                    }
                 }
             case "paused-for-cache":
                 if let buff = value as? Bool {

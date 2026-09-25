@@ -32,6 +32,7 @@ struct PlayerView: View {
     /// unmount the controls layer, so ±10/15s skips don't flicker the UI.
     @State private var sustainedBuffering = false
     @State private var bufferingGraceTask: Task<Void, Never>? = nil
+    @State private var midPlaybackStallWatchdogTask: Task<Void, Never>? = nil
     /// Frozen-frame watchdog: picture stuck while mpv claims to be playing.
     /// The reconnect-inside-readahead stall class never raises paused-for-cache,
     /// so without this the mid-playback overlay would stay hidden and the stop
@@ -184,6 +185,8 @@ struct PlayerView: View {
             playbackStartTask = nil
             bufferingGraceTask?.cancel()
             bufferingGraceTask = nil
+            midPlaybackStallWatchdogTask?.cancel()
+            midPlaybackStallWatchdogTask = nil
             upNextTimerTask?.cancel()
             upNextTimerTask = nil
             exitWarningTask?.cancel()
@@ -352,17 +355,34 @@ struct PlayerView: View {
             handleEndOfFile()
         }
         .onChange(of: isMidPlaybackBuffering) { _, buffering in
-            // Grace: brief seeks/buffer blips (<0.6s) never flash the overlay
-            // or unmount the controls layer (the ±10/15s skip flicker).
+            // Grace: brief seeks/buffer blips (<0.35s) never flash the overlay.
             // For startup stalls (timePos < 1.0), respond faster so frozen 00:00 frames don't linger bare.
             bufferingGraceTask?.cancel()
             bufferingGraceTask = nil
+            midPlaybackStallWatchdogTask?.cancel()
+            midPlaybackStallWatchdogTask = nil
+
             if buffering {
-                let delayNs: UInt64 = mpv.timePos < 1.0 ? 150_000_000 : 600_000_000
+                let delayNs: UInt64 = mpv.timePos < 1.0 ? 150_000_000 : 350_000_000
                 bufferingGraceTask = Task {
                     try? await Task.sleep(nanoseconds: delayNs)
                     guard !Task.isCancelled else { return }
                     await MainActor.run { sustainedBuffering = true }
+                }
+
+                // Mid-playback stall watchdog: if stalled for 18s without resuming, auto-advance or alert
+                midPlaybackStallWatchdogTask = Task {
+                    try? await Task.sleep(nanoseconds: 18_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard isMidPlaybackBuffering && sustainedBuffering && !mpv.isUserPaused else { return }
+                        if !playerManager.isManualSelection && !playerManager.standbyFallbacks.isEmpty {
+                            print("[PlayerView] Mid-playback stall exceeded 18s — auto-advancing to standby fallback...")
+                            playerManager.advanceToStandbyFallback()
+                        } else {
+                            playerManager.errorMessage = "Connection lost during playback. Tap to reconnect or choose another source.".localized
+                        }
+                    }
                 }
             } else {
                 sustainedBuffering = false
@@ -437,6 +457,8 @@ struct PlayerView: View {
         playbackStartTask = nil
         bufferingGraceTask?.cancel()
         bufferingGraceTask = nil
+        midPlaybackStallWatchdogTask?.cancel()
+        midPlaybackStallWatchdogTask = nil
         mpv.play(url: url)
     }
 
@@ -626,7 +648,7 @@ struct PlayerView: View {
     private func updateFrozenWatchdog() {
         let t = mpv.timePos
         let eligible = hasStartedPlayback && !didReachEnd && t >= 0.5
-            && !mpv.isBuffering && !mpv.isSeeking && !mpv.isUserPaused
+            && !mpv.isSeeking && !mpv.isUserPaused
         guard eligible else {
             if frameFrozen { frameFrozen = false }
             lastAdvancingTimePos = t
@@ -657,9 +679,8 @@ struct PlayerView: View {
         } else {
             SleepAssertionManager.shared.disableSleepPrevention()
         }
-        if !isPlaying {
-            // Paused or stalled at the mpv level: watchdog state must not leak
-            // into the next play stretch (overlay is separately gated on pause).
+        if !isPlaying && mpv.isUserPaused {
+            // Only clear watchdog state when the USER deliberately paused
             frameFrozen = false
             lastAdvancingTimePos = mpv.timePos
             lastAdvanceDate = Date()
@@ -1825,7 +1846,7 @@ struct PlayerView: View {
             systemImage: "square.and.arrow.up",
             isEnabled: isPlaybackEnabled || playerManager.currentStreamURL != nil
         ) { [weak playerManager] in
-            let rawLink = playerManager?.currentStreamURL?.absoluteString ?? playerManager?.currentMagnetURL ?? ""
+            let rawLink = playerManager?.currentStreamURL?.absoluteString ?? (playerManager?.currentSelectedStream.flatMap { playerManager?.getPlayableURL(for: $0).absoluteString }) ?? ""
             let link = playerManager?.cleanPlayableURLString(from: rawLink) ?? ""
             if !link.isEmpty {
                 DispatchQueue.main.async {
@@ -1872,7 +1893,8 @@ struct PlayerView: View {
     }
 
     private var isMidPlaybackBuffering: Bool {
-        return hasStartedPlayback && (mpv.isBuffering || mpv.isSeeking || frameFrozen) && !mpv.isUserPaused
+        guard hasStartedPlayback, !mpv.isUserPaused, !didReachEnd else { return false }
+        return mpv.isBuffering || mpv.isSeeking || frameFrozen || !mpv.isPlaying
     }
 
     private var isBufferingOverlayActive: Bool {
@@ -2393,7 +2415,7 @@ struct PlayerView: View {
             let dur = mediaInfo.bufferDuration ?? (mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos))
             return String(format: "%.1f sec", dur)
         }()
-        let rawLink = playerManager.currentStreamURL?.absoluteString ?? playerManager.currentMagnetURL ?? ""
+        let rawLink = playerManager.currentStreamURL?.absoluteString ?? (playerManager.currentSelectedStream.map { playerManager.getPlayableURL(for: $0).absoluteString }) ?? ""
         let link = playerManager.cleanPlayableURLString(from: rawLink)
         let magnetLink = playerManager.currentMagnetURL
 

@@ -1779,19 +1779,16 @@ class PlayerManager: ObservableObject {
     /// Extracts the clean external stream URL from any loopback proxy or stream object.
     /// Never exposes internal loopback proxy addresses (127.0.0.1:51547) to the user.
     func cleanPlayableURLString(from rawString: String) -> String {
-        if let stream = currentSelectedStream {
-            if stream.isTorrent {
-                if let magnet = currentMagnetURL, !magnet.isEmpty { return magnet }
-            }
-            return stream.url.absoluteString
-        }
         if rawString.contains("127.0.0.1:51547"),
            let comp = URLComponents(string: rawString),
            let target = comp.queryItems?.first(where: { $0.name == "url" })?.value,
            !target.isEmpty {
             return target
         }
-        return rawString
+        if !rawString.isEmpty {
+            return rawString
+        }
+        return currentStreamURL?.absoluteString ?? currentSelectedStream?.url.absoluteString ?? ""
     }
 
     /// Two-phase playback (Stremio-style): torrents are resolved by the Stremio server,

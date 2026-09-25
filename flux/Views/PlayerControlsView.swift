@@ -91,7 +91,7 @@ struct PlayerControlsView: View {
                                 .background(Color.white.opacity(0.2))
                                 
                             Button(action: {
-                                let rawLink = PlayerManager.shared.currentStreamURL?.absoluteString ?? PlayerManager.shared.currentMagnetURL ?? ""
+                                let rawLink = PlayerManager.shared.currentStreamURL?.absoluteString ?? (PlayerManager.shared.currentSelectedStream.map { PlayerManager.shared.getPlayableURL(for: $0).absoluteString }) ?? ""
                                 let link = PlayerManager.shared.cleanPlayableURLString(from: rawLink)
                                 if !link.isEmpty {
                                     NSPasteboard.general.clearContents()

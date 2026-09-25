@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 25, 2026 (10:50 PM IST)  
+**Updated**: September 25, 2026 (11:10 PM IST)  
 **Latest Git State**: Working tree verified, 234/234 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -385,6 +385,18 @@ The app has recently undergone major enhancements:
   2. Preserved internal canonical keys (`.tag("both")`, `.tag("http")`, `.tag("torrent")`, UserDefaults keys, engine endpoints) in English.
   3. Expanded `LanguageManager.swift` across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) with verified 0 dictionary duplicate keys (631 unique keys per language).
   4. Verified user forward proxy playback test in system logs: verified that external direct HTTP streams route through Tinyproxy (`ready proxy` on `100.73.223.33:8888`), with 0 dropped startup frames on *Lanterns S01E06*.
+### Issue 14: "Copy Stream Link" Magnet Override, Mid-Playback Buffering Logo Suppression & Stall Watchdog [RESOLVED]
+- **Symptom**:
+  1. Clicking "Copy Stream Link" in player controls or the info HUD copied the magnet link instead of the local engine streaming URL (`http://127.0.0.1:11470/...`).
+  2. When a P2P stream stalled mid-playback (e.g. at 8 or 21 seconds due to 0 connected swarm peers), the video froze with no mid-playback logo buffering screen, and playback sat frozen indefinitely with no fallback.
+- **Root Cause**:
+  1. `PlayerManager.swift:cleanPlayableURLString(from:)` previously intercepted *any* URL passed to it if `currentSelectedStream?.isTorrent == true` and replaced it with `currentMagnetURL`. This meant even valid engine HTTP URLs (`http://127.0.0.1:11470/...`) were rewritten back into `magnet:?xt=urn:btih:...`.
+  2. In `MPVVideoView.swift:observePropertyChanges`, when mpv paused internally due to buffer starvation, EOF, or decoder stall, it emitted property change `case "pause"`. Because `paused-for-cache` was not yet set, the code executed `self.isUserPaused = paused`. This set `isUserPaused = true`, causing `PlayerView.swift:isMidPlaybackBuffering` (`!mpv.isUserPaused`) to evaluate to `false`. The frozen-frame watchdog also checked `!mpv.isUserPaused` and immediately aborted. Consequently, the player believed the user had intentionally paused, suppressing the `midPlaybackLogoBufferingView` and disabling stall detection.
+- **Resolution**:
+  1. In `PlayerManager.swift:cleanPlayableURLString`, removed the block that overwrote URLs with magnets. In `PlayerControlsView.swift` and `PlayerView.swift`, changed `rawLink` to resolve the playable HTTP URL directly (`getPlayableURL(for:)`) without magnet fallback. "Copy Magnet Link" remains dedicated to magnet links, while "Copy Stream Link" strictly copies the playable HTTP stream link.
+  2. In `MPVVideoView.swift`, removed `self.isUserPaused = paused` from `case "pause"`. `isUserPaused` is now strictly mutated only when the user or app explicitly calls `pause()`, `play()`, `preparePaused()`, or `stop()`.
+  3. In `PlayerView.swift`, updated `isMidPlaybackBuffering` to include `!mpv.isPlaying` alongside `isBuffering`, `isSeeking`, and `frameFrozen`. Updated `updateFrozenWatchdog` and `handleIsPlayingChange` to preserve watchdog state during involuntary stalls.
+  4. Added `midPlaybackStallWatchdogTask` in `PlayerView.swift:onChange(of: isMidPlaybackBuffering)`. If mid-playback buffering persists continuously for 18 seconds without data resuming, Flux automatically advances to the next standby fallback in auto-play mode, or displays an actionable error banner prompting the user to reconnect or select another source.
   5. All 234 unit tests pass cleanly.
 
 ---
