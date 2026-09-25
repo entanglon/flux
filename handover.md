@@ -364,6 +364,22 @@ The app has recently undergone major enhancements:
   2. Updated `CachedImage` `default:` phase inside `loadingLogo` from `Color.clear.frame(...)` to `stylizedTextLogo(title: media.title, progress: progress)`. The user now immediately sees the title text with real-time progressive fill from the very first frame of buffering, which seamlessly transitions once the high-res PNG logo finishes downloading.
   3. Confirmed all 234 unit tests pass and verified smooth playback logs across recent user tests (*Colony*, *Reacher*, *The Day of the Jackal*).
 
+### Issue 13: Direct & P2P UI Nomenclature Alignment Across Settings [RESOLVED]
+- **Symptom**: User-facing settings displayed protocol-level engineering jargon ("HTTP" and "Torrent") across the Stream Filter picker, Route Proxy headers, Cache limits, and purge actions.
+- **Resolution**:
+  1. Updated all user-facing settings strings in `SettingsView.swift` and `StreamRouteProxyConfigSheet.swift`:
+     - "HTTP Streams Only" -> "Direct Streams Only"
+     - "Torrent Streams Only" -> "P2P Streams Only"
+     - "HTTP & Torrent Streams (Both)" -> "Direct & P2P Streams (Both)"
+     - "HTTP Stream Route Proxy" -> "Direct Stream Route Proxy"
+     - "Torrent Cache Limit" -> "P2P Cache Limit"
+     - "Purge Torrent Cache" -> "Purge P2P Cache"
+     - "Proxy All HTTP Streams" -> "Proxy All Direct Streams"
+  2. Preserved internal canonical keys (`.tag("both")`, `.tag("http")`, `.tag("torrent")`, UserDefaults keys, engine endpoints) in English.
+  3. Expanded `LanguageManager.swift` across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) with verified 0 dictionary duplicate keys (631 unique keys per language).
+  4. Verified user forward proxy playback test in system logs: verified that external direct HTTP streams route through Tinyproxy (`ready proxy` on `100.73.223.33:8888`), with 0 dropped startup frames on *Lanterns S01E06*.
+  5. All 234 unit tests pass cleanly.
+
 ---
 
 ## 4. Key Files & Reference Table

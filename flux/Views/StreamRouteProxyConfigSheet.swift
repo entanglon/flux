@@ -26,7 +26,7 @@ struct StreamRouteProxyConfigSheet: View {
                     Text("Stream Route Proxy".localized)
                         .font(.headline)
                         .foregroundColor(.white)
-                    Text("Bypass residential ISP peering bottlenecks for HTTP scrapers".localized)
+                    Text("Bypass residential ISP peering bottlenecks for Direct scrapers".localized)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.6))
                 }
@@ -59,7 +59,7 @@ struct StreamRouteProxyConfigSheet: View {
                                 Text("Enable Stream Route Proxy".localized)
                                     .font(.system(size: 13.5, weight: .medium))
                                     .foregroundColor(.white)
-                                Text("Route matching HTTP streams through the forward proxy".localized)
+                                Text("Route matching Direct streams through the forward proxy".localized)
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.55))
                             }
@@ -148,10 +148,10 @@ struct StreamRouteProxyConfigSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Proxy All HTTP Streams".localized)
+                                Text("Proxy All Direct Streams".localized)
                                     .font(.system(size: 13.5, weight: .medium))
                                     .foregroundColor(.white)
-                                Text("When enabled, all external HTTP/HTTPS media streams are routed through the proxy. Torrents and metadata always route directly.".localized)
+                                Text("When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.".localized)
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.55))
                                     .fixedSize(horizontal: false, vertical: true)
@@ -214,7 +214,7 @@ struct StreamRouteProxyConfigSheet: View {
                             Text("Bypass Firewall Active".localized)
                                 .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundColor(.white)
-                            Text("Torrents (P2P), local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.".localized)
+                            Text("P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.".localized)
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.55))
                                 .fixedSize(horizontal: false, vertical: true)

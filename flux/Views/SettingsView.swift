@@ -541,18 +541,18 @@ struct StreamingSettingsView: View {
         Form {
             Section(header: Text(L10n.tr("Stream Sources"))) {
                 Picker(L10n.tr("Stream Filter"), selection: $streamingSourceMode) {
-                    Text("HTTP & Torrent Streams (Both)".localized).tag("both")
-                    Text("HTTP Streams Only".localized).tag("http")
-                    Text("Torrent Streams Only".localized).tag("torrent")
+                    Text("Direct & P2P Streams (Both)".localized).tag("both")
+                    Text("Direct Streams Only".localized).tag("http")
+                    Text("P2P Streams Only".localized).tag("torrent")
                 }
                 .pickerStyle(.menu)
                 
-                Text("Select whether Flux should load HTTP streams, Torrent streams, or both simultaneously.".localized)
+                Text("Select whether Flux should load Direct streams, P2P streams, or both simultaneously.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             
-            Section(header: Text(L10n.tr("HTTP Stream Route Proxy")), footer: Text("Routes throttled HTTP scraper streams (e.g. 2peckle) through a private forward proxy over Tailscale/LAN while strictly bypassing torrents and metadata.".localized)) {
+            Section(header: Text(L10n.tr("Direct Stream Route Proxy")), footer: Text("Routes throttled Direct scraper streams (e.g. 2peckle) through a private forward proxy over Tailscale/LAN while strictly bypassing P2P and metadata.".localized)) {
                 Toggle(L10n.tr("Enable Route Proxy"), isOn: $proxyManager.isEnabled)
                 
                 if proxyManager.isEnabled {
@@ -913,9 +913,9 @@ struct AdvancedSettingsView: View {
         Form {
             Section(
                 header: Text("Storage".localized),
-                footer: Text("Torrent streams buffer to disk and the least-recently-watched titles are evicted automatically when the limit is reached. Changing the limit applies immediately.".localized)
+                footer: Text("P2P streams buffer to disk and the least-recently-watched titles are evicted automatically when the limit is reached. Changing the limit applies immediately.".localized)
             ) {
-                Picker("Torrent Cache Limit".localized, selection: $stremioCacheGB) {
+                Picker("P2P Cache Limit".localized, selection: $stremioCacheGB) {
                     ForEach(cacheOptions, id: \.self) { gb in
                         Text("\(gb) GB").tag(gb)
                     }
@@ -984,7 +984,7 @@ struct AdvancedSettingsView: View {
                             } else {
                                 Image(systemName: "trash")
                             }
-                            Text("Purge Torrent Cache".localized)
+                            Text("Purge P2P Cache".localized)
                         }
                     }
                     .buttonStyle(.bordered)
