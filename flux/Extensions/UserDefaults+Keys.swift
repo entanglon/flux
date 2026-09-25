@@ -15,6 +15,11 @@ extension UserDefaults {
         static let lastUsedSource = "lastUsedSource"
         static let activeTMDBID = "activeTMDBID"
 
+        // MARK: - AI Stream Selection (Experimental)
+        static let enableAIStreamSelection = "enableAIStreamSelection"
+        static let geminiApiKey = "geminiApiKey"
+        static let geminiModel = "geminiModel"
+
         // MARK: - Stream Route Proxy
         static let streamRouteProxyEnabled = "streamRouteProxyEnabled"
         static let streamRouteProxyEndpoint = "streamRouteProxyEndpoint"

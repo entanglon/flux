@@ -5,5 +5,6 @@ struct Secrets {
     // key (embedding one would share it across every install and breach TMDB ToS).
     // Users may add their own free key in Settings → Metadata.
     static let tmdbAPIKey = ""
+    static let geminiAPIKey = ""
 }
 

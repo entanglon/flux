@@ -338,5 +338,69 @@ struct fluxTests {
         #expect(TMDBEnricher.regionalProviderOverrides["IN"]?["amp"] == "119|9")
         #expect(TMDBEnricher.regionalProviderOverrides["IN"]?["cru"] == "283|1112")
     }
+
+    // MARK: - MediaItem Year & AI Stream Selection Tests
+
+    @Test func mediaItemYearParsing() {
+        var item = MediaItem(
+            id: "test",
+            title: "Cosmos",
+            description: "",
+            imageURL: nil,
+            posterURL: nil,
+            backdropURL: nil,
+            heroURL: nil,
+            logoURL: nil,
+            streamURL: nil,
+            category: "series"
+        )
+        item.releaseDate = "2014-03-09"
+        #expect(item.year == 2014)
+
+        item.releaseDate = "1999"
+        #expect(item.year == 1999)
+
+        item.releaseDate = ""
+        #expect(item.year == nil)
+
+        item.releaseDate = nil
+        #expect(item.year == nil)
+    }
+
+    @Test func geminiStreamRankerWithEmptyKeyPreservesStreams() async throws {
+        let stream1 = Stream(title: "Stream 1", cleanTitle: "Stream 1", url: URL(string: "http://example.com/1")!, source: "Src1", quality: "1080p")
+        let stream2 = Stream(title: "Stream 2", cleanTitle: "Stream 2", url: URL(string: "http://example.com/2")!, source: "Src2", quality: "720p")
+        let ranked = try await GeminiStreamRanker.shared.rankStreams(
+            [stream1, stream2],
+            title: "Cosmos",
+            year: 2014,
+            season: 2,
+            episode: 1,
+            apiKey: ""
+        )
+        #expect(ranked.count == 2)
+        #expect(ranked[0].title == "Stream 1")
+        #expect(ranked[1].title == "Stream 2")
+    }
+
+    @Test func candidateWaterfallPreservesAllStandbyCandidates() {
+        let s1 = Stream(title: "HTTP 1", cleanTitle: "HTTP 1", url: URL(string: "http://a.com/1")!, source: "Pengu", quality: "1080p")
+        let s2 = Stream(title: "HTTP 2", cleanTitle: "HTTP 2", url: URL(string: "http://a.com/2")!, source: "Pengu", quality: "1080p")
+        let s3 = Stream(title: "HTTP 3", cleanTitle: "HTTP 3", url: URL(string: "http://a.com/3")!, source: "Pengu", quality: "720p")
+        let s4 = Stream(title: "Torrent 1", cleanTitle: "Torrent 1", url: URL(string: "magnet:?xt=urn:btih:abc1")!, source: "Torrentio", quality: "1080p", seeders: 100)
+        let s5 = Stream(title: "Torrent 2", cleanTitle: "Torrent 2", url: URL(string: "magnet:?xt=urn:btih:abc2")!, source: "Torrentio", quality: "720p", seeders: 50)
+
+        let fallbacks = [s2, s3, s4, s5]
+        let top3Candidates = Array(([s1] + fallbacks).prefix(3)) // s1, s2, s3
+        let standby = [s2, s3] // simulation of remaining after s1 won
+
+        let top3Keys = Set(top3Candidates.map { $0.stableKey })
+        let remainingAfterTop3 = fallbacks.filter { !top3Keys.contains($0.stableKey) } // s4, s5
+        let finalStandby = standby + remainingAfterTop3
+
+        #expect(finalStandby.count == 4)
+        #expect(finalStandby.contains(where: { $0.isTorrent && $0.title == "Torrent 1" }))
+        #expect(finalStandby.contains(where: { $0.isTorrent && $0.title == "Torrent 2" }))
+    }
 }
 

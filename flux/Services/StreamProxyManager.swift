@@ -17,6 +17,12 @@ class StreamProxyManager {
     private(set) var isRunning = false
     private let activePipesLock = NSLock()
     private var activePipes: [UUID: StreamProxyDataPipe] = [:]
+
+    private let streamStateLock = NSLock()
+    private var lastOriginURL: URL?
+    private var lastBaseDirectoryURL: URL?
+    private var lastHeaders: [String: String] = [:]
+    private var lastStreamTitle: String?
     
     private init() {}
     
@@ -90,6 +96,13 @@ class StreamProxyManager {
         listener = nil
         isRunning = false
 
+        streamStateLock.lock()
+        lastOriginURL = nil
+        lastBaseDirectoryURL = nil
+        lastHeaders = [:]
+        lastStreamTitle = nil
+        streamStateLock.unlock()
+
         activePipesLock.lock()
         let pipes = Array(activePipes.values)
         activePipes.removeAll()
@@ -99,6 +112,20 @@ class StreamProxyManager {
     
     /// Creates a proxy URL that MPV can play. The proxy will fetch `originalURL` with optional `headers`.
     func proxyURL(for originalURL: URL, headers: [String: String]? = nil, title: String? = nil) -> URL? {
+        streamStateLock.lock()
+        let scheme = originalURL.scheme ?? "http"
+        let host = originalURL.host ?? ""
+        let portStr = originalURL.port != nil ? ":\(originalURL.port!)" : ""
+        self.lastOriginURL = URL(string: "\(scheme)://\(host)\(portStr)")
+        var baseDir = originalURL.deletingLastPathComponent()
+        if !baseDir.absoluteString.hasSuffix("/") {
+            baseDir = baseDir.appendingPathComponent("")
+        }
+        self.lastBaseDirectoryURL = baseDir
+        self.lastHeaders = headers ?? [:]
+        self.lastStreamTitle = title
+        streamStateLock.unlock()
+
         var items = [
             URLQueryItem(name: "url", value: originalURL.absoluteString)
         ]
@@ -112,7 +139,8 @@ class StreamProxyManager {
         components.scheme = "http"
         components.host = "127.0.0.1"
         components.port = Int(port)
-        components.path = "/proxy"
+        let origPath = originalURL.path
+        components.path = (!origPath.isEmpty && origPath != "/") ? origPath : "/proxy"
         components.queryItems = items
         return components.url
     }
@@ -169,19 +197,67 @@ class StreamProxyManager {
             }
         }
         
-        // Parse query parameters from the path
-        guard let urlComponents = URLComponents(string: "http://localhost\(fullPath)"),
-              let queryItems = urlComponents.queryItems else {
-            sendError(connection, status: 400, message: "Missing query parameters")
-            return
-        }
+        // Parse query parameters from the path if present
+        let urlComponents = URLComponents(string: "http://localhost\(fullPath)")
+        let queryItems = urlComponents?.queryItems
         
-        guard let targetURLString = queryItems.first(where: { $0.name == "url" })?.value,
-              let targetURL = URL(string: targetURLString),
-              let scheme = targetURL.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
-            sendError(connection, status: 400, message: "Missing or invalid 'url' parameter (only HTTP and HTTPS supported)")
-            return
+        let targetURL: URL
+        let customHeaders: [String: String]
+        let streamTitle: String?
+
+        if let targetURLString = queryItems?.first(where: { $0.name == "url" })?.value,
+           let parsedURL = URL(string: targetURLString),
+           let scheme = parsedURL.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            targetURL = parsedURL
+            let headersString = queryItems?.first(where: { $0.name == "headers" })?.value
+            customHeaders = decodeHeaders(headersString)
+            streamTitle = queryItems?.first(where: { $0.name == "title" })?.value
+
+            streamStateLock.lock()
+            let originScheme = targetURL.scheme ?? "http"
+            let originHost = targetURL.host ?? ""
+            let originPort = targetURL.port != nil ? ":\(targetURL.port!)" : ""
+            self.lastOriginURL = URL(string: "\(originScheme)://\(originHost)\(originPort)")
+            var baseDir = targetURL.deletingLastPathComponent()
+            if !baseDir.absoluteString.hasSuffix("/") {
+                baseDir = baseDir.appendingPathComponent("")
+            }
+            self.lastBaseDirectoryURL = baseDir
+            self.lastHeaders = customHeaders
+            self.lastStreamTitle = streamTitle
+            streamStateLock.unlock()
+        } else {
+            // Relative segment request from HLS (.m3u8) or DASH (.mpd) playlist
+            streamStateLock.lock()
+            let origin = self.lastOriginURL
+            let baseDir = self.lastBaseDirectoryURL
+            let cachedHeaders = self.lastHeaders
+            let cachedTitle = self.lastStreamTitle
+            streamStateLock.unlock()
+
+            guard let origin = origin else {
+                sendError(connection, status: 400, message: "Missing or invalid 'url' parameter (only HTTP and HTTPS supported)")
+                return
+            }
+
+            let resolved: URL?
+            if let baseDir = baseDir, !fullPath.hasPrefix("/") {
+                resolved = URL(string: fullPath, relativeTo: baseDir)?.absoluteURL
+            } else {
+                resolved = URL(string: fullPath, relativeTo: origin)?.absoluteURL
+            }
+
+            guard let finalTarget = resolved,
+                  let scheme = finalTarget.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                sendError(connection, status: 400, message: "Could not resolve relative segment URL")
+                return
+            }
+
+            targetURL = finalTarget
+            customHeaders = cachedHeaders
+            streamTitle = cachedTitle
         }
 
         // Security: Disallow loopback destinations to prevent SSRF against internal services
@@ -191,16 +267,15 @@ class StreamProxyManager {
             return
         }
         
-        let headersString = queryItems.first(where: { $0.name == "headers" })?.value
-        let customHeaders = decodeHeaders(headersString)
-        let streamTitle = queryItems.first(where: { $0.name == "title" })?.value
-        
         print("[StreamProxy] \(method) -> \(targetURL.host ?? "?") [\(customHeaders.keys.joined(separator: ", "))]")
         
         // Build the upstream request with custom headers
         var request = URLRequest(url: targetURL)
         request.httpMethod = method
         request.timeoutInterval = 30
+        // Never allow upstream servers/proxies to compress raw media streams (e.g. Brotli 'br' or gzip).
+        // FFmpeg's HTTP demuxer does not support Brotli on raw media and fails with premature EOF.
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         
         // Set custom headers from the addon's behaviorHints
         for (key, value) in customHeaders {
@@ -474,7 +549,7 @@ private final class StreamProxyDataPipe: NSObject, URLSessionDataDelegate {
         for (key, value) in httpResponse.allHeaderFields {
             let keyStr = "\(key)"
             let lower = keyStr.lowercased()
-            if lower == "connection" || lower == "transfer-encoding" { continue }
+            if lower == "connection" || lower == "transfer-encoding" || lower == "content-encoding" { continue }
             headerString += "\(keyStr): \(value)\r\n"
         }
         if httpResponse.value(forHTTPHeaderField: "Access-Control-Allow-Origin") == nil {

@@ -106,7 +106,6 @@ struct HomeView: View {
             Task {
                 await TMDBCatalogCacheActor.shared.clear()
                 await TMDBEnricher.shared.clearMemoryCache()
-                ImageInMemoryCache.purgeMemoryCache()
                 await loadData()
             }
         }

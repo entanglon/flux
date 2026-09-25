@@ -783,7 +783,7 @@ struct TrackSelectionList: View {
                             } label: {
                                 HStack {
                                     Spacer().frame(width: 16)
-                                    Text(sub.language)
+                                    Text(sub.displayName)
                                     if let source = sub.source {
                                         Text("(\(source))")
                                             .font(.caption2)

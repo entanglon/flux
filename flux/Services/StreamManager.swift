@@ -587,7 +587,8 @@ class StreamManager {
         streams: [Stream],
         sourceMode: String,
         preferredQuality: String = "1080p",
-        targetTitle: String? = nil
+        targetTitle: String? = nil,
+        hasPendingHttpScrapers: Bool = false
     ) -> Bool {
         guard !streams.isEmpty else { return false }
         
@@ -626,24 +627,29 @@ class StreamManager {
             return healthyTorrents.count >= 2
         } else {
             // "both" mode: balanced representation.
-            // Never let a single unverified HTTP stream preempt torrent swarms before they arrive.
             let healthyTorrents = validCandidates.filter { $0.isTorrent && ($0.seeders ?? 0) >= 25 }
             let validHTTPCount = validCandidates.filter { !$0.isTorrent }.count
+            
+            // If HTTP scrapers (e.g. PenguPlay, WebStreamr) are actively pending and NO valid HTTP streams
+            // have arrived yet, do NOT let fast torrent indexers (Torrentio) preempt them prematurely.
+            if hasPendingHttpScrapers && validHTTPCount == 0 {
+                return false
+            }
             
             // 1. Both sources represented with at least one healthy torrent:
             if !healthyTorrents.isEmpty && validHTTPCount >= 1 {
                 return true
             }
-            // 2. Strong torrent presence (2+ healthy swarms):
-            if healthyTorrents.count >= 2 {
+            // 2. Strong torrent presence (2+ healthy swarms) — only when no HTTP scrapers are pending:
+            if !hasPendingHttpScrapers && healthyTorrents.count >= 2 {
                 return true
             }
             // 3. Multiple valid HTTP sources (not just a single scraper early response):
             if validHTTPCount >= 2 {
                 return true
             }
-            // 4. Broad quorum:
-            return validCandidates.count >= 3
+            // 4. Broad quorum (only when no HTTP scrapers are pending):
+            return !hasPendingHttpScrapers && validCandidates.count >= 3
         }
     }
 
@@ -950,7 +956,7 @@ class StreamManager {
     }
     
     func maxAllowedQualityScore() -> Int {
-        let pref = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "4K"
+        let pref = UserDefaults.standard.string(forKey: UserDefaults.Key.preferredQuality) ?? "1080p"
         return qualityScore(pref)
     }
     

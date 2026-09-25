@@ -40,6 +40,10 @@ struct MediaItem: Identifiable, Hashable, Codable {
     var genres: [String]?
     var popularity: Double? // For search ranking
     var releaseDate: String? // YYYY-MM-DD
+    var year: Int? {
+        guard let d = releaseDate, d.count >= 4 else { return nil }
+        return Int(d.prefix(4))
+    }
     var originalLanguage: String? // ISO 639-1 code, e.g. "ko", "ja", "en"
     var spokenLanguages: [String]? // e.g. ["English", "Spanish"]
     var availableSubtitles: [String]? // e.g. ["English (SDH)", "French (SDH)"]

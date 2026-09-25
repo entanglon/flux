@@ -17,10 +17,12 @@ final class StreamRouteProxyManager: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+            syncWithStockAddon()
             if !isReloading {
-                syncWithStockAddon()
                 ProfileManager.shared.saveCurrentProfileSettings()
-                AuthManager.shared.scheduleAutoSync()
+                if !AppEnvironment.isRunningTests {
+                    AuthManager.shared.scheduleAutoSync(delay: 0.1)
+                }
             }
         }
     }
@@ -30,7 +32,9 @@ final class StreamRouteProxyManager: ObservableObject {
             UserDefaults.standard.set(endpointURL, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
             if !isReloading {
                 ProfileManager.shared.saveCurrentProfileSettings()
-                AuthManager.shared.scheduleAutoSync()
+                if !AppEnvironment.isRunningTests {
+                    AuthManager.shared.scheduleAutoSync(delay: 0.1)
+                }
             }
         }
     }
@@ -40,7 +44,9 @@ final class StreamRouteProxyManager: ObservableObject {
             UserDefaults.standard.set(targetHosts, forKey: UserDefaults.Key.streamRouteProxyTargetHosts)
             if !isReloading {
                 ProfileManager.shared.saveCurrentProfileSettings()
-                AuthManager.shared.scheduleAutoSync()
+                if !AppEnvironment.isRunningTests {
+                    AuthManager.shared.scheduleAutoSync(delay: 0.1)
+                }
             }
         }
     }
@@ -51,14 +57,17 @@ final class StreamRouteProxyManager: ObservableObject {
 
     /// Scans existing profile snapshots and settings dictionaries to recover any previously configured proxy endpoint.
     public static func recoverConfiguredEndpoint() -> String? {
+        guard !AppEnvironment.isRunningTests else { return nil }
         let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
         var candidateEndpoints: [String] = []
         for key in allKeys {
             if key.hasPrefix("profile.") && key.hasSuffix(".settings"),
                let dict = UserDefaults.standard.dictionary(forKey: key),
-               let ep = dict[UserDefaults.Key.streamRouteProxyEndpoint] as? String,
-               !ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                candidateEndpoints.append(ep.trimmingCharacters(in: .whitespacesAndNewlines))
+               let ep = dict[UserDefaults.Key.streamRouteProxyEndpoint] as? String {
+                let trimmed = ep.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && !trimmed.contains("100.64.0.1") && !trimmed.contains("example.com") {
+                    candidateEndpoints.append(trimmed)
+                }
             }
         }
         if let mostCommon = candidateEndpoints.reduce(into: [String: Int](), { $0[$1, default: 0] += 1 }).max(by: { $0.value < $1.value })?.key {
@@ -69,13 +78,11 @@ final class StreamRouteProxyManager: ObservableObject {
 
     private init() {
         var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
-        var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        let enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
         if !AppEnvironment.isRunningTests, ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
                 ep = recovered
                 UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
-                UserDefaults.standard.set(true, forKey: UserDefaults.Key.streamRouteProxyEnabled)
-                enabled = true
             }
         }
         self.endpointURL = ep
@@ -98,13 +105,11 @@ final class StreamRouteProxyManager: ObservableObject {
         isReloading = true
         defer { isReloading = false }
         var ep = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? Self.defaultEndpoint
-        var enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        let enabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
         if !AppEnvironment.isRunningTests, ep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let recovered = Self.recoverConfiguredEndpoint(), !recovered.isEmpty {
                 ep = recovered
                 UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
-                UserDefaults.standard.set(true, forKey: UserDefaults.Key.streamRouteProxyEnabled)
-                enabled = true
             }
         }
         self.endpointURL = ep
@@ -275,8 +280,12 @@ final class StreamRouteProxyManager: ObservableObject {
         do {
             let (_, response) = try await session.data(for: request)
             let latencyMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
-            if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                return .success(latencyMs)
+            if let http = response as? HTTPURLResponse {
+                if (200...399).contains(http.statusCode) {
+                    return .success(latencyMs)
+                } else {
+                    return .failure(NSError(domain: "StreamRouteProxy", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Proxy returned HTTP \(http.statusCode)"]))
+                }
             } else {
                 return .success(latencyMs)
             }

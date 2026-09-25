@@ -18,6 +18,7 @@ class UserDataService: ObservableObject {
     private var collectionsKey = "localCollectionsData"
     var episodeProgressKey = "globalEpisodeProgress"
     private(set) var currentProfileID: UUID?
+    private let collectionsLock = NSRecursiveLock()
 
     var historyClearedAtKey: String {
         if let id = currentProfileID {
@@ -910,7 +911,10 @@ class UserDataService: ObservableObject {
     
     private func saveCollections() {
         guard !AppEnvironment.isRunningTests else { return }
-        let raw: [[String: Any]] = collections.map { c in
+        collectionsLock.lock()
+        let currentCollections = collections
+        collectionsLock.unlock()
+        let raw: [[String: Any]] = currentCollections.map { c in
             let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
             return [
                 "id": c.id,
@@ -976,49 +980,72 @@ class UserDataService: ObservableObject {
             createdAt: Date(),
             items: []
         )
+        collectionsLock.lock()
         collections.append(collection)
         saveCollections()
+        collectionsLock.unlock()
         AuthManager.shared.scheduleAutoSync()
         return collection
     }
     
     func renameCollection(id: String, to newName: String) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let idx = collections.firstIndex(where: { $0.id == id }) else { return }
+        collectionsLock.lock()
+        guard !trimmed.isEmpty, let idx = collections.firstIndex(where: { $0.id == id }) else {
+            collectionsLock.unlock()
+            return
+        }
         collections[idx].name = trimmed
         saveCollections()
+        collectionsLock.unlock()
         AuthManager.shared.scheduleAutoSync()
     }
     
     func deleteCollection(id: String) {
+        collectionsLock.lock()
         collections.removeAll { $0.id == id }
         saveCollections()
+        collectionsLock.unlock()
         AuthManager.shared.scheduleAutoSync()
     }
     
     func isInCollection(collectionID: String, item: MediaItem) -> Bool {
-        collections.first(where: { $0.id == collectionID })?.items.contains { $0.id == item.id } ?? false
+        collectionsLock.lock()
+        defer { collectionsLock.unlock() }
+        return collections.first(where: { $0.id == collectionID })?.items.contains { $0.id == item.id } ?? false
     }
     
     func collectionIDs(containing item: MediaItem) -> Set<String> {
-        Set(collections.filter { c in c.items.contains { $0.id == item.id } }.map(\.id))
+        collectionsLock.lock()
+        defer { collectionsLock.unlock() }
+        return Set(collections.filter { c in c.items.contains { $0.id == item.id } }.map(\.id))
     }
     
     func toggleCollectionMembership(collectionID: String, item: MediaItem) {
-        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        collectionsLock.lock()
+        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else {
+            collectionsLock.unlock()
+            return
+        }
         if collections[idx].items.contains(where: { $0.id == item.id }) {
             collections[idx].items.removeAll { $0.id == item.id }
         } else {
             collections[idx].items.insert(item, at: 0)
         }
         saveCollections()
+        collectionsLock.unlock()
         AuthManager.shared.scheduleAutoSync()
     }
     
     func removeFromCollection(collectionID: String, item: MediaItem) {
-        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        collectionsLock.lock()
+        guard let idx = collections.firstIndex(where: { $0.id == collectionID }) else {
+            collectionsLock.unlock()
+            return
+        }
         collections[idx].items.removeAll { $0.id == item.id }
         saveCollections()
+        collectionsLock.unlock()
         AuthManager.shared.scheduleAutoSync()
     }
 
@@ -1039,6 +1066,7 @@ class UserDataService: ObservableObject {
     /// for backward compatibility with older clients or single-profile views, while each
     /// profile's scoped library is independently synchronized within the `profiles` array.
     func exportCloudPayload() -> [String: Any] {
+        ProfileManager.shared.saveCurrentProfileSettings()
         let profiles = ProfileManager.shared.profiles
         let primaryProfile = profiles.first(where: { !$0.isKids }) ?? profiles.first
         let primaryPrefix = primaryProfile.map { "profile.\($0.id.uuidString)." }
@@ -1067,6 +1095,7 @@ class UserDataService: ObservableObject {
         }
 
         let tmdbKey = UserDefaults.standard.string(forKey: UserDefaults.Key.tmdbApiKey) ?? ""
+        let geminiKey = UserDefaults.standard.string(forKey: UserDefaults.Key.geminiApiKey) ?? ""
         let displayName = UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? ""
         let appLang = UserDefaults.standard.string(forKey: UserDefaults.Key.appLanguage) ?? "en"
 
@@ -1083,20 +1112,25 @@ class UserDataService: ObservableObject {
             "recentSearches": RecentSearchManager.shared.recentItems.map { itemDict($0) },
             "settings": ProfileManager.shared.exportGlobalSettings(),
             "episodeProgress": epProgress,
-            "collections": collections.map { c in
-                let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
-                return [
-                    "id": c.id,
-                    "name": c.name,
-                    "createdAt": c.createdAt.timeIntervalSince1970,
-                    "itemsData": itemsData.base64EncodedString()
-                ]
-            },
+            "collections": {
+                collectionsLock.lock()
+                defer { collectionsLock.unlock() }
+                return collections.map { c in
+                    let itemsData = (try? JSONSerialization.data(withJSONObject: c.items.map { itemDict($0) })) ?? Data()
+                    return [
+                        "id": c.id,
+                        "name": c.name,
+                        "createdAt": c.createdAt.timeIntervalSince1970,
+                        "itemsData": itemsData.base64EncodedString()
+                    ]
+                }
+            }(),
             "tasteLoved": TasteProfileManager.shared.exportLovedData(),
             "tasteSnapshots": TasteProfileManager.shared.exportSnapshotsData(),
             "profiles": ProfileManager.shared.exportProfilesData(),
             "addons": AddonManager.shared.exportAddonsPayload(),
             "tmdbApiKey": tmdbKey,
+            "geminiApiKey": geminiKey,
             "userDisplayName": displayName,
             "appLanguage": appLang
         ]
@@ -1409,6 +1443,14 @@ class UserDataService: ObservableObject {
         let addonsData = payload["addons"] as? [[String: Any]]
         let remoteEpProgress = payload["episodeProgress"] as? [String: [String: Any]]
 
+        let remoteSettingsDict = payload["settings"] as? [String: Any]
+        let remoteProxyEp = (remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEndpoint] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localProxyEp = (UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let missingProxyInCloud = remoteProxyEp.isEmpty && !localProxyEp.isEmpty
+        let remoteProxyEnabled = remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool ?? false
+        let localProxyEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        let proxyEnabledMismatch = (localProxyEnabled != remoteProxyEnabled) && !localProxyEp.isEmpty
+
         // Only publish/post when the merge actually changed something. @Published
         // fires on every set (even for identical values), and fluxRefresh makes
         // every page wipe caches and refetch all rails — posting it on a no-op
@@ -1437,31 +1479,42 @@ class UserDataService: ObservableObject {
                 AddonManager.shared.syncWithCloudAddons(addonsData)
             }
             if let remoteSettings {
-                for (key, val) in remoteSettings {
-                    if key == UserDefaults.Key.streamRouteProxyEndpoint {
-                        let remoteEp = (val as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        let localEp = UserDefaults.standard.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if !remoteEp.isEmpty {
-                            UserDefaults.standard.set(remoteEp, forKey: key)
-                        } else if !localEp.isEmpty {
-                            // Keep local configured endpoint
-                        } else if let rec = StreamRouteProxyManager.recoverConfiguredEndpoint() {
-                            UserDefaults.standard.set(rec, forKey: key)
+                let remoteUpdatedAt = remoteSettings["settingsUpdatedAt"] as? Double ?? 0
+                let currentProfileID = ProfileManager.shared.currentProfile?.id.uuidString ?? ""
+                let localSettings = UserDefaults.standard.dictionary(forKey: "profile.\(currentProfileID).settings")
+                let profileUpdatedAt = localSettings?["settingsUpdatedAt"] as? Double ?? 0
+                let globalUpdatedAt = UserDefaults.standard.double(forKey: "settingsUpdatedAt")
+                let localUpdatedAt = max(profileUpdatedAt, globalUpdatedAt)
+                let shouldApplySettings = remoteUpdatedAt > localUpdatedAt || (localSettings == nil && globalUpdatedAt == 0)
+
+                if shouldApplySettings {
+                    for (key, val) in remoteSettings {
+                        if key == "settingsUpdatedAt" { continue }
+                        if key == UserDefaults.Key.streamRouteProxyEndpoint {
+                            let remoteEp = (val as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            let localEp = UserDefaults.standard.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            if !remoteEp.isEmpty {
+                                UserDefaults.standard.set(remoteEp, forKey: key)
+                            } else if !localEp.isEmpty {
+                                // Keep local configured endpoint
+                            } else if let rec = StreamRouteProxyManager.recoverConfiguredEndpoint() {
+                                UserDefaults.standard.set(rec, forKey: key)
+                            }
+                            continue
                         }
-                        continue
-                    }
-                    if key == UserDefaults.Key.streamRouteProxyEnabled {
-                        let rBool = val as? Bool ?? false
-                        let lBool = UserDefaults.standard.bool(forKey: key)
-                        let hasEp = !(UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint) ?? "").isEmpty
-                        UserDefaults.standard.set(rBool || (lBool && hasEp), forKey: key)
-                        continue
-                    }
-                    if UserDefaults.standard.object(forKey: key) == nil {
+                        if key == UserDefaults.Key.streamRouteProxyEnabled {
+                            let rBool = val as? Bool ?? false
+                            if !rBool && localProxyEnabled && !localProxyEp.isEmpty && remoteUpdatedAt <= localUpdatedAt {
+                                UserDefaults.standard.set(true, forKey: key)
+                                continue
+                            }
+                            UserDefaults.standard.set(rBool, forKey: key)
+                            continue
+                        }
                         UserDefaults.standard.set(val, forKey: key)
                     }
+                    StreamRouteProxyManager.shared.reloadFromUserDefaults()
                 }
-                StreamRouteProxyManager.shared.reloadFromUserDefaults()
             }
             if let remoteEpProgress {
                 var localEpProgress = UserDefaults.standard.dictionary(forKey: self.episodeProgressKey) as? [String: [String: Any]] ?? [:]
@@ -1489,19 +1542,27 @@ class UserDataService: ObservableObject {
         let localHasName = !(UserDefaults.standard.string(forKey: "flux.authDisplayName") ?? "").isEmpty
         let missingNameInCloud = !remoteHasName && localHasName
 
+        let remoteGeminiKey = ((payload["geminiApiKey"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let localGeminiKey = (UserDefaults.standard.string(forKey: UserDefaults.Key.geminiApiKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remoteGeminiKey.isEmpty && localGeminiKey.isEmpty {
+            UserDefaults.standard.set(remoteGeminiKey, forKey: UserDefaults.Key.geminiApiKey)
+        }
+        let missingGeminiInCloud = remoteGeminiKey.isEmpty && !localGeminiKey.isEmpty
+
         let hasLocalHistoryAdditions = mergedHistory.count > remoteHistory.count
         let hasLocalWatchlistAdditions = mergedWatchlist.count > remoteWatchlist.count
         let hasLocalCollectionAdditions = mergedCollections.count > imported.count
 
-        let remoteSettingsDict = payload["settings"] as? [String: Any]
-        let remoteProxyEp = (remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEndpoint] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let localProxyEp = (UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let missingProxyInCloud = remoteProxyEp.isEmpty && !localProxyEp.isEmpty
-        let remoteProxyEnabled = remoteSettingsDict?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool ?? false
-        let localProxyEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
-        let proxyEnabledMismatch = localProxyEnabled && !remoteProxyEnabled && !localProxyEp.isEmpty
+        let remoteSettingsUpdatedAt = (payload["settings"] as? [String: Any])?["settingsUpdatedAt"] as? Double ?? 0
+        let currentProfileID = ProfileManager.shared.currentProfile?.id.uuidString ?? ""
+        let localProfileSettings = UserDefaults.standard.dictionary(forKey: "profile.\(currentProfileID).settings")
+        let profileUpdatedAt = localProfileSettings?["settingsUpdatedAt"] as? Double ?? 0
+        let globalUpdatedAt = UserDefaults.standard.double(forKey: "settingsUpdatedAt")
+        let localSettingsUpdatedAt = max(profileUpdatedAt, globalUpdatedAt)
+        let localSettingsNewer = localSettingsUpdatedAt > remoteSettingsUpdatedAt
+        let missingSettingsInCloud = payload["settings"] == nil && (localProfileSettings != nil || globalUpdatedAt > 0)
 
-        let hasLocalAdditionsToPush = missingTmdbInCloud || missingNameInCloud || hasLocalHistoryAdditions || hasLocalWatchlistAdditions || hasLocalCollectionAdditions || missingProxyInCloud || proxyEnabledMismatch
+        let hasLocalAdditionsToPush = missingTmdbInCloud || missingNameInCloud || missingGeminiInCloud || hasLocalHistoryAdditions || hasLocalWatchlistAdditions || hasLocalCollectionAdditions || missingProxyInCloud || proxyEnabledMismatch || localSettingsNewer || missingSettingsInCloud
 
         if Thread.isMainThread {
             applyUIUpdates()

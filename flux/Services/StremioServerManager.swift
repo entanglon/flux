@@ -71,6 +71,8 @@ class StremioServerManager: ObservableObject {
         let downloaded: Int64?
         let uploaded: Int64?
         let streamProgress: Double?
+        let streamLen: Int64?
+        let streamName: String?
         let peerSearchRunning: Bool?
     }
 

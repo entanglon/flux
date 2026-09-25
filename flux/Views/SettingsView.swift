@@ -520,11 +520,16 @@ struct StreamingSettingsView: View {
     @ObservedObject var languageManager = LanguageManager.shared
     @ObservedObject private var proxyManager = StreamRouteProxyManager.shared
     @AppStorage("enableFluxMode") private var enableFluxMode = true
-    @AppStorage("preferredQuality") private var preferredQuality = "4K"
+    @AppStorage("preferredQuality") private var preferredQuality = "1080p"
     @AppStorage("streamingSourceMode") private var streamingSourceMode = "both"
     @AppStorage("enableFluxLanguageFilter") private var enableFluxLanguageFilter = false
+    @AppStorage(UserDefaults.Key.enableAIStreamSelection) private var enableAIStreamSelection = false
+    @AppStorage(UserDefaults.Key.geminiApiKey) private var geminiApiKey = ""
+    @AppStorage(UserDefaults.Key.geminiModel) private var geminiModel = "gemini-3.5-flash-lite"
     @State private var showProxySheet = false
     @State private var preferredLanguages: [String] = []
+    @State private var isEditingGeminiKey = false
+    @State private var draftGeminiKey = ""
 
     let availableLanguages = [
         "English", "Japanese", "Spanish", "French", "German",
@@ -638,6 +643,126 @@ struct StreamingSettingsView: View {
                     .padding(.vertical, 4)
                 }
             }
+
+            Section(header: Text(L10n.tr("Selection Engine")), footer: Text("Choose between Flux's fast heuristic stream scoring algorithm and experimental LLM-powered selection via Google Gemini.".localized)) {
+                Picker(L10n.tr("Stream Selection Mode"), selection: $enableAIStreamSelection) {
+                    Text("Heuristic Algorithm (Instant)".localized).tag(false)
+                    Text("Smart AI Selection (Experimental)".localized).tag(true)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!enableFluxMode)
+                .opacity(enableFluxMode ? 1.0 : 0.6)
+
+                if enableAIStreamSelection && enableFluxMode {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Google Gemini API".localized)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(geminiApiKey.isEmpty ? "API key required for AI stream ranking".localized : "Personal API key active for smart stream selection".localized)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if !geminiApiKey.isEmpty && !isEditingGeminiKey {
+                            HStack(spacing: 6) {
+                                HStack(spacing: 4) {
+                                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                                    Text("Active".localized)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.green)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.green.opacity(0.12))
+                                .clipShape(Capsule())
+
+                                Button(action: {
+                                    draftGeminiKey = geminiApiKey
+                                    isEditingGeminiKey = true
+                                }) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Edit Gemini API Key".localized)
+
+                                Button(action: {
+                                    geminiApiKey = ""
+                                    draftGeminiKey = ""
+                                    UserDefaults.standard.removeObject(forKey: UserDefaults.Key.geminiApiKey)
+                                    persistSettings()
+                                }) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.red.opacity(0.85))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.red.opacity(0.12))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove Gemini API Key".localized)
+                            }
+                        } else if !isEditingGeminiKey {
+                            Button("Add Key".localized) {
+                                draftGeminiKey = ""
+                                isEditingGeminiKey = true
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if isEditingGeminiKey {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                SecureField("Enter Gemini API Key (from Google AI Studio)…".localized, text: $draftGeminiKey)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit {
+                                        geminiApiKey = draftGeminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        UserDefaults.standard.set(geminiApiKey, forKey: UserDefaults.Key.geminiApiKey)
+                                        isEditingGeminiKey = false
+                                        persistSettings()
+                                    }
+
+                                Button("Cancel".localized) {
+                                    draftGeminiKey = geminiApiKey
+                                    isEditingGeminiKey = false
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button("Save".localized) {
+                                    geminiApiKey = draftGeminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    UserDefaults.standard.set(geminiApiKey, forKey: UserDefaults.Key.geminiApiKey)
+                                    isEditingGeminiKey = false
+                                    persistSettings()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .disabled(draftGeminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    Picker(L10n.tr("Gemini Model"), selection: $geminiModel) {
+                        Text("Gemini 3.5 Flash-Lite (Fastest)".localized).tag("gemini-3.5-flash-lite")
+                        Text("Gemini 2.5 Flash".localized).tag("gemini-2.5-flash")
+                        Text("Gemini 3.6 Flash".localized).tag("gemini-3.6-flash")
+                        Text("Gemini 3.8 Flash (Recommended)".localized).tag("gemini-3.8-flash")
+                        Text("Gemini 3.7 Flash".localized).tag("gemini-3.7-flash")
+                        Text("Gemini 3.5 Flash".localized).tag("gemini-3.5-flash")
+                        Text("Gemini 3.1 Flash-Lite".localized).tag("gemini-3.1-flash-lite")
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
         }
         .formStyle(.grouped)
         .onAppear {
@@ -647,9 +772,17 @@ struct StreamingSettingsView: View {
         .onChange(of: enableFluxMode) { _, _ in persistSettings() }
         .onChange(of: preferredQuality) { _, _ in persistSettings() }
         .onChange(of: enableFluxLanguageFilter) { _, _ in persistSettings() }
+        .onChange(of: enableAIStreamSelection) { _, _ in persistSettings() }
+        .onChange(of: geminiModel) { _, _ in persistSettings() }
+        .onChange(of: proxyManager.isEnabled) { _, _ in persistSettings() }
     }
 
     private func loadPreferredLanguages() {
+        let validGeminiModels = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
+        if !validGeminiModels.contains(geminiModel) {
+            geminiModel = "gemini-3.5-flash-lite"
+            UserDefaults.standard.set("gemini-3.5-flash-lite", forKey: UserDefaults.Key.geminiModel)
+        }
         if let saved = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages), !saved.isEmpty {
             preferredLanguages = saved
         } else {
@@ -681,7 +814,7 @@ struct StreamingSettingsView: View {
 
     private func persistSettings() {
         ProfileManager.shared.saveCurrentProfileSettings()
-        AuthManager.shared.scheduleAutoSync()
+        AuthManager.shared.scheduleAutoSync(delay: 0.1)
     }
 }
 
@@ -751,7 +884,7 @@ struct PlaybackSettingsView: View {
 
     private func persistSettings() {
         ProfileManager.shared.saveCurrentProfileSettings()
-        AuthManager.shared.scheduleAutoSync()
+        AuthManager.shared.scheduleAutoSync(delay: 0.5)
     }
 }
 

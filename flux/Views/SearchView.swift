@@ -570,6 +570,8 @@ struct SearchView: View {
 // MARK: - Apple TV Style Recent Search Card
 struct RecentSearchCard: View {
     let item: MediaItem
+    @ObservedObject private var userData = UserDataService.shared
+    @ObservedObject private var recentManager = RecentSearchManager.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -616,6 +618,34 @@ struct RecentSearchCard: View {
         .frame(width: 270, height: 80)
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .glassEffect(.clear.interactive(), in: .rect(cornerRadius: 14))
+        .contextMenu {
+            NavigationLink(value: item) {
+                let navLabel = item.category == "Actor" || item.category == "Person"
+                    ? "Go to Person".localized
+                    : (item.category == "Movie" ? "Go to Movie" : "Go to Show").localized
+                Label(navLabel, systemImage: "info.circle")
+            }
+
+            if item.category != "Actor" && item.category != "Person" {
+                Button(action: {
+                    userData.toggleWatchlist(item)
+                }) {
+                    let isInWatchlist = userData.watchlist.contains { $0.id == item.id }
+                    Label((isInWatchlist ? "Remove from Watchlist" : "Add to Watchlist").localized,
+                          systemImage: isInWatchlist ? "minus.circle" : "plus.circle")
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                withAnimation {
+                    recentManager.removeItem(item)
+                }
+            } label: {
+                Label("Remove from Recent Searches".localized, systemImage: "trash")
+            }
+        }
     }
 
     private var subtitleText: String {

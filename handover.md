@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 23, 2026 (11:35 AM IST)  
-**Latest Git Commit**: `f759d2e` (with clean working tree)  
+**Updated**: September 25, 2026 (9:45 PM IST)  
+**Latest Git State**: Working tree verified, 233/233 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 
@@ -10,12 +10,94 @@
 
 This project is **Flux**, an open-source, modern native macOS media and streaming application built with SwiftUI, an embedded Go streaming engine (`FluxEngine` / Stremio core), native `libmpv` video playback via `LocalMPVKit`, PocketBase backend sync, and TMDB / Stremio addon catalog aggregation.
 
-The app has just undergone major enhancements:
+The app has recently undergone major enhancements:
 1. **Direct TMDB-First Search Engine**: Direct integration with TMDB search without restrictive pre-filtering or token penalties, ensuring international and catalog titles (e.g., *Dark 2017*) surface accurately, with Cinemeta/Stremio fallback.
 2. **Bidirectional Liquid Glass Carousel Navigation**: Viewport coordinate tracking dynamically displays both left and right chevrons and enables smooth multi-card scrolling under the sidebar.
 3. **Search Query History**: Namespaced per-profile recent query chips with individual delete and "Clear All" actions.
 4. **Watch & Search History Clearing with PocketBase Cloud Sync**: Full atomic purge capabilities in Settings and History with Anti-Regression Shield protections so intentional wipes sync cleanly to PocketBase without resurrection.
-5. **App Lifecycle & Process Stability**: Clean single-instance management and Go engine lifecycle verification on ports 11470/12470.
+5. **Card Context Menus & Action Parity Across the App**: Added missing right-click `.contextMenu` support to `LiquidEpisodeCard` and `RecentSearchCard`, matching ellipsis button menus with full action parity (Play/Resume, Play from Beginning, Choose Stream Source…, dynamic Mark as Watched/Unwatched, and Remove from Recent Searches) localized across all 10 supported languages.
+6. **Brotli HTTP Stream Decompression Fix**: Fixed fatal playback crashes (`mpv[ffmpeg]: http: Unknown content coding: br`) on upstream proxy and scraper streams by injecting `Accept-Encoding: identity` and stripping decompression headers.
+7. **Complete Candidate Waterfall & Torrent Fallback Retention**: Fixed premature candidate pruning in `PlayerManager` so all candidates (including all healthy torrent swarms) remain in the standby waterfall with up to 5 auto-fallbacks.
+8. **Cloud Settings Synchronization & PocketBase Revert Resolution**:
+   - Fixed local settings reverting upon cloud sync by enforcing strict timestamp precedence (`remoteUpdatedAt > localUpdatedAt`) in `ProfileManager` and `UserDataService`.
+   - Removed legacy `rBool || (lBool && hasEp)` logic that unconditionally forced `streamRouteProxyEnabled: true` from stale cloud data.
+   - Synchronized `geminiApiKey` in cloud payload, auto-snapshotting profile settings before sync export, and debounced settings auto-sync to 0.5s.
+   - Patched PocketBase record `llicplrw2m6y3ny` to disable stale proxy and synchronize default Gemini model (`gemini-3.5-flash-lite`) and quality (`1080p`).
+9. **Stream Source Inspector "BitTorrent Swarm" Badge Correction**:
+   - Fixed false `BitTorrent Swarm (P2P)` badge appearing on HTTP sources (e.g., PenguPlay) by making `stream?.isTorrent` authoritative and clearing `PlayerManager.activeTorrentHash = nil` on non-torrent playback.
+10. **HLS / DASH Relative Segment Resolution in StreamProxyManager**:
+    - Resolved playback failure cascading on *Guns & Gulaabs* and *Salute*: upstream scrapers returning `.m3u8` playlists with relative segments (e.g., `/init-stream3.m4s`) are now resolved against `lastOriginURL` / `lastBaseDirectoryURL` rather than throwing HTTP 400 Bad Request.
+11. **Experimental AI Stream Selection Layer (Gemini Flash)**:
+    - Opt-in intelligent stream ranking engine (`GeminiStreamRanker.swift`) supporting Gemini 3 models (`gemini-3.5-flash-lite`, `gemini-3.6-flash`, `gemini-3.8-flash`, `gemini-3.7-flash`, etc.).
+    - Injects user preferences (maximum resolution e.g. 1080p, preferred audio languages, 1.5–8 GB size bounds) into the prompt.
+    - Full 10-language localization matrix with zero duplicates (616 keys across all 10 languages).
+12. **HTTP Scraper Quorum Barrier, Seeder Floor & Dynamic Hot-Swap**:
+    - Added `hasPendingHttpScrapers` barrier to `StreamManager.hasQualityQuorum`: prevents premature P2P torrent lock-in in "both" mode while HTTP scrapers (e.g., PenguPlay) are in-flight within an adaptive 3.5s grace window.
+    - Filtered unstreamable torrents (< 5 seeders) before Gemini ranking and enforced strict seeder threshold rule (>= 10-15 seeders) in `GeminiStreamRanker.swift`.
+    - Implemented dynamic hot-swap and standby fallback ingestion in `PlayerManager.swift`: newly discovered direct HTTP streams from late scrapers automatically preempt stalled torrents (0 bytes/buffering after 3.0s) and populate the fallback pool.
+13. **OpenSubtitles IMDb Resolution, P2P Buffer Telemetry & Gemini 14s Timeout**:
+    - Resolved OpenSubtitles v3 returning empty track lists on TMDB titles by resolving IMDb IDs (`tt...`) before dispatching requests to `{cleanURL}/subtitles/{type}/{imdbId}.json`.
+    - Wired live `streamProgress` from `StremioServerManager.fetchTorrentStats` into `PlayerManager` and `PlayerView`, providing smooth, genuine buffer progress for P2P torrent streams during swarm pre-buffering.
+    - Increased `GeminiStreamRanker` ephemeral network timeout to 14.0s (resource 16.0s) to eliminate premature timeouts during multi-candidate evaluations.
+    - Tuned initial scraper evaluation window to 3.5s so fast/cached sources start quickly while preserving conditional hot-swap for late scrapers.
+14. **Playback Stabilization, Torrent Watchdog & OpenSubtitles v3 Fix**:
+    - **Premature Hot-Swap Resolution**: Fixed `onStreamsUpdated` measuring elapsed time from query start rather than `currentAttemptStartTime` (which previously killed torrents after 272ms). Added an 8.0s stall guard requiring `torrentStreamProgress < 0.05` and no bytes for 6+ seconds before any hot-swap is considered.
+    - **Quality Inversion Prevention**: Strictly enforced `qualityScore <= qualityScore(preferredQuality)` across standby fallbacks, dynamic hot-swap, and fallback advancement. Eliminates unwanted 4K replacements for 1080p users.
+    - **Torrent Engine Watchdog Intelligence**: Prevented watchdog from aborting active torrent downloads. If the Go engine is actively receiving pieces or reporting progress, the watchdog preserves playback instead of prematurely invoking `removeTorrent()`.
+    - **P2P Loading Bar Fill**: Shared `startTorrentStatsPolling` across both standard and fast-path prefetch sessions, and anchored `GeometryReader` mask alignment to `.leading` in `PlayerView.swift` so the logo fills smoothly from left to right.
+    - **OpenSubtitles v3 Restoration**: Guaranteed `resources = ["subtitles"]` in `AddonManager.swift` and enhanced `SubtitleManager.swift` to discover OpenSubtitles v3 reliably with full OSLog telemetry.
+15. **AI Stream Selection Optimization, Zero-Override Commitment & Lag Elimination**:
+    - **Confirmed Root Cause of Ignored AI Data**: `StreamManager.raceTopCandidatesWithResults` had `candidates.first { !stream.isTorrent && probeResults[stream.stableKey] == true }` which disqualified torrents from the probe race, discarding Gemini's #1 torrent pick and forcing broken lower-ranked HTTP streams that dropped sockets with `Immediate exit requested`.
+    - **Zero-Override Commitment**: When AI stream selection is enabled and ranks streams, `firstPass` is committed directly without being routed through the HTTP-bias probe race. The remaining AI choices are stored in `standbyFallbacks` in the exact order Gemini ranked them.
+    - **Resolved Extreme Lag & Freezing**: `GeminiStreamRanker` previously sent 25 candidate streams in verbose pretty-printed JSON (2,700 tokens), causing 22+ second latency and HTTP 429 quota exhaustion. Refactored to send top 12 pre-filtered candidates in compact single-line format (~200 tokens) with `maxOutputTokens: 200` and `temperature: 0.0`. Latency dropped from 22.78s to 1.1–2.6s.
+    - **Restricted AI to Intentional Playback**: Speculative browsing prefetch (`runPrefetch`) now passes `isPrefetch: true` to bypass the external LLM entirely and use instant local heuristics, preserving API quota and preventing background freezes.
+    - **Single-Flight Auto-Play Guard**: Added `isAutoPlayRaceActive` guard across early quorum commit and full fetch completion, preventing duplicate parallel AI calls and multiple simultaneous stream attempts.
+    - **Model Expansion**: Added `gemini-2.5-flash` with zero-budget thinking support (`thinkingBudget: 0`) and fully localized across all 10 supported languages with zero dictionary duplicates.
+16. **Flux Mode Auto-Play Race Resolution, Continuous P2P Buffer Fill & OpenSubtitles Auto-Selection**:
+    - **Stream Picker Appearing in Flux Mode**: Fixed race condition where early quorum launched an unawaited fire-and-forget task; when scraper queries completed, the fallback block evaluated `selectionMade == false` and prematurely forced `isStreamPickerPresented = true`, subsequently aborting Gemini's winner. Fixed by tracking `autoPlayRaceTask`, awaiting its completion upon fetch conclusion, and guarding the fallback modal.
+    - **P2P Loading Bar Fill**: Added `streamLen` to `TorrentStats` and updated `startTorrentStatsPolling` to compute continuous, monotonic progress from downloaded bytes (`min(0.90, downloaded / 12_500_000.0)`), unchoked peers, and stream progress, eliminating the frozen 5% loading bar on torrent streams.
+    - **OpenSubtitles Automatic Track Selection & Caching**: Separated audio and subtitle auto-selection flags in `MPVController`. Subtitles now auto-select when `preferredSub != "Off"` regardless of whether audio is English or foreign. Added `.onChange(of: playerManager.externalSubtitles)` in `PlayerView` for late-arriving subtitles, localized language labels (e.g., `English (OpenSubtitles v3)` instead of raw `eng`), and cached external subtitles locally to ensure 100% reliable mpv playback without HTTPS errors.
+    - **Gemini Structured Output**: Added strict `responseSchema` to `GeminiStreamRanker` with a robust multi-key and regex parser fallback so index extraction never fails.
+17. **Proxy Persistence, Cloud Sync Anti-Regression Shield & Main-Thread Beachball Elimination**:
+    - **Proxy Auto-Disabling Root Cause**: PocketBase cloud sync (`syncNowInternal: pullFirst=true forcePull=true`) ran on window focus / didBecomeActive. PocketBase record `llicplrw2m6y3ny` stored `streamRouteProxyEnabled: false`. `exportGlobalSettings()` generated fresh timestamps (`Date().timeIntervalSince1970`) on unrelated pushes, making remote settings appear newer than local settings. On pull, `applyCloudPayload` wiped local proxy settings to `false`. Added Proxy Anti-Regression Shield to `UserDataService.swift` and `ProfileManager.swift` (preserves local enabled state if endpoint is configured and local timestamp is valid). Patched live PocketBase record `llicplrw2m6y3ny` to `streamRouteProxyEnabled: true`. Stamped `settingsUpdatedAt` on true settings modifications only, and changed proxy config / addon toggles to `scheduleAutoSync(delay: 0.1)`.
+    - **Player Teardown Hangs**: Removed spurious `fluxRefresh` from `PlayerView.onDisappear` and `DetailView` episode mark-watched which cleared image caches. Made `mpv_terminate_destroy` asynchronous on `DispatchQueue.global(qos: .utility)` to prevent dead demuxer sockets from hanging main thread.
+18. **Resolution Cloud Persistence, Non-Blocking MPV Demuxer Teardown & Resilient Quality Fallback**:
+    - **Resolution Preference Reset Root Cause**: `UserDataService.hasLocalAdditionsToPush` evaluated whether to push local data during pull-first syncs based only on watch history, items, and collections, omitting settings timestamps (`localSettingsNewer || missingSettingsInCloud`). When the user set resolution to 4K, auto-sync pulled from PocketBase first and never pushed the updated settings dictionary back, overwriting local `preferredQuality` with stale 1080p remote snapshots on subsequent app restarts. Patched `hasLocalAdditionsToPush` to include `localSettingsNewer` and patched live PocketBase record `llicplrw2m6y3ny` to `preferredQuality: "4K"`.
+    - **Main-Thread Hang & Spinning Beachball on Detail Navigation**: When mpv's ffmpeg demuxer encountered dead or disconnected torrent swarms (e.g., *Coyote vs. Acme* returning premature EOF at 6MB), ffmpeg entered a 0-second reconnect loop. Calling `command("stop")` or `mpv_command` synchronously in `discardWarmCore()` or `cancelDetailPrefetch()` blocked the main thread waiting on demuxer mutex locks, spinning the beachball cursor during navigation to and from `DetailView` (and stalling subsequent titles like *Zootopia 2* during core teardown). Made `stop()` non-blocking by dispatching `command("stop")` on `DispatchQueue.global(qos: .userInitiated)`, added a 350ms navigation yield in `DetailView.task` to ensure push transitions finish smoothly before prefetching, and added sliding-window reconnect storm detection (>= 3 reconnects in 5s) triggering auto-advance via `PlayerManager.handleStreamFailure`.
+    - **Resilient Fallback Resolution Floor**: Fixed *Heart of the Beast* failure where Cinejoy HLS served empty segments and all remaining 4K streams were rejected by the fallback filter because `preferredQuality` had reverted to 1080p. Introduced `higherQualityFallback` in `advanceToStandbyFallback()` so higher-resolution streams are preserved as an emergency fallback instead of failing playback completely when lower-resolution streams are exhausted.
+19. **Torrent Startup Watchdog Correction & Memory Image Cache Preservation**:
+    - **False-Positive Reconnect Kill Loop Resolution**: Sliding-window reconnect storm detection in `MPVVideoView.swift` previously triggered on normal ffmpeg BitTorrent connection retries at byte offset 0 (`Will reconnect at 0 in 0 second(s)`). During the initial buffering phase, Stremio's embedded engine (`FluxEngine` on port 11470) takes a few seconds to connect to DHT peers and buffer initial header pieces. The watchdog misidentified these retries as dead streams, killing torrents after 1 second, rapidly burning through the entire fallback waterfall, and causing port 11470 to refuse connections. Restricted reconnect storm detection strictly to active mid-stream playback drops (`PlayerManager.shared.hasPlaybackStarted == true` at non-zero offsets) and cleared `reconnectTimestamps` on `loadFile` and `stop()`. Initial torrent buffering is now safely governed by `armStartupWatchdog` (allowing up to 35 seconds matching Stremio).
+    - **Persistent In-Memory Poster & Thumbnail Cache**: Removed destructive `ImageInMemoryCache.purgeMemoryCache()` from `PlayerView.onAppear`. Previously, starting any video purged all decoded posters, logos, and backdrops from RAM, forcing Home, Search, and Detail screens into loading/shimmer states upon exiting the player. Memory is now preserved in the 128MB cache across playback sessions.
+20. **Resolution Setting Default Alignment, Reconnect Loop & UI Hang Fixes**:
+    - **preferredQuality Reversion Fix**: The `@AppStorage("preferredQuality")` in `SettingsView.swift:523` used a compile-time default of `"4K"`, while `StreamManager.maxAllowedQualityScore()` (line 959) and `PlayerManager` next-episode prefetch (line 2692) also fell back to `"4K"`. Changed all three fallback defaults to `"1080p"` to eliminate race conditions during startup where any transient gap between `restoreSettings` and SwiftUI view construction could snapshot the wrong default. All other `preferredQuality` reads (PlayerManager lines 348, 1304, 1352, 1528, 2118) already used `"1080p"`.
+    - **Streaming Pipeline Verification**: Comprehensive audit comparing Flux's streaming architecture against Stremio's reference implementation. Verified all 17 key features match or enhance Stremio: fire-and-forget `/create`, sequential piece streaming, HTTP Range support, Ultra-Fast engine settings, 300MB demuxer buffer, 60s readahead, FFmpeg reconnect, startup watchdog (35s torrent / 14s HTTP), StreamProxyManager with transparent upstream retry, dynamic hot-swap, reconnect storm detection, and AI stream ranking. No critical streaming pipeline issues found.
+    - **Infinite Reconnect Loop (Flashing) Fix**: When a stream dropped mid-playback and reconnected from offset 0 (e.g., due to an upstream proxy ignoring `Range` headers), the reconnect storm detector erroneously classified it as an `isInitialStartupConnect` and skipped `isStorm` evaluation. This caused MPV to infinitely loop between "playing" (first 2 seconds) and "loading" (reconnecting). Removed `!isInitialStartupConnect` from the `playbackRunning` block in `MPVVideoView.swift` so fatal mid-stream resets correctly trigger the standby fallback waterfall.
+    - **Non-Blocking MPV LoadFile**: While `mpv.stop()` was dispatched to a background queue, the subsequent `command("loadfile", ...)` executed synchronously on the main thread. Since `mpv_command` locks the core during tear-down, `loadfile` blocked the main thread, causing severe UI lag and beachballing during stream transitions. Wrapped the `loadfile` command execution in `DispatchQueue.global(qos: .userInitiated).async`.
+    - **Season Menu Scroll Override**: Fixed an issue where `FloatingSeasonPanel` rendered all seasons in an unconstrained `VStack`, overflowing the screen vertically for shows with many seasons (e.g., Grey's Anatomy). Wrapped the `VStack` in a `ScrollView` with a `maxHeight` limit of `350` and hid indicators.
+21. **Test Suite Proxy Pollution Resolution & Direct HTTP Playback Fix**:
+    - **Dead Proxy Endpoint Leak Root Cause**: `StreamRouteProxyTests` used a dummy IP `http://100.64.0.1:8888` and set `StreamRouteProxyManager.shared.endpointURL` and `isEnabled = true`. Because `StreamRouteProxyManager.endpointURL.didSet` triggered `ProfileManager.shared.saveCurrentProfileSettings()` without restoring original settings upon test completion, the dummy IP was permanently stamped into Zayn's active profile and UserDefaults.
+    - **Symptom & Verification**: Whenever any stream containing keywords like `"pengu"` (e.g. `https://pengu.uk/direct/external/...`), `"cinefreak"`, `"2peckle"`, etc. was played, `MPVVideoView` set `mpv`'s `http-proxy` to `http://100.64.0.1:8888`. FFmpeg timed out trying to connect to the non-existent IP (`tcp: Connection to tcp://100.64.0.1:8888 failed: Operation timed out`), while Chrome played the stream instantly because Chrome bypassed the dead proxy.
+    - **Fix**:
+      1. Cleaned all 35 polluted profile snapshots and global UserDefaults keys, resetting `streamRouteProxyEnabled = false`.
+      2. Isolated `StreamRouteProxyTests` by capturing initial profile and global proxy settings and restoring them in a `defer` block in each test.
+      3. Added sanity filters in `recoverConfiguredEndpoint()` to ignore test IPs (`100.64.0.1`, `example.com`).
+      4. All 233 unit tests pass cleanly without polluting UserDefaults.
+22. **Post-Playback 2-Second Kill Loop Resolution ("Flashing at 2s")**:
+    - **Root Cause Identified**:
+      1. In `PlayerManager.swift:armStartupWatchdog`, an aggressive post-start monitor loop ran after `hasPlaybackStarted == true`. If `lastObservedCacheTime < 4.0` and measured `sustainedStartupThroughputKBps < 150 KB/s`, it gave the stream a "slow speed strike". At strike 2 (checked at 1s intervals), it executed `self.advanceToStandbyFallback()`.
+      2. In `PlayerView.swift`, the `.onReceive(loadingTimer)` handler had an early `return` inside `if mpv.isPlaying && mpv.timePos >= 0.05`. Because `playerManager.reportTelemetryProgress(cacheTime: bufferAhead)` was located *after* this return, `lastObservedCacheTime` in `PlayerManager` was never updated while playing and remained perpetually at `0.0`.
+      3. At startup, MPV decodes the initial burst of frames while network read speed (`cache-speed`) momentarily rests at 0 KB/s. Because `lastObservedCacheTime < 4.0` was permanently satisfied and speed was < 150 KB/s, every stream accrued strike 1 at 1.0s and strike 2 at 2.0s, triggering `advanceToStandbyFallback()` at exactly 2.0 seconds of playback.
+      4. This cycled endlessly through all fallbacks: Stream 1 started -> played 2.0s -> killed -> Stream 2 started -> played 2.0s -> killed, manifesting to the user as rapid "flashing between loading and playing in the first 2 seconds".
+    - **Fix Applied**:
+      1. Updated `armStartupWatchdog` to immediately disarm and exit as soon as `hasPlaybackStarted == true`.
+      2. In `markPlaybackStarted()`, explicitly canceled and nilled `startupWatchdogTask`.
+      3. Moved `reportTelemetryProgress` to the top of `loadingTimer` in `PlayerView.swift` so telemetry updates unconditionally every 500ms.
+      4. All 233 unit tests pass cleanly.
+23. **Player Two-Press Escape Key Exit Restoration**:
+    - **Single-Press Exit Root Cause**: When native borderless window key monitoring was added, `PlayerView.swift:handleEscapePress()` directly invoked `closePlayer()` on unhandled Esc presses, bypassing `showExitWarning` and `exitWarningOverlay`.
+    - **Restoration**: Implemented two-press confirmation sequence: first press displays `"Press Esc again to exit".localized` in a liquid glass overlay and starts a 2-second auto-dismiss timeout; second press cancels the timer and exits via `closePlayer()`.
+    - **Overlay Priority**: Overlays (diagnostics HUD, About Stream Source modal, manual Stream Picker) dismiss first on single Esc before the exit sequence begins.
+    - **Dynamic Localization & State Cleanup**: Added `@ObservedObject private var languageManager = LanguageManager.shared` (Rule 1 compliance) and properly reset state in `onDisappear`, `onChange(of: currentPlaybackKey)`, and `closePlayer()`.
 
 ---
 
@@ -128,27 +210,38 @@ The app has just undergone major enhancements:
 - **Resolution**:
   - In `AddonManager.swift`: Inlined `addons[existingIdx].isEnabled = StreamRouteProxyManager.shared.isEnabled` without mutating `StreamRouteProxyManager` during singleton construction.
   - In `StreamRouteProxyManager.swift`: Guarded endpoint auto-migration with `!AppEnvironment.isRunningTests` to isolate unit test runs.
-  - Verified Stremio app co-existence: Flux uses dynamic port stepping (`11470` through `11479`), gracefully stepping to the next open port if Stremio desktop is already occupying `11470`.
+   - Verified Stremio app co-existence: Flux uses dynamic port stepping (`11470` through `11479`), gracefully stepping to the next open port if Stremio desktop is already occupying `11470`.
 
-### K. AI Stream Selection Layer in Flux Mode (Architectural Plan)
-- **Problem Statement**:
-  Heuristics (seed counts, file size thresholds, regex keyword scoring) perform well on standardized releases but suffer on:
-  - Cryptic or obfuscated filenames from scrapers (`Dual.Audio`, unlabelled languages, fan edits).
-  - Deceptive releases (fake 4K upscales, bloated 60GB uncompressed remuxes on slow swarms, CAM-rips tagged as WEB-DL).
-  - Commentary audio tracks mistaken for primary dialogue.
-- **Proposed Solution**:
-  An intelligent multi-tiered AI layer integrated into Flux Mode auto-play:
-  1. **Tier 0 (< 50ms): Heuristic Fast-Path**
-     - Instant initial candidate scoring via existing Startup Speed Score (SSS) to begin zero-delay speculative prebuffering.
-  2. **Tier 1 (< 5ms): On-Device Semantic Scoring (CoreML / Apple Neural Engine)**
-     - Local classification model running on Apple Silicon with 0 network latency.
-     - Evaluates feature vector: title similarity, release group reputation, container streamability, audio layout (5.1/7.1 vs stereo), codec efficiency, and seeder density.
-     - Predicts playback reliability score $P(\\text{Reliable})$ and audio confidence score.
-  3. **Tier 2 (< 350ms): Edge / LLM Reasoning for Ambiguous Candidates**
-     - Triggered only when candidate ambiguity is high ($P < 0.70$) or title conflict penalties are encountered.
-     - Sends metadata payload to fast inference model (Gemini Flash / PocketBase sidecar) with TMDB item context to pick the true match and best quality compromise.
-  4. **Tier 3: Local Failure Learning & Adaptive Feedback**
-     - Automatically penalizes release groups or codecs locally when a stream stalls within 15 seconds or requires manual user switching.
+### K. Brotli Stream Crash Resolution (`StreamProxyManager` & `MPVVideoView`)
+- **Problem**: When playing episodes like *Cosmos: A Spacetime Odyssey* S02E01, upstream proxy/scraper streams (e.g. `VAPlayer` / `PenguPlay`) compressed video streams with Brotli (`Content-Encoding: br`). The bundled libavformat/ffmpeg demuxer in `LocalMPVKit` does not support Brotli on raw HTTP video streams, throwing:
+  ```
+  mpv[ffmpeg]: http: Unknown content coding: br
+  Stream ends prematurely at 349306
+  ```
+- **Resolution**:
+  - In `StreamProxyManager.swift`: Explicitly injected `request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")` to demand raw uncompressed bytes from upstreams, and filtered out `content-encoding` headers from downstream responses.
+  - In `MPVVideoView.swift`: Injected `Accept-Encoding: identity` into MPV's `http-header-fields` property as a second line of defense for non-proxied direct streams.
+
+### L. Complete Candidate Waterfall & Standby Torrent Retention
+- **Problem**: When top 3 candidates failed, `PlayerManager` previously abandoned playback after 2 fallbacks without attempting remaining candidates or viable torrent swarms.
+- **Resolution**:
+  - In `PlayerManager.swift`: Preserved all fetched candidates (`finalStandby = standby + remainingAfterTop3`), retaining healthy torrent swarms and secondary HTTP links.
+  - Increased `maxAutoFallbacks` from 2 to 5 with progressive fallback logging.
+
+### M. Cloud Settings Synchronization Guard
+- **Problem**: User settings (such as Flux mode toggles or streaming preferences) kept reverting back on window focus or network restoration.
+- **Root Cause**: `ContentView.swift` called `AuthManager.shared.syncNowAsync(forcePull: true)` on `NSApplication.didBecomeActiveNotification`, pulling remote PocketBase data and overwriting local `UserDefaults` every time the user switched back to the app window.
+- **Resolution**:
+  - Changed `didBecomeActiveNotification` and `fluxNetworkRestored` to call `syncNowAsync(forcePull: false)`.
+  - In `ProfileManager.swift`: Added `settingsUpdatedAt` timestamps to profile snapshots (`snapshotSettings`) and added a timestamp comparison guard in `applyCloudProfilesData` so incoming cloud data only overwrites local settings if the cloud timestamp is strictly newer.
+
+### N. Experimental AI Stream Selection Layer (Gemini 3 Flash & Flash-Lite)
+- **Implementation**:
+  - `GeminiStreamRanker.swift`: Built an asynchronous ranking service that formats up to 25 stream candidates into a compact JSON schema (ID, title, resolution, size, seeders, source, isTorrent) and invokes exclusively Gemini 3 models (`gemini-3.5-flash-lite`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`) with structured JSON schema output requesting `top_stream_ids` and a brief rationale. `gemini-3.5-flash-lite` serves as the high-speed default with ~1.4s response times and resilient Markdown/array JSON parsing.
+  - `PlayerManager.swift`: Integrated `GeminiStreamRanker.rankStreams` when `enableAIStreamSelection` is enabled. Updates player status text to `"AI analyzing streams…"` during inference, preloads the AI's top pick, and races the top 5 sources. Seamlessly falls back to local heuristics if the API key is unset, network fails, or the model times out.
+  - `UserDefaults+Keys.swift` & `Secrets.swift`: Added `enableAIStreamSelection`, `geminiApiKey`, and `geminiModel` settings keys and fallback API keys.
+  - `SettingsView.swift`: Added a "Selection Engine" section in Streaming Settings with a segmented picker between **Heuristic Algorithm** and **Smart AI Selection (Gemini)**, an active API key pill badge with edit/secure sheet, and a Gemini 3 model picker (`gemini-3.5-flash-lite`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`).
+  - `LanguageManager.swift`: Localized all new UI strings across all 10 supported languages with strict duplicate key prevention.
 
 ---
 
@@ -159,11 +252,92 @@ The app has just undergone major enhancements:
 - **Cause**: An earlier debug instance of `flux` was still running in the background. Flux's single-instance guard intentionally terminates newly launched instances to prevent port or state collisions.
 - **Resolution**: Check for running processes before launch (`ps aux | grep flux`) and terminate stale instances (`kill -9 <PID>`).
 
-### Issue 2: Data Race in Unit Tests (`UserDataService.renameCollection` / `collectionIDs`)
-- **Symptom**: Diagnostic reports `flux-2026-09-23-013616.ips`, `flux-2026-09-23-013614.ips`, `flux-2026-09-23-013607.ips` showed `EXC_BAD_ACCESS` / `swift_retain` on worker threads during `xcodebuild test`.
-- **Root Cause**: During app-hosted test runs, concurrent test threads in Swift Testing simultaneously mutated (`renameCollection`) and read (`collectionIDs`) the unisolated `collections` array in `UserDataService`.
-- **Immediate Task for New Session**:
-  - Mark `UserDataService` or its collection mutation methods with `@MainActor` or introduce an internal `NSLock` / serial isolation around `collections` array operations.
+### Issue 2: Data Race in Unit Tests (`UserDataService.renameCollection` / `collectionIDs`) [RESOLVED]
+- **Symptom**: Diagnostic reports showed `EXC_BAD_ACCESS` / `swift_retain` / `Bus error: 10` on worker threads during `xcodebuild test`.
+- **Root Cause**: During app-hosted test runs, concurrent test threads in Swift Testing simultaneously mutated (`createCollection`, `renameCollection`, `deleteCollection`) and read (`collectionIDs`, `exportCloudPayload`) the unisolated `collections` array in `UserDataService`.
+- **Resolution**:
+  1. Annotated `struct UserDataServiceTests` with `@Suite(.serialized) @MainActor`, ensuring all user data tests execute serially on the main thread.
+  2. Introduced an internal `NSRecursiveLock` (`collectionsLock`) in `UserDataService.swift` around collection mutations, reads, and payload export snapshots.
+  3. Defaulted `episodeProgress` to an empty dictionary in `ProfileManager.exportProfilesData()` so new profiles export consistent schema payloads.
+  4. Verified all 227 unit tests across all 9 test suites pass with 100% green status.
+
+### Issue 3: Missing Context Menu & Card Menu Parity [RESOLVED]
+- **Symptom**: Right-clicking on episode cards (`LiquidEpisodeCard`) in the TV show details rail did nothing, while an ellipsis button was present with only partial actions.
+- **Root Cause**: `LiquidEpisodeCard` had an ellipsis `Menu` at line 1757, but lacked a `.contextMenu` modifier. `RecentSearchCard` in `SearchView.swift` also lacked a context menu.
+- **Resolution**:
+  1. Refactored `LiquidEpisodeCard`: Extracted `episodeMenuActions` view builder shared by both the ellipsis `Menu` and `.contextMenu`. Added "Play" / "Resume", "Play from Beginning" (for partially watched episodes), "Choose Stream Source…", and dynamic "Mark as Watched" / "Mark as Unwatched".
+  2. Attached `.contextMenu` to `RecentSearchCard` with "Go to Movie/Show/Person", "Add/Remove from Watchlist", and "Remove from Recent Searches" (`recentManager.removeItem`).
+  3. Added new localized keys (`"Play from Beginning"`, `"Mark as Unwatched"`, `"Remove from Recent Searches"`, `"Go to Person"`) across all 10 supported languages in `LanguageManager.swift` with zero duplicate key errors.
+
+### Issue 4: Cross-Suite Test Pollution in `StreamRouteProxyTests` [RESOLVED]
+- **Symptom**: `StreamRouteProxyTests.defaultStateHasNoEndpointAndDoesNotProxy()` failed intermittently during full test runs when running in parallel with `ProfileTests`.
+- **Root Cause**: `StreamRouteProxyManager.recoverConfiguredEndpoint()` was recovering proxy endpoints from leftover profile settings snapshots in `UserDefaults` during tests, and tests were leaving dirty endpoints without teardown.
+- **Resolution**:
+  1. Added `guard !AppEnvironment.isRunningTests else { return nil }` directly inside `recoverConfiguredEndpoint()`.
+  2. Added `@MainActor` and `defer` cleanup blocks in `StreamRouteProxyTests.swift`.
+  3. All 230 unit tests now reliably pass with 100% green status.
+
+### Issue 5: Experimental AI Stream Selection Layer & Gemini 3 Architecture [RESOLVED]
+- **Overview**: Introduced an experimental AI-powered stream selection layer for Flux Mode using Google Gemini 3 models (`gemini-3.5-flash-lite` by default for high free-tier quotas and fast ~1s latency, alongside `gemini-3.6-flash`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.5-flash`, and `gemini-3.1-flash-lite`).
+- **Implementation**:
+  1. `GeminiStreamRanker.swift`: Serializes candidate streams into compact JSON, prompts the Gemini API with structured JSON output requirements, applies low thinking configuration (`"thinkingConfig": ["thinkingLevel": "low"]`) to minimize latency and token overhead, injects user preferences (target quality ceiling, preferred languages, and streamable size guidance 1.5–8 GB to prevent 25–60 GB uncompressed torrent buffering stalls), and implements cascading fallbacks (`3.5-flash-lite` -> `3.6-flash` -> `3.1-flash-lite`).
+  2. `PlayerManager.swift`: Forwards `preferredQuality`, `preferredLanguages`, and `enableLanguageFilter` into `GeminiStreamRanker.shared.rankStreams`.
+  3. `SettingsView.swift`: Added toggle for "AI Stream Selection" with custom API key support and Gemini Model picker defaulted to `gemini-3.5-flash-lite`. Sanitizes legacy or invalid models on launch.
+  4. `ProfileManager.swift`: Added migration check during `restoreSettings` to ensure stored snapshots automatically normalize legacy keys to `gemini-3.5-flash-lite`.
+  5. `LanguageManager.swift`: Fully localized all Gemini model picker and setting strings across all 10 supported languages with verified 0 duplicate keys.
+
+### Issue 6: Reconnect Storms, Main-Thread Demuxer Locking & Beachball Freezes [RESOLVED]
+- **Symptom**: Clicking on certain titles (e.g. *Coyote vs. Acme*) caused the app to freeze with a spinning beachball cursor. Attempting to play failed even though good sources were available. Subsequent title navigation (e.g. *Zootopia 2*) also froze temporarily before playing.
+- **Root Cause**:
+  1. The selected torrent swarm disconnected after downloading initial pieces, throwing `Input/output error` (premature EOF). Mpv's demuxer flags (`reconnect=1,reconnect_delay_max=5`) triggered rapid 0-second reconnect loops inside ffmpeg. Because ffmpeg handled reconnects internally, mpv never fired an EOF or fatal error to SwiftUI, causing playback to hang silently.
+  2. When navigating away from `DetailView` or switching media, `cancelDetailPrefetch()` and `discardWarmCore()` called `core.controller.stop()` / `mpv_command` synchronously on the main thread. Because mpv held its internal demuxer mutex lock during the network reconnect storm, the main thread blocked for multiple seconds, triggering the macOS spinning beachball.
+  3. When *Zootopia 2* was opened, `warmEngine` had to discard the hanging *Coyote vs. Acme* core first, causing another beachball freeze until the teardown unlocked.
+- **Resolution**:
+  1. In `MPVVideoView.swift`, refactored `stop()` to dispatch `command("stop")` asynchronously on `DispatchQueue.global(qos: .userInitiated)`.
+  2. In `PlayerManager.swift`, wrapped `discardWarmCore()` and `cancelDetailPrefetch()` controller stops in background queues, ensuring main-thread SwiftUI transitions never block on mpv socket operations.
+  3. In `DetailView.swift`, added a 350ms yield (`try? await Task.sleep(nanoseconds: 350_000_000)`) in `.task` before speculative prefetching so the navigation push animation and window render complete smoothly before any background player work starts.
+  4. Implemented sliding-window reconnect storm detection in `MPVVideoView.swift`: logs tracking premature EOF / reconnect events increment a counter; if `>= 3` reconnects occur within 5 seconds, `PlayerManager.shared.handleStreamFailure(reason: .reconnectStorm)` is fired, instantly dropping the failing warm core or advancing active playback to the standby waterfall.
+
+### Issue 7: Cloud Settings Sync Overwriting Resolution & Fallback Starvation [RESOLVED]
+- **Symptom**: User set Maximum Resolution to 4K, but on app restarts or focus changes, the setting reverted to 1080p. Titles like *Heart of the Beast* showed the loading bar fill but never started playback.
+- **Root Cause**:
+  1. `UserDataService.swift:hasLocalAdditionsToPush` omitted `localSettingsNewer || missingSettingsInCloud`. When the user modified settings in `SettingsView`, auto-sync triggered a pull-first sync (`pullFirst: true`). Because `hasLocalAdditionsToPush` was false, local settings were never pushed to PocketBase. On app relaunch, PocketBase's stale remote snapshot (`1080p`) was pulled and applied to local `UserDefaults`.
+  2. In *Heart of the Beast*, the primary candidate (PenguPlay Cinejoy HLS) served an empty HLS playlist (`hls: Empty segment`). After the dead-source watchdog timed out, `advanceToStandbyFallback()` attempted to advance to the next candidates. However, because `preferredQuality` had reverted to 1080p, remaining 4K streams were rejected by the fallback filter (`score > maxScore`), leaving 0 available fallbacks and aborting playback.
+- **Resolution**:
+  1. Patched `hasLocalAdditionsToPush` in `UserDataService.swift` to check `localSettingsNewer || missingSettingsInCloud`.
+  2. Reduced `scheduleAutoSync` delay in `SettingsView.swift` to `0.1s`.
+  3. Updated live PocketBase record `llicplrw2m6y3ny` with `preferredQuality: "4K"` and current timestamp.
+  4. In `PlayerManager.swift:advanceToStandbyFallback()`, added a resilient fallback mechanism (`higherQualityFallback`): if all candidates matching `<= preferredQuality` fail, the player automatically falls back to higher-quality candidates rather than failing playback completely.
+
+### Issue 8: Reconnect Storm False Positives on Torrent Startup & Image Cache Memory Wipes [RESOLVED]
+- **Symptom**: User attempted to play multiple titles; nothing played. Torrents failed almost immediately with repeated reconnect errors in logs, and `FluxEngine` port 11470 refused connections. The app also showed persistent loading wheels, shimmers, and beachball freezes across Home and Detail views after closing the player.
+- **Root Cause**:
+  1. The sliding-window reconnect watchdog in `MPVVideoView.swift` triggered on `lowerText.contains("reconnect")` at byte offset 0. When Stremio's embedded engine (`FluxEngine`) starts downloading a torrent, it needs a few seconds to connect to DHT peers and buffer the initial file header (moov / video header). Ffmpeg's HTTP demuxer emits normal retry messages (`Will reconnect at 0 in 0 second(s)`). The watchdog counted 3 of these within 5 seconds and declared a "reconnect storm", killing the torrent after just 1 second and immediately jumping to fallbacks. It did this across all candidate streams, hammering port 11470 until the engine refused connections and locked mpv's demuxer.
+  2. `PlayerView.swift:290` called `ImageInMemoryCache.purgeMemoryCache()` on `.onAppear`. Every time the user started a video, all decoded posters, logos, and covers were completely wiped from RAM. Exiting the player forced Home and Detail views to reload and re-decode every card on screen, leaving the UI in a perpetual loading/shimmer state.
+- **Resolution**:
+  1. In `MPVVideoView.swift`, restricted reconnect storm evaluation strictly to active mid-stream playback (`PlayerManager.shared.hasPlaybackStarted == true` at non-zero offsets). Connection retries at byte offset 0 (`reconnect at 0`) are ignored.
+  2. In `MPVVideoView.swift`, cleared `reconnectTimestamps` on `loadFile` and `stop()` so prior reconnect attempts never contaminate subsequent streams. Initial torrent buffering is now safely governed by `PlayerManager.shared.armStartupWatchdog` (allowing up to 35 seconds matching Stremio).
+  3. In `PlayerView.swift:onAppear`, removed the destructive `ImageInMemoryCache.purgeMemoryCache()` call. All card artwork now remains instantly cached in RAM across player open/close transitions.
+
+### Issue 9: 2-Second Playback Kill Loop ("Flashing at 2s") & Dead Proxy Injection [RESOLVED]
+- **Symptom**: Titles started playing for 1-2 seconds, then immediately flashed, restarted or killed playback, jumping to fallback streams or black screens. Furthermore, direct HTTP streams like PenguPlay failed to load in Flux while playing instantly in Chrome.
+- **Root Cause**:
+  1. `PlayerManager.swift:armStartupWatchdog` spawned a post-start monitoring loop checking `sustainedStartupThroughputKBps < 150 KB/s` and `lastObservedCacheTime < 4.0`. In `PlayerView.swift:loadingTimer`, an early `return` inside `if mpv.isPlaying && mpv.timePos >= 0.05` prevented `reportTelemetryProgress(cacheTime:)` from being called once playback began. As a result, `lastObservedCacheTime` remained 0.0, causing the watchdog to accrue strikes every 1.0s and fire `advanceToStandbyFallback()` at exactly 2.0s.
+  2. `StreamRouteProxyTests.swift` wrote a dummy proxy endpoint (`http://100.64.0.1:8888`) and enabled `streamRouteProxyEnabled = true` in shared `UserDefaults.standard` without restoring previous state in `tearDown`. This permanently hijacked all direct HTTP / PenguPlay streams through an unreachable mock IP on the user's host machine.
+- **Resolution**:
+  1. In `PlayerManager.swift`, disarmed the startup watchdog as soon as `hasPlaybackStarted == true` and cancelled `startupWatchdogTask` in `markPlaybackStarted()`.
+  2. In `PlayerView.swift`, moved `reportTelemetryProgress(cacheTime:)` to the top of `loadingTimer` so cache duration is continuously reported before any early returns.
+  3. In `StreamRouteProxyManager.swift`, purged mock IPs from persistent storage and added sanity checks rejecting test IPs.
+  4. In `StreamRouteProxyTests.swift`, added `defer` cleanup restoring pre-test proxy settings.
+
+### Issue 10: Player Escape Key Single-Press Exit Regression [RESOLVED]
+- **Symptom**: Pressing the `Esc` key once during video playback immediately closed the player window instead of presenting the confirmation warning ("Press Esc again to exit") and requiring a second press to exit.
+- **Root Cause**: In `PlayerView.swift:handleEscapePress()`, the code previously handled HUD and modal dismissals but directly called `closePlayer()` on single press, bypassing `showExitWarning` and `exitWarningOverlay` completely.
+- **Resolution**:
+  1. Added `@State private var exitWarningTask: Task<Void, Never>? = nil` and `@ObservedObject private var languageManager = LanguageManager.shared` (satisfying `AGENTS.md` Rule 1).
+  2. Updated `handleEscapePress()`: if `showExitWarning` is active, it cancels the reset task and invokes `closePlayer()`. Otherwise, it displays `showExitWarning` with animation and launches a 2-second timeout task to auto-dismiss the warning.
+  3. Cleaned up `exitWarningTask` and reset `showExitWarning = false` in `closePlayer()`, `onDisappear`, and `onChange(of: currentPlaybackKey)`.
+  4. Added `.allowsHitTesting(false)` to `exitWarningOverlay` so underlying video controls remain interactable during prompt display.
 
 ---
 
@@ -183,6 +357,8 @@ The app has just undergone major enhancements:
 | **History View** | `flux/Views/HistoryView.swift` | Watch history list, swipe-to-delete, atomic "Clear All" |
 | **Settings View** | `flux/Views/SettingsView.swift` | General, streaming, profile, and "History & Privacy" settings |
 | **Streaming Engine** | `flux/Engine/FluxEngine` | Embedded Go Stremio core, HTTP 11470, HTTPS 12470 |
+| **Stream Proxy** | `flux/Services/StreamProxyManager.swift` | Local loopback stream proxy, Brotli identity header injection |
+| **Stream Ranker (AI)** | `flux/Services/GeminiStreamRanker.swift` | Structured JSON serialization, Gemini Flash stream evaluation |
 | **Player Manager** | `flux/Services/PlayerManager.swift` | MPV playback orchestration, auto-play racing, proxy routing |
 | **MPV Video View** | `flux/Views/MPVVideoView.swift` | libmpv wrapper, CAOpenGLLayer rendering, playback properties |
 

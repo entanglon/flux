@@ -329,7 +329,8 @@ class MPVController: ObservableObject {
     @Published private(set) var endOfFileCount = 0
     func registerEndOfFile() { endOfFileCount += 1 }
     weak var playerView: MPVViewController?
-    private var hasAutoSelectedTracksForCurrentMedia = false
+    private var hasAutoSelectedAudio = false
+    private var hasAutoSelectedSubtitles = false
     
     func preparePaused(url: URL) {
         if hasLoadedMedia, loadedURL == url {
@@ -340,7 +341,8 @@ class MPVController: ObservableObject {
         self.isPlaying = false
         self.hasLoadedMedia = true
         self.loadedURL = url
-        self.hasAutoSelectedTracksForCurrentMedia = false
+        self.hasAutoSelectedAudio = false
+        self.hasAutoSelectedSubtitles = false
         playerView?.setMute(true)
         playerView?.play(url, paused: true)
     }
@@ -358,7 +360,8 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = true
         self.loadedURL = url
-        self.hasAutoSelectedTracksForCurrentMedia = false
+        self.hasAutoSelectedAudio = false
+        self.hasAutoSelectedSubtitles = false
         resetVolumeBoostIfNeeded()
         playerView?.setMute(false)
         // IINA-parity auto-pause: output device vanishing mid-playback pauses.
@@ -394,7 +397,8 @@ class MPVController: ObservableObject {
         self.bufferProgress = 0.0
         self.recentCacheSpeedKBps = 0.0
         self.isBuffering = false
-        self.hasAutoSelectedTracksForCurrentMedia = false
+        self.hasAutoSelectedAudio = false
+        self.hasAutoSelectedSubtitles = false
         self.audioTracks = []
         self.subtitleTracks = []
         self.chapters = []
@@ -751,57 +755,80 @@ class MPVController: ObservableObject {
             ?? tracks.first
     }
 
-    private func autoSelectPreferredTracks() {
-        guard !hasAutoSelectedTracksForCurrentMedia else { return }
-        guard !audioTracks.isEmpty else { return }
-        hasAutoSelectedTracksForCurrentMedia = true
-
-        let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+    func autoSelectPreferredSubtitles(from externalSubs: [StremioSubtitleTrack]) {
+        guard !hasAutoSelectedSubtitles else { return }
         let preferredSub = UserDefaults.standard.string(forKey: "defaultSubLang") ?? "English"
-        let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredAudio]
+        let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
 
-        // 1. Audio Track Selection — pure decision helper (see doc comment).
-        let activeAudio = audioTracks.first(where: { $0.isSelected })
-        var selectedTrack: Track? = nil
-
-        let currentOriginalLanguage = PlayerManager.shared.currentItem?.effectiveOriginalLanguage ?? PlayerManager.shared.currentItem?.originalLanguage
-        if let pick = Self.preferredAudioTrack(
-            from: audioTracks,
-            preferredLang: preferredAudio,
-            secondaryPreferredLangs: preferredLanguages,
-            originalLanguage: currentOriginalLanguage
-        ) {
-            selectedTrack = pick
-            if activeAudio?.id != pick.id {
-                print("[MPV] Auto-selecting audio track: \(pick.displayName) (id: \(pick.id)) preferred=\(preferredAudio) original=\(currentOriginalLanguage ?? "nil")")
-                playerView?.selectTrack(pick)
-            }
-        }
-
-        let effectiveAudioTrack = selectedTrack ?? activeAudio
-        let isEffectivePreferred = effectiveAudioTrack.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
-
-        // 2. Subtitle Track Selection
-        // If preferredSub is Off or None, the user explicitly does not want subtitles by default
-        guard preferredSub != "Off" && preferredSub != "None" else { return }
-
-        // If the audio track is foreign/non-preferred relative to default audio,
-        // we automatically turn on preferred subtitles!
         let activeSub = subtitleTracks.first(where: { $0.isSelected })
-        let isSubPreferred = activeSub.map { trackMatchesLanguage(track: $0, targetLang: preferredSub) } ?? false
 
-        if !isEffectivePreferred && !isSubPreferred {
-            if let matchedSub = subtitleTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredSub) }) {
-                print("[MPV] Foreign audio detected without subtitles — auto-selecting embedded subtitle: \(matchedSub.displayName) (id: \(matchedSub.id))")
-                playerView?.selectTrack(matchedSub)
-            } else if let extSub = PlayerManager.shared.externalSubtitles.first(where: { sub in
-                let dummy = Track(id: 0, type: "sub", title: sub.language, lang: sub.language, isSelected: false)
-                return trackMatchesLanguage(track: dummy, targetLang: preferredSub)
-            }) {
-                print("[MPV] Foreign audio detected — auto-attaching external subtitle: \(extSub.language)")
-                addExternalSubtitle(extSub)
+        if preferredSub != "Off" && preferredSub != "None" {
+            let isSubPreferred = activeSub.map { trackMatchesLanguage(track: $0, targetLang: preferredSub) } ?? false
+            if !isSubPreferred {
+                if let matchedSub = subtitleTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredSub) }) {
+                    hasAutoSelectedSubtitles = true
+                    print("[MPV] Auto-selecting embedded subtitle matching \(preferredSub): \(matchedSub.displayName) (id: \(matchedSub.id))")
+                    playerView?.selectTrack(matchedSub)
+                } else if let extSub = externalSubs.first(where: { sub in
+                    let dummy = Track(id: 0, type: "sub", title: sub.displayName, lang: sub.language, isSelected: false)
+                    return trackMatchesLanguage(track: dummy, targetLang: preferredSub)
+                }) {
+                    hasAutoSelectedSubtitles = true
+                    print("[MPV] Auto-attaching external subtitle matching \(preferredSub): \(extSub.displayName) (\(extSub.source ?? "OpenSubtitles"))")
+                    addExternalSubtitle(extSub)
+                }
+            } else {
+                hasAutoSelectedSubtitles = true
+            }
+        } else {
+            // User prefers Subtitles Off, but if foreign audio is detected, auto-enable subtitles in preferredAudio
+            let effectiveAudio = audioTracks.first(where: { $0.isSelected })
+            let isAudioPreferred = effectiveAudio.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? true
+            if !isAudioPreferred {
+                let isSubAudioActive = activeSub.map { trackMatchesLanguage(track: $0, targetLang: preferredAudio) } ?? false
+                if !isSubAudioActive {
+                    if let matchedSub = subtitleTracks.first(where: { trackMatchesLanguage(track: $0, targetLang: preferredAudio) }) {
+                        hasAutoSelectedSubtitles = true
+                        print("[MPV] Foreign audio detected — auto-selecting embedded subtitle: \(matchedSub.displayName)")
+                        playerView?.selectTrack(matchedSub)
+                    } else if let extSub = externalSubs.first(where: { sub in
+                        let dummy = Track(id: 0, type: "sub", title: sub.displayName, lang: sub.language, isSelected: false)
+                        return trackMatchesLanguage(track: dummy, targetLang: preferredAudio)
+                    }) {
+                        hasAutoSelectedSubtitles = true
+                        print("[MPV] Foreign audio detected — auto-attaching external subtitle: \(extSub.displayName)")
+                        addExternalSubtitle(extSub)
+                    }
+                } else {
+                    hasAutoSelectedSubtitles = true
+                }
             }
         }
+    }
+
+    private func autoSelectPreferredTracks() {
+        guard !audioTracks.isEmpty else { return }
+
+        if !hasAutoSelectedAudio {
+            hasAutoSelectedAudio = true
+            let preferredAudio = UserDefaults.standard.string(forKey: "defaultAudioLang") ?? "English"
+            let preferredLanguages = UserDefaults.standard.stringArray(forKey: UserDefaults.Key.preferredStreamLanguages) ?? [preferredAudio]
+            let activeAudio = audioTracks.first(where: { $0.isSelected })
+            let currentOriginalLanguage = PlayerManager.shared.currentItem?.effectiveOriginalLanguage ?? PlayerManager.shared.currentItem?.originalLanguage
+            if let pick = Self.preferredAudioTrack(
+                from: audioTracks,
+                preferredLang: preferredAudio,
+                secondaryPreferredLangs: preferredLanguages,
+                originalLanguage: currentOriginalLanguage
+            ) {
+                if activeAudio?.id != pick.id {
+                    print("[MPV] Auto-selecting audio track: \(pick.displayName) (id: \(pick.id)) preferred=\(preferredAudio) original=\(currentOriginalLanguage ?? "nil")")
+                    playerView?.selectTrack(pick)
+                }
+            }
+        }
+
+        autoSelectPreferredSubtitles(from: PlayerManager.shared.externalSubtitles)
     }
     
     func fetchChapters() {
@@ -819,10 +846,35 @@ class MPVController: ObservableObject {
     }
     
     func addExternalSubtitle(_ subtitle: StremioSubtitleTrack) {
-        playerView?.addExternalSubtitle(url: subtitle.url.absoluteString, title: subtitle.language)
-        // Re-fetch tracks after a brief delay to show the new track selected
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.fetchTracks()
+        let title = subtitle.displayName
+        let lang = subtitle.language
+        let remoteURL = subtitle.url
+
+        Task {
+            var targetPath = remoteURL.absoluteString
+            do {
+                var request = URLRequest(url: remoteURL)
+                request.timeoutInterval = 8
+                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode), !data.isEmpty {
+                    let cacheDir = FileManager.default.temporaryDirectory.appendingPathComponent("FluxSubtitles", isDirectory: true)
+                    try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+                    let safeID = subtitle.id.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
+                    let localFileURL = cacheDir.appendingPathComponent("\(safeID).srt")
+                    try data.write(to: localFileURL)
+                    targetPath = localFileURL.path
+                }
+            } catch {
+                print("[MPV] External subtitle download failed (\(error.localizedDescription)), passing remote URL to mpv")
+            }
+
+            await MainActor.run {
+                self.playerView?.addExternalSubtitle(url: targetPath, title: title, lang: lang)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.fetchTracks()
+                }
+            }
         }
     }
 }
@@ -888,7 +940,7 @@ class MPVViewController: NSViewController {
     func getTracks() -> [Track] { return playerView.getTracks() }
     func getChapters() -> [MediaChapter] { return playerView.getChapters() }
     func selectTrack(_ track: Track) { playerView.selectTrack(track) }
-    func addExternalSubtitle(url: String, title: String) { playerView.addExternalSubtitle(url: url, title: title) }
+    func addExternalSubtitle(url: String, title: String, lang: String? = nil) { playerView.addExternalSubtitle(url: url, title: title, lang: lang) }
 
     func setSubtitleDelay(_ delay: Double) { playerView?.setSubtitleDelay(delay) }
     func setSubtitleScale(_ scale: Double) { playerView?.setSubtitleScale(scale) }
@@ -1072,6 +1124,8 @@ final class MPVLayerView: NSView {
     private var lastBackingScale: CGFloat = 2.0
     private var isRenderUpdateScheduled = false
     private let renderUpdateLock = NSLock()
+    private var reconnectTimestamps: [CFAbsoluteTime] = []
+    private let reconnectLock = NSLock()
     
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1249,8 +1303,10 @@ final class MPVLayerView: NSView {
         }
         if let handle = self.mpv {
             mpv_set_wakeup_callback(handle, nil, nil)
-            mpv_terminate_destroy(handle)
             self.mpv = nil
+            DispatchQueue.global(qos: .utility).async {
+                mpv_terminate_destroy(handle)
+            }
         }
     }
     
@@ -1323,6 +1379,8 @@ final class MPVLayerView: NSView {
         mpv_set_property_string(mpv, "hr-seek-framedrop", "no")
 
         mpv_set_property_string(mpv, "user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        // Instruct FFmpeg HTTP demuxer to request uncompressed stream data (avoids unsupported Brotli 'br' encoding)
+        mpv_set_property_string(mpv, "http-header-fields", "Accept-Encoding: identity")
         // Do not force a global synthetic referrer — streaming CDNs often reject or throttle requests with unrecognized external referrers.
         mpv_set_property_string(mpv, "referrer", "")
 
@@ -1466,6 +1524,9 @@ final class MPVLayerView: NSView {
     func loadFile(_ url: URL, paused: Bool = false) {
         print("[MPV] loadFile called: \(url.absoluteString) (paused: \(paused))")
         isIntentionallySwitchingFile = true
+        reconnectLock.lock()
+        reconnectTimestamps.removeAll()
+        reconnectLock.unlock()
 
         // Configure MPV forward proxy property dynamically for scoped direct HTTP streams (strictly bypass loopback)
         if let mpv = self.mpv {
@@ -1489,7 +1550,9 @@ final class MPVLayerView: NSView {
             pendingURL = nil
             pendingPaused = false
             print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
-            command("loadfile", url.absoluteString)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.command("loadfile", url.absoluteString)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.isIntentionallySwitchingFile = false
@@ -1508,7 +1571,12 @@ final class MPVLayerView: NSView {
     
     func stop() {
         isIntentionallySwitchingFile = true
-        command("stop")
+        reconnectLock.lock()
+        reconnectTimestamps.removeAll()
+        reconnectLock.unlock()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.command("stop")
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.isIntentionallySwitchingFile = false
         }
@@ -1580,8 +1648,12 @@ final class MPVLayerView: NSView {
         }
     }
     
-    func addExternalSubtitle(url: String, title: String) {
-        command("sub-add", url, "select", title)
+    func addExternalSubtitle(url: String, title: String, lang: String? = nil) {
+        if let lang = lang, !lang.isEmpty {
+            command("sub-add", url, "select", title, lang)
+        } else {
+            command("sub-add", url, "select", title)
+        }
     }
     
     func setSubtitleDelay(_ delay: Double) {
@@ -1765,6 +1837,30 @@ final class MPVLayerView: NSView {
                             let sof = self.getPropertyString("stream-open-filename") ?? ""
                             if let host = URL(string: sof)?.host {
                                 HostHealthTracker.shared.recordFailure(host: host)
+                            }
+                        }
+
+                        let playbackRunning = PlayerManager.shared.hasPlaybackStarted
+
+                        // Only evaluate reconnect storms during active mid-stream playback (after playback has started).
+                        // Initial connection and buffering timeouts are safely managed by PlayerManager.armStartupWatchdog.
+                        if playbackRunning {
+                            let now = CFAbsoluteTimeGetCurrent()
+                            self.reconnectLock.lock()
+                            self.reconnectTimestamps.append(now)
+                            self.reconnectTimestamps.removeAll { now - $0 > 5.0 }
+                            let isStorm = self.reconnectTimestamps.count >= 4
+                            if isStorm {
+                                self.reconnectTimestamps.removeAll()
+                            }
+                            self.reconnectLock.unlock()
+
+                            if isStorm {
+                                DispatchQueue.main.async { [weak self] in
+                                    guard let self = self, !self.isCleaningUp, self.mpv != nil else { return }
+                                    Logger.player.error("🚨 Mid-playback reconnect storm detected in mpv (\(lowerText.prefix(80), privacy: .public)). Advancing to fallback stream...")
+                                    PlayerManager.shared.handleStreamFailure(reason: "Stream connection dropped repeatedly during playback")
+                                }
                             }
                         }
                     }

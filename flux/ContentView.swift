@@ -219,12 +219,12 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {
-                await AuthManager.shared.syncNowAsync(forcePull: true)
+                await AuthManager.shared.syncNowAsync(forcePull: false)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .fluxNetworkRestored)) { _ in
             Task {
-                await AuthManager.shared.syncNowAsync(forcePull: true)
+                await AuthManager.shared.syncNowAsync(forcePull: false)
             }
         }
     }

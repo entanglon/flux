@@ -2,6 +2,8 @@ import Testing
 import Foundation
 @testable import flux
 
+@Suite(.serialized)
+@MainActor
 struct UserDataServiceTests {
 
     @MainActor struct TestStateGuard {

@@ -8,7 +8,9 @@ struct PlayerView: View {
     // one matches this title (already buffering → instant start), else fresh.
     @ObservedObject private var mpv: MPVController
     @ObservedObject private var playerManager = PlayerManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var showExitWarning = false
+    @State private var exitWarningTask: Task<Void, Never>? = nil
     @State private var isControlsVisible = true
     @State private var animatedProgress: Double = 0.0
     @AppStorage("autoPlayNextEnabled") private var autoPlayNextEnabled = true
@@ -184,6 +186,9 @@ struct PlayerView: View {
             bufferingGraceTask = nil
             upNextTimerTask?.cancel()
             upNextTimerTask = nil
+            exitWarningTask?.cancel()
+            exitWarningTask = nil
+            showExitWarning = false
         }
         .task(id: activeItem?.id) {
             fetchedLogo = nil
@@ -287,7 +292,6 @@ struct PlayerView: View {
         }
         .onAppear {
             SleepAssertionManager.shared.playerDidOpen()
-            ImageInMemoryCache.purgeMemoryCache()
             mpv.resetVolumeBoostIfNeeded()
             mpv.onPlaybackError = {
                 print("[PlayerView] MPV playback error detected. Triggering auto-fallback to next stream...")
@@ -308,6 +312,9 @@ struct PlayerView: View {
             }
         }
         .onDisappear {
+            exitWarningTask?.cancel()
+            exitWarningTask = nil
+            showExitWarning = false
             cancelUpNextCountdown()
             contextMenuMonitor?.stop()
             contextMenuMonitor = nil
@@ -321,7 +328,6 @@ struct PlayerView: View {
             mpv.pause()
             mpv.stop()
             playerManager.close()
-            NotificationCenter.default.post(name: .fluxRefresh, object: nil)
         }
         .onReceive(loadingTimer) { _ in
             // Hot-swap telemetry: mpv's native cache-speed (KB/s) + position
@@ -390,6 +396,11 @@ struct PlayerView: View {
         .onChange(of: mpv.volume) { _, _ in
             if !isControlsVisible {
                 triggerVolumeHUD()
+            }
+        }
+        .onChange(of: playerManager.externalSubtitles) { _, newSubs in
+            if !newSubs.isEmpty {
+                mpv.autoSelectPreferredSubtitles(from: newSubs)
             }
         }
         .overlay {
@@ -798,6 +809,7 @@ struct PlayerView: View {
                 .cornerRadius(12)
                 .transition(.opacity)
                 .zIndex(200)
+                .allowsHitTesting(false)
         }
     }
 
@@ -1511,10 +1523,32 @@ struct PlayerView: View {
             }
             return
         }
-        closePlayer()
+        if showExitWarning {
+            exitWarningTask?.cancel()
+            exitWarningTask = nil
+            showExitWarning = false
+            closePlayer()
+        } else {
+            exitWarningTask?.cancel()
+            withAnimation(.easeOut(duration: 0.2)) {
+                showExitWarning = true
+            }
+            exitWarningTask = Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showExitWarning = false
+                    }
+                }
+            }
+        }
     }
 
     private func closePlayer() {
+        exitWarningTask?.cancel()
+        exitWarningTask = nil
+        showExitWarning = false
         if mpv.duration > 0 && mpv.timePos > 0 {
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
         }
@@ -1522,9 +1556,13 @@ struct PlayerView: View {
         keyMonitor = nil
         contextMenuMonitor?.stop()
         contextMenuMonitor = nil
+        if let window = hostWindow, window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+        }
         mpv.stop()
         playerManager.close()
         hostWindow?.identifier = nil
+        hostWindow?.close()
         dismiss()
     }
 
@@ -1695,7 +1733,7 @@ struct PlayerView: View {
             if !extSubs.isEmpty {
                 subMenu.addItem(NSMenuItem.separator())
                 for sub in extSubs {
-                    let label = sub.source != nil ? "\(sub.language) (\(sub.source!))" : sub.language
+                    let label = sub.source != nil ? "\(sub.displayName) (\(sub.source!))" : sub.displayName
                     subMenu.addItem(ClosureMenuItem(
                         title: label
                     ) { [weak mpv] in
@@ -1890,7 +1928,8 @@ struct PlayerView: View {
                                     .mask(
                                         GeometryReader { geo in
                                             Rectangle()
-                                                .frame(width: max(0, geo.size.width * progress))
+                                                .frame(width: max(0, geo.size.width * progress), alignment: .leading)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
                                                 .animation(.linear(duration: 0.25), value: progress)
                                         }
                                     )
@@ -1933,6 +1972,7 @@ struct PlayerView: View {
                     GeometryReader { geo in
                         Rectangle()
                             .frame(width: max(0, geo.size.width * progress), alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .animation(.linear(duration: 0.25), value: progress)
                     }
                 )
@@ -1954,7 +1994,9 @@ struct PlayerView: View {
             // the refill began. mpv's own cache-buffering-state (0-100%)
             // ticks the refill honestly; cacheTime/5 covers the pre-fill gap.
             let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
-            let realProgress = CGFloat(min(0.99, max(mpv.bufferProgress, bufferAhead / 5.0)))
+            let isTorrent = playerManager.currentSelectedStream?.isTorrent == true
+            let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
+            let realProgress = CGFloat(min(0.99, max(mpv.bufferProgress, bufferAhead / 5.0, engineProgress)))
 
             if let media = activeItem {
                 loadingLogo(for: media, progress: realProgress)
@@ -1994,6 +2036,9 @@ struct PlayerView: View {
             }
         }
         .onReceive(loadingTimer) { _ in
+            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+            playerManager.reportTelemetryProgress(cacheTime: bufferAhead)
+
             if mpv.isPlaying && mpv.timePos >= 0.05 {
                 // Frozen-frame watchdog (see state decl): stuck picture with
                 // healthy cache never trips isBuffering, so detect it here and
@@ -2053,12 +2098,12 @@ struct PlayerView: View {
                 return
             }
 
-            // Genuine demuxer buffer telemetry from mpv (no artificial base jumps)
-            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
-            playerManager.reportTelemetryProgress(cacheTime: bufferAhead)
-
+            // Genuine demuxer buffer telemetry from mpv combined with P2P engine streamProgress
+            let isTorrent = playerManager.currentSelectedStream?.isTorrent == true
+            let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
             let mpvBuf = max(mpv.bufferProgress, min(1.0, bufferAhead / 5.0))
-            let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, mpvBuf)
+            let combinedProgress = max(mpvBuf, engineProgress)
+            let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, combinedProgress)
             self.animatedProgress = max(self.animatedProgress, targetProgress)
         }
     }
@@ -2191,7 +2236,7 @@ struct PlayerView: View {
             return false
         })
         let mediaInfo = mpv.getMediaInfo()
-        let isTorrent = stream?.isTorrent == true || playerManager.activeTorrentHash != nil || playerManager.currentMagnetURL != nil || playerManager.currentStreamURL?.absoluteString.contains("127.0.0.1:11470") == true
+        let isTorrent = stream?.isTorrent ?? (playerManager.activeTorrentHash != nil || playerManager.currentMagnetURL != nil || playerManager.currentStreamURL?.absoluteString.contains("127.0.0.1:11470") == true)
         let rawSourceName = stream?.source ?? playerManager.currentItem?.lastStreamSource ?? UserDefaults.standard.string(forKey: UserDefaults.Key.lastUsedSource) ?? (isTorrent ? "Stremio Engine".localized : "Direct Stream".localized)
         let sourceName = StreamManager.cleanProviderName(rawSourceName)
         let rawIndexer = stream?.indexer ?? StreamManager.parseIndexer(name: stream?.source ?? "", title: stream?.title ?? "")

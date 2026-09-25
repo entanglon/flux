@@ -5,8 +5,13 @@ import Foundation
 @Suite(.serialized)
 struct StreamRouteProxyTests {
 
-    @Test func strictSafetyExclusionsBypassTorrentsAndMetadata() {
+    @Test @MainActor func strictSafetyExclusionsBypassTorrentsAndMetadata() {
         let manager = StreamRouteProxyManager.shared
+        defer {
+            manager.endpointURL = ""
+            manager.isEnabled = false
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        }
         manager.isEnabled = true
         manager.endpointURL = "http://100.64.0.1:8888"
         manager.targetHosts = ["2peckle", "peckle", "febbox"]
@@ -42,8 +47,13 @@ struct StreamRouteProxyTests {
         #expect(!manager.shouldProxy(stream: torrentStream))
     }
 
-    @Test func targetHostMatchingAndScoping() {
+    @Test @MainActor func targetHostMatchingAndScoping() {
         let manager = StreamRouteProxyManager.shared
+        defer {
+            manager.endpointURL = ""
+            manager.isEnabled = false
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        }
         manager.endpointURL = "http://100.64.0.1:8888"
         manager.targetHosts = ["2peckle", "peckle", "febbox"]
 
@@ -75,8 +85,13 @@ struct StreamRouteProxyTests {
         #expect(manager.shouldProxy(stream: directStream))
     }
 
-    @Test func endpointComponentsAndProxyDictionary() {
+    @Test @MainActor func endpointComponentsAndProxyDictionary() {
         let manager = StreamRouteProxyManager.shared
+        defer {
+            manager.endpointURL = ""
+            manager.isEnabled = false
+            UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        }
         manager.endpointURL = "http://100.64.0.1:8888"
         manager.targetHosts = ["2peckle", "peckle", "febbox"]
 
@@ -97,9 +112,10 @@ struct StreamRouteProxyTests {
         #expect(manager.mpvHttpProxy(for: nonMatchingURL) == nil)
     }
 
-    @Test func defaultStateHasNoEndpointAndDoesNotProxy() {
+    @Test @MainActor func defaultStateHasNoEndpointAndDoesNotProxy() {
         let manager = StreamRouteProxyManager.shared
         manager.endpointURL = ""
+        UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
         manager.isEnabled = true
         #expect(StreamRouteProxyManager.defaultEndpoint.isEmpty)
         #expect(manager.endpointComponents() == nil)
@@ -130,12 +146,30 @@ struct StreamRouteProxyTests {
         if profileManager.currentProfile == nil {
             profileManager.ensureDefaultProfile(name: "TestUser")
         }
+        guard let current = profileManager.currentProfile else { return }
+        let originalProfileSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        let originalGlobalEndpoint = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        let originalGlobalEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        defer {
+            if let snap = originalProfileSettings {
+                UserDefaults.standard.set(snap, forKey: "profile.\(current.id.uuidString).settings")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "profile.\(current.id.uuidString).settings")
+            }
+            if let ep = originalGlobalEndpoint {
+                UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            } else {
+                UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            }
+            UserDefaults.standard.set(originalGlobalEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+            proxyManager.endpointURL = originalGlobalEndpoint ?? ""
+            proxyManager.isEnabled = originalGlobalEnabled
+        }
+
         proxyManager.isEnabled = true
         #expect(UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled) == true)
-        if let current = profileManager.currentProfile {
-            let snap = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
-            #expect(snap?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == true)
-        }
+        let snap = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        #expect(snap?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == true)
 
         let staleAddonsPayload: [[String: Any]] = [
             [
@@ -152,5 +186,145 @@ struct StreamRouteProxyTests {
 
         proxyManager.isEnabled = false
         #expect(proxyManager.isEnabled == false)
+    }
+
+    @Test func streamProxyManagerRelativeSegmentResolution() {
+        let proxy = StreamProxyManager.shared
+        let originalURL = URL(string: "https://example.com/hls/series/master.m3u8")!
+        let proxyURL = proxy.proxyURL(for: originalURL, headers: ["User-Agent": "TestUA"], title: "Test Video")
+        #expect(proxyURL != nil)
+        #expect(proxyURL?.path == "/hls/series/master.m3u8")
+        #expect(proxyURL?.query?.contains("url=") == true)
+
+        let cleaned = PlayerManager.shared.cleanPlayableURLString(from: proxyURL?.absoluteString ?? "")
+        #expect(cleaned == originalURL.absoluteString)
+    }
+
+    @Test @MainActor func cloudSyncRespectsLocallyDisabledProxyWhenTimestampsAreFresh() {
+        let profileManager = ProfileManager.shared
+        let proxyManager = StreamRouteProxyManager.shared
+        if profileManager.currentProfile == nil {
+            profileManager.ensureDefaultProfile(name: "TestUser")
+        }
+        guard let current = profileManager.currentProfile else { return }
+
+        let originalProfileSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        let originalGlobalEndpoint = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        let originalGlobalEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        defer {
+            if let snap = originalProfileSettings {
+                UserDefaults.standard.set(snap, forKey: "profile.\(current.id.uuidString).settings")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "profile.\(current.id.uuidString).settings")
+            }
+            if let ep = originalGlobalEndpoint {
+                UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            } else {
+                UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            }
+            UserDefaults.standard.set(originalGlobalEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+            proxyManager.endpointURL = originalGlobalEndpoint ?? ""
+            proxyManager.isEnabled = originalGlobalEnabled
+        }
+
+        // Local user disables proxy and saves with fresh timestamp
+        UserDefaults.standard.set(false, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        UserDefaults.standard.set("http://100.64.0.1:8888", forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        profileManager.snapshotSettings(for: current.id)
+
+        let localSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        let localTimestamp = localSettings?["settingsUpdatedAt"] as? Double ?? 0
+        #expect(localTimestamp > 0)
+        #expect(localSettings?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == false)
+
+        // Incoming older remote payload with streamRouteProxyEnabled = true should NOT overwrite local settings
+        let stalePayload: [String: Any] = [
+            "settings": [
+                UserDefaults.Key.streamRouteProxyEnabled: true,
+                UserDefaults.Key.streamRouteProxyEndpoint: "http://100.64.0.1:8888",
+                "settingsUpdatedAt": localTimestamp - 100.0
+            ],
+            "profiles": [
+                [
+                    "id": current.id.uuidString,
+                    "name": current.name,
+                    "settings": [
+                        UserDefaults.Key.streamRouteProxyEnabled: true,
+                        UserDefaults.Key.streamRouteProxyEndpoint: "http://100.64.0.1:8888",
+                        "settingsUpdatedAt": localTimestamp - 100.0
+                    ]
+                ]
+            ]
+        ]
+
+        let needsPush = UserDataService.shared.applyCloudPayload(stalePayload)
+        // Stale remote should NOT override local false setting
+        let afterSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        #expect(afterSettings?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == false)
+        #expect(needsPush == true) // Local has additions or fresher changes to push back to cloud
+    }
+
+    @Test @MainActor func cloudSyncRespectsLocallyEnabledProxyWhenRemoteIsStaleOrDisabled() {
+        let profileManager = ProfileManager.shared
+        let proxyManager = StreamRouteProxyManager.shared
+        if profileManager.currentProfile == nil {
+            profileManager.ensureDefaultProfile(name: "TestUser")
+        }
+        guard let current = profileManager.currentProfile else { return }
+
+        let originalProfileSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        let originalGlobalEndpoint = UserDefaults.standard.string(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        let originalGlobalEnabled = UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        defer {
+            if let snap = originalProfileSettings {
+                UserDefaults.standard.set(snap, forKey: "profile.\(current.id.uuidString).settings")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "profile.\(current.id.uuidString).settings")
+            }
+            if let ep = originalGlobalEndpoint {
+                UserDefaults.standard.set(ep, forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            } else {
+                UserDefaults.standard.removeObject(forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+            }
+            UserDefaults.standard.set(originalGlobalEnabled, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+            proxyManager.endpointURL = originalGlobalEndpoint ?? ""
+            proxyManager.isEnabled = originalGlobalEnabled
+        }
+
+        // Local user enables proxy and configures endpoint
+        UserDefaults.standard.set(true, forKey: UserDefaults.Key.streamRouteProxyEnabled)
+        UserDefaults.standard.set("http://100.64.0.1:8888", forKey: UserDefaults.Key.streamRouteProxyEndpoint)
+        profileManager.snapshotSettings(for: current.id)
+
+        let localSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        let localTimestamp = localSettings?["settingsUpdatedAt"] as? Double ?? 0
+        #expect(localTimestamp > 0)
+        #expect(localSettings?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == true)
+
+        // Incoming older remote payload with streamRouteProxyEnabled = false should NOT disable local proxy
+        let staleDisabledPayload: [String: Any] = [
+            "settings": [
+                UserDefaults.Key.streamRouteProxyEnabled: false,
+                UserDefaults.Key.streamRouteProxyEndpoint: "http://100.64.0.1:8888",
+                "settingsUpdatedAt": localTimestamp - 100.0
+            ],
+            "profiles": [
+                [
+                    "id": current.id.uuidString,
+                    "name": current.name,
+                    "settings": [
+                        UserDefaults.Key.streamRouteProxyEnabled: false,
+                        UserDefaults.Key.streamRouteProxyEndpoint: "http://100.64.0.1:8888",
+                        "settingsUpdatedAt": localTimestamp - 100.0
+                    ]
+                ]
+            ]
+        ]
+
+        let needsPush = UserDataService.shared.applyCloudPayload(staleDisabledPayload)
+        let afterSettings = UserDefaults.standard.dictionary(forKey: "profile.\(current.id.uuidString).settings")
+        #expect(afterSettings?[UserDefaults.Key.streamRouteProxyEnabled] as? Bool == true)
+        #expect(UserDefaults.standard.bool(forKey: UserDefaults.Key.streamRouteProxyEnabled) == true)
+        #expect(needsPush == true)
     }
 }

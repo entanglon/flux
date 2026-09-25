@@ -138,6 +138,7 @@ class AddonManager: ObservableObject {
                 if id == "stock.stream-route-proxy" && proxyEnabled != StreamRouteProxyManager.shared.isEnabled {
                     StreamRouteProxyManager.shared.isEnabled = proxyEnabled
                 }
+                let resources = (dict["resources"] as? [String]) ?? ((id == "opensubtitles3" || url.contains("opensubtitles")) ? ["subtitles"] : nil)
                 let newAddon = StremioAddon(
                     id: id,
                     name: name,
@@ -149,7 +150,8 @@ class AddonManager: ObservableObject {
                     transportUrl: url,
                     isEnabled: proxyEnabled,
                     isStock: isStock,
-                    category: category
+                    category: category,
+                    resources: resources
                 )
                 map[id] = newAddon
             }
@@ -201,6 +203,7 @@ class AddonManager: ObservableObject {
             addons[existingIdx].url = openSubtitlesHost
             addons[existingIdx].transportUrl = openSubtitlesHost
             addons[existingIdx].logoURL = "https://www.strem.io/images/addons/opensubtitles-logo.png"
+            addons[existingIdx].resources = ["subtitles"]
         } else {
             let openSubs = StremioAddon(
                 id: openSubtitlesID,
@@ -390,7 +393,7 @@ class AddonManager: ObservableObject {
                 ProfileManager.shared.saveCurrentProfileSettings()
             }
             saveAddons()
-            AuthManager.shared.syncNow(forcePull: false)
+            AuthManager.shared.scheduleAutoSync(delay: 0.1)
         }
     }
     

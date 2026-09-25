@@ -226,8 +226,7 @@ struct StreamRouteProxyConfigSheet: View {
         }
 
         ProfileManager.shared.saveCurrentProfileSettings()
-        AuthManager.shared.scheduleAutoSync()
-        AuthManager.shared.syncNow(forcePull: false)
+        AuthManager.shared.scheduleAutoSync(delay: 0.1)
     }
 
     private func runConnectionTest() {

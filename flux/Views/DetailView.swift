@@ -935,6 +935,9 @@ struct DetailView: View {
         .task {
             await checkKidsRestriction()
             if !isRestrictedItem {
+                // Yield briefly to let navigation transition complete smoothly before kicking off prefetch
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
                 prefetchPlaybackSources()
                 await loadDetails()
                 prefetchPlaybackSources()
@@ -1755,38 +1758,7 @@ struct LiquidEpisodeCard: View {
                     Spacer()
                     
                     Menu {
-                        if !episode.isUpcoming {
-                            Button {
-                                if let item = item {
-                                    PlayerManager.shared.play(
-                                        item,
-                                        season: episode.seasonNumber,
-                                        episode: episode.episodeNumber,
-                                        episodeImage: episode.stillURL,
-                                        fromContinueWatching: false,
-                                        forceStreamPicker: true,
-                                        startFromBeginning: false
-                                    )
-                                    openWindow(id: "player", value: item.id)
-                                }
-                            } label: {
-                                Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
-                            }
-                        }
-
-                        Button {
-                            if let item = item {
-                                userData.toggleWatched(
-                                    item,
-                                    season: episode.seasonNumber,
-                                    episode: episode.episodeNumber,
-                                    episodeTitle: episode.name,
-                                    episodeImage: episode.stillURL
-                                )
-                            }
-                        } label: {
-                            Label("Mark as Watched".localized, systemImage: "checkmark.circle")
-                        }
+                        episodeMenuActions
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 13, weight: .bold))
@@ -1827,6 +1799,98 @@ struct LiquidEpisodeCard: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
+        }
+        .contextMenu {
+            episodeMenuActions
+        }
+    }
+
+    private var isWatched: Bool {
+        progress >= 0.90
+    }
+
+    private var hasProgress: Bool {
+        progress > 0.01 && progress < 0.90
+    }
+
+    private func playEpisode(fromContinueWatching: Bool, forceStreamPicker: Bool, startFromBeginning: Bool) {
+        guard !episode.isUpcoming, let item = item else { return }
+        let isFlux = UserDefaults.standard.object(forKey: UserDefaults.Key.enableFluxMode) as? Bool ?? true
+        PlayerManager.shared.play(
+            item,
+            season: episode.seasonNumber,
+            episode: episode.episodeNumber,
+            episodeImage: episode.stillURL,
+            fromContinueWatching: fromContinueWatching,
+            forceStreamPicker: forceStreamPicker || !isFlux,
+            startFromBeginning: startFromBeginning
+        )
+        openWindow(id: "player", value: item.id)
+    }
+
+    @ViewBuilder
+    private var episodeMenuActions: some View {
+        if !episode.isUpcoming {
+            Button {
+                playEpisode(fromContinueWatching: hasProgress, forceStreamPicker: false, startFromBeginning: false)
+            } label: {
+                Label((hasProgress ? "Resume" : "Play").localized, systemImage: "play.fill")
+            }
+
+            if progress > 0.05 {
+                Button {
+                    playEpisode(fromContinueWatching: false, forceStreamPicker: false, startFromBeginning: true)
+                } label: {
+                    Label("Play from Beginning".localized, systemImage: "arrow.counterclockwise")
+                }
+            }
+
+            Button {
+                playEpisode(fromContinueWatching: false, forceStreamPicker: true, startFromBeginning: false)
+            } label: {
+                Label("Choose Stream Source…".localized, systemImage: "list.bullet.rectangle")
+            }
+
+            Divider()
+        }
+
+        Button {
+            if let item = item {
+                let epDuration = Double((episode.runtime ?? 45) * 60)
+                if isWatched {
+                    userData.saveEpisodeProgress(
+                        for: item.id,
+                        season: episode.seasonNumber,
+                        episode: episode.episodeNumber,
+                        position: 0,
+                        duration: epDuration,
+                        isRestart: true
+                    )
+                    if let hist = userData.getHistoryItem(for: item),
+                       hist.lastSeason == episode.seasonNumber,
+                       hist.lastEpisode == episode.episodeNumber {
+                        userData.removeFromHistory(item)
+                    }
+                } else {
+                    userData.toggleWatched(
+                        item,
+                        season: episode.seasonNumber,
+                        episode: episode.episodeNumber,
+                        episodeTitle: episode.name,
+                        episodeImage: episode.stillURL
+                    )
+                    userData.saveEpisodeProgress(
+                        for: item.id,
+                        season: episode.seasonNumber,
+                        episode: episode.episodeNumber,
+                        position: epDuration,
+                        duration: epDuration
+                    )
+                }
+            }
+        } label: {
+            Label((isWatched ? "Mark as Unwatched" : "Mark as Watched").localized,
+                  systemImage: isWatched ? "arrow.counterclockwise" : "checkmark.circle")
         }
     }
 
