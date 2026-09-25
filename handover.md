@@ -110,6 +110,11 @@ The app has recently undergone major enhancements:
     - **Hardware Decoding Restoration**: Changed `hwdec` from `"auto"` to `"auto-safe"` in `MPVVideoView.swift`. With OpenGL `CAOpenGLLayer`, `auto` attempted zero-copy mapping (`videotoolbox`), which libmpv rejects on 10-bit HEVC (`Main 10`) surfaces and silently fell back to CPU software decoding. `auto-safe` uses copy-back (`videotoolbox-copy`), restoring native Apple Silicon hardware acceleration (`VideoToolbox (Hardware)`).
     - **Stream Link vs. Magnet Link Separation**: Fixed `PlayerControlsView` and `PlayerView` (context menu & About Stream Source modal) which previously prioritized `currentMagnetURL` over `currentStreamURL`. "Copy Stream Link" now copies the playable stream URL (`http://127.0.0.1:11470/...` or CDN link), proving local streaming server activity. Added a dedicated "Copy Magnet Link" action button and context menu item when a torrent magnet exists, fully localized in all 10 languages with zero duplicate keys.
     - **Mid-Playback Buffering UI & Interactive Controls**: Removed `if !sustainedBuffering` gating from `controlsLayer` so player controls remain mounted and accessible during stalls. Restored `midPlaybackLogoBufferingView` matching commit `7f458ce`: video frame pauses under a 35% dark vignette, displaying a floating liquid glass badge with the logo and a sleek horizontal capsule progress bar (`width: 140, height: 4`) reflecting live buffer fill for both direct HTTP and P2P torrent streams.
+27. **Stream Link Interception Fix, Mid-Playback Stall Detection & macOS libmpv OpenGL Pipeline**:
+    - **Stream Link vs Magnet Separation**: Fixed `cleanPlayableURLString(from:)` in `PlayerManager.swift` which intercepted valid `http://127.0.0.1:11470/...` streaming URLs and converted them back to magnets. "Copy Stream Link" now strictly copies the playable HTTP stream link.
+    - **Mid-Playback Buffering Logo Restoration**: Resolved `isUserPaused` false-positive in `MPVVideoView.swift:case "pause"`. When buffer starved, mpv's internal pause was erroneously treated as a user pause, suppressing the mid-playback buffering overlay.
+    - **Stall Watchdog**: Added an 18-second watchdog (`midPlaybackStallWatchdogTask`) in `PlayerView.swift` to automatically advance to standby fallbacks on dead swarms.
+    - **Architectural Documentation**: Documented why `CAOpenGLLayer` with `MPV_RENDER_API_TYPE_OPENGL` is the only supported embedded host API in `libmpv` on macOS, while hardware video decoding runs independently via Apple VideoToolbox (`videotoolbox-copy`).
 
 ---
 
@@ -398,6 +403,30 @@ The app has recently undergone major enhancements:
   3. In `PlayerView.swift`, updated `isMidPlaybackBuffering` to include `!mpv.isPlaying` alongside `isBuffering`, `isSeeking`, and `frameFrozen`. Updated `updateFrozenWatchdog` and `handleIsPlayingChange` to preserve watchdog state during involuntary stalls.
   4. Added `midPlaybackStallWatchdogTask` in `PlayerView.swift:onChange(of: isMidPlaybackBuffering)`. If mid-playback buffering persists continuously for 18 seconds without data resuming, Flux automatically advances to the next standby fallback in auto-play mode, or displays an actionable error banner prompting the user to reconnect or select another source.
   5. All 234 unit tests pass cleanly.
+
+---
+
+## 3. Pending Tasks & Agenda for Tomorrow's Session
+
+### A. P2P Streaming Engine Deep Dive & Swarm Health Tuning
+1. **Peer Discovery & DHT Latency in `FluxEngine`**:
+   - Investigate why certain BitTorrent swarms report `peers: 0` or take 30+ seconds to connect to peers in `FluxEngine`.
+   - Inspect tracker announce lists, DHT bootstrapping, and port listening options passed to the embedded engine.
+   - Compare with Stremio's reference engine configuration (`stremio-server`) to ensure FluxEngine receives optimal swarm bootstrap parameters.
+2. **Pre-Stream Seeder Threshold Hardening**:
+   - In `StreamManager.swift` and `GeminiStreamRanker.swift`, ensure torrents with low/dead seed counts (< 10-15 seeders) are deprioritized or filtered out when fast, healthy Direct HTTP streams exist.
+   - Verify that Gemini does not select high-resolution 4K torrents with 0-2 active peers over responsive 1080p Direct streams.
+3. **Mid-Playback Stall Recovery Validation**:
+   - Test the newly added 18-second stall watchdog (`midPlaybackStallWatchdogTask`) across live P2P streams to verify seamless fallback transitions when swarms stall mid-playback.
+   - Validate that the mid-playback buffering logo correctly reflects live download telemetry and dismisses instantly upon playback resumption.
+
+### B. Direct HTTP Playback, Proxy & Language Filter Testing
+1. **Full Proxy Routing Validation**:
+   - Verify that "Proxy All Direct Streams" routes all non-P2P video playback through the designated forward proxy without regressions.
+   - Verify that BitTorrent engine traffic (`127.0.0.1:11470`), local stream proxy (`127.0.0.1:51547`), TMDB metadata, and PocketBase sync strictly bypass the forward proxy.
+2. **Language Filter Evaluation**:
+   - Test multi-language audio preference rankings and language filtering across diverse international catalogs.
+   - Verify subtitle synchronization and OpenSubtitles v3 track auto-selection for foreign language streams.
 
 ---
 
