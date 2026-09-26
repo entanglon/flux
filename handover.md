@@ -142,8 +142,10 @@ The app has recently undergone major enhancements:
     - **Player Enter & Exit Lag Elimination**:
       - Added `@State private var isClosingPlayer = false` guard across `closePlayer()` and `.onDisappear` to eliminate duplicate teardowns, double watch progress updates, duplicate async tasks, and disk eviction storms.
       - Resolved macOS AppKit fullscreen transition collision: when closing in full-screen, `closePlayer()` calls `window.toggleFullScreen(nil)` and defers `window.close()` / `dismiss()` by 0.45s so the space transition completes smoothly without freezing the main thread, while immediately cutting audio and stopping mpv.
-    - **Settings View & Localization Compliance**:
-      - Replaced the P2P engine picker with a static informational row referencing the Official Stremio Engine.
+    - **Settings View & PocketBase Synchronization (False UI Eliminated)**:
+      - Completely removed the redundant "P2P Streaming Engine" row/selector from `SettingsView.swift` under "Stream Sources". Because Flux exclusively runs the official Stremio engine, no selector or informational row is presented.
+      - Removed `p2pEngineType` key from `UserDefaults+Keys.swift` and scrubbed local defaults.
+      - Synchronized PocketBase record `llicplrw2m6y3ny` via REST PATCH, setting `streamingSourceMode: "both"`, updating `settingsUpdatedAt`, and ensuring zero stale engine fields exist in the cloud.
       - Verified 0 duplicate keys across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) in `LanguageManager.swift`.
       - All 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`).
 

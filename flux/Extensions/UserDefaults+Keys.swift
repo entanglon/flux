@@ -14,7 +14,6 @@ extension UserDefaults {
         static let streamingSourceMode = "streamingSourceMode"
         static let lastUsedSource = "lastUsedSource"
         static let activeTMDBID = "activeTMDBID"
-        static let p2pEngineType = "p2pEngineType"
 
         // MARK: - AI Stream Selection (Experimental)
         static let enableAIStreamSelection = "enableAIStreamSelection"

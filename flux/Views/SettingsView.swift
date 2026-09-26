@@ -550,19 +550,6 @@ struct StreamingSettingsView: View {
                 Text("Select whether Flux should load Direct streams, P2P streams, or both simultaneously.".localized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                if streamingSourceMode != "http" {
-                    HStack {
-                        Text(L10n.tr("P2P Streaming Engine"))
-                        Spacer()
-                        Text("Official Stremio Engine (Node.js)".localized)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text("Selects the underlying P2P BitTorrent streaming core.".localized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             
             Section(header: Text(L10n.tr("Direct Stream Route Proxy")), footer: Text("Routes throttled Direct scraper streams (e.g. 2peckle) through a private forward proxy over Tailscale/LAN while strictly bypassing P2P and metadata.".localized)) {
