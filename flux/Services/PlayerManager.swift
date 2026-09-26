@@ -1565,13 +1565,25 @@ class PlayerManager: ObservableObject {
                     model: model,
                     preferredQuality: preferredQuality,
                     preferredLanguages: preferredLanguages,
-                    enableLanguageFilter: enableLanguageFilter
+                    enableLanguageFilter: enableLanguageFilter,
+                    sourceMode: sourceMode
                 )
                 if let first = aiRanked.first {
-                    primary = first
-                    fallbacks = Array(aiRanked.dropFirst())
+                    let maxAllowed = StreamManager.shared.qualityScore(preferredQuality)
+                    if StreamManager.shared.qualityScore(first.quality) > maxAllowed && maxAllowed >= 3 {
+                        if let compliantWinner = aiRanked.first(where: { StreamManager.shared.qualityScore($0.quality) <= maxAllowed }) {
+                            primary = compliantWinner
+                            fallbacks = aiRanked.filter { $0.stableKey != compliantWinner.stableKey }
+                        } else {
+                            primary = first
+                            fallbacks = Array(aiRanked.dropFirst())
+                        }
+                    } else {
+                        primary = first
+                        fallbacks = Array(aiRanked.dropFirst())
+                    }
                     wasRankedByAI = true
-                    Logger.stream.error("[PlayerManager] 🤖 AI Stream Selection (\(model, privacy: .public)) successfully prioritized \(aiRanked.count) streams. Top pick: \(first.cleanTitle, privacy: .public)")
+                    Logger.stream.error("[PlayerManager] 🤖 AI Stream Selection (\(model, privacy: .public)) successfully prioritized \(aiRanked.count) streams. Top pick: \(primary?.cleanTitle ?? "", privacy: .public) (\(primary?.quality ?? "", privacy: .public))")
                 }
             } catch {
                 Logger.stream.error("[PlayerManager] ⚠️ AI Stream Selection (\(model, privacy: .public)) error: \(error.localizedDescription, privacy: .public) — falling back to local heuristic algorithm.")
@@ -1600,11 +1612,23 @@ class PlayerManager: ObservableObject {
         let finalStandby: [Stream]
 
         if wasRankedByAI {
-            // When AI ranked the streams, AI intelligence already picked the optimal candidate
-            // based on user preferences, resolution, size, audio, and seeders.
-            // Directly commit to the AI's top pick and use remaining AI picks as standby fallbacks.
-            winnerCandidate = firstPass
-            finalStandby = fallbacks
+            let maxAllowed = StreamManager.shared.qualityScore(preferredQuality)
+            let chosenWinner: Stream
+            let chosenStandby: [Stream]
+            if StreamManager.shared.qualityScore(firstPass.quality) > maxAllowed && maxAllowed >= 3 {
+                if let compliant = fallbacks.first(where: { StreamManager.shared.qualityScore($0.quality) <= maxAllowed }) {
+                    chosenWinner = compliant
+                    chosenStandby = [firstPass] + fallbacks.filter { $0.stableKey != compliant.stableKey }
+                } else {
+                    chosenWinner = firstPass
+                    chosenStandby = fallbacks
+                }
+            } else {
+                chosenWinner = firstPass
+                chosenStandby = fallbacks
+            }
+            winnerCandidate = chosenWinner
+            finalStandby = chosenStandby
             await MainActor.run {
                 self.standbyFallbacks = finalStandby
                 self.statusText = nil

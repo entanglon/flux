@@ -402,5 +402,21 @@ struct fluxTests {
         #expect(finalStandby.contains(where: { $0.isTorrent && $0.title == "Torrent 1" }))
         #expect(finalStandby.contains(where: { $0.isTorrent && $0.title == "Torrent 2" }))
     }
+
+    @Test func streamManagerResolutionCapExcludes4KWhen1080pSelected() {
+        let stream4k = Stream(title: "Movie 4K", cleanTitle: "Movie 4K", url: URL(string: "http://example.com/4k")!, source: "Src1", quality: "4K")
+        let stream1080 = Stream(title: "Movie 1080p", cleanTitle: "Movie 1080p", url: URL(string: "http://example.com/1080")!, source: "Src2", quality: "1080p")
+        let stream720 = Stream(title: "Movie 720p", cleanTitle: "Movie 720p", url: URL(string: "http://example.com/720")!, source: "Src3", quality: "720p")
+
+        let (primary, fallbacks) = StreamManager.shared.selectFastStartCandidate(
+            from: [stream4k, stream1080, stream720],
+            sourceMode: "both",
+            preferredQuality: "1080p",
+            preferredLang: "English"
+        )
+        #expect(primary?.quality == "1080p")
+        #expect(primary?.title == "Movie 1080p")
+        #expect(!fallbacks.contains(where: { $0.quality == "4K" }))
+    }
 }
 

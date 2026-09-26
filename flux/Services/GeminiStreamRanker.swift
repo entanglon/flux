@@ -25,20 +25,55 @@ final class GeminiStreamRanker: @unchecked Sendable {
         model: String = "gemini-3.5-flash-lite",
         preferredQuality: String? = nil,
         preferredLanguages: [String] = [],
-        enableLanguageFilter: Bool = false
+        enableLanguageFilter: Bool = false,
+        sourceMode: String = "both"
     ) async throws -> [Stream] {
         guard !streams.isEmpty else { return [] }
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else { return streams }
 
-        // Filter out obvious junk/CAM and severely dead torrents before sending to AI
-        let viableStreams = streams.filter { s in
+        // 1. Source Mode Pre-Filter
+        let modeFiltered: [Stream]
+        if sourceMode == "http" {
+            modeFiltered = streams.filter { !$0.isTorrent }
+        } else if sourceMode == "torrent" {
+            modeFiltered = streams.filter { $0.isTorrent }
+        } else {
+            modeFiltered = streams
+        }
+        let basePool = modeFiltered.isEmpty ? streams : modeFiltered
+
+        // 2. Strict Resolution Cap Pre-Filter (Eliminates 4K releases when 1080p is selected)
+        let maxAllowedQuality: Int?
+        if let pq = preferredQuality, !pq.isEmpty, pq != "Auto" {
+            maxAllowedQuality = StreamManager.shared.qualityScore(pq)
+        } else {
+            maxAllowedQuality = nil
+        }
+
+        let qualityFiltered: [Stream]
+        if let maxAllowed = maxAllowedQuality, maxAllowed >= 3 {
+            let capped = basePool.filter { StreamManager.shared.qualityScore($0.quality) <= maxAllowed }
+            qualityFiltered = capped.isEmpty ? basePool : capped
+        } else {
+            qualityFiltered = basePool
+        }
+
+        // 3. Health & Viability Pre-Filter:
+        // Filter out obvious junk/CAM, corrupt titles, Dolby Vision Profile 5, and severely dead torrents (< 5 seeders)
+        let viableStreams = qualityFiltered.filter { s in
             if s.isTorrent {
                 return (s.seeders ?? 0) >= 5
             }
+            if StreamManager.shared.isDolbyVisionProfile5(s) {
+                return false
+            }
+            if !title.isEmpty, StreamManager.labelLooksLikeJunk(labelText: s.fullScannableText, targetTitle: title) {
+                return false
+            }
             return true
         }
-        let streamPool = viableStreams.isEmpty ? streams : viableStreams
+        let streamPool = viableStreams.isEmpty ? qualityFiltered : viableStreams
         // Bounded to top 12 streams to ensure ultra-low token count and < 2.0s latency
         let candidates = Array(streamPool.prefix(12))
 
@@ -68,10 +103,15 @@ final class GeminiStreamRanker: @unchecked Sendable {
 
         var userPrefsConstraints: [String] = []
         if let pq = preferredQuality, !pq.isEmpty, pq != "Auto" {
-            userPrefsConstraints.append("- PREFERRED QUALITY: \(pq). Strictly prioritize \(pq) releases.")
+            userPrefsConstraints.append("- MAXIMUM RESOLUTION: \(pq). Candidates are pre-filtered to <= \(pq). Never choose or exceed 4K/2160p.")
+        }
+        if sourceMode == "torrent" {
+            userPrefsConstraints.append("- STREAMING SOURCE: P2P Torrent Streams Only.")
+        } else if sourceMode == "http" {
+            userPrefsConstraints.append("- STREAMING SOURCE: Direct HTTP Streams Only.")
         }
         if enableLanguageFilter && !preferredLanguages.isEmpty {
-            userPrefsConstraints.append("- PREFERRED LANGUAGES: [\(preferredLanguages.joined(separator: ", "))]. Prefer releases or audio matching these.")
+            userPrefsConstraints.append("- PREFERRED LANGUAGES: [\(preferredLanguages.joined(separator: ", "))]. Strongly prefer releases or audio matching these.")
         }
         userPrefsConstraints.append("- STREAMABILITY: Prefer 1.5GB-8GB for movies, 400MB-2.5GB for TV episodes. Avoid 20+ GB uncompressed files.")
         userPrefsConstraints.append("- SEEDERS: For torrents, NEVER select releases with < 15 seeders. Prefer healthy swarms (> 25 seeders). If healthy torrents unavailable, prioritize direct HTTP.")
@@ -139,7 +179,8 @@ final class GeminiStreamRanker: @unchecked Sendable {
                 apiKey: cleanKey,
                 postData: postData,
                 candidates: candidates,
-                allStreams: streams
+                allStreams: streams,
+                maxAllowedQuality: maxAllowedQuality
             )
         } catch {
             // Attempt ONE fast fallback model if the chosen model failed
@@ -161,7 +202,8 @@ final class GeminiStreamRanker: @unchecked Sendable {
                 apiKey: cleanKey,
                 postData: fallbackData,
                 candidates: candidates,
-                allStreams: streams
+                allStreams: streams,
+                maxAllowedQuality: maxAllowedQuality
             ) {
                 return result
             }
@@ -174,7 +216,8 @@ final class GeminiStreamRanker: @unchecked Sendable {
         apiKey: String,
         postData: Data,
         candidates: [Stream],
-        allStreams: [Stream]
+        allStreams: [Stream],
+        maxAllowedQuality: Int?
     ) async throws -> [Stream] {
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)") else {
             throw URLError(.badURL)
@@ -303,6 +346,11 @@ final class GeminiStreamRanker: @unchecked Sendable {
         for idx in topIndices {
             if idx >= 0 && idx < candidates.count {
                 let stream = candidates[idx]
+                // Hard Post-Filter: Discard any stream that somehow violates the quality ceiling
+                if let maxAllowed = maxAllowedQuality, maxAllowed >= 3,
+                   StreamManager.shared.qualityScore(stream.quality) > maxAllowed {
+                    continue
+                }
                 if !pickedKeySet.contains(stream.stableKey) {
                     pickedStreams.append(stream)
                     pickedKeySet.insert(stream.stableKey)
@@ -318,8 +366,15 @@ final class GeminiStreamRanker: @unchecked Sendable {
             )
         }
 
-        // Retain unpicked streams at the end
+        // Retain unpicked streams at the end (partitioning compliant resolutions ahead of higher ones)
         let remaining = allStreams.filter { !pickedKeySet.contains($0.stableKey) }
-        return pickedStreams + remaining
+        let (compliantRemaining, higherRemaining) = remaining.reduce(into: ([Stream](), [Stream]())) { acc, s in
+            if let maxAllowed = maxAllowedQuality, maxAllowed >= 3, StreamManager.shared.qualityScore(s.quality) > maxAllowed {
+                acc.1.append(s)
+            } else {
+                acc.0.append(s)
+            }
+        }
+        return pickedStreams + compliantRemaining + higherRemaining
     }
 }

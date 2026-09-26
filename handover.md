@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 25, 2026 (11:10 PM IST)  
-**Latest Git State**: Working tree verified, 234/234 Unit Tests Passing (100%)  
+**Updated**: September 26, 2026 (12:25 PM IST)  
+**Latest Git State**: Working tree verified, 235/235 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 
@@ -402,34 +402,24 @@ The app has recently undergone major enhancements:
   2. In `MPVVideoView.swift`, removed `self.isUserPaused = paused` from `case "pause"`. `isUserPaused` is now strictly mutated only when the user or app explicitly calls `pause()`, `play()`, `preparePaused()`, or `stop()`.
   3. In `PlayerView.swift`, updated `isMidPlaybackBuffering` to include `!mpv.isPlaying` alongside `isBuffering`, `isSeeking`, and `frameFrozen`. Updated `updateFrozenWatchdog` and `handleIsPlayingChange` to preserve watchdog state during involuntary stalls.
   4. Added `midPlaybackStallWatchdogTask` in `PlayerView.swift:onChange(of: isMidPlaybackBuffering)`. If mid-playback buffering persists continuously for 18 seconds without data resuming, Flux automatically advances to the next standby fallback in auto-play mode, or displays an actionable error banner prompting the user to reconnect or select another source.
-  5. All 234 unit tests pass cleanly.
+### Issue 15: Stream Selection Resolution Cap Enforcement & Gemini Candidate Pre-Filtering [RESOLVED]
+- **Symptom**: A 2160p (4K) stream was selected for *Ant-Man* despite `preferredQuality` being explicitly configured to `1080p` in Settings.
+- **Root Cause**:
+  1. `PlayerManager.swift:raceBestStream` previously passed the raw `healthy` streams array to `GeminiStreamRanker.shared.rankStreams` without pre-filtering by `sourceMode` or `preferredQuality`.
+  2. In `GeminiStreamRanker.swift`, `candidates = Array(streamPool.prefix(12))` took the first 12 streams from the catalog. Because Torrentio orders 4K releases at the very top, the top candidate slots were dominated by 2160p releases.
+  3. Although the prompt noted `PREFERRED QUALITY: 1080p`, the LLM saw `[0] Ant-Man 2160p 10-bit HDR BluRay 8CH` and judged it "highest quality", returning index `0`.
+  4. In `PlayerManager.swift:1606`, the "Zero-Override Commitment" committed directly to Gemini's winner (`winnerCandidate = firstPass`) without verifying `qualityScore(winnerCandidate.quality) <= maxAllowed`.
+- **Resolution**:
+  1. In `GeminiStreamRanker.swift`: Added `sourceMode` and strict resolution cap pre-filtering (`StreamManager.shared.qualityScore(s.quality) <= maxAllowedQuality`). Also pre-filters Dolby Vision Profile 5, dead torrents (< 5 seeders), and junk labels before constructing the 12-candidate pool. Added hard post-filter validation to `pickedStreams` and partitioned unpicked fallbacks so compliant resolutions come first.
+  2. In the prompt to Gemini: Explicitly specified `MAXIMUM RESOLUTION: \(pq)` and `STREAMING SOURCE: ...`. Smaller, pre-screened candidate pools also reduce prompt token size, speeding up inference and reducing API quota consumption.
+  3. In `PlayerManager.swift:raceBestStream`: Passed `sourceMode` to `rankStreams` and added quality cap validation to `firstPass` and `winnerCandidate`. If Gemini's top pick exceeds the resolution cap, Flux automatically promotes the highest-ranked compliant fallback.
+  4. Added unit test `streamManagerResolutionCapExcludes4KWhen1080pSelected` in `fluxTests.swift`. All 235 unit tests pass cleanly.
 
 ---
 
-## 3. Pending Tasks & Agenda for Tomorrow's Session
+## 3. Pending Tasks & Active Focus
 
-### A. Stream Selection Hard Pre-Filtering & Prompt Token Reduction
-1. **Hard Quality Pre-Filter Before Gemini Ranking**:
-   - In `PlayerManager.swift` and `GeminiStreamRanker.swift`, strictly pre-filter the stream candidate pool with `StreamManager.shared.qualityScore(s.quality) <= qualityScore(preferredQuality)` before constructing the candidate list for the model.
-   - Pre-filter by `sourceMode` (`http`, `torrent`, or `both`) before prompt construction.
-   - **Dual Advantage**:
-     1. **Zero Quality Inversion**: Guarantees that 2160p/4K releases are completely excluded when the user sets 1080p max resolution.
-     2. **Smaller Prompt & Lower Latency**: Stripping oversized and irrelevant 4K streams reduces prompt token size, speeds up Gemini response time, and conserves API quota.
-   - Pass remaining user preferences (preferred audio languages, streamability 1.5–8 GB bounds) in the prompt so Gemini chooses the best candidate among compliant streams.
-2. **Hard Post-Filter Validation in `PlayerManager`**:
-   - Guard `winnerCandidate` and `standbyFallbacks`: verify `qualityScore(stream.quality) <= maxAllowed` before playback commit, preventing any rogue index or fallback leak.
-3. **Eliminate Heuristic Quality Leaks in `StreamManager`**:
-   - Patch `selectFastStartCandidate` line 1453 so `qualityCandidates` never falls back to `modeFiltered` (which may contain 4K) when `preferredQuality` is set to 1080p.
-
-### B. IINA & Stremio Playback Mechanism Alignment
-1. **Hardware Acceleration & VideoToolbox Pipeline**:
-   - Align `MPVVideoView` property configuration with IINA's reference implementation:
-     - `hwdec = "auto-safe"` (VideoToolbox hardware decoding via native macOS media engine).
-     - `vo = "libmpv"` with `CAOpenGLLayer` / `CGLContextObj`.
-     - Evaluate `video-sync` options (`display-resample` vs `audio`) and display link synchronization to ensure smooth ProMotion (120Hz/60Hz) playback without jitter.
-   - Validate demuxer buffer sizing (`demuxer-max-bytes`, `demuxer-readahead-secs`) matching Stremio's 300MB buffer and 60-second readahead window.
-
-### C. P2P Streaming Engine Deep Dive & Swarm Health Tuning
+### A. P2P Streaming Engine Deep Dive & Swarm Health Tuning
 1. **Peer Discovery & DHT Latency in `FluxEngine`**:
    - Investigate why certain BitTorrent swarms report `peers: 0` or take long to connect to peers in `FluxEngine`.
    - Inspect tracker announce lists, DHT bootstrapping, and port listening options passed to the embedded Go engine.
@@ -440,7 +430,7 @@ The app has recently undergone major enhancements:
    - Test the newly added 18-second stall watchdog (`midPlaybackStallWatchdogTask`) across live P2P streams to verify seamless fallback transitions when swarms stall mid-playback.
    - Validate that the mid-playback buffering logo correctly reflects live download telemetry and dismisses instantly upon playback resumption.
 
-### D. Direct HTTP Playback, Proxy & Language Filter Testing
+### B. Direct HTTP Playback, Proxy & Language Filter Testing
 1. **Full Proxy Routing Validation**:
    - Verify that "Proxy All Direct Streams" routes all non-P2P video playback through the designated forward proxy without regressions.
    - Verify that BitTorrent engine traffic (`127.0.0.1:11470`), local stream proxy (`127.0.0.1:51547`), TMDB metadata, and PocketBase sync strictly bypass the forward proxy.
