@@ -244,14 +244,8 @@ struct fluxApp: App {
         
         // Player Window
         WindowGroup(id: "player", for: MediaItem.ID.self) { $itemId in
-            if let item = PlayerManager.shared.currentItem {
-                PlayerView(item: item)
-                    .environmentObject(playerManager)
-            } else {
-                Text("No Media Selected")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
-            }
+            PlayerWindowContainer(itemId: $itemId.wrappedValue)
+                .environmentObject(playerManager)
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
@@ -263,3 +257,32 @@ struct fluxApp: App {
         }
     }
 }
+
+private struct PlayerWindowContainer: View {
+    let itemId: MediaItem.ID?
+    @ObservedObject private var playerManager = PlayerManager.shared
+    @State private var retainedItem: MediaItem?
+
+    var body: some View {
+        Group {
+            if let item = retainedItem ?? playerManager.currentItem {
+                PlayerView(item: item)
+                    .environmentObject(playerManager)
+            } else {
+                Color.black
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            if retainedItem == nil {
+                retainedItem = playerManager.currentItem
+            }
+        }
+        .onChange(of: playerManager.currentItem) { _, newItem in
+            if let newItem = newItem {
+                retainedItem = newItem
+            }
+        }
+    }
+}
+

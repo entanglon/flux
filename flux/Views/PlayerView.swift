@@ -1657,23 +1657,31 @@ struct PlayerView: View {
         keyMonitor = nil
         contextMenuMonitor?.stop()
         contextMenuMonitor = nil
+
+        // Cleanly disarm keyboard focus before closing to prevent focus preference traversal crashes
+        hostWindow?.makeFirstResponder(nil)
+
         SleepAssertionManager.shared.playerDidClose()
         mpv.pause()
         mpv.stop()
-        playerManager.close()
 
-        if let window = hostWindow, window.styleMask.contains(.fullScreen) {
+        let windowToClose = hostWindow
+        windowToClose?.identifier = nil
+
+        if let window = windowToClose, window.styleMask.contains(.fullScreen) {
             window.toggleFullScreen(nil)
             // Allow AppKit space transition to complete smoothly before closing the window
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                window.identifier = nil
                 window.close()
-                self.dismiss()
+                self.playerManager.close()
             }
         } else {
-            hostWindow?.identifier = nil
-            hostWindow?.close()
-            dismiss()
+            if let window = windowToClose {
+                window.close()
+            } else {
+                dismiss()
+            }
+            playerManager.close()
         }
     }
 

@@ -2548,7 +2548,7 @@ class PlayerManager: ObservableObject {
     }
 
     func close() {
-        DispatchQueue.main.async {
+        let performClose = {
             SleepAssertionManager.shared.playerDidClose()
             self.cancelDetailPrefetch()
             self.fetchAndRaceTask?.cancel()
@@ -2587,6 +2587,12 @@ class PlayerManager: ObservableObject {
             AsyncTask {
                 await StremioServerManager.shared.evictCacheIfNeeded()
             }
+        }
+
+        if Thread.isMainThread {
+            performClose()
+        } else {
+            DispatchQueue.main.async(execute: performClose)
         }
     }
     

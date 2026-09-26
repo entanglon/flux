@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 26, 2026 (2:30 PM IST)  
+**Updated**: September 26, 2026 (2:50 PM IST)  
 **Latest Git State**: 240/240 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -148,6 +148,16 @@ The app has recently undergone major enhancements:
       - Synchronized PocketBase record `llicplrw2m6y3ny` via REST PATCH, setting `streamingSourceMode: "both"`, updating `settingsUpdatedAt`, and ensuring zero stale engine fields exist in the cloud.
       - Verified 0 duplicate keys across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) in `LanguageManager.swift`.
       - All 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`).
+30. **Player Exit Crash Resolution & Focus Responder Lifecycle Stabilization**:
+    - **Crash Diagnosis (`EXC_BAD_ACCESS (SIGSEGV)` / `swift_weakCopyInit`)**:
+      - Report `/Users/zainulnazir/Library/Logs/DiagnosticReports/flux-2026-09-26-143741.ips` revealed a segmentation fault on Thread 0 inside `swift_weakCopyInit` called by `initializeWithCopy for FocusStoreList.Item` during `NSHostingView.layout()` -> `ViewGraphRootValueUpdater.render` -> `GraphHost.updatePreferences()` -> `FocusStoreList.Key.reduce`.
+      - Root Cause: In `PlayerView.swift`, `closePlayer()` invoked `playerManager.close()`, which dispatched `self.currentItem = nil` on `DispatchQueue.main.async`. In `fluxApp.swift`, `WindowGroup(id: "player")` observed `currentItem = nil` and immediately replaced the entire `PlayerView` tree with `Text("No Media Selected")`. Simultaneously, `hostWindow?.close()` and `dismiss()` were called on adjacent lines, dismantling the AppKit window. When AppKit executed `layoutIfNeeded` during window teardown, SwiftUI's focus manager attempted to copy weak references to the focused view (`FocusStoreList.Item`), which was already half-deallocated, crashing with `KERN_INVALID_ADDRESS at 0x000001016c0c8990`.
+    - **Resolution & Stabilization**:
+      1. *`PlayerWindowContainer` in `fluxApp.swift`*: Introduced `PlayerWindowContainer` holding a `@State private var retainedItem: MediaItem?`. When `playerManager.close()` sets `currentItem = nil`, the container keeps `PlayerView` mounted and stable until the window is fully destroyed. Replaced raw hardcoded string literal `Text("No Media Selected")` with `Color.black` (Rule 1 compliance).
+      2. *Clean Focus Responder Disarming*: Added `hostWindow?.makeFirstResponder(nil)` at the top of `closePlayer()` in `PlayerView.swift` to disarm SwiftUI focus tracking cleanly before any window close or animation begins.
+      3. *Eliminated Double-Close Collision*: Removed simultaneous `hostWindow?.close()` + `dismiss()` invocation. In windowed mode, `window.close()` is called (or `dismiss()` if unwindowed). In fullscreen, toggles out of fullscreen first (`window.toggleFullScreen(nil)`), waits 0.45s for the AppKit Space transition to finish, closes the window cleanly, and calls `playerManager.close()` only *after* the window is gone.
+      4. *Synchronous Main-Thread `PlayerManager.close()`*: Removed unconditional `DispatchQueue.main.async` in `PlayerManager.close()`: if already on `Thread.isMainThread`, it cleans up synchronously, eliminating the deferred runloop race.
+      5. *Zero Regressions*: Verified all 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`), codesigned ad-hoc.
 
 ---
 
@@ -506,6 +516,13 @@ The app has recently undergone major enhancements:
 4. **Localization & Unit Tests**:
    - Added 7 new localized keys across all 10 supported languages (641 unique keys, 0 duplicates).
    - Added 5 unit tests in `fluxTests.swift` covering single-file/multi-file movie torrents, series season packs, sample filtering, and fallback behavior (240/240 tests passing).
+
+### Completed: Priority 3 — Player Exit Crash Resolution & Focus Responder Lifecycle Stabilization
+1. **Focus Responder Disarming**: Added `hostWindow?.makeFirstResponder(nil)` at the start of `closePlayer()` to disarm SwiftUI focus responders before window order-out and avoid `FocusStoreList` dangling weak pointer invalidations.
+2. **`PlayerWindowContainer` View Stability**: Wrapped `PlayerView` in `fluxApp.swift` in `PlayerWindowContainer` which retains `activeMediaItem`. Prevents `fluxApp` from violently destroying `PlayerView` and rendering `Text("No Media Selected")` while the window is closing or animating out of full-screen. Replaced hardcoded text with `Color.black` (Rule 1 compliance).
+3. **Eliminated Double-Close Collision**: Cleaned `closePlayer()` to close the AppKit window directly in windowed mode (or `dismiss()` if unwindowed), and in fullscreen mode, toggles out of fullscreen first before closing after 0.45s.
+4. **Synchronous `PlayerManager.close()` Execution**: Executed `PlayerManager.close()` synchronously when on main thread, preventing deferred runloop races against AppKit window layout passes.
+5. **Verified Stability**: 240/240 tests passing, codesigned ad-hoc.
 
 ---
 
