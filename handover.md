@@ -408,19 +408,39 @@ The app has recently undergone major enhancements:
 
 ## 3. Pending Tasks & Agenda for Tomorrow's Session
 
-### A. P2P Streaming Engine Deep Dive & Swarm Health Tuning
+### A. Stream Selection Hard Pre-Filtering & Prompt Token Reduction
+1. **Hard Quality Pre-Filter Before Gemini Ranking**:
+   - In `PlayerManager.swift` and `GeminiStreamRanker.swift`, strictly pre-filter the stream candidate pool with `StreamManager.shared.qualityScore(s.quality) <= qualityScore(preferredQuality)` before constructing the candidate list for the model.
+   - Pre-filter by `sourceMode` (`http`, `torrent`, or `both`) before prompt construction.
+   - **Dual Advantage**:
+     1. **Zero Quality Inversion**: Guarantees that 2160p/4K releases are completely excluded when the user sets 1080p max resolution.
+     2. **Smaller Prompt & Lower Latency**: Stripping oversized and irrelevant 4K streams reduces prompt token size, speeds up Gemini response time, and conserves API quota.
+   - Pass remaining user preferences (preferred audio languages, streamability 1.5–8 GB bounds) in the prompt so Gemini chooses the best candidate among compliant streams.
+2. **Hard Post-Filter Validation in `PlayerManager`**:
+   - Guard `winnerCandidate` and `standbyFallbacks`: verify `qualityScore(stream.quality) <= maxAllowed` before playback commit, preventing any rogue index or fallback leak.
+3. **Eliminate Heuristic Quality Leaks in `StreamManager`**:
+   - Patch `selectFastStartCandidate` line 1453 so `qualityCandidates` never falls back to `modeFiltered` (which may contain 4K) when `preferredQuality` is set to 1080p.
+
+### B. IINA & Stremio Playback Mechanism Alignment
+1. **Hardware Acceleration & VideoToolbox Pipeline**:
+   - Align `MPVVideoView` property configuration with IINA's reference implementation:
+     - `hwdec = "auto-safe"` (VideoToolbox hardware decoding via native macOS media engine).
+     - `vo = "libmpv"` with `CAOpenGLLayer` / `CGLContextObj`.
+     - Evaluate `video-sync` options (`display-resample` vs `audio`) and display link synchronization to ensure smooth ProMotion (120Hz/60Hz) playback without jitter.
+   - Validate demuxer buffer sizing (`demuxer-max-bytes`, `demuxer-readahead-secs`) matching Stremio's 300MB buffer and 60-second readahead window.
+
+### C. P2P Streaming Engine Deep Dive & Swarm Health Tuning
 1. **Peer Discovery & DHT Latency in `FluxEngine`**:
-   - Investigate why certain BitTorrent swarms report `peers: 0` or take 30+ seconds to connect to peers in `FluxEngine`.
-   - Inspect tracker announce lists, DHT bootstrapping, and port listening options passed to the embedded engine.
+   - Investigate why certain BitTorrent swarms report `peers: 0` or take long to connect to peers in `FluxEngine`.
+   - Inspect tracker announce lists, DHT bootstrapping, and port listening options passed to the embedded Go engine.
    - Compare with Stremio's reference engine configuration (`stremio-server`) to ensure FluxEngine receives optimal swarm bootstrap parameters.
 2. **Pre-Stream Seeder Threshold Hardening**:
    - In `StreamManager.swift` and `GeminiStreamRanker.swift`, ensure torrents with low/dead seed counts (< 10-15 seeders) are deprioritized or filtered out when fast, healthy Direct HTTP streams exist.
-   - Verify that Gemini does not select high-resolution 4K torrents with 0-2 active peers over responsive 1080p Direct streams.
 3. **Mid-Playback Stall Recovery Validation**:
    - Test the newly added 18-second stall watchdog (`midPlaybackStallWatchdogTask`) across live P2P streams to verify seamless fallback transitions when swarms stall mid-playback.
    - Validate that the mid-playback buffering logo correctly reflects live download telemetry and dismisses instantly upon playback resumption.
 
-### B. Direct HTTP Playback, Proxy & Language Filter Testing
+### D. Direct HTTP Playback, Proxy & Language Filter Testing
 1. **Full Proxy Routing Validation**:
    - Verify that "Proxy All Direct Streams" routes all non-P2P video playback through the designated forward proxy without regressions.
    - Verify that BitTorrent engine traffic (`127.0.0.1:11470`), local stream proxy (`127.0.0.1:51547`), TMDB metadata, and PocketBase sync strictly bypass the forward proxy.
