@@ -89,7 +89,14 @@ class StremioServerManager: ObservableObject {
               (resp as? HTTPURLResponse)?.statusCode == 200 else {
             return nil
         }
-        return try? JSONDecoder().decode(TorrentStats.self, from: data)
+        if let direct = try? JSONDecoder().decode(TorrentStats.self, from: data) {
+            return direct
+        }
+        if let dict = try? JSONDecoder().decode([String: TorrentStats].self, from: data),
+           let entry = dict[infoHash] ?? dict.values.first {
+            return entry
+        }
+        return nil
     }
 
     /// Client firewall + registration tracking hook (called by PlayerManager).
@@ -327,12 +334,9 @@ class StremioServerManager: ObservableObject {
         Task {
             killStaleEngines()
 
-            // Engine order: bundled FluxEngine sidecar → node+server.js.
-            // server.js is only needed for the legacy path; don't block startup
-            // on its download when the sidecar is present.
-            let hasSidecar = bundledFluxEnginePath() != nil
+            // Engine: Official Stremio server (Node.js + server.js)
             let haveServer = FileManager.default.fileExists(atPath: serverJSPath)
-            if !hasSidecar && !haveServer {
+            if !haveServer {
                 let ok = await downloadServerJS()
                 if !ok {
                     print("[StremioServer] No engine available — torrent streaming disabled")
@@ -431,29 +435,26 @@ class StremioServerManager: ObservableObject {
     }
 
     private enum EngineLaunch {
-        case fluxEngine(path: String, port: Int)
         case nodeJS(nodePath: String)
     }
 
-    /// Engine order: bundled Go sidecar → node+server.js (system or downloaded).
+    /// Exclusively resolves and runs the official Stremio Node.js server (`server.js`).
     private func resolveEngine() async -> EngineLaunch? {
-        if let sidecar = bundledFluxEnginePath() {
-            // Sidecar does NOT self-increment on port conflicts — we assign the
-            // port explicitly, walking 11470…maxPort.
-            let busy = await alivePorts()
-            let candidate = (11470...maxPort).first { !busy.contains($0) } ?? maxPort
-            return .fluxEngine(path: sidecar, port: candidate)
-        }
         let serverJSReady: Bool
         if FileManager.default.fileExists(atPath: serverJSPath) {
             serverJSReady = true
         } else {
             serverJSReady = await downloadServerJS()
         }
-        if serverJSReady, let nodePath = await resolveNodePath() {
-            return .nodeJS(nodePath: nodePath) // server.js self-increments on conflict
+        guard serverJSReady else {
+            print("[StremioServer] server.js is not present and download failed")
+            return nil
         }
-        return nil
+        guard let nodePath = await resolveNodePath() else {
+            print("[StremioServer] Node.js runtime not found or failed to provision")
+            return nil
+        }
+        return .nodeJS(nodePath: nodePath)
     }
 
     /// Ensures `<appPath>/server-settings.json` is configured with Stremio's Ultra-Fast
@@ -493,27 +494,12 @@ class StremioServerManager: ObservableObject {
         task.currentDirectoryURL = URL(fileURLWithPath: appPath)
         var env = ProcessInfo.processInfo.environment
         env["APP_PATH"] = appPath
+        let systemPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let extraPaths = "/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/sbin"
+        env["PATH"] = systemPath.contains("/opt/homebrew/bin") ? systemPath : "\(extraPaths):\(systemPath)"
 
         switch engine {
-        case .fluxEngine(let path, let assignedPort):
-            task.executableURL = URL(fileURLWithPath: path)
-            env["HTTP_PORT"] = String(assignedPort)
-            env["NO_CORS"] = "1"
-            env["STREMIO_TORRENT_IDLE_TIMEOUT"] = "600"
-            // High-performance BitTorrent & peer peering configuration (matching Stremio Ultra Fast):
-            env["STREMIO_PEERS_PER_TORRENT"] = "150"
-            env["STREMIO_TRACKERS_MAX"] = "25"
-            env["STREMIO_DISABLE_WEBTORRENT"] = "0"
-            env["STREMIO_BT_ENCRYPTION"] = "prefer"
-            // Remove synthetic GC and memory constraints to allow unthrottled packet throughput
-            env.removeValue(forKey: "GOGC")
-            env.removeValue(forKey: "GOMEMLIMIT")
-            env.removeValue(forKey: "STREMIO_MEM_LIMIT")
-            engineIsFluxEngine = true
-            print("[StremioServer] Launching FluxEngine (Go) on port \(assignedPort) with high-performance swarm settings")
         case .nodeJS(let nodePath):
-            // server.js binds 11470 and increments itself on conflict; launch on
-            // the first free port so discovery finds it.
             let busy = await alivePorts()
             let startPort = (11470...maxPort).first { !busy.contains($0) } ?? maxPort
             task.executableURL = URL(fileURLWithPath: nodePath)
@@ -521,7 +507,7 @@ class StremioServerManager: ObservableObject {
             env["HTTP_PORT"] = String(startPort)
             env["NO_CORS"] = "1"
             engineIsFluxEngine = false
-            print("[StremioServer] Launching server.js via node \(nodePath) targeting port \(startPort)")
+            print("[StremioServer] Launching official Stremio server.js via node \(nodePath) targeting port \(startPort)")
         }
         task.environment = env
 
@@ -535,31 +521,20 @@ class StremioServerManager: ObservableObject {
             return
         }
 
-        // FluxEngine: we assigned the port explicitly — poll it directly.
-        // server.js: poll for the NEW port that appears (self-incremented).
-        if engineIsFluxEngine, case .fluxEngine(_, let assignedPort) = engine {
-            for _ in 0..<40 {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                port = assignedPort
-                if await isServerAlive() {
-                    await MainActor.run { self.isRunning = true }
-                    print("[StremioServer] FluxEngine UP on http://127.0.0.1:\(assignedPort)")
-                    await applySavedCacheSize()
-                    return
-                }
-            }
-            print("[StremioServer] FluxEngine did not answer on \(assignedPort) — server did not start")
-            return
-        }
-
-        // Poll up to 20s for a NEW port to come alive
+        // Poll up to 20s for the engine to answer
         for _ in 0..<40 {
             try? await Task.sleep(nanoseconds: 500_000_000)
             let after = await alivePorts()
             if let p = after.subtracting(before).first {
                 port = p
                 await MainActor.run { self.isRunning = true }
-                print("[StremioServer] UP on http://127.0.0.1:\(p)")
+                print("[StremioServer] Official Stremio Engine UP on http://127.0.0.1:\(p)")
+                await applySavedCacheSize()
+                return
+            } else if after.contains(11470) {
+                port = 11470
+                await MainActor.run { self.isRunning = true }
+                print("[StremioServer] Official Stremio Engine UP on http://127.0.0.1:11470")
                 await applySavedCacheSize()
                 return
             }

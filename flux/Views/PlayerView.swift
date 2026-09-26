@@ -17,6 +17,8 @@ struct PlayerView: View {
     @AppStorage(UserDefaults.Key.streamingSourceMode) private var sourceMode: String = "both"
     @State private var autoPlayCancelled = false
     @State private var hasStartedPlayback = false
+    @State private var hasEverStartedPlayback = false
+    @State private var isClosingPlayer = false
     /// Latched when mpv reports natural end-of-file. Keeps the Up Next card
     /// visible after playback stops (it requires isPlaying otherwise) until
     /// the next episode starts. Cleared on URL change / seek-away-from-end.
@@ -123,9 +125,8 @@ struct PlayerView: View {
             }
             
             // 3. Mid-Playback Buffering (Logo buffer bar over the paused video frame).
-            // Gated on sustainedBuffering (0.6s grace) so brief seeks never flash
-            // the overlay or unmount the controls layer.
-            if sustainedBuffering {
+            // Gated on sustainedBuffering or mid-stream reconnects/fallbacks after initial start.
+            if sustainedBuffering || (!hasStartedPlayback && hasEverStartedPlayback) {
                 midPlaybackLogoBufferingView
             }
 
@@ -173,6 +174,7 @@ struct PlayerView: View {
             fetchedLogo = nil
             animatedProgress = 0.0
             hasStartedPlayback = false
+            hasEverStartedPlayback = false
             didReachEnd = false
             showManualStreamPicker = false
             showAboutStreamSource = false
@@ -315,12 +317,16 @@ struct PlayerView: View {
             }
         }
         .onDisappear {
+            guard !isClosingPlayer else { return }
+            isClosingPlayer = true
             exitWarningTask?.cancel()
             exitWarningTask = nil
             showExitWarning = false
             cancelUpNextCountdown()
             contextMenuMonitor?.stop()
             contextMenuMonitor = nil
+            keyMonitor?.stop()
+            keyMonitor = nil
             mpv.resetVolumeBoostIfNeeded()
             // Entering PiP closes this window as a deliberate handoff — the
             // floating panel owns the core now. Saving progress or stopping
@@ -333,11 +339,66 @@ struct PlayerView: View {
             playerManager.close()
         }
         .onReceive(loadingTimer) { _ in
-            // Hot-swap telemetry: mpv's native cache-speed (KB/s) + position
-            // feed the startup slow-source monitor in PlayerManager. Lives on
-            // the root body (always mounted during playback), so the monitor
-            // keeps receiving samples after the buffering overlay unmounts.
+            // 1. Hot-swap telemetry: mpv's native cache-speed (KB/s) + position
             playerManager.reportStartupThroughput(kbps: mpv.recentCacheSpeedKBps, timePos: mpv.timePos)
+
+            // 2. Report buffer ahead to player manager telemetry
+            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
+            playerManager.reportTelemetryProgress(cacheTime: bufferAhead)
+
+            // 3. Playback monitoring & watchdogs when actively advancing
+            if mpv.isPlaying && mpv.timePos >= 0.05 {
+                updateFrozenWatchdog()
+                self.confirmPlaybackStarted()
+
+                if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
+                   playerManager.nextReleasedEpisodeInfo != nil,
+                   mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
+                    transitionToNextEpisode()
+                }
+
+                let drops = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
+                let voDelayed = mpv.playerView?.playerView?.getPropertyInt("vo-delayed-frame-count") ?? -1
+                let avsync = mpv.playerView?.playerView?.getPropertyDouble("total-avsync-change") ?? -1.0
+                if lastDropCount < 0 {
+                    lastDropCount = drops
+                    lastVoDelayed = voDelayed
+                    lastAvsyncChange = avsync
+                } else {
+                    var parts: [String] = []
+                    if drops > lastDropCount {
+                        parts.append("drop +\(drops - lastDropCount) (total \(drops))")
+                        lastDropCount = drops
+                    }
+                    if voDelayed > lastVoDelayed {
+                        parts.append("vodelay +\(voDelayed - lastVoDelayed) (total \(voDelayed))")
+                        lastVoDelayed = voDelayed
+                    }
+                    if avsync > lastAvsyncChange + 0.0005 {
+                        parts.append(String(format: "avsync +%.3fs (total %.3fs)", avsync - lastAvsyncChange, avsync))
+                        lastAvsyncChange = avsync
+                    }
+                    if !parts.isEmpty {
+                        let cache = String(format: "%.1f", bufferAhead)
+                        let pos = String(format: "%.1f", mpv.timePos)
+                        Logger.player.error("Hitch \(parts.joined(separator: ", "), privacy: .public) at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s")
+                    }
+                }
+            } else if !hasStartedPlayback {
+                self.confirmPlaybackStarted()
+            }
+
+            // 4. Progress calculation for loading & buffering overlays
+            if playerManager.currentStreamURL == nil {
+                self.animatedProgress = 0.0
+            } else {
+                let isTorrent = playerManager.currentSelectedStream?.isTorrent == true
+                let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
+                let mpvBuf = max(mpv.bufferProgress, min(1.0, bufferAhead / 5.0))
+                let combinedProgress = max(mpvBuf, engineProgress)
+                let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, combinedProgress)
+                self.animatedProgress = max(self.animatedProgress, targetProgress)
+            }
         }
         .onChange(of: playerManager.currentStreamURL) { _, newURL in
             handleStreamURLChange(newURL)
@@ -478,6 +539,7 @@ struct PlayerView: View {
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.25)) {
                     hasStartedPlayback = true
+                    hasEverStartedPlayback = true
                     animatedProgress = 1.0
                 }
                 playerManager.markPlaybackStarted()
@@ -771,7 +833,7 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var controlsLayer: some View {
-        if hasStartedPlayback || showVolumeHUD {
+        if hasStartedPlayback || hasEverStartedPlayback || showVolumeHUD {
             PlayerControlsView(
                 isPlaying: $mpv.isPlaying,
                 progress: Binding(
@@ -1209,6 +1271,7 @@ struct PlayerView: View {
         autoPlayCancelled = false
         didReachEnd = false
         hasStartedPlayback = false
+        hasEverStartedPlayback = false
         mpv.stop()
         playerManager.playNextEpisode()
     }
@@ -1526,6 +1589,7 @@ struct PlayerView: View {
         suggestionsScrollTargetIndex = 0
         movieSuggestions = []
         hasStartedPlayback = false
+        hasEverStartedPlayback = false
         mpv.stop()
         playerManager.play(movie, startFromBeginning: true)
     }
@@ -1580,6 +1644,9 @@ struct PlayerView: View {
     }
 
     private func closePlayer() {
+        guard !isClosingPlayer else { return }
+        isClosingPlayer = true
+
         exitWarningTask?.cancel()
         exitWarningTask = nil
         showExitWarning = false
@@ -1590,14 +1657,24 @@ struct PlayerView: View {
         keyMonitor = nil
         contextMenuMonitor?.stop()
         contextMenuMonitor = nil
-        if let window = hostWindow, window.styleMask.contains(.fullScreen) {
-            window.toggleFullScreen(nil)
-        }
+        SleepAssertionManager.shared.playerDidClose()
+        mpv.pause()
         mpv.stop()
         playerManager.close()
-        hostWindow?.identifier = nil
-        hostWindow?.close()
-        dismiss()
+
+        if let window = hostWindow, window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+            // Allow AppKit space transition to complete smoothly before closing the window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                window.identifier = nil
+                window.close()
+                self.dismiss()
+            }
+        } else {
+            hostWindow?.identifier = nil
+            hostWindow?.close()
+            dismiss()
+        }
     }
 
     private func setupKeyMonitor(for window: NSWindow) {
@@ -1671,7 +1748,7 @@ struct PlayerView: View {
     private func buildNativeContextMenu() -> NSMenu {
         let menu = NSMenu(title: "Player Context Menu")
         let isPlaying = mpv.isPlaying
-        let isPlaybackEnabled = hasStartedPlayback || !isInitialLoading
+        let isPlaybackEnabled = hasStartedPlayback || hasEverStartedPlayback || !isInitialLoading
 
         // 1. Play / Pause
         menu.addItem(ClosureMenuItem(
@@ -1889,7 +1966,7 @@ struct PlayerView: View {
     }
 
     private var isInitialLoading: Bool {
-        return !hasStartedPlayback
+        return !hasStartedPlayback && !hasEverStartedPlayback
     }
 
     private var isMidPlaybackBuffering: Bool {
@@ -2045,90 +2122,10 @@ struct PlayerView: View {
             let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
             let realProgress = CGFloat(min(0.99, max(mpv.bufferProgress, bufferAhead / 5.0, engineProgress)))
 
-            VStack(spacing: 16) {
-                if let media = activeItem {
-                    let logoURL = resolvedLogoURL(for: media)
-
-                    ZStack {
-                        if let lURL = logoURL {
-                            // Base translucent watermark logo
-                            AsyncImage(url: lURL) { phase in
-                                switch phase {
-                                case .success(let img):
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 70)
-                                        .opacity(0.25)
-                                        .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
-                                default:
-                                    EmptyView()
-                                }
-                            }
-
-                            // Real progress fill logo (left-to-right fill)
-                            AsyncImage(url: lURL) { phase in
-                                switch phase {
-                                case .success(let img):
-                                    img.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 70)
-                                        .opacity(1.0)
-                                        .mask(
-                                            GeometryReader { geo in
-                                                Rectangle()
-                                                    .frame(width: max(0, geo.size.width * realProgress), alignment: .leading)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                    .animation(.linear(duration: 0.25), value: realProgress)
-                                            }
-                                        )
-                                        .shadow(color: .white.opacity(0.5), radius: 10, x: 0, y: 2)
-                                default:
-                                    EmptyView()
-                                }
-                            }
-                        } else {
-                            // Text fallback for media with no logo image
-                            Text(media.title.uppercased())
-                                .font(.system(size: 24, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.25))
-
-                            Text(media.title.uppercased())
-                                .font(.system(size: 24, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.white)
-                                .mask(
-                                    GeometryReader { geo in
-                                        Rectangle()
-                                            .frame(width: max(0, geo.size.width * realProgress), alignment: .leading)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .animation(.linear(duration: 0.25), value: realProgress)
-                                    }
-                                )
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                }
-
-                // Sleek progress bar under the logo
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 140, height: 4)
-
-                    Capsule()
-                        .fill(Color.white)
-                        .frame(width: max(4, 140 * realProgress), height: 4)
-                        .animation(.linear(duration: 0.25), value: realProgress)
-                }
-                .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
+            if let media = activeItem {
+                loadingLogo(for: media, progress: realProgress)
+                    .allowsHitTesting(false)
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 20)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.ultraThinMaterial.opacity(0.85))
-                    .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
-            )
-            .allowsHitTesting(false)
         }
         .transition(.opacity)
         .zIndex(15)
@@ -2162,77 +2159,6 @@ struct PlayerView: View {
             if let media = activeItem {
                 loadingLogo(for: media, progress: realProgress)
             }
-        }
-        .onReceive(loadingTimer) { _ in
-            let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
-            playerManager.reportTelemetryProgress(cacheTime: bufferAhead)
-
-            if mpv.isPlaying && mpv.timePos >= 0.05 {
-                // Frozen-frame watchdog (see state decl): stuck picture with
-                // healthy cache never trips isBuffering, so detect it here and
-                // surface the same mid-playback overlay instead of a bare stall.
-                updateFrozenWatchdog()
-                // First-frame-aware delayed flip (buffering screen fades over
-                // rendered video, never over the first frames).
-                self.confirmPlaybackStarted()
-
-                // Backup auto-play trigger at the very end (countdown UI shows
-                // from 10s). Primary trigger is the EOF event → handleEndOfFile.
-                // Air-gated like everything else: unaired next episodes never fire.
-                if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
-                   playerManager.nextReleasedEpisodeInfo != nil,
-                   mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
-                    transitionToNextEpisode()
-                }
-                // Diagnostic hitch sampling (8/31 investigation, error channel):
-                // log ONLY on increment, with position + cache level, so each
-                // hitch gets a timestamped fingerprint to correlate against
-                // user-reported lag instants. Covers decoder drops, VO delays,
-                // and A/V sync corrections in one combined line per tick.
-                let drops = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
-                let voDelayed = mpv.playerView?.playerView?.getPropertyInt("vo-delayed-frame-count") ?? -1
-                let avsync = mpv.playerView?.playerView?.getPropertyDouble("total-avsync-change") ?? -1.0
-                if lastDropCount < 0 {
-                    lastDropCount = drops
-                    lastVoDelayed = voDelayed
-                    lastAvsyncChange = avsync
-                } else {
-                    var parts: [String] = []
-                    if drops > lastDropCount {
-                        parts.append("drop +\(drops - lastDropCount) (total \(drops))")
-                        lastDropCount = drops
-                    }
-                    if voDelayed > lastVoDelayed {
-                        parts.append("vodelay +\(voDelayed - lastVoDelayed) (total \(voDelayed))")
-                        lastVoDelayed = voDelayed
-                    }
-                    if avsync > lastAvsyncChange + 0.0005 {
-                        parts.append(String(format: "avsync +%.3fs (total %.3fs)", avsync - lastAvsyncChange, avsync))
-                        lastAvsyncChange = avsync
-                    }
-                    if !parts.isEmpty {
-                        let bufferAhead = mpv.demuxerCacheDuration > 0 ? mpv.demuxerCacheDuration : max(0.0, mpv.demuxerCacheTime - mpv.timePos)
-                        let cache = String(format: "%.1f", bufferAhead)
-                        let pos = String(format: "%.1f", mpv.timePos)
-                        Logger.player.error("Hitch \(parts.joined(separator: ", "), privacy: .public) at \(pos, privacy: .public)s, cache \(cache, privacy: .public)s")
-                    }
-                }
-                return
-            }
-
-            // Real telemetry only: while stream URL is resolving, progress stays strictly at 0.0
-            if playerManager.currentStreamURL == nil {
-                self.animatedProgress = 0.0
-                return
-            }
-
-            // Genuine demuxer buffer telemetry from mpv combined with P2P engine streamProgress
-            let isTorrent = playerManager.currentSelectedStream?.isTorrent == true
-            let engineProgress = isTorrent ? playerManager.torrentStreamProgress : 0.0
-            let mpvBuf = max(mpv.bufferProgress, min(1.0, bufferAhead / 5.0))
-            let combinedProgress = max(mpvBuf, engineProgress)
-            let targetProgress = hasStartedPlayback ? 1.0 : min(0.95, combinedProgress)
-            self.animatedProgress = max(self.animatedProgress, targetProgress)
         }
     }
 

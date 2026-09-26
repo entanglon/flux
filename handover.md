@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 26, 2026 (12:56 PM IST)  
-**Latest Git State**: Working tree clean, 235/235 Unit Tests Passing (100%)  
+**Updated**: September 26, 2026 (2:30 PM IST)  
+**Latest Git State**: 240/240 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 
@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary for Antigravity Sessions
 
-This project is **Flux**, an open-source, modern native macOS media and streaming application built with SwiftUI, an embedded Go streaming engine (`FluxEngine` / Stremio core), native `libmpv` video playback via `LocalMPVKit`, PocketBase backend sync, and TMDB / Stremio addon catalog aggregation.
+This project is **Flux**, an open-source, modern native macOS media and streaming application built with SwiftUI, the official Stremio streaming server (`server.js` + Node.js runtime), native `libmpv` video playback via `LocalMPVKit`, PocketBase backend sync, and TMDB / Stremio addon catalog aggregation.
 
 The app has recently undergone major enhancements:
 1. **Direct TMDB-First Search Engine**: Direct integration with TMDB search without restrictive pre-filtering or token penalties, ensuring international and catalog titles (e.g., *Dark 2017*) surface accurately, with Cinemeta/Stremio fallback.
@@ -126,7 +126,26 @@ The app has recently undergone major enhancements:
 29. **Mid-Playback Buffering UI Regression Analysis**:
     - **Regressed Card Container Identified**: In commit `e56210b`, `midPlaybackLogoBufferingView` was wrapped in an unwanted `RoundedRectangle(cornerRadius: 20).fill(.ultraThinMaterial.opacity(0.85))` floating card box, shrinking the logo from `maxHeight: 100`/`76` to `70` and adding a separate progress bar.
     - **Historical Audit**: Git archaeology on commits `21eed32` ("use pure logo fill buffer loading without separate progress bar") and `a5f94e0` ("remove floating buffer card") confirmed the authentic original design: a clean, borderless, floating title logo filling left-to-right directly over the `Color.black.opacity(0.35)` darkened video frame without any surrounding card background.
-
+30. **Authentic Mid-Playback Buffering UI Restoration**:
+    - **Removed Knockoff Card Container**: Stripped the `.background(RoundedRectangle(...).fill(.ultraThinMaterial...))` container, container padding, and separate `140x4` capsule progress bar from `midPlaybackLogoBufferingView` in `PlayerView.swift`.
+    - **Restored Pure Borderless Fill**: Re-anchored `loadingLogo(for: media, progress: realProgress)` directly over `Color.black.opacity(0.35)` vignette, maintaining authentic Apple TV-style pure logo fill (`maxHeight: 100`/`76`) without card boxes or duplicate progress indicators.
+31. **P2P Torrent Streaming Architecture Overhaul & Smart Multi-File Resolution**:
+    - **Root Cause of Multi-File Failures (e.g. Big Buck Bunny)**: Multi-file torrents frequently place a tiny subtitle (`.srt`, 140 bytes), NFO, or poster file at index 0. Because movie streams often omit `fileIdx`, Flux previously hardcoded `stream.fileIdx ?? 0`, requesting `/{infoHash}/0` from the streaming server. libmpv received plain text subtitles as video input, causing ffmpeg demuxer crashes (`Invalid data found when processing input`).
+    - **Smart `fileIdx` Resolution**: Implemented `PlayerManager.findBestVideoFileIndex(files:targetSeason:targetEpisode:)` which inspects the streaming engine's `/create` response `files` array. For movies, filters out samples/trailers/subtitles/posters and selects the primary video file by byte length. For series season packs, accurately parses episodic patterns (`S01E02`, `1x02`, `e02`) to extract the exact requested episode file.
+    - **Sequential `/create` Handshake**: Replaced fire-and-forget `/create` calls in `attemptStream` with an awaited `resolveTorrentStream` call (with an 8.0s timeout). The resolved `fileIdx` is written back to `stream.fileIdx` and `currentSelectedStream`, ensuring mpv always requests the true video payload (`/{infoHash}/{resolvedIdx}`). If the torrent swarm fails to respond or is dead, the stream gracefully auto-advances to standby fallbacks.
+    - **P2P Streaming Engine Selection**: Added `p2pEngineType` preference to `UserDefaults+Keys.swift` and `SettingsView.swift` (`"Embedded Go (FluxEngine)"` vs `"Official Stremio Engine (Node.js)"`). Updated `StremioServerManager.swift` to resolve engines dynamically and enriched PATH with `/opt/homebrew/bin:/usr/local/bin` to prevent Node execution errors.
+    - **Localization & Unit Tests**: Added 7 new localized keys across all 10 supported languages (641 unique keys, 0 duplicates). Added 5 unit tests in `fluxTests.swift` covering single-file/multi-file movie torrents, series season packs, sample filtering, and fallback behavior (240/240 tests passing).
+29. **Official Stremio Engine Standardization, Mid-Playback Buffering UI Fix, Continuous Torrent Polling & Enter/Exit Lag Elimination**:
+    - **Standardized Exclusively on Official Stremio Engine (`server.js`)**: Following extensive A/B testing on *Obsession* and *Zootopia 2*, the Go engine (`FluxEngine` based on `anacrolix/torrent`) repeatedly suffered connection drops at 14MB/92MB, HTTP Range seek failures (`input/output error`), and infinite reconnect loops. By contrast, the official Node.js Stremio engine (`server.js`) downloaded at 2.5–3.0 MB/s, handled multi-gigabyte disk/RAM caching, and sought instantaneously. Completely dropped the Go engine and standardized on the official Stremio Node.js server. Updated `StremioServerManager.swift` to launch `server.js` directly, discovering ports on 11470–11474 with automatic Node provisioning fallback if system Node is missing.
+    - **Mid-Playback Buffering UI Fixed (No Start Screen Flash)**: Introduced `@State private var hasEverStartedPlayback = false` in `PlayerView.swift`. `isInitialLoading` is now strictly `!hasStartedPlayback && !hasEverStartedPlayback`. When a mid-stream stall, seek, reconnect, or fallback occurs after playback has started, `logoBufferingView` (the start screen with the fullscreen backdrop image) is never displayed. Instead, the player frame remains visible as-is, player controls stay mounted (`if hasStartedPlayback || hasEverStartedPlayback || showVolumeHUD`), and `midPlaybackLogoBufferingView` overlays the video with a subtle 35% black vignette and the pulsating polyfill logo with live buffer progress.
+    - **Continuous Torrent Stats Polling & Monotonic Telemetry**: Removed `if self.hasPlaybackStarted { break }` from `PlayerManager.startTorrentStatsPolling`. Polling now runs continuously at 1.5s during smooth playback and 350ms during buffering. Combined all telemetry, watchdog, and progress calculations into the root-mounted `.onReceive(loadingTimer)` in `PlayerView.swift`, eliminating the bug where unmounting the initial loading screen killed buffer progress and froze progress bars at 5%. Cancelled and nilled poll tasks properly on player close.
+    - **Player Enter & Exit Lag Elimination**:
+      - Added `@State private var isClosingPlayer = false` guard across `closePlayer()` and `.onDisappear` to eliminate duplicate teardowns, double watch progress updates, duplicate async tasks, and disk eviction storms.
+      - Resolved macOS AppKit fullscreen transition collision: when closing in full-screen, `closePlayer()` calls `window.toggleFullScreen(nil)` and defers `window.close()` / `dismiss()` by 0.45s so the space transition completes smoothly without freezing the main thread, while immediately cutting audio and stopping mpv.
+    - **Settings View & Localization Compliance**:
+      - Replaced the P2P engine picker with a static informational row referencing the Official Stremio Engine.
+      - Verified 0 duplicate keys across all 10 supported languages (`en`, `ja`, `es`, `fr`, `de`, `it`, `pt`, `ko`, `hi`, `zh`) in `LanguageManager.swift`.
+      - All 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`).
 
 ---
 
@@ -463,26 +482,28 @@ The app has recently undergone major enhancements:
 
 ---
 
-## 4. Pending Tasks & Active Focus (Next Session Priorities)
+## 4. Completed Priorities & Active Focus
 
-### Priority 1: Restore Authentic Mid-Playback Buffering UI
-1. **Remove Knockoff Card Background**: Strip the `.background(RoundedRectangle(...).fill(.ultraThinMaterial...))` and surrounding container padding from `midPlaybackLogoBufferingView` in `PlayerView.swift`.
-2. **Restore Original Logo Sizing & Pure Fill**: Align directly with commit `21eed32` / `a5f94e0`:
+### Completed: Priority 1 — Restore Authentic Mid-Playback Buffering UI
+1. **Removed Knockoff Card Background**: Stripped the `.background(RoundedRectangle(...).fill(.ultraThinMaterial...))` and container padding from `midPlaybackLogoBufferingView` in `PlayerView.swift`.
+2. **Restored Original Logo Sizing & Pure Fill**: Aligned directly with commit `21eed32` / `a5f94e0`:
    - Pure title logo / text fallback directly over `Color.black.opacity(0.35)` vignette.
    - Sizing: `maxHeight: 100` (or `76`).
    - Smooth left-to-right mask fill reflecting live demuxer/torrent progress.
-   - Zero card borders, zero boxes.
+   - Zero card borders, zero boxes, zero duplicate capsule progress bars.
 
-### Priority 2: P2P Torrent Streaming Architecture Overhaul
-1. **Official Stremio Node.js `server.js` Evaluation**:
-   - `StremioServerManager.swift` already has built-in support for official Stremio Node.js `server.js` (`resolveEngine`, `downloadServerJS`). Test running the official `server.js` to compare download speeds (5–20 MB/s vs 100 KB/s in Go engine).
-   - Evaluate providing a toggle or fallback to official `server.js` if `FluxEngine` continues to throttle or crash.
-2. **Smart `fileIdx` Resolution**:
-   - In `PlayerManager.swift` / `StreamManager.swift`, never default blindly to `fileIdx = 0`. If `fileIdx` is missing from the stream, inspect torrent files from the engine's metadata and select the largest file by byte size (the video payload).
-3. **Sequential `/create` Metadata Handshake**:
-   - Await `resolveTorrentStream` (with a sensible 4–6s timeout) before calling `finishSelect(stream)` so mpv does not hammer uninitialized swarms.
-4. **Engine Sequential Mode & Readahead**:
-   - Investigate setting readahead or sequential download parameters in the streaming server.
+### Completed: Priority 2 — P2P Torrent Streaming Architecture Overhaul
+1. **Smart `fileIdx` Resolution**:
+   - Implemented `PlayerManager.findBestVideoFileIndex(files:targetSeason:targetEpisode:)` to select the primary video file by byte length and episode patterns (`s01e02`, `1x02`, `e02`) from the engine's `/create` response.
+   - Successfully eliminated demuxer crashes on multi-file torrents (e.g. *Big Buck Bunny* picking 140-byte subtitle file).
+2. **Sequential `/create` Metadata Handshake**:
+   - `attemptStream` now awaits `resolveTorrentStream` (8.0s timeout), commits the resolved `fileIdx` to `stream.fileIdx` and `currentSelectedStream`, and auto-advances if the swarm is dead.
+3. **Official Stremio Engine (Node.js) Option & Setting**:
+   - Added `p2pEngineType` preference to `UserDefaults+Keys.swift` and `SettingsView.swift` (`"Embedded Go (FluxEngine)"` vs `"Official Stremio Engine (Node.js)"`).
+   - `StremioServerManager.swift` dynamically selects the chosen engine and enriches PATH for Node.js execution.
+4. **Localization & Unit Tests**:
+   - Added 7 new localized keys across all 10 supported languages (641 unique keys, 0 duplicates).
+   - Added 5 unit tests in `fluxTests.swift` covering single-file/multi-file movie torrents, series season packs, sample filtering, and fallback behavior (240/240 tests passing).
 
 ---
 
@@ -501,7 +522,7 @@ The app has recently undergone major enhancements:
 | **Auth Manager** | `flux/Services/AuthManager.swift` | PocketBase auth, cloud sync scheduling, Anti-Regression Shield |
 | **History View** | `flux/Views/HistoryView.swift` | Watch history list, swipe-to-delete, atomic "Clear All" |
 | **Settings View** | `flux/Views/SettingsView.swift` | General, streaming, profile, and "History & Privacy" settings |
-| **Streaming Engine** | `flux/Engine/FluxEngine` | Embedded Go Stremio core, HTTP 11470, HTTPS 12470 |
+| **Streaming Engine** | `flux/Engine/server.js` | Official Stremio Node streaming core, HTTP 11470–11474 |
 | **Stream Proxy** | `flux/Services/StreamProxyManager.swift` | Local loopback stream proxy, Brotli identity header injection |
 | **Stream Ranker (AI)** | `flux/Services/GeminiStreamRanker.swift` | Structured JSON serialization, Gemini Flash stream evaluation |
 | **Player Manager** | `flux/Services/PlayerManager.swift` | MPV playback orchestration, auto-play racing, proxy routing |

@@ -418,5 +418,65 @@ struct fluxTests {
         #expect(primary?.title == "Movie 1080p")
         #expect(!fallbacks.contains(where: { $0.quality == "4K" }))
     }
+
+    // MARK: - Smart Torrent File Index Resolution Tests
+
+    @Test func smartTorrentFileIndexSelectsVideoOverSubtitles() {
+        // Reproduces Big Buck Bunny multi-file torrent:
+        // Index 0 is a 140-byte subtitle file, Index 1 is the 276MB video file, Index 2 is a JPEG poster.
+        let files = [
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Big_Buck_Bunny_1080p.srt", length: 140),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Big_Buck_Bunny_1080p.mp4", length: 289_400_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "poster.jpg", length: 45_000)
+        ]
+
+        let selected = PlayerManager.findBestVideoFileIndex(files: files)
+        #expect(selected == 1)
+    }
+
+    @Test func smartTorrentFileIndexSelectsEpisodeInSeasonPack() {
+        let files = [
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Breaking.Bad.S01E01.1080p.mkv", length: 900_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Breaking.Bad.S01E02.1080p.mkv", length: 920_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Breaking.Bad.S01E03.1080p.mkv", length: 910_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Breaking.Bad.S01E02.srt", length: 32_000)
+        ]
+
+        let ep1 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 1)
+        #expect(ep1 == 0)
+
+        let ep2 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 2)
+        #expect(ep2 == 1)
+
+        let ep3 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 3)
+        #expect(ep3 == 2)
+    }
+
+    @Test func smartTorrentFileIndexFiltersOutSamplesAndTrailers() {
+        let files = [
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "sample.mkv", length: 25_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "feature.film.2024.1080p.bluray.mkv", length: 4_500_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "trailer.mp4", length: 60_000_000)
+        ]
+
+        let selected = PlayerManager.findBestVideoFileIndex(files: files)
+        #expect(selected == 1)
+    }
+
+    @Test func smartTorrentFileIndexFallbackToLargestFile() {
+        let files = [
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "instructions.txt", length: 500),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "payload.bin", length: 1_200_000_000)
+        ]
+
+        let selected = PlayerManager.findBestVideoFileIndex(files: files)
+        #expect(selected == 1)
+    }
+
+    @Test func smartTorrentFileIndexReturnsNilOnEmptyFiles() {
+        let selected = PlayerManager.findBestVideoFileIndex(files: [])
+        #expect(selected == nil)
+    }
 }
+
 

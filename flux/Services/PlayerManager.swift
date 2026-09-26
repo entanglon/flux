@@ -249,8 +249,9 @@ class PlayerManager: ObservableObject {
     }
 
     private func primeWinner(winner: Stream, item: MediaItem, season: Int?, episode: Int?, key: String, subs: [StremioSubtitleTrack]?) async {
-        if winner.isTorrent {
-            guard let hash = torrentHash(winner) else {
+        var primedWinner = winner
+        if primedWinner.isTorrent {
+            guard let hash = torrentHash(primedWinner) else {
                 await MainActor.run {
                     self.isPrefetching = false
                     self.inflightPrefetchKey = nil
@@ -258,18 +259,27 @@ class PlayerManager: ObservableObject {
                 return
             }
 
+            let resolution = await resolveTorrentStream(
+                primedWinner,
+                targetSeason: season,
+                targetEpisode: episode
+            )
+            let creationError = resolution.error
+            if let fIdx = resolution.resolvedFileIdx {
+                primedWinner.fileIdx = fIdx
+            }
+
             await MainActor.run {
                 guard self.inflightPrefetchKey == key else { return }
                 self.prefetchTorrentHash = hash
                 StremioServerManager.shared.trackCreate(
                     infoHash: hash,
-                    magnetURL: winner.url.absoluteString,
-                    fileIdx: winner.fileIdx ?? 0
+                    magnetURL: primedWinner.url.absoluteString,
+                    fileIdx: primedWinner.fileIdx ?? 0
                 )
             }
             guard !Task.isCancelled, inflightPrefetchKey == key else { return }
 
-            let creationError = await resolveTorrentStream(winner)
             guard !Task.isCancelled,
                   inflightPrefetchKey == key,
                   creationError == nil else {
@@ -286,21 +296,21 @@ class PlayerManager: ObservableObject {
                 return
             }
         } else {
-            Self.warmHTTP(url: getPlayableURL(for: winner))
+            Self.warmHTTP(url: getPlayableURL(for: primedWinner))
         }
 
         await MainActor.run {
             let targetMatchesCurrent = (self.currentItem?.id == item.id && self.currentSeason == season && self.currentEpisode == episode)
             if targetMatchesCurrent {
                 self.prefetchedKey = key
-                self.prefetchedStream = winner
+                self.prefetchedStream = primedWinner
                 self.prefetchedSubtitles = subs
                 self.prefetchedAt = Date()
                 self.inflightPrefetchKey = nil
                 self.isPrefetching = false
                 if self.currentSelectedStream == nil && self.currentStreamURL == nil {
-                    print("[PlayerManager] ⚡ Delivering prefetch winner directly to active player session: \(winner.cleanTitle)")
-                    self.attemptStream(winner)
+                    print("[PlayerManager] ⚡ Delivering prefetch winner directly to active player session: \(primedWinner.cleanTitle)")
+                    self.attemptStream(primedWinner)
                 }
                 return
             }
@@ -311,14 +321,14 @@ class PlayerManager: ObservableObject {
                 return
             }
             self.prefetchedKey = key
-            self.prefetchedStream = winner
+            self.prefetchedStream = primedWinner
             self.prefetchedSubtitles = subs
             self.prefetchedAt = Date()
             self.inflightPrefetchKey = nil
-            self.buildWarmCore(key: key, url: getPlayableURL(for: winner), stream: winner)
+            self.buildWarmCore(key: key, url: getPlayableURL(for: primedWinner), stream: primedWinner)
             self.isPrefetching = false
-            print("[PlayerManager] ⚡ Prefetch primed: \(winner.cleanTitle) (\(winner.source)) — warm core holding")
-            Logger.stream.error("⚡ Prefetch primed: \(winner.cleanTitle, privacy: .public) via \(winner.source, privacy: .public) — warm core holding, race ran during browsing")
+            print("[PlayerManager] ⚡ Prefetch primed: \(primedWinner.cleanTitle) (\(primedWinner.source)) — warm core holding")
+            Logger.stream.error("⚡ Prefetch primed: \(primedWinner.cleanTitle, privacy: .public) via \(primedWinner.source, privacy: .public) — warm core holding, race ran during browsing")
         }
     }
 
@@ -718,22 +728,143 @@ class PlayerManager: ObservableObject {
         return true
     }
 
+    struct TorrentCreateResponse: Decodable {
+        struct FileEntry: Decodable {
+            let name: String?
+            let path: String?
+            let length: Int64?
+            let offset: Int64?
+
+            init(name: String? = nil, path: String? = nil, length: Int64? = nil, offset: Int64? = nil) {
+                self.name = name
+                self.path = path
+                self.length = length
+                self.offset = offset
+            }
+        }
+        let infoHash: String?
+        let name: String?
+        let files: [FileEntry]?
+    }
+
+    struct TorrentResolutionResult {
+        let error: String?
+        let resolvedFileIdx: Int?
+    }
+
+    /// Selects the most appropriate video file index from a torrent's file tree.
+    /// Handles episodic pattern matching (e.g. S01E03) for season packs and series,
+    /// and selects the primary video payload while ignoring samples and subtitles for movies.
+    static func findBestVideoFileIndex(
+        files: [TorrentCreateResponse.FileEntry],
+        targetSeason: Int? = nil,
+        targetEpisode: Int? = nil
+    ) -> Int? {
+        guard !files.isEmpty else { return nil }
+
+        let videoExtensions: Set<String> = [
+            "mp4", "mkv", "avi", "mov", "m4v", "webm", "ts", "wmv", "iso", "flv", "m2ts"
+        ]
+
+        // 1. If target episode is specified, search for matching episodic patterns in file names
+        if let ep = targetEpisode {
+            let s = targetSeason ?? 1
+            let epPadded = String(format: "%02d", ep)
+            let sPadded = String(format: "%02d", s)
+
+            let patterns = [
+                "s\(sPadded)e\(epPadded)",
+                "s\(s)e\(epPadded)",
+                "s\(sPadded)e\(ep)",
+                "\(s)x\(epPadded)",
+                "\(s)x\(ep)",
+                "e\(epPadded)",
+                "episode \(ep)",
+                "episode.\(ep)",
+                "ep\(epPadded)",
+                "ep\(ep)"
+            ]
+
+            var episodeCandidates: [(index: Int, length: Int64)] = []
+            for (idx, file) in files.enumerated() {
+                let name = (file.name ?? file.path ?? "").lowercased()
+                let ext = (name as NSString).pathExtension.lowercased()
+                guard videoExtensions.contains(ext) || ext.isEmpty else { continue }
+
+                for pattern in patterns {
+                    if name.contains(pattern) {
+                        episodeCandidates.append((idx, file.length ?? 0))
+                        break
+                    }
+                }
+            }
+
+            if let bestEp = episodeCandidates.max(by: { $0.length < $1.length }) {
+                print("[PlayerManager] 🎯 Smart fileIdx selected episode file [\(bestEp.index)]: \(files[bestEp.index].name ?? "") (\((bestEp.length) / (1024 * 1024))MB)")
+                return bestEp.index
+            }
+        }
+
+        // 2. Movie or non-episodic torrent: search for video files excluding samples/trailers
+        var videoCandidates: [(index: Int, file: TorrentCreateResponse.FileEntry)] = []
+        for (i, file) in files.enumerated() {
+            let name = (file.name ?? file.path ?? "").lowercased()
+            let ext = (name as NSString).pathExtension.lowercased()
+            let isVideo = videoExtensions.contains(ext)
+            let isSample = name.contains("sample") || name.contains("trailer") || name.contains("preview")
+            if isVideo && !isSample {
+                videoCandidates.append((i, file))
+            }
+        }
+
+        // If no non-sample video matched, consider any video file
+        if videoCandidates.isEmpty {
+            for (i, file) in files.enumerated() {
+                let name = (file.name ?? file.path ?? "").lowercased()
+                let ext = (name as NSString).pathExtension.lowercased()
+                if videoExtensions.contains(ext) {
+                    videoCandidates.append((i, file))
+                }
+            }
+        }
+
+        // Fallback: consider all files
+        if videoCandidates.isEmpty {
+            for (i, file) in files.enumerated() {
+                videoCandidates.append((i, file))
+            }
+        }
+
+        // Return candidate with largest size
+        if let best = videoCandidates.max(by: { ($0.file.length ?? 0) < ($1.file.length ?? 0) }) {
+            print("[PlayerManager] 🎯 Smart fileIdx selected primary video file [\(best.index)]: \(best.file.name ?? "") (\((best.file.length ?? 0) / (1024 * 1024))MB)")
+            return best.index
+        }
+
+        return nil
+    }
+
     /// Registers the torrent on the Stremio server engine — the exact step the real
     /// Stremio client performs before handing the stream URL to its player.
     ///   GET /{infoHash}/create?torrent={magnet}&fileIdx={n}
-    /// Returns nil on success, or a human-readable failure reason.
-    /// NOTE: create failures are NOT marked dead — they're usually transient
-    /// (server restart, timeout). Only real mpv playback failures mark hashes dead.
-    func resolveTorrentStream(_ stream: Stream, keepOthers: Bool = false) async -> String? {
-        guard stream.isTorrent else { return nil }
-        guard let hash = torrentHash(stream) else { return "Invalid torrent source" }
+    /// Returns TorrentResolutionResult with any creation error and the resolved video fileIdx.
+    func resolveTorrentStream(
+        _ stream: Stream,
+        keepOthers: Bool = false,
+        targetSeason: Int? = nil,
+        targetEpisode: Int? = nil
+    ) async -> TorrentResolutionResult {
+        guard stream.isTorrent else { return TorrentResolutionResult(error: nil, resolvedFileIdx: stream.fileIdx) }
+        guard let hash = torrentHash(stream) else {
+            return TorrentResolutionResult(error: "Invalid torrent source".localized, resolvedFileIdx: nil)
+        }
 
         // The server may have died since app launch — recover before giving up.
         guard await StremioServerManager.shared.ensureRunning() else {
-            return "Streaming server unavailable"
+            return TorrentResolutionResult(error: "Streaming server unavailable".localized, resolvedFileIdx: nil)
         }
 
-        func createCall() async -> (ok: Bool, status: Int, connError: Bool) {
+        func createCall() async -> (ok: Bool, status: Int, connError: Bool, data: Data?) {
             var components = URLComponents(url: StremioServerManager.shared.baseURL, resolvingAgainstBaseURL: false)
             components?.path = "/\(hash)/create"
             var query = [URLQueryItem(name: "torrent", value: stream.url.absoluteString)]
@@ -741,16 +872,16 @@ class PlayerManager: ObservableObject {
                 query.append(URLQueryItem(name: "fileIdx", value: String(idx)))
             }
             components?.queryItems = query
-            guard let url = components?.url else { return (false, 0, false) }
+            guard let url = components?.url else { return (false, 0, false, nil) }
 
             var request = URLRequest(url: url)
-            request.timeoutInterval = 20
+            request.timeoutInterval = 8
             do {
-                let (_, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                return (status == 200, status, false)
+                return (status == 200, status, false, data)
             } catch {
-                return (false, 0, true)
+                return (false, 0, true, nil)
             }
         }
 
@@ -758,17 +889,30 @@ class PlayerManager: ObservableObject {
         if !result.ok && result.connError {
             // Server died mid-request — recover and retry exactly once.
             guard await StremioServerManager.shared.ensureRunning() else {
-                return "Streaming server unavailable"
+                return TorrentResolutionResult(error: "Streaming server unavailable".localized, resolvedFileIdx: nil)
             }
             result = await createCall()
         }
 
         if result.ok {
-            print("[PlayerManager] Torrent created on server: \(hash.prefix(12))…")
-            return nil
+            var resolvedIdx = stream.fileIdx
+            if let data = result.data,
+               let createResp = try? JSONDecoder().decode(TorrentCreateResponse.self, from: data),
+               let files = createResp.files, !files.isEmpty {
+                if resolvedIdx == nil {
+                    resolvedIdx = Self.findBestVideoFileIndex(
+                        files: files,
+                        targetSeason: targetSeason,
+                        targetEpisode: targetEpisode
+                    )
+                }
+            }
+            print("[PlayerManager] Torrent created on server: \(hash.prefix(12))… (fileIdx: \(resolvedIdx ?? 0))")
+            return TorrentResolutionResult(error: nil, resolvedFileIdx: resolvedIdx)
         }
         print("[PlayerManager] Create failed (HTTP \(result.status)) for \(stream.cleanTitle)")
-        return result.status == 0 ? "Could not reach the streaming server" : "Source swarm did not respond"
+        let err = result.status == 0 ? "Could not reach the streaming server".localized : "Source swarm did not respond".localized
+        return TorrentResolutionResult(error: err, resolvedFileIdx: nil)
     }
     
     private init() {}
@@ -1728,7 +1872,8 @@ class PlayerManager: ObservableObject {
                 components.scheme = "http"
                 components.host = "127.0.0.1"
                 components.port = StremioServerManager.shared.port
-                components.path = "/\(hash)/0"
+                let targetFileIdx = currentSelectedStream?.fileIdx ?? 0
+                components.path = "/\(hash)/\(targetFileIdx)"
                 if let streamURL = components.url {
                     return streamURL
                 }
@@ -1867,36 +2012,44 @@ class PlayerManager: ObservableObject {
                 StremioServerManager.shared.removeTorrent(infoHash: oldHash)
             }
             activeTorrentHash = hash
-            // Stremio-exact flow: register the torrent on the server (fire-and-forget)
-            // and hand the URL to mpv IMMEDIATELY. The server blocks the file response
-            // until pieces flow, mpv reports paused-for-cache → buffering overlay shows.
-            // Awaiting /create here would stall the UI on metadata fetch (slow swarms)
-            // and time out — the torrent still registers server-side, which is why a
-            // second click "suddenly works".
-            DispatchQueue.main.async { self.statusText = "Connecting to source…" }
+            // Sequential /create handshake: register the torrent and await metadata resolution
+            // so we can resolve the genuine video fileIdx (never defaulting to subtitle index 0),
+            // ensure the swarm is connected, and hand a ready URL to mpv.
+            DispatchQueue.main.async { self.statusText = "Connecting…".localized }
             AsyncTask {
                 let serverUp = await StremioServerManager.shared.ensureRunning()
+                var resolvedStream = stream
+                var creationError: String? = nil
                 if serverUp {
-                    // Fire-and-forget — do NOT block playback on metadata fetch.
+                    let resolution = await self.resolveTorrentStream(
+                        stream,
+                        targetSeason: self.currentSeason,
+                        targetEpisode: self.currentEpisode
+                    )
+                    creationError = resolution.error
+                    if let fIdx = resolution.resolvedFileIdx {
+                        resolvedStream.fileIdx = fIdx
+                    }
                     let magnetURL = stream.url.absoluteString
                     StremioServerManager.shared.trackCreate(
                         infoHash: hash,
                         magnetURL: magnetURL,
-                        fileIdx: stream.fileIdx ?? 0
+                        fileIdx: resolvedStream.fileIdx ?? 0
                     )
-                    AsyncTask { _ = await self.resolveTorrentStream(stream) }
                 }
                 await MainActor.run {
                     self.statusText = nil
-                    if serverUp {
+                    if serverUp && creationError == nil {
                         self.consecutiveFallbacks = 0
-                        self.startTorrentStatsPolling(for: stream)
-                        self.finishSelect(stream)
+                        self.currentSelectedStream = resolvedStream
+                        self.startTorrentStatsPolling(for: resolvedStream)
+                        self.finishSelect(resolvedStream)
                     } else if isFluxEnabled {
+                        print("[PlayerManager] ⚠️ Torrent creation failed (\(creationError ?? "unknown")), auto-advancing to standby fallback")
                         advancePast(stream)
                     } else {
                         self.isLoading = false
-                        self.errorMessage = "Streaming server unavailable"
+                        self.errorMessage = creationError ?? "Streaming server unavailable".localized
                     }
                 }
             }
@@ -2027,9 +2180,12 @@ class PlayerManager: ObservableObject {
         let targetFileIdx = stream.fileIdx ?? 0
         self.torrentStatsPollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                guard !Task.isCancelled, let self = self else { break }
-                if self.hasPlaybackStarted { break }
+                guard let self = self else { break }
+                let pollIntervalNs: UInt64 = (self.hasPlaybackStarted && !(self.sessionController?.isBuffering ?? false))
+                    ? 1_500_000_000 // 1.5s while playing smoothly
+                    : 350_000_000   // 350ms while buffering/starting
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+                guard !Task.isCancelled else { break }
                 let stats = await StremioServerManager.shared.fetchTorrentStats(infoHash: hash, fileIdx: targetFileIdx)
                 guard !Task.isCancelled else { break }
                 if let stats {
@@ -2039,8 +2195,8 @@ class PlayerManager: ObservableObject {
                     }
                     if let downloaded = stats.downloaded, downloaded > 0 {
                         self.lastTelemetryProgressTime = Date()
-                        // Initial startup buffer fill target (~12.5MB for smooth first frame delivery)
-                        let bytesProgress = min(0.90, Double(downloaded) / 12_500_000.0)
+                        // Initial/mid-stream buffer fill target (~12.5MB for smooth frame delivery)
+                        let bytesProgress = min(0.95, Double(downloaded) / 12_500_000.0)
                         calculatedProgress = max(calculatedProgress, bytesProgress)
                     } else if let unchoked = stats.unchoked, unchoked > 0 {
                         calculatedProgress = max(calculatedProgress, 0.05)
@@ -2059,8 +2215,6 @@ class PlayerManager: ObservableObject {
 
     func markPlaybackStarted() {
         hasPlaybackStarted = true
-        torrentStatsPollTask?.cancel()
-        torrentStatsPollTask = nil
         startupWatchdogTask?.cancel()
         startupWatchdogTask = nil
         print("[PlayerManager] ▶️ Playback confirmed started — canceled startup watchdog.")
@@ -2399,6 +2553,9 @@ class PlayerManager: ObservableObject {
             self.cancelDetailPrefetch()
             self.fetchAndRaceTask?.cancel()
             self.fetchAndRaceTask = nil
+            self.torrentStatsPollTask?.cancel()
+            self.torrentStatsPollTask = nil
+            self.torrentStreamProgress = 0.0
             // When closing the player, MPV stops reading from the stream, naturally
             // pausing downloads in FluxEngine while preserving verified cache on disk.
             self.currentItem = nil
@@ -2681,12 +2838,20 @@ class PlayerManager: ObservableObject {
                let matchingSeasonPackStream = streams.first(where: { linked.matches($0) }) {
                 print("[PlayerManager] ⚡ Smart preloading linked directly to active season pack (\(matchingSeasonPackStream.isTorrent ? "P2P" : "HTTP")): \(matchingSeasonPackStream.cleanTitle) (fileIdx: \(matchingSeasonPackStream.fileIdx ?? 0))")
                 if matchingSeasonPackStream.isTorrent, let packHash = linked.infoHash {
+                    var packStream = matchingSeasonPackStream
+                    let resolution = await self.resolveTorrentStream(
+                        matchingSeasonPackStream,
+                        targetSeason: next.season,
+                        targetEpisode: next.episode
+                    )
+                    if let fIdx = resolution.resolvedFileIdx {
+                        packStream.fileIdx = fIdx
+                    }
                     StremioServerManager.shared.trackCreate(
                         infoHash: packHash,
-                        magnetURL: matchingSeasonPackStream.url.absoluteString,
-                        fileIdx: matchingSeasonPackStream.fileIdx ?? 0
+                        magnetURL: packStream.url.absoluteString,
+                        fileIdx: packStream.fileIdx ?? 0
                     )
-                    _ = await self.resolveTorrentStream(matchingSeasonPackStream)
                 }
 
                 let subs = await subsTask
@@ -2722,14 +2887,22 @@ class PlayerManager: ObservableObject {
             guard let winner = bestNext else { return }
 
             // Pre-warm the next episode source (AIOStreams style)
+            var primedWinner = winner
             if winner.isTorrent {
                 if let hash = self.torrentHash(winner) {
+                    let resolution = await self.resolveTorrentStream(
+                        winner,
+                        targetSeason: next.season,
+                        targetEpisode: next.episode
+                    )
+                    if let fIdx = resolution.resolvedFileIdx {
+                        primedWinner.fileIdx = fIdx
+                    }
                     StremioServerManager.shared.trackCreate(
                         infoHash: hash,
-                        magnetURL: winner.url.absoluteString,
-                        fileIdx: winner.fileIdx ?? 0
+                        magnetURL: primedWinner.url.absoluteString,
+                        fileIdx: primedWinner.fileIdx ?? 0
                     )
-                    _ = await self.resolveTorrentStream(winner)
                 }
             } else {
                 Self.warmHTTP(url: self.getPlayableURL(for: winner))
@@ -2737,11 +2910,11 @@ class PlayerManager: ObservableObject {
 
             let subs = await subsTask
             await MainActor.run {
-                self.prefetchedNextStream = winner
+                self.prefetchedNextStream = primedWinner
                 self.prefetchedNextSubtitles = subs
                 self.prefetchedNextKey = nextKey
                 self.prefetchedNextAt = Date()
-                print("[PlayerManager] ⚡ Next Episode preloaded & primed: \(winner.cleanTitle)")
+                print("[PlayerManager] ⚡ Next Episode preloaded & primed: \(primedWinner.cleanTitle)")
             }
         }
     }

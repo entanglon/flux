@@ -808,6 +808,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy All Direct Streams",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.",
+            "Streaming server unavailable": "Streaming server unavailable",
+            "Source swarm did not respond": "Source swarm did not respond",
+            "Invalid torrent source": "Invalid torrent source",
+            "P2P Streaming Engine": "P2P Streaming Engine",
+            "Embedded Go (FluxEngine)": "Embedded Go (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Official Stremio Engine (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Selects the underlying P2P BitTorrent streaming core.",
         ],
 
         // 🇯🇵 Japanese
@@ -1459,6 +1466,13 @@ public struct L10n {
             "Proxy All Direct Streams": "すべてのDirectストリームをプロキシ経由にする",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "有効にすると、すべての外部Directメディアストリームがプロキシを経由します。P2Pやメタデータは常に直接接続されます。",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2Pストリーム、ローカルエンジン（127.0.0.1）、TMDBメタデータ、Cinemeta、アカウント同期は一切プロキシを経由しません。",
+            "Streaming server unavailable": "ストリーミングサーバーを利用できません",
+            "Source swarm did not respond": "シード群（スウォーム）から応答がありません",
+            "Invalid torrent source": "無効なトレントソースです",
+            "P2P Streaming Engine": "P2Pストリーミングエンジン",
+            "Embedded Go (FluxEngine)": "組み込みGo（FluxEngine）",
+            "Official Stremio Engine (Node.js)": "公式Stremioエンジン（Node.js）",
+            "Selects the underlying P2P BitTorrent streaming core.": "基礎となるP2P BitTorrentストリーミングコアを選択します。",
         ],
 
         // 🇪🇸 Spanish
@@ -2110,6 +2124,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy para todas las transmisiones Directas",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "Cuando está habilitado, todas las transmisiones multimedia Directas externas pasan por el proxy. P2P y metadatos siempre se conectan directamente.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "Los streams P2P, el motor local (127.0.0.1), metadatos de TMDB, catálogos de Cinemeta y la sincronización NUNCA pasan por el proxy.",
+            "Streaming server unavailable": "Servidor de streaming no disponible",
+            "Source swarm did not respond": "El enjambre de origen no respondió",
+            "Invalid torrent source": "Fuente de torrent no válida",
+            "P2P Streaming Engine": "Motor de streaming P2P",
+            "Embedded Go (FluxEngine)": "Go integrado (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Motor oficial Stremio (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Selecciona el núcleo de streaming BitTorrent P2P subyacente.",
         ],
 
         // 🇫🇷 French
@@ -2761,6 +2782,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy pour tous les flux Directs",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "Lorsqu'il est activé, tous les flux multimédias Directs externes passent par le proxy. Le P2P et les métadonnées passent toujours en direct.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "Les flux P2P, le moteur local (127.0.0.1), les métadonnées TMDB, Cinemeta et la synchronisation ne passent JAMAIS par le proxy.",
+            "Streaming server unavailable": "Serveur de streaming indisponible",
+            "Source swarm did not respond": "L'essaim source n'a pas répondu",
+            "Invalid torrent source": "Source torrent non valide",
+            "P2P Streaming Engine": "Moteur de streaming P2P",
+            "Embedded Go (FluxEngine)": "Go intégré (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Moteur officiel Stremio (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Sélectionne le moteur de streaming BitTorrent P2P sous-jacent.",
         ],
 
         // 🇩🇪 German
@@ -3412,6 +3440,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy für alle Direct-Streams",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "Wenn aktiviert, werden alle externen Direct-Medienstreams über den Proxy geleitet. P2P und Metadaten werden immer direkt übertragen.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2P-Streams, die lokale Streaming-Engine (127.0.0.1), TMDB-Metadaten, Cinemeta und Account-Sync werden NIEMALS über den Proxy geleitet.",
+            "Streaming server unavailable": "Streaming-Server nicht verfügbar",
+            "Source swarm did not respond": "Quell-Swarm hat nicht geantwortet",
+            "Invalid torrent source": "Ungültige Torrent-Quelle",
+            "P2P Streaming Engine": "P2P-Streaming-Engine",
+            "Embedded Go (FluxEngine)": "Eingebettetes Go (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Offizielle Stremio-Engine (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Wählt den zugrunde liegenden P2P-BitTorrent-Streaming-Kern aus.",
         ],
 
         // 🇮🇹 Italian
@@ -4063,6 +4098,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy per tutti i flussi Direct",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "Quando abilitato, tutti i flussi multimediali Direct esterni vengono instradati tramite il proxy. Il P2P e i metadati viaggiano sempre direttamente.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "Stream P2P, motore locale (127.0.0.1), metadati TMDB, cataloghi Cinemeta e sincronizzazione NON vengono MAI instradati tramite il proxy.",
+            "Streaming server unavailable": "Server di streaming non disponibile",
+            "Source swarm did not respond": "Lo swarm di origine non ha risposto",
+            "Invalid torrent source": "Sorgente torrent non valida",
+            "P2P Streaming Engine": "Motore di streaming P2P",
+            "Embedded Go (FluxEngine)": "Go integrato (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Motore ufficiale Stremio (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Seleziona il core di streaming BitTorrent P2P sottostante.",
         ],
 
         // 🇧🇷 Portuguese
@@ -4714,6 +4756,13 @@ public struct L10n {
             "Proxy All Direct Streams": "Proxy para todas as transmissões Diretas",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "Quando ativado, todas as transmissões de mídia Diretas externas passam pelo proxy. P2P e metadados sempre passam diretamente.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "Transmissões P2P, motor local (127.0.0.1), metadados TMDB, Cinemeta e sincronização de conta NUNCA passam pelo proxy sob nenhuma circunstância.",
+            "Streaming server unavailable": "Servidor de streaming indisponível",
+            "Source swarm did not respond": "O swarm de origem não respondeu",
+            "Invalid torrent source": "Fonte de torrent inválida",
+            "P2P Streaming Engine": "Motor de streaming P2P",
+            "Embedded Go (FluxEngine)": "Go integrado (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "Motor oficial Stremio (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "Seleciona o núcleo de streaming BitTorrent P2P subjacente.",
         ],
 
         // 🇰🇷 Korean
@@ -5365,6 +5414,13 @@ public struct L10n {
             "Proxy All Direct Streams": "모든 Direct 스트림 프록시 사용",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "활성화하면 모든 외부 Direct 미디어 스트림이 프록시를 통해 라우팅됩니다. P2P와 메타데이터는 항상 직접 라우팅됩니다.",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2P 스트림, 로컬 엔진(127.0.0.1), TMDB 메타데이터, Cinemeta 및 계정 동기화는 어떤 경우에도 프록시를 거치지 않습니다.",
+            "Streaming server unavailable": "스트리밍 서버를 사용할 수 없습니다",
+            "Source swarm did not respond": "소스 피어 스웜이 응답하지 않았습니다",
+            "Invalid torrent source": "유효하지 않은 토렌트 소스입니다",
+            "P2P Streaming Engine": "P2P 스트리밍 엔진",
+            "Embedded Go (FluxEngine)": "임베디드 Go (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "공식 Stremio 엔진 (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "기본 P2P BitTorrent 스트리밍 코어를 선택합니다.",
         ],
 
         // 🇮🇳 Hindi
@@ -6016,6 +6072,13 @@ public struct L10n {
             "Proxy All Direct Streams": "सभी Direct स्ट्रीम को प्रॉक्सी करें",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "सक्षम होने पर, सभी बाहरी Direct मीडिया स्ट्रीम प्रॉक्सी के माध्यम से रूट किए जाते हैं। P2P और मेटाडेटा हमेशा सीधे रूट होते हैं।",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2P स्ट्रीम, स्थानीय इंजन (127.0.0.1), TMDB मेटाडेटा, Cinemeta और खाता सिंक किसी भी परिस्थिति में प्रॉक्सी से रूट नहीं होते हैं।",
+            "Streaming server unavailable": "स्ट्रीमिंग सर्वर अनुपलब्ध है",
+            "Source swarm did not respond": "स्रोत स्वार्म ने उत्तर नहीं दिया",
+            "Invalid torrent source": "अमान्य टोरेंट स्रोत",
+            "P2P Streaming Engine": "P2P स्ट्रीमिंग इंजन",
+            "Embedded Go (FluxEngine)": "एंबेडेड Go (FluxEngine)",
+            "Official Stremio Engine (Node.js)": "आधिकारिक Stremio इंजन (Node.js)",
+            "Selects the underlying P2P BitTorrent streaming core.": "अंतर्निहित P2P BitTorrent स्ट्रीमिंग कोर का चयन करता है।",
         ],
 
         // 🇨🇳 Chinese (Simplified)
@@ -6667,6 +6730,13 @@ public struct L10n {
             "Proxy All Direct Streams": "为所有 Direct 流启用代理",
             "When enabled, all external Direct media streams are routed through the proxy. P2P and metadata always route directly.": "启用后，所有外部 Direct 媒体流都会通过代理路由。P2P 和元数据始终直接连接。",
             "P2P streams, local streaming engine (127.0.0.1), TMDB metadata, Cinemeta catalogs, and account sync are NEVER routed through the proxy under any circumstances.": "P2P 流、本地引擎（127.0.0.1）、TMDB 元数据、Cinemeta 和账户同步在任何情况下都不会通过代理路由。",
+            "Streaming server unavailable": "流式传输服务器不可用",
+            "Source swarm did not respond": "源蜂群（Swarm）未响应",
+            "Invalid torrent source": "无效的种子源",
+            "P2P Streaming Engine": "P2P流式传输引擎",
+            "Embedded Go (FluxEngine)": "内置Go（FluxEngine）",
+            "Official Stremio Engine (Node.js)": "官方Stremio引擎（Node.js）",
+            "Selects the underlying P2P BitTorrent streaming core.": "选择底层的P2P BitTorrent流式传输核心。",
         ]
     ]
 }
