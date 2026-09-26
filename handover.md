@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 26, 2026 (2:50 PM IST)  
+**Updated**: September 26, 2026 (2:55 PM IST)  
 **Latest Git State**: 240/240 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -575,3 +575,24 @@ When continuing work in Antigravity:
 1. **Localization**: Maintain zero hardcoded strings. Every user-visible string must use `.localized` and have 10-language translations in `flux/Services/LanguageManager.swift`.
 2. **Push Back on User Requests**: Evaluate trade-offs, warn about regressions, and confirm architectural decisions before proceeding.
 3. **Keep `handover.md` Updated**: After finishing any major feature or session, update this document and commit changes.
+
+---
+
+## 8. Immediate Focus & Known Issues for Next Session
+
+### Issue 18: Player Behavioral Malfunctions & App-Wide Performance Degradation [ACTIVE]
+- **Symptom**: User reported that while streaming/playback works via the official Stremio engine, the player itself is not functioning properly (controls, lifecycle, or state behavior) and the overall app performance is degraded.
+- **Investigative Vectors & Priority Fixes for Next Session**:
+  1. **`isClosingPlayer` / State Latching on Player Re-Use**:
+     - In `flux/Views/PlayerView.swift`, `@State private var isClosingPlayer = false` was introduced to guard teardowns. If SwiftUI reuses the player window or view instance without full destruction, `isClosingPlayer` latches permanently to `true`.
+     - When latched, subsequent attempts to exit via `closePlayer()` fail at `guard !isClosingPlayer else { return }`, key monitors remain stopped, and watch progress is not saved.
+     - *Fix to verify*: Reset `isClosingPlayer = false` in `PlayerView.onAppear` and inside `.onChange(of: activeItem?.id)`.
+  2. **`PlayerWindowContainer` Window Lifecycle vs. State Isolation**:
+     - `PlayerWindowContainer` in `flux/fluxApp.swift` caches `@State private var retainedItem: MediaItem?` to prevent the `FocusStoreList` crash when `currentItem = nil` was set.
+     - However, retaining the item across sessions might prevent `PlayerView` from cleanly re-initializing its `@StateObject private var mpv = MPVController()` and internal controllers when switching titles or re-opening the window.
+     - *Fix to verify*: Provide an explicit identity key such as `.id(item.id)` on `PlayerView` so that a new `PlayerView` instance is cleanly mounted per item, while keeping `currentItem = nil` guarded until after window deallocation.
+  3. **Main-Thread Hitching & Background Resource Contention**:
+     - Check if background tasks in `PlayerView` (e.g. `loadingTimer = Timer.publish(every: 0.5, ...)`, freeze watchdogs, or `startTorrentStatsPolling`) continue running when the player window is closed or hidden.
+     - Audit `MPVVideoView` OpenGL teardown (`dismantleNSViewController`) to ensure `CAOpenGLLayer` and `mpv_handle` contexts release resources without lingering memory or GPU pipeline contention.
+     - Inspect `StremioServerManager` disk cache evictions (`evictCacheIfNeeded`) to ensure filesystem operations are debounced and never contend with UI responsiveness.
+
