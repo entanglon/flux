@@ -26,18 +26,14 @@ final class AudioOutputRouteMonitor {
     }
 
     func start() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            guard !self.started else { return }
-            self.started = true
-            var addr = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain)
-            AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &addr, audioRouteListener, nil)
-        }
+        lock.lock(); defer { lock.unlock() }
+        guard !started else { return }
+        started = true
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &addr, audioRouteListener, nil)
     }
 }
 
@@ -52,31 +48,21 @@ struct MPVVideoView: NSViewControllerRepresentable {
     
     func makeNSViewController(context: Context) -> MPVViewController {
         let vc: MPVViewController
-        if let existing = controller.playerView, existing.isViewLoaded, existing.playerView.mpv != nil {
+        if let existing = controller.playerView {
             // Adopted warm core from the detail-page prefetch — already paired
-            // with its controller and buffering the stream. A stale VC whose
-            // core was torn down (window closed / PiP expanded) is NOT adopted:
-            // it would mount black with controller state claiming media loaded.
-            print("[MPVView] makeNSViewController: ADOPTING existing live core (view: \(existing.playerView))")
+            // with its controller and buffering the stream.
             vc = existing
         } else {
-            print("[MPVView] makeNSViewController: building FRESH core (had: \(controller.playerView != nil ? "dead/unloaded VC" : "nil"))")
             vc = MPVViewController()
-            vc.delegate = controller
-            _ = vc.view // Force loadView + viewDidLoad with delegate wired
             controller.playerView = vc
+            vc.delegate = controller
         }
         context.coordinator.player = vc // Link controller to view
-        controller.flushPendingPlay(into: vc)
         return vc
     }
     
     func updateNSViewController(_ nsViewController: MPVViewController, context: Context) {
-        if nsViewController.delegate !== controller {
-            nsViewController.delegate = controller
-            controller.playerView = nsViewController
-            controller.flushPendingPlay(into: nsViewController)
-        }
+        // Updates handled via controller
     }
     
     static func dismantleNSViewController(_ nsViewController: MPVViewController, coordinator: Coordinator) {
@@ -342,53 +328,12 @@ class MPVController: ObservableObject {
     /// via onChange — a closure would capture a stale View struct.
     @Published private(set) var endOfFileCount = 0
     func registerEndOfFile() { endOfFileCount += 1 }
-    var isCoreAlive: Bool {
-        playerView?.playerView?.mpv != nil
-    }
-
-    weak var playerView: MPVViewController? {
-        didSet {
-            if let pv = playerView {
-                flushPendingPlay(into: pv)
-            }
-        }
-    }
-    fileprivate var pendingPlayURL: URL?
-    fileprivate var pendingPaused: Bool = false
+    weak var playerView: MPVViewController?
     private var hasAutoSelectedAudio = false
     private var hasAutoSelectedSubtitles = false
-
-    func flushPendingPlay(into pv: MPVViewController) {
-        guard let url = pendingPlayURL else { return }
-        let paused = pendingPaused
-        pendingPlayURL = nil
-        pendingPaused = false
-        pv.loadViewIfNeeded()
-        print("[MPVController] playerView attached! Loading queued stream: \(url.lastPathComponent) (paused: \(paused))")
-        if paused {
-            pv.setMute(true)
-            pv.play(url, paused: true)
-        } else {
-            pv.setMute(false)
-            pv.play(url, paused: false)
-        }
-    }
-
-    func handleCoreDestroyed() {
-        print("[MPVController] Underlying mpv core destroyed — resetting media state")
-        self.hasLoadedMedia = false
-        self.loadedURL = nil
-        self.pendingPlayURL = nil
-        self.pendingPaused = false
-        self.isPlaying = false
-        self.timePos = 0.0
-        self.duration = 0.0
-        self.progress = 0.0
-        self.isBuffering = false
-    }
     
     func preparePaused(url: URL) {
-        if hasLoadedMedia, loadedURL == url, playerView != nil, isCoreAlive {
+        if hasLoadedMedia, loadedURL == url {
             print("[MPVController] Skipping duplicate preparePaused for \(url.lastPathComponent)")
             return
         }
@@ -398,18 +343,14 @@ class MPVController: ObservableObject {
         self.loadedURL = url
         self.hasAutoSelectedAudio = false
         self.hasAutoSelectedSubtitles = false
-        guard let pv = playerView else {
-            print("[MPVController] playerView not attached yet — queuing pendingPlayURL (paused) for \(url.lastPathComponent)")
-            pendingPlayURL = url
-            pendingPaused = true
-            return
-        }
-        flushPendingPlay(into: pv)
+        playerView?.setMute(true)
+        playerView?.play(url, paused: true)
     }
 
     func play(url: URL) {
-        // Same media already loading/loaded on this controller and playerView is actively holding a live core
-        if hasLoadedMedia, loadedURL == url, playerView != nil, isCoreAlive {
+        // Same media already loading/loaded on this controller (warm-core
+        // adoption races finishSelect) — reloading would discard the buffer.
+        if hasLoadedMedia, loadedURL == url {
             print("[MPVController] Skipping duplicate loadfile for \(url.lastPathComponent)")
             if isUserPaused {
                 play()
@@ -422,6 +363,7 @@ class MPVController: ObservableObject {
         self.hasAutoSelectedAudio = false
         self.hasAutoSelectedSubtitles = false
         resetVolumeBoostIfNeeded()
+        playerView?.setMute(false)
         // IINA-parity auto-pause: output device vanishing mid-playback pauses.
         AudioOutputRouteMonitor.shared.start()
         AudioOutputRouteMonitor.shared.onRouteChanged = { [weak self] in
@@ -431,15 +373,7 @@ class MPVController: ObservableObject {
                 self.pause()
             }
         }
-        guard let pv = playerView else {
-            print("[MPVController] playerView not attached yet — queuing pendingPlayURL for \(url.lastPathComponent)")
-            pendingPlayURL = url
-            pendingPaused = false
-            return
-        }
-        pendingPlayURL = url
-        pendingPaused = false
-        flushPendingPlay(into: pv)
+        playerView?.play(url, paused: false)
     }
 
     func play() {
@@ -457,8 +391,6 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = false
         self.loadedURL = nil
-        self.pendingPlayURL = nil
-        self.pendingPaused = false
         self.timePos = 0.0
         self.duration = 0.0
         self.progress = 0.0
@@ -960,11 +892,6 @@ class MPVViewController: NSViewController {
         super.viewDidLoad()
         self.playerView.setupContext()
         self.playerView.setupMpv()
-        print("[MPVView] viewDidLoad: mpv core \(self.playerView.mpv != nil ? "CREATED" : "FAILED TO CREATE")")
-        
-        self.playerView.onCoreDestroyed = { [weak self] in
-            self?.delegate?.handleCoreDestroyed()
-        }
         
         self.playerView.onPropertyChange = { [weak self] name, value in
             self?.delegate?.handlePropertyChange(name: name, value: value)
@@ -997,97 +924,31 @@ class MPVViewController: NSViewController {
         }
     }
     
-    func play(_ url: URL, paused: Bool = false) { 
-        loadViewIfNeeded()
-        playerView?.loadFile(url, paused: paused) 
-    }
-    func pause() { 
-        loadViewIfNeeded()
-        playerView?.setPause(true) 
-    }
-    func resume() { 
-        loadViewIfNeeded()
-        playerView?.setPause(false) 
-    }
-    func setMute(_ muted: Bool) { 
-        loadViewIfNeeded()
-        playerView?.setMute(muted) 
-    }
-    func stop() { 
-        loadViewIfNeeded()
-        playerView?.stop() 
-    }
+    func play(_ url: URL, paused: Bool = false) { playerView.loadFile(url, paused: paused) }
+    func pause() { playerView.setPause(true) }
+    func resume() { playerView.setPause(false) }
+    func setMute(_ muted: Bool) { playerView.setMute(muted) }
+    func stop() { playerView.stop() }
     
-    func seek(absolute seconds: Double) { 
-        loadViewIfNeeded()
-        playerView?.seek(absoluteSeconds: seconds) 
-    }
-    func seek(relative seconds: Double) { 
-        loadViewIfNeeded()
-        playerView?.seek(relativeSeconds: seconds) 
-    }
+    func seek(absolute seconds: Double) { playerView.seek(absoluteSeconds: seconds) }
+    func seek(relative seconds: Double) { playerView.seek(relativeSeconds: seconds) }
     
-    func setVolume(_ value: Double) { 
-        loadViewIfNeeded()
-        playerView?.setVolume(value) 
-    }
-    func getTracks() -> [Track] { 
-        loadViewIfNeeded()
-        return playerView?.getTracks() ?? [] 
-    }
-    func getChapters() -> [MediaChapter] { 
-        loadViewIfNeeded()
-        return playerView?.getChapters() ?? [] 
-    }
-    func selectTrack(_ track: Track) { 
-        loadViewIfNeeded()
-        playerView?.selectTrack(track) 
-    }
-    func addExternalSubtitle(url: String, title: String, lang: String? = nil) { 
-        loadViewIfNeeded()
-        playerView?.addExternalSubtitle(url: url, title: title, lang: lang) 
-    }
+    func setVolume(_ value: Double) { playerView.setVolume(value) }
+    func getTracks() -> [Track] { return playerView.getTracks() }
+    func getChapters() -> [MediaChapter] { return playerView.getChapters() }
+    func selectTrack(_ track: Track) { playerView.selectTrack(track) }
+    func addExternalSubtitle(url: String, title: String, lang: String? = nil) { playerView.addExternalSubtitle(url: url, title: title, lang: lang) }
 
-    func setSubtitleDelay(_ delay: Double) { 
-        loadViewIfNeeded()
-        playerView?.setSubtitleDelay(delay) 
-    }
-    func setSubtitleScale(_ scale: Double) { 
-        loadViewIfNeeded()
-        playerView?.setSubtitleScale(scale) 
-    }
-    func setSubtitlePos(_ pos: Double) { 
-        loadViewIfNeeded()
-        playerView?.setSubtitlePos(pos) 
-    }
-    func setAudioDelay(_ delay: Double) { 
-        loadViewIfNeeded()
-        playerView?.setAudioDelay(delay) 
-    }
-    func setDialogueBoost(_ enabled: Bool) { 
-        loadViewIfNeeded()
-        playerView?.setDialogueBoost(enabled) 
-    }
-    func setVideoAspect(_ aspect: String) { 
-        loadViewIfNeeded()
-        playerView?.setVideoAspect(aspect) 
-    }
-    func setDeband(_ enabled: Bool) { 
-        loadViewIfNeeded()
-        playerView?.setDeband(enabled) 
-    }
-    func setContrast(_ value: Double) { 
-        loadViewIfNeeded()
-        playerView?.setContrast(value) 
-    }
-    func setBrightness(_ value: Double) { 
-        loadViewIfNeeded()
-        playerView?.setBrightness(value) 
-    }
-    func setSaturation(_ value: Double) { 
-        loadViewIfNeeded()
-        playerView?.setSaturation(value) 
-    }
+    func setSubtitleDelay(_ delay: Double) { playerView?.setSubtitleDelay(delay) }
+    func setSubtitleScale(_ scale: Double) { playerView?.setSubtitleScale(scale) }
+    func setSubtitlePos(_ pos: Double) { playerView?.setSubtitlePos(pos) }
+    func setAudioDelay(_ delay: Double) { playerView?.setAudioDelay(delay) }
+    func setDialogueBoost(_ enabled: Bool) { playerView?.setDialogueBoost(enabled) }
+    func setVideoAspect(_ aspect: String) { playerView?.setVideoAspect(aspect) }
+    func setDeband(_ enabled: Bool) { playerView?.setDeband(enabled) }
+    func setContrast(_ value: Double) { playerView?.setContrast(value) }
+    func setBrightness(_ value: Double) { playerView?.setBrightness(value) }
+    func setSaturation(_ value: Double) { playerView?.setSaturation(value) }
 
     /// Pixel aspect of the loaded video (for PiP window sizing). Falls back to 16:9.
     var videoAspectRatio: Double { playerView?.videoAspectRatio ?? 16.0 / 9.0 }
@@ -1096,18 +957,7 @@ class MPVViewController: NSViewController {
 // MARK: - OpenGL View & MPV Backend
 // MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
 final class MPVLayer: CAOpenGLLayer {
-    /// Set (and left set) by MPVLayerView.attachMpvLayer() on the main thread.
-    /// CAOpenGLLayer requires the layer and view to share ONE pixel format and
-    /// ONE context for their entire lifetime — recreating either invalidates
-    /// the mpv render context (black video, audio keeps playing). All three
-    /// copyCGL* overrides therefore answer from this view-owned cache and the
-    /// view's contextReboundIfNeeded() rebinds mpvGL after any layer→view
-    /// re-attachment that swaps the underlying CGL context.
-    var ownerView: MPVLayerView? {
-        get { _ownerView }
-        set { _ownerView = newValue; newValue?.attachMpvLayer(self) }
-    }
-    private weak var _ownerView: MPVLayerView?
+    weak var ownerView: MPVLayerView?
     
     override init() {
         super.init()
@@ -1128,18 +978,6 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
-        if let pix = ownerView?.cglPixelFormat {
-            CGLRetainPixelFormat(pix)
-            return pix
-        }
-        let fresh = copyCGLPixelFormatBase(forDisplayMask: mask)
-        print("[MPV] ⚠️ copyCGLPixelFormat missed pin cache (owner: \(String(describing: ownerView))) → fresh \(fresh)")
-        return fresh
-    }
-    
-    /// The one-shot format construction (EDR/float16 detection per display).
-    /// Also used by MPVLayerView.attachMpvLayer to pin the format at bind time.
-    func copyCGLPixelFormatBase(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
         // Evaluate hardware reference EDR capability for the target display mask.
         // We check `maximumReferenceExtendedDynamicRangeColorComponentValue`,
         // which is > 1.0 strictly on true HDR/XDR panels (MacBook Pro Liquid Retina XDR, Pro Display XDR).
@@ -1179,54 +1017,30 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func copyCGLContext(forPixelFormat pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
-        if let ctx = ownerView?.cglContext {
-            CGLRetainContext(ctx)
-            return ctx
-        }
         var ctx: CGLContextObj?
         CGLCreateContext(pixelFormat, nil, &ctx)
-        print("[MPV] ⚠️ copyCGLContext missed pin cache → fresh \(String(describing: ctx))")
         return ctx!
     }
     
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
-        guard let owner = ownerView, !owner.isCleaningUp, owner.canDrawIfMpvAlive else { return false }
-        let alive = owner.mpv != nil
-        if alive && !owner.didLogFirstCanDraw {
-            owner.didLogFirstCanDraw = true
-            print("[MPV] canDraw first TRUE (draw ctx: \(ctx), pinned: \(String(describing: owner.cglContext)))")
-        }
-        return alive
+        return ownerView?.mpv != nil
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
-        guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil else {
-            return
-        }
         CGLSetCurrentContext(ctx)
         CGLLockContext(ctx)
         defer { CGLUnlockContext(ctx) }
         
-        guard !owner.isCleaningUp, owner.mpv != nil else {
+        guard let owner = ownerView, owner.mpv != nil else {
             glFlush()
             return
         }
-        
-        if !owner.didLogFirstDraw {
-            owner.didLogFirstDraw = true
-            print("[MPV] first draw (draw ctx: \(ctx), pinned: \(String(describing: owner.cglContext)), size: \(bounds.size))")
-        }
-        
-        // Defense-in-depth: if CA is drawing into a different CGL context than
-        // the pinned one (layer/window churn), rebind mpvGL to the live context
-        // instead of rendering into a stale one (black video, audio playing).
-        owner.contextReboundIfNeeded(to: ctx)
         
         if owner.mpvGL == nil {
             owner.setupMPVGL(with: ctx)
         }
         
-        guard !owner.isCleaningUp, let mpvGL = owner.mpvGL else {
+        guard let mpvGL = owner.mpvGL else {
             glFlush()
             return
         }
@@ -1281,8 +1095,8 @@ final class MPVLayer: CAOpenGLLayer {
 final class MPVLayerView: NSView {
     private(set) var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
-    private(set) var cglContext: CGLContextObj?
-    private(set) var cglPixelFormat: CGLPixelFormatObj?
+    private var pendingURL: URL?
+    private var pendingPaused: Bool = false
     private var displayLink: CVDisplayLink?
     let mpvLayer = MPVLayer()
     
@@ -1293,12 +1107,11 @@ final class MPVLayerView: NSView {
     /// emit STOP/REDIRECT reasons instead, so autoplay must only listen here.
     var onEndOfFile: (() -> Void)?
     var onFileLoaded: (() -> Void)?
-    var onCoreDestroyed: (() -> Void)?
     private var isEventLoopRunning = false
     private let eventLoopLock = NSLock()
     /// Last forwarded mpv log line (consecutive-dedupe key for diagnostics).
     private var lastForwardedMPVLog = ""
-    private(set) var isCleaningUp = false
+    private var isCleaningUp = false
     private var lastTimePosDispatchTime: Double = 0
     private var lastTelemetryLogTime: Double = 0
     /// Token into MPVCallbackRegistry so mpv's C callbacks never hold a raw,
@@ -1310,50 +1123,12 @@ final class MPVLayerView: NSView {
     private let renderUpdateLock = NSLock()
     private var reconnectTimestamps: [CFAbsoluteTime] = []
     private let reconnectLock = NSLock()
-    /// One-shot diagnostics for the render pipeline bring-up (replay regressions).
-    fileprivate var didLogFirstCanDraw = false
-    fileprivate var didLogFirstDraw = false
     
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
         mpvLayer.ownerView = self
-        attachMpvLayer(mpvLayer)
-    }
-    
-    /// Pins ONE CGL pixel format for this view's entire lifetime, the moment
-    /// the backing layer is bound (before CA ever asks). CAOpenGLLayer must
-    /// never change pixel format or context mid-life: when a player window is
-    /// closed and a new one opened for a replay, CA re-queries copyCGL*
-    /// during re-compositing; without this pin it created a brand-new CGL
-    /// context while the mpv render context stayed attached to the old one —
-    /// frames rendered into a void → black video with audio still playing.
-    func attachMpvLayer(_ layer: MPVLayer) {
-        guard cglPixelFormat == nil else { return }
-        // Derive the display mask from the layer's current screen (falls back
-        // like copyCGLPixelFormat did) so HDR/EDR attributes match the panel.
-        // During init the view has no window yet; NSScreen.main's format is
-        // virtualized and works on any attached display.
-        let screen = window?.screen ?? NSScreen.main
-        var mask: UInt32 = 1
-        if let num = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value {
-            mask = CGDisplayIDToOpenGLDisplayMask(num)
-        }
-        let pix = layer.copyCGLPixelFormatBase(forDisplayMask: mask)
-        cglPixelFormat = pix
-        CGLRetainPixelFormat(pix)
-        var ctx: CGLContextObj?
-        CGLCreateContext(pix, nil, &ctx)
-        guard let created = ctx else {
-            print("[MPV] Failed to create pinned CGL context — falling back to layer-managed context")
-            cglPixelFormat = nil
-            CGLReleasePixelFormat(pix)
-            return
-        }
-        cglContext = created
-        CGLRetainContext(created)
-        print("[MPV] Pinned CGL pixel format \(pix) + context \(created) for view lifetime")
     }
     
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
@@ -1392,7 +1167,6 @@ final class MPVLayerView: NSView {
             lastPipelineKey = ""
             applyColorPipeline()
         }
-        mpvLayer.setNeedsDisplay()
     }
     
     func setupDisplayLink() {
@@ -1502,34 +1276,10 @@ final class MPVLayerView: NSView {
         // Handled via mpvGLUpdate callback
     }
     
-    /// Renders only while a live mpv core exists on this view.
-    var canDrawIfMpvAlive: Bool = true
-    
-    /// Called from MPVLayer.draw on the CA render thread with the context CA
-    /// is actually about to draw into. If that context differs from the one
-    /// the mpv render context was created with (window/layer churn across
-    /// replay sessions), the old mpvGL is freed and a new one is created
-    /// against the live context — self-healing black-video-on-replay.
-    func contextReboundIfNeeded(to ctx: CGLContextObj) {
-        if cglContext != ctx, mpvGL != nil, mpv != nil {
-            print("[MPV] GL context rebound detected (\(String(describing: cglContext)) → \(ctx)) — rebuilding mpv render context")
-            CGLSetCurrentContext(ctx)
-            let gl = mpvGL
-            mpvGL = nil
-            mpv_render_context_set_update_callback(gl, { _ in }, nil)
-            mpv_render_context_free(gl)
-            setupMPVGL(with: ctx)
-            cglContext = ctx
-            CGLRetainContext(ctx)
-        }
-    }
-    
     func teardown() {
         guard !isCleaningUp else { return }
         isCleaningUp = true
         isIntentionallySwitchingFile = true
-        
-        onCoreDestroyed?()
         
         // Invalidate the callback token first so any in-flight or future mpv
         // callback resolves to nil and no-ops instead of touching a dying view.
@@ -1543,38 +1293,16 @@ final class MPVLayerView: NSView {
             displayLink = nil
         }
         
-        // Stop the CA render thread from entering draw() while the core is
-        // being disassembled (isAsynchronous = true draws off-thread).
-        canDrawIfMpvAlive = false
-        
-        renderUpdateLock.lock()
-        let handle = self.mpv
-        self.mpv = nil
-        renderUpdateLock.unlock()
-        
         if let glCtx = self.mpvGL {
             mpv_render_context_set_update_callback(glCtx, { _ in }, nil)
             mpv_render_context_free(glCtx)
             self.mpvGL = nil
         }
-        if let handle = handle {
+        if let handle = self.mpv {
             mpv_set_wakeup_callback(handle, nil, nil)
+            self.mpv = nil
             DispatchQueue.global(qos: .utility).async {
                 mpv_terminate_destroy(handle)
-            }
-        }
-        
-        // Release the pinned CGL objects on the main thread: the view is being
-        // destroyed, so the format/context must NOT survive for reuse.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if let ctx = self.cglContext {
-                CGLReleaseContext(ctx)
-                self.cglContext = nil
-            }
-            if let pix = self.cglPixelFormat {
-                CGLReleasePixelFormat(pix)
-                self.cglPixelFormat = nil
             }
         }
     }
@@ -1595,7 +1323,7 @@ final class MPVLayerView: NSView {
         
         // Pre-init options — only what's needed
         mpv_set_option_string(mpv, "terminal", "yes")
-        mpv_set_option_string(mpv, "ytdl", "no")
+        mpv_set_option_string(mpv, "ytdl", "yes")
         mpv_set_option_string(mpv, "volume-max", "200")
         mpv_set_option_string(mpv, "network-timeout", "45")
         mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
@@ -1765,6 +1493,27 @@ final class MPVLayerView: NSView {
         
         mpv_render_context_set_update_callback(mpvGL, mpvGLUpdate, UnsafeMutableRawPointer(bitPattern: UInt(callbackToken)))
         setupDisplayLink()
+        
+        if let pending = pendingURL {
+            let urlToLoad = pending
+            let shouldPause = pendingPaused
+            pendingURL = nil
+            pendingPaused = false
+            print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
+            if let mpv = self.mpv {
+                let isLoopback = urlToLoad.host == "127.0.0.1" || urlToLoad.host == "localhost"
+                let selectedStream = PlayerManager.shared.currentSelectedStream
+                let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+                if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) {
+                    print("[MPV] Routing pending stream through forward proxy: \(proxyURL)")
+                    mpv_set_property_string(mpv, "http-proxy", proxyURL)
+                } else {
+                    mpv_set_property_string(mpv, "http-proxy", "")
+                }
+                mpv_set_property_string(mpv, "pause", shouldPause ? "yes" : "no")
+            }
+            command("loadfile", urlToLoad.absoluteString)
+        }
     }
     
     private var isIntentionallySwitchingFile = false
@@ -1776,22 +1525,34 @@ final class MPVLayerView: NSView {
         reconnectTimestamps.removeAll()
         reconnectLock.unlock()
 
-        let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
-        let selectedStream = PlayerManager.shared.currentSelectedStream
-        let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-        let proxyURL = (!isLoopback) ? StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) : nil
-
-        print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self, let mpv = self.mpv else { return }
-            if let proxyURL = proxyURL {
+        // Configure MPV forward proxy property dynamically for scoped direct HTTP streams (strictly bypass loopback)
+        if let mpv = self.mpv {
+            let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
+            let selectedStream = PlayerManager.shared.currentSelectedStream
+            let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+            if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) {
                 print("[MPV] Routing stream through forward proxy: \(proxyURL)")
                 mpv_set_property_string(mpv, "http-proxy", proxyURL)
             } else {
                 mpv_set_property_string(mpv, "http-proxy", "")
             }
             mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
-            self.command("loadfile", url.absoluteString)
+        }
+
+        if mpvGL == nil {
+            print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
+            pendingURL = url
+            pendingPaused = paused
+        } else {
+            pendingURL = nil
+            pendingPaused = false
+            print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.command("loadfile", url.absoluteString)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.isIntentionallySwitchingFile = false
         }
     }
     
@@ -2029,7 +1790,6 @@ final class MPVLayerView: NSView {
                 switch eventId {
                 case MPV_EVENT_START_FILE:
                     print("[MPV EVENT] START_FILE")
-                    self.isIntentionallySwitchingFile = false
                 case MPV_EVENT_END_FILE:
                     let endFile = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self)
                     let reason = endFile.pointee.reason
@@ -2045,7 +1805,6 @@ final class MPVLayerView: NSView {
                     }
                 case MPV_EVENT_FILE_LOADED:
                     print("[MPV EVENT] FILE_LOADED")
-                    self.isIntentionallySwitchingFile = false
                     DispatchQueue.main.async { [weak self] in self?.onFileLoaded?() }
                 case MPV_EVENT_LOG_MESSAGE:
                     let logMsg = event.pointee.data.assumingMemoryBound(to: mpv_event_log_message.self)

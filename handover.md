@@ -1,11 +1,40 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (3:50 PM IST)  
-**Latest Git State**: 242/242 Unit Tests Passing (100%) — ⚠️ Item 38 OPEN: replay regression, see section 38 before touching MPVVideoView.swift  
+**Updated**: September 27, 2026 (8:50 PM IST)  
+**Latest Git State**: 240/240 Unit Tests Passing — **PLAYER RESTORED TO LAST-KNOWN-GOOD BASELINE `f971e1f`**  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
 
 ## 1. Executive Summary for Antigravity Sessions
+---
+
+39. **⚠️ READ THIS FIRST — Full Player Restore To Sep-26 Baseline (`f971e1f`) After Replay-Fix Series Broke Second Play**:
+    - **State as of this restore (2026-09-27 evening)**: Every player file — `MPVVideoView.swift`, `PlayerView.swift`, `PlayerManager.swift`, `PiPManager.swift`, `DetailView.swift`, `fluxApp.swift`, `fluxTests.swift` — has been reset to commit `f971e1f` (Sep 26 evening, 240/240 tests). Build is clean, all 240 tests pass, and the app behaves exactly as it did yesterday: **first play works; replay plays AUDIO ONLY with a blank video surface (the pre-existing, original bug)**. The player window lifecycle is the Sep-26 one (retained `retainedItem` container in `fluxApp.swift`, `window.close()` in `closePlayer()`, no `dismissWindow`).
+    - **Why**: The user's machine was confirmed-good on Sep 26 evening (`f971e1f`) and still-good the morning of Sep 27. The replay-fix series started Sep 27 12:22 PM (`bd7ef31` → `8372718`) and progressively degraded second-play until nothing would play at all (user report 2026-09-27 ~4 PM: "play anything for the first time, it plays, then if we exit the player and try to play anything after that, nothing plays"). Uncommitted Antigravity work on top (`~1,800` diff lines: render-context-ready load deferral, `ensureLiveCore` view/core rebuilds, delegate `didSet` rewiring, dismantle-time `playerView = nil` on the shared controller, ICC/EDR pipeline rewrite, retainedItem removal, instant-replay rework) deepened the breakage and was ALSO still broken per user testing.
+    - **Antigravity's uncommitted work is PRESERVED, not lost**: full diff saved at `scratch/ag-player-session-20260927.patch` (1,771 lines). Salvageable ideas for the CORRECT next attempt are itemized in section 40.
+    - **⚠️ RULES FOR THE NEXT SESSION (do not violate)**:
+      1. **The bug to fix is ONLY: replay (2nd play of any title) renders no video while audio plays.** Do not chase startup crashes, teardown crashes, or fullscreen issues — none are currently reported at this baseline.
+      2. **Make ONE change at a time** to `MPVVideoView.swift`, test replay immediately (play → close → replay), and commit per fix. The all-at-once rewrites are exactly what lost the last 8 hours.
+      3. **DO NOT modify `closePlayer()`, `onDisappear`, `PiPManager`, or `PlayerWindowContainer` (fluxApp.swift) when fixing replay.** The Sep-26 window lifecycle works; the bug is in the RENDER bring-up path of `MPVLayerView`/`MPVLayer`, not in window teardown (evidence: IINA plays the same stream URL instantly; mpv demuxes and plays audio).
+      4. **Read section 34 first, then section 40.** Section 34 documents the replay data flow precisely.
+      5. **Test protocol**: `xcodebuild build` → launch the binary directly so `print()` is captured → repro → read log. See section 38 for capture commands (still valid).
+    - **Root-cause knowledge that survives all rewrites (verified facts)**:
+      - The mpv core demuxes and plays audio on replay — the C core and loadfile are fine.
+      - `MPVLayer.draw(inCGLContext:)` runs on the CA render thread and creates `mpvGL` bound to whatever CGL context CA passes on FIRST draw.
+      - On replay, the freshly created player window + freshly created `MPVLayerView` + `CAOpenGLLayer` is a NEW render surface; the defect is that video frames never composite to it while `mpv_render_context_render` is presumably still being driven (audio advances, time-pos advances).
+      - Any fix must live inside `MPVLayerView`/`MPVLayer` (context/layer/render-context lifecycle), keep the Sep-26 window lifecycle untouched, and be verifiable with the single replay repro.
+
+40. **Salvage Guide — What To Keep From `scratch/ag-player-session-20260927.patch` When Re-attacking**:
+    - **Worth porting (low risk, high diagnostic value)**:
+      - The load-request diagnostic IDs (`PendingLoadRequest.id`, "accepted by mpv", "rejected by mpv", "START_FILE/END_FILE (load: ...)" correlation) — pure logging, no behavior change, would have pinpointed today's failures in one repro.
+      - `MPVColorPipelinePolicy` pure-decision struct + tests — clean refactor of `applyColorPipeline`, no lifecycle coupling.
+      - Event-driven `isIntentionallySwitchingFile` reset on `MPV_EVENT_START_FILE`/`FILE_LOADED` (replaces 0.6s wall-clock timer) — but land it ALONE and verify replay + next-episode.
+    - **Handle with extreme care (likely culprit class)**:
+      - `ensureLiveCore()` view-replacement inside `MPVViewController` + delegate `didSet` rewiring: creating a NEW `MPVLayerView` and swapping it into the view hierarchy mid-session couples mpv-core lifetime to view identity again — this is the exact coupling that caused the original black-video bug.
+      - `dismantleNSViewController` setting `coordinator.parent.controller.playerView = nil`: the controller is SHARED across sessions (`beginSession()` caches it). When the replay window's old VC is dismantled AFTER the new window mounted (AppKit dismantle timing is not guaranteed ordered), this nils the NEW session's `playerView` → next `play(url:)` re-queues to `pendingPlayURL` with no VC to flush → stuck at loading. This is the leading suspect for "nothing plays after the first session, not even other titles".
+      - Deferring `loadfile` until `isRenderContextReady` (render-context-ready gate): restores the exact anti-pattern removed in `c744e79` (section 35: mpv does not need a render context to start demuxing; gating loadfile on it creates infinite-buffer loops whenever the layer never draws). If CA never calls `draw` (occlusion, layer not attached yet), the load waits forever.
+    - **Do not port**: retainedItem removal in `PlayerWindowContainer` (the Sep-26 retained container is what keeps the player window stable while `currentItem` flickers during teardown), and the `closePlayer()` simplification (removing `window.close()` changed a verified-working teardown path).
+
 ---
 31. **Player Window Teardown, Double-Esc Exit, Buffering Overlay & Startup Beachball Resolution**:
     - **Clean Direct Window Teardown (Apple TV Parity)**:

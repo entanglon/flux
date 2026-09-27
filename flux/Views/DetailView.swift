@@ -413,7 +413,7 @@ struct DetailView: View {
                                                 episode: target.episode,
                                                 episodeImage: target.image ?? matchingEp?.stillURL,
                                                 fromContinueWatching: target.isResume,
-                                                forceStreamPicker: (!isFlux && !target.isResume),
+                                                forceStreamPicker: !isFlux,
                                                 startFromBeginning: !target.isResume
                                             )
                                         } else {
@@ -424,7 +424,7 @@ struct DetailView: View {
                                                 episode: nil,
                                                 episodeImage: nil,
                                                 fromContinueWatching: isInContinueWatching,
-                                                forceStreamPicker: (!isFlux && !isInContinueWatching),
+                                                forceStreamPicker: !isFlux,
                                                 startFromBeginning: !isInContinueWatching
                                             )
                                         }
@@ -774,7 +774,7 @@ struct DetailView: View {
                                                 episode: episode.episodeNumber,
                                                 episodeImage: episode.stillURL,
                                                 fromContinueWatching: hasProgress,
-                                                forceStreamPicker: (!isFlux && !hasProgress),
+                                                forceStreamPicker: !isFlux,
                                                 startFromBeginning: !hasProgress
                                             )
                                             openWindow(id: "player", value: displayItem.id)
@@ -1822,7 +1822,7 @@ struct LiquidEpisodeCard: View {
             episode: episode.episodeNumber,
             episodeImage: episode.stillURL,
             fromContinueWatching: fromContinueWatching,
-            forceStreamPicker: forceStreamPicker || (!isFlux && !fromContinueWatching),
+            forceStreamPicker: forceStreamPicker || !isFlux,
             startFromBeginning: startFromBeginning
         )
         openWindow(id: "player", value: item.id)

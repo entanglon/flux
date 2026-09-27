@@ -9,12 +9,19 @@ enum PlayerWindowRouter {
 
     @MainActor
     static func openPlayerWindow(itemID: MediaItem.ID, openWindow: OpenWindowAction? = nil) {
+        if let existing = NSApp.windows.first(where: {
+            $0.identifier?.rawValue == "playerWindow" || $0.title.lowercased().contains("player")
+        }) {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
         if let openWindow = openWindow {
             openWindow(id: "player", value: itemID)
-        } else if let openPlayer = openPlayer {
-            openPlayer(itemID)
+        } else {
+            openPlayer?(itemID)
         }
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -167,7 +174,9 @@ final class PiPManager: ObservableObject {
         let itemID = PlayerManager.shared.currentItem?.id
         // Save progress — expanding continues the same content.
         performFullStop(saveProgress: true)
-        PlayerManager.shared.endSession()
+        if pos > 0.5 {
+            PlayerManager.shared.pendingResumeTime = pos
+        }
         if pos > 0.5 {
             PlayerManager.shared.pendingResumeTime = pos
         }
@@ -294,7 +303,6 @@ final class PiPManager: ObservableObject {
         mpvController?.onPlaybackError = nil
 
         let layer = hostedLayer
-        let controller = mpvController
         hostedLayer = nil
         hostedViewController = nil
         mpvController = nil
@@ -310,8 +318,7 @@ final class PiPManager: ObservableObject {
         panel = nil
         isActive = false
 
-        // Destroy the orphaned core with its layer and reset controller state.
-        controller?.handleCoreDestroyed()
+        // Destroy the orphaned core with its layer.
         layer?.cleanup()
     }
 

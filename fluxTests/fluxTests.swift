@@ -477,36 +477,6 @@ struct fluxTests {
         let selected = PlayerManager.findBestVideoFileIndex(files: [])
         #expect(selected == nil)
     }
-
-    // MARK: - Audio Route & Replay Compatibility Tests
-
-    @Test func audioOutputRouteMonitorAutoPauseConditions() {
-        // Should pause only when media is loaded, currently playing, and NOT paused by user
-        #expect(AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: true, isUserPaused: false) == true)
-        #expect(AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: false, isPlaying: true, isUserPaused: false) == false)
-        #expect(AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: false, isUserPaused: false) == false)
-        #expect(AudioOutputRouteMonitor.shouldAutoPause(hasLoadedMedia: true, isPlaying: true, isUserPaused: true) == false)
-    }
-
-    @Test func instantReplayCompatibilityIdentification() {
-        let localTorrentURL = URL(string: "http://127.0.0.1:11470/0/0")!
-        let localhostTorrentURL = URL(string: "http://localhost:11470/0/0")!
-        let remoteHttpURL = URL(string: "https://stream.provider.com/video.mp4")!
-        let magnetURL = URL(string: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")!
-
-        func isTorrentURL(_ url: URL, hash: String?) -> Bool {
-            (hash != nil && !hash!.isEmpty) ||
-            (url.host == "127.0.0.1" || url.host == "localhost") ||
-            url.scheme == "magnet" ||
-            url.absoluteString.contains("xt=urn:btih:")
-        }
-
-        #expect(isTorrentURL(localTorrentURL, hash: nil) == true)
-        #expect(isTorrentURL(localhostTorrentURL, hash: nil) == true)
-        #expect(isTorrentURL(magnetURL, hash: nil) == true)
-        #expect(isTorrentURL(remoteHttpURL, hash: "0123456789abcdef0123456789abcdef01234567") == true)
-        #expect(isTorrentURL(remoteHttpURL, hash: nil) == false)
-    }
 }
 
 

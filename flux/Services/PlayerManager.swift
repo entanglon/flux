@@ -553,7 +553,6 @@ class PlayerManager: ObservableObject {
     /// MANUAL MODE CONTRACT: when the user explicitly picks a source, NOTHING may
     /// switch away from it — no racing, no auto-fallback. Failures surface to the user.
     var isManualSelection = false
-    @Published var playbackSessionUUID = UUID()
     
     // Track current episode
     var currentSeason: Int?
@@ -596,16 +595,22 @@ class PlayerManager: ObservableObject {
         guard let item = currentItem, let url = currentStreamURL else { return }
         hasConfirmedPlaybackSuccess = true
 
+        let isLocal = (url.host == "127.0.0.1" || url.host == "localhost")
+        let isRemoteHttp = !isLocal && (url.scheme == "http" || url.scheme == "https")
+        let hasQueryToken = (url.query?.contains("token") == true || url.query?.contains("expires") == true || url.query?.contains("exp=") == true || url.query?.contains("sig=") == true)
+
         let isEpisodic = item.isSeries || currentSeason != nil || currentEpisode != nil
         let key = isEpisodic ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
 
-        // In-memory cache for instant replay during active session
-        lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date(), stream: currentSelectedStream)
-        print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
+        // In-memory cache for instant replay during active session (avoid caching ephemeral expired HTTP tokens)
+        if !hasQueryToken {
+            lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date(), stream: currentSelectedStream)
+            print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
+        }
 
         let hash = currentSelectedStream?.isTorrent == true ? torrentHash(currentSelectedStream!) : nil
         var historyItem = item
-        historyItem.lastStreamURL = url
+        historyItem.lastStreamURL = (isRemoteHttp && hasQueryToken) ? nil : url
         historyItem.lastTorrentInfoHash = hash
         historyItem.lastFileIndex = currentSelectedStream?.fileIdx
         historyItem.lastStreamSource = currentSelectedStream?.source
@@ -624,7 +629,7 @@ class PlayerManager: ObservableObject {
             episodeImage: self.currentEpisodeImage,
             playbackPosition: initialPos,
             playbackDuration: initialDur,
-            streamURL: url,
+            streamURL: (isRemoteHttp && hasQueryToken) ? nil : url,
             torrentInfoHash: hash,
             fileIndex: currentSelectedStream?.fileIdx,
             streamSource: currentSelectedStream?.source,
@@ -927,7 +932,6 @@ class PlayerManager: ObservableObject {
             return
         }
         pruneSessionCaches()
-        self.playbackSessionUUID = UUID()
         // USER-initiated playback while a PiP session floats: same title =
         // expand (resume at the floating position); different title = tear the
         // floating session down first. Auto-advance skips this — the floating
@@ -965,7 +969,6 @@ class PlayerManager: ObservableObject {
                 }
             }
         }
-        self.pendingResumeTime = resumePos
         let playbackKey = prefetchKey(for: item, season: season, episode: episode)
 
         // Apple TV style single player window handoff:
@@ -1044,12 +1047,10 @@ class PlayerManager: ObservableObject {
             self.currentStreamURL = nil
             self.currentSelectedStream = nil
             self.sessionController?.stop()
-            self.isLoading = false
         } else {
             self.forceStreamPicker = false
             self.isManualSelection = false
             self.isStreamPickerPresented = false
-            self.isLoading = true
         }
 
         // Only clear streams if we don't already have pre-fetched streams for this playback key
@@ -1087,8 +1088,8 @@ class PlayerManager: ObservableObject {
             return
         }
         
-        // 1. Instant Replay / Active Session Reuse Check (Whenever not explicitly forcing the stream picker)
-        if !forceStreamPicker {
+        // 1. Instant Replay / Active Session Reuse Check (ONLY for Continue Watching cards and Detail View resume when not forcing picker)
+        if fromContinueWatching && !forceStreamPicker {
             let historyItem = UserDataService.shared.getHistoryItem(for: item)
             let matchedId = historyItem?.id ?? item.id
             let isEpisodic = item.isSeries || season != nil || episode != nil
@@ -1108,7 +1109,7 @@ class PlayerManager: ObservableObject {
             // Helper to verify that saved URL matches the user's active streaming filter
             func isSavedURLCompatible(_ url: URL, hash: String?) -> Bool {
                 let isTorrent = (hash != nil && !hash!.isEmpty) ||
-                                (url.host == "127.0.0.1" || url.host == "localhost") ||
+                                url.absoluteString.contains("127.0.0.1:11470") ||
                                 url.scheme == "magnet" ||
                                 url.absoluteString.contains("xt=urn:btih:")
                 if sourceMode == "http" && isTorrent { return false }
@@ -1116,10 +1117,8 @@ class PlayerManager: ObservableObject {
                 return true
             }
 
-            let candidateCached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey]
-            let candidateHash = (candidateCached?.stream != nil ? self.torrentHash(candidateCached!.stream!) : nil) ?? historyItem?.lastTorrentInfoHash ?? activeTorrentHash
-            if let cached = candidateCached,
-               isSavedURLCompatible(cached.url, hash: candidateHash),
+            if let cached = lastPlayedStreams[key] ?? lastPlayedStreams[fallbackKey],
+               isSavedURLCompatible(cached.url, hash: activeTorrentHash),
                !cachedStreamLabelLooksLikeJunk(cached.stream, item: item) {
                 let elapsed = Date().timeIntervalSince(cached.timestamp)
                 
@@ -1154,26 +1153,10 @@ class PlayerManager: ObservableObject {
                         print("[PlayerManager] Active Torrent Stream Session Fresh (\(Int(elapsed/60))m): Resuming stream session immediately.")
                         if let s = cached.stream {
                             self.currentSelectedStream = s
-                            self.startTorrentStatsPolling(for: s)
                         }
                         self.currentStreamURL = cached.url
                         self.isLoading = false
-                        let torrentHash = self.activeTorrentHash ?? (cached.stream != nil ? self.torrentHash(cached.stream!) : nil) ?? historyItem?.lastTorrentInfoHash
-                        if let h = torrentHash {
-                            self.activeTorrentHash = h
-                            self.currentMagnetURL = cached.stream?.url.absoluteString.hasPrefix("magnet:") == true ? cached.stream!.url.absoluteString : "magnet:?xt=urn:btih:\(h)"
-                            AsyncTask {
-                                let serverUp = await StremioServerManager.shared.ensureRunning()
-                                if serverUp {
-                                    let magnetURL = cached.stream?.url.absoluteString ?? "magnet:?xt=urn:btih:\(h)"
-                                    StremioServerManager.shared.trackCreate(
-                                        infoHash: h,
-                                        magnetURL: magnetURL,
-                                        fileIdx: cached.stream?.fileIdx ?? 0
-                                    )
-                                }
-                            }
-                        } else {
+                        if activeTorrentHash != nil {
                             AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
                         }
                         self.populateStreamsInBackground(item: item, season: season, episode: episode)
@@ -1228,7 +1211,7 @@ class PlayerManager: ObservableObject {
                         print("[PlayerManager] Persisted History Stream Available (Across Restarts): Playing \(savedURL)")
                         let sourceStr = item.lastStreamSource ?? historyItem?.lastStreamSource ?? "Unknown Source".localized
                         let titleStr = item.lastStreamTitle ?? historyItem?.lastStreamTitle ?? item.title
-                        var fallbackStream = Stream(
+                        let fallbackStream = Stream(
                             title: titleStr,
                             cleanTitle: item.title,
                             url: savedURL,
@@ -1236,28 +1219,12 @@ class PlayerManager: ObservableObject {
                             quality: "Auto",
                             indexer: StreamManager.parseIndexer(name: sourceStr, title: titleStr)
                         )
-                        fallbackStream.infoHash = historyItem?.lastTorrentInfoHash
-                        fallbackStream.fileIdx = historyItem?.lastFileIndex
                         self.currentSelectedStream = fallbackStream
                         self.lastPlayedStreams[key] = CachedStream(url: savedURL, timestamp: Date(), stream: fallbackStream)
                         self.currentStreamURL = savedURL
                         self.isLoading = false
-                        let torrentHash = historyItem?.lastTorrentInfoHash
-                        if let hash = torrentHash {
+                        if let hash = historyItem?.lastTorrentInfoHash {
                             self.activeTorrentHash = hash
-                            self.currentMagnetURL = "magnet:?xt=urn:btih:\(hash)"
-                            self.startTorrentStatsPolling(for: fallbackStream)
-                            AsyncTask {
-                                let serverUp = await StremioServerManager.shared.ensureRunning()
-                                if serverUp {
-                                    StremioServerManager.shared.trackCreate(
-                                        infoHash: hash,
-                                        magnetURL: "magnet:?xt=urn:btih:\(hash)",
-                                        fileIdx: historyItem?.lastFileIndex ?? 0
-                                    )
-                                }
-                            }
-                        } else {
                             AsyncTask { _ = await StremioServerManager.shared.ensureRunning() }
                         }
                         self.populateStreamsInBackground(item: item, season: season, episode: episode)
@@ -1280,23 +1247,11 @@ class PlayerManager: ObservableObject {
         guard url.scheme == "http" || url.scheme == "https" else { return true }
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
-        request.timeoutInterval = 2.5
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 1.8
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
-                if (200...399).contains(http.statusCode) { return true }
-                if http.statusCode == 405 {
-                    var getReq = URLRequest(url: url)
-                    getReq.httpMethod = "GET"
-                    getReq.timeoutInterval = 2.5
-                    getReq.setValue("bytes=0-1024", forHTTPHeaderField: "Range")
-                    getReq.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-                    let (_, getResp) = try await URLSession.shared.data(for: getReq)
-                    if let getHttp = getResp as? HTTPURLResponse {
-                        return (200...399).contains(getHttp.statusCode)
-                    }
-                }
+                return (200...399).contains(http.statusCode) || http.statusCode == 405
             }
             return false
         } catch {

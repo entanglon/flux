@@ -267,7 +267,6 @@ private struct PlayerWindowContainer: View {
         Group {
             if let item = retainedItem ?? playerManager.currentItem {
                 PlayerView(item: item)
-                    .id(playerManager.playbackSessionUUID)
                     .environmentObject(playerManager)
             } else {
                 Color.black
@@ -275,18 +274,13 @@ private struct PlayerWindowContainer: View {
             }
         }
         .onAppear {
-            if let current = playerManager.currentItem {
-                retainedItem = current
+            if retainedItem == nil {
+                retainedItem = playerManager.currentItem
             }
         }
         .onChange(of: playerManager.currentItem) { _, newItem in
             if let newItem = newItem {
                 retainedItem = newItem
-            }
-        }
-        .onChange(of: playerManager.playbackSessionUUID) { _, _ in
-            if let current = playerManager.currentItem {
-                retainedItem = current
             }
         }
     }
