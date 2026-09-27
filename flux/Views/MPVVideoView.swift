@@ -1084,6 +1084,33 @@ class MPVViewController: NSViewController {
     var videoAspectRatio: Double { playerView?.videoAspectRatio ?? 16.0 / 9.0 }
 }
 
+// MARK: - Replay diagnostics: unbuffered file log (print() is line-buffered
+// on a TTY but BLOCK-buffered when stdout is redirected, which silently ate
+// earlier capture attempts). Every render-lifecycle event lands in
+// /tmp/flux_render_diag.log with timestamps and CGL context identities.
+import os.signpost
+let fluxDiagLock = NSLock()
+func fluxDiag(_ message: String) {
+    let line = "[\(Date().timeIntervalSince1970)] \(message)\n"
+    fluxDiagLock.lock()
+    if let fh = FileHandle(forWritingAtPath: "/tmp/flux_render_diag.log") {
+        fh.seekToEndOfFile()
+        fh.write(line.data(using: .utf8)!)
+        fh.closeFile()
+    } else {
+        try? line.write(to: URL(fileURLWithPath: "/tmp/flux_render_diag.log"), atomically: true, encoding: .utf8)
+    }
+    fluxDiagLock.unlock()
+}
+func ptrId(_ p: UnsafeMutableRawPointer?) -> String {
+    guard let p = p else { return "nil" }
+    return String(UInt(bitPattern: p), radix: 16)
+}
+func ptrId(_ p: CGLContextObj?) -> String {
+    guard let p = p else { return "nil" }
+    return String(UInt(bitPattern: p), radix: 16)
+}
+
 // MARK: - OpenGL View & MPV Backend
 // MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
 /// Pure color-pipeline decision logic (unit-tested in fluxTests).
@@ -1217,6 +1244,7 @@ final class MPVLayer: CAOpenGLLayer {
         cglContext = MPVLayer.createContext(cglPixelFormat)
         super.init()
         self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
+        fluxDiag("LAYER INIT \(ObjectIdentifier(self).hashValue), pinned ctx \(ptrId(cglContext))")
         self.contentsFormat = .RGBA8Uint
         self.needsDisplayOnBoundsChange = true
         self.backgroundColor = NSColor.black.cgColor
@@ -1235,6 +1263,7 @@ final class MPVLayer: CAOpenGLLayer {
         self.contentsFormat = previous.contentsFormat
         self.wantsExtendedDynamicRangeContent = previous.wantsExtendedDynamicRangeContent
         self.ownerView = previous.ownerView
+        fluxDiag("LAYER SHADOW COPY \(ObjectIdentifier(previous).hashValue) -> \(ObjectIdentifier(self).hashValue), carrying ctx \(ptrId(cglContext))")
     }
     
     required init?(coder: NSCoder) {
@@ -1323,7 +1352,14 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
+        if ownerView?.didLogFirstDraw != true {
+            ownerView?.didLogFirstDraw = true
+            fluxDiag("DRAW first draw on layer \(ObjectIdentifier(self).hashValue), ctx \(ptrId(ctx)), ownerView \(ownerView.map { ObjectIdentifier($0).hashValue } ?? 0)")
+        }
         guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil else {
+            if ownerView?.didLogFirstDraw == true, ownerView?.mpv == nil {
+                fluxDiag("DRAW skipped: owner.mpv nil (ctx \(ptrId(ctx)))")
+            }
             return
         }
         CGLSetCurrentContext(ctx)
@@ -1356,6 +1392,7 @@ final class MPVLayer: CAOpenGLLayer {
             // should never fire, but if CA ever hands us a different context
             // the render context must be rebuilt against it — rendering into a
             // stale context is the black-video/software-decode failure mode.
+            fluxDiag("DRAW context MISMATCH detected: mpvGL bound to \(ptrId(owner.mpvGLCreationContext)) but drawing into \(ptrId(ctx)) — rebuilding")
             owner.rebuildRenderContext(for: ctx)
         }
         
@@ -1435,6 +1472,8 @@ final class MPVLayerView: NSView {
     private let renderUpdateLock = NSLock()
     private var reconnectTimestamps: [CFAbsoluteTime] = []
     private let reconnectLock = NSLock()
+    /// One-shot first-draw diagnostic flag.
+    var didLogFirstDraw = false
     /// IINA parity: every mpv_render_* call (draw on the CA render thread,
     /// render-context free during teardown) is serialized through this
     /// recursive lock. render.h: only one mpv_render_* call at a time per
@@ -1654,6 +1693,7 @@ final class MPVLayerView: NSView {
         guard !isCleaningUp else { return }
         isCleaningUp = true
         isIntentionallySwitchingFile = true
+        fluxDiag("TEARDOWN view \(ObjectIdentifier(self).hashValue), mpvGL ctx was \(ptrId(mpvGLCreationContext))")
         
         onCoreDestroyed?()
         
@@ -1717,8 +1757,10 @@ final class MPVLayerView: NSView {
 
         if mpv_initialize(mpv) < 0 {
             print("[MPV] init failed")
+            fluxDiag("CORE mpv_initialize FAILED (view \(ObjectIdentifier(self).hashValue))")
             return
         }
+        fluxDiag("CORE mpv initialized (view \(ObjectIdentifier(self).hashValue), mpv \(ptrId(UnsafeMutableRawPointer(mpv))))")
         
         // Minimal mpv config — use mpv defaults, don't over-configure.
         mpv_set_property_string(mpv, "vo", "libmpv")
@@ -1879,8 +1921,10 @@ final class MPVLayerView: NSView {
                 let res = mpv_render_context_create(&mpvGL, mpv, &params)
                 if res < 0 {
                     print("[MPV] Failed to create mpv render context: \(res)")
+                    fluxDiag("GL mpv_render_context_create FAILED res=\(res) (ctx \(ptrId(ctx)))")
                 } else {
                     print("[MPV] Successfully created render context!")
+                    fluxDiag("GL mpv_render_context_create OK (mpvGL bound to ctx \(ptrId(ctx)), view \(ObjectIdentifier(self).hashValue))")
                 }
             }
         }
