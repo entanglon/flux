@@ -50,6 +50,20 @@
       - This intentionally discarded stream URLs from hosters like PenguPlay (which sign URLs with `?psig=...`), causing titles to have no saved stream and forcing full scraper re-fetching on replay.
       - Solution: Removed query token restrictions. Both direct HTTP streams (signed or unsigned) and local P2P torrent streams (`http://127.0.0.1:11470/{hash}/{fileIdx}`) are now reliably cached in `lastPlayedStreams` and persisted in `UserDataService` history. On replay, `verifyStreamURLHealth` validates if the URL is still alive; if valid, playback starts instantly; if expired, it seamlessly falls back to scraping.
 
+34. **MPVController Attachment Race & Instant Replay Infinite Buffer Resolution**:
+    - **Root Cause (The Microsecond Race)**:
+      - When playing a title for the first time, scraper queries take 3–5 seconds, so SwiftUI's AppKit representable (`MPVVideoView.makeNSViewController`) mounts and sets `controller.playerView = vc` well before `currentStreamURL` is emitted.
+      - On instant replay, however, `verifyStreamURLHealth` validated in ~40ms, immediately assigning `playerManager.currentStreamURL = cached.url`.
+      - `PlayerView.onChange(of: currentStreamURL)` called `handleStreamURLChange(url)` -> `mpv.play(url:)` *before* AppKit called `makeNSViewController`!
+      - Because `playerView` on `MPVController` was `nil`, the line `playerView?.play(url, paused: false)` used optional chaining and **silently dropped the play call without loading the file into mpv**.
+      - Crucially, `mpv.hasLoadedMedia = true` and `mpv.loadedURL = url` were still recorded. When `PlayerView.onAppear` executed moments later, it saw `mpv.hasLoadedMedia == true`, mistook it for an already playing warm core, and only called `mpv.play()` (which only unpaused/resumed). `loadFile` was NEVER called on mpv!
+      - The player sat idle with no media loaded while `isInitialLoading` remained `true`, trapping the user on an endless buffering screen while the stream URL itself was perfectly valid.
+    - **Solution**:
+      - Added `pendingPlayURL` and `pendingPaused` queuing to `MPVController`. If `play(url:)` or `preparePaused(url:)` is invoked before `playerView` is attached, the request is safely staged in `pendingPlayURL`.
+      - Wired `didSet` on `weak var playerView: MPVViewController?` and `makeNSViewController` to immediately flush and execute any staged `pendingPlayURL` as soon as the NSViewController is created and linked.
+      - Added `mpvLayer.setNeedsDisplay()` to `viewDidMoveToWindow()` and `loadFile` (when `mpvGL == nil`) in `MPVLayerView`, ensuring CoreAnimation immediately schedules the OpenGL context creation and frame rendering.
+      - Strictened `PlayerView.onAppear` warm-core adoption check to `mpv.hasLoadedMedia && mpv.loadedURL != nil && mpv.loadedURL == playerManager.currentStreamURL`, and armed `pendingResumeTime = resumePos` in `PlayerManager.play` so saved watch positions seek automatically.
+
 
 ---
 

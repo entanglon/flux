@@ -965,6 +965,7 @@ class PlayerManager: ObservableObject {
                 }
             }
         }
+        self.pendingResumeTime = resumePos
         let playbackKey = prefetchKey(for: item, season: season, episode: episode)
 
         // Apple TV style single player window handoff:

@@ -62,6 +62,18 @@ struct MPVVideoView: NSViewControllerRepresentable {
             vc.delegate = controller
         }
         context.coordinator.player = vc // Link controller to view
+        if let pending = controller.pendingPlayURL {
+            let paused = controller.pendingPaused
+            controller.pendingPlayURL = nil
+            controller.pendingPaused = false
+            if paused {
+                vc.setMute(true)
+                vc.play(pending, paused: true)
+            } else {
+                vc.setMute(false)
+                vc.play(pending, paused: false)
+            }
+        }
         return vc
     }
     
@@ -332,12 +344,30 @@ class MPVController: ObservableObject {
     /// via onChange — a closure would capture a stale View struct.
     @Published private(set) var endOfFileCount = 0
     func registerEndOfFile() { endOfFileCount += 1 }
-    weak var playerView: MPVViewController?
+    weak var playerView: MPVViewController? {
+        didSet {
+            if let pv = playerView, let url = pendingPlayURL {
+                let paused = pendingPaused
+                print("[MPVController] playerView attached! Loading queued stream: \(url.lastPathComponent) (paused: \(paused))")
+                pendingPlayURL = nil
+                pendingPaused = false
+                if paused {
+                    pv.setMute(true)
+                    pv.play(url, paused: true)
+                } else {
+                    pv.setMute(false)
+                    pv.play(url, paused: false)
+                }
+            }
+        }
+    }
+    fileprivate var pendingPlayURL: URL?
+    fileprivate var pendingPaused: Bool = false
     private var hasAutoSelectedAudio = false
     private var hasAutoSelectedSubtitles = false
     
     func preparePaused(url: URL) {
-        if hasLoadedMedia, loadedURL == url {
+        if hasLoadedMedia, loadedURL == url, playerView != nil {
             print("[MPVController] Skipping duplicate preparePaused for \(url.lastPathComponent)")
             return
         }
@@ -347,14 +377,21 @@ class MPVController: ObservableObject {
         self.loadedURL = url
         self.hasAutoSelectedAudio = false
         self.hasAutoSelectedSubtitles = false
-        playerView?.setMute(true)
-        playerView?.play(url, paused: true)
+        guard let pv = playerView else {
+            print("[MPVController] playerView not attached yet — queuing pendingPlayURL (paused) for \(url.lastPathComponent)")
+            pendingPlayURL = url
+            pendingPaused = true
+            return
+        }
+        pendingPlayURL = nil
+        pendingPaused = false
+        pv.setMute(true)
+        pv.play(url, paused: true)
     }
 
     func play(url: URL) {
-        // Same media already loading/loaded on this controller (warm-core
-        // adoption races finishSelect) — reloading would discard the buffer.
-        if hasLoadedMedia, loadedURL == url {
+        // Same media already loading/loaded on this controller and playerView is actively holding it
+        if hasLoadedMedia, loadedURL == url, playerView != nil {
             print("[MPVController] Skipping duplicate loadfile for \(url.lastPathComponent)")
             if isUserPaused {
                 play()
@@ -367,7 +404,6 @@ class MPVController: ObservableObject {
         self.hasAutoSelectedAudio = false
         self.hasAutoSelectedSubtitles = false
         resetVolumeBoostIfNeeded()
-        playerView?.setMute(false)
         // IINA-parity auto-pause: output device vanishing mid-playback pauses.
         AudioOutputRouteMonitor.shared.start()
         AudioOutputRouteMonitor.shared.onRouteChanged = { [weak self] in
@@ -377,7 +413,16 @@ class MPVController: ObservableObject {
                 self.pause()
             }
         }
-        playerView?.play(url, paused: false)
+        guard let pv = playerView else {
+            print("[MPVController] playerView not attached yet — queuing pendingPlayURL for \(url.lastPathComponent)")
+            pendingPlayURL = url
+            pendingPaused = false
+            return
+        }
+        pendingPlayURL = nil
+        pendingPaused = false
+        pv.setMute(false)
+        pv.play(url, paused: false)
     }
 
     func play() {
@@ -395,6 +440,8 @@ class MPVController: ObservableObject {
         self.isUserPaused = false
         self.hasLoadedMedia = false
         self.loadedURL = nil
+        self.pendingPlayURL = nil
+        self.pendingPaused = false
         self.timePos = 0.0
         self.duration = 0.0
         self.progress = 0.0
@@ -1171,6 +1218,7 @@ final class MPVLayerView: NSView {
             lastPipelineKey = ""
             applyColorPipeline()
         }
+        mpvLayer.setNeedsDisplay()
     }
     
     func setupDisplayLink() {
@@ -1540,6 +1588,9 @@ final class MPVLayerView: NSView {
             print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
             pendingURL = url
             pendingPaused = paused
+            DispatchQueue.main.async { [weak self] in
+                self?.mpvLayer.setNeedsDisplay()
+            }
         } else {
             pendingURL = nil
             pendingPaused = false

@@ -309,7 +309,7 @@ struct PlayerView: View {
                     playerManager.tryNextStream()
                 }
             }
-            if !isPickerVisible && mpv.hasLoadedMedia {
+            if !isPickerVisible && mpv.hasLoadedMedia && mpv.loadedURL != nil && mpv.loadedURL == playerManager.currentStreamURL {
                 print("PlayerView: adopting warm core, releasing hold...")
                 mpv.play()
             } else if let url = playerManager.currentStreamURL {
