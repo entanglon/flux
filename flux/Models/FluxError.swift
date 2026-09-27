@@ -28,7 +28,6 @@ enum StreamingError: Error, LocalizedError, Equatable {
     case invalidInfoHash(String)
     case playbackFailed(reason: String)
     case streamTimeout
-    case torrentEngineOffline
 
     var errorDescription: String? {
         switch self {
@@ -42,8 +41,6 @@ enum StreamingError: Error, LocalizedError, Equatable {
             return "Playback failed: \(reason)"
         case .streamTimeout:
             return "Stream resolution timed out. The peer swarm may be inactive."
-        case .torrentEngineOffline:
-            return "FluxEngine torrent backend is currently offline."
         }
     }
 }
