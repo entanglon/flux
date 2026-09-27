@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (12:22 PM IST)  
-**Latest Git State**: 240/240 Unit Tests Passing (100%)  
+**Updated**: September 27, 2026 (12:47 PM IST)  
+**Latest Git State**: 242/242 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
@@ -24,7 +24,20 @@
     - **View State Isolation & Key Monitor Re-attachment**:
       - Applied `.id(item.id)` to `PlayerView(item: item)` in `PlayerWindowContainer` (`fluxApp.swift`) ensuring fresh `@State` and controllers per playback session.
       - Reset `isClosingPlayer = false` on `.onAppear` and guaranteed `PlayerWindowAccessor` re-attaches `PlayerKeyMonitor` if it was ever nilled.
-    - **Verified Stability**: All 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`), codesigned ad-hoc.
+
+32. **Instant Replay Cache Un-Gating & Complete Main-Thread Hitch Elimination**:
+    - **Instant Replay Source Reuse Across Entire App**:
+      - Root Cause: In `PlayerManager.swift:1092`, the instant replay / cached stream reuse check was artificially gated on `if fromContinueWatching && !forceStreamPicker`.
+      - Whenever a user clicked "Play" on a detail screen, episode rail, or list where `prog <= 0.01` or `startFromBeginning` was set, `fromContinueWatching` was `false`. As a result, the active session cache (`lastPlayedStreams[key]`) and persisted watch history source were bypassed, re-triggering the full 5–15s multi-addon scraper race (`fetchAndRace`).
+      - Solution: Un-gated the instant replay check to `if !forceStreamPicker`.
+      - Verified Health Check & Torrent Prime: For HTTP streams, `PlayerManager` performs a fast non-blocking HEAD probe (`verifyStreamURLHealth` with 1.8s timeout, ~50ms response). If alive, resumes immediately. For torrent streams, it restores `activeTorrentHash`, primes the Go engine with `trackCreate`, starts live buffer stats polling (`startTorrentStatsPolling`), and plays immediately. Populates the manual stream picker in the background so alternative sources remain accessible.
+    - **Complete Main-Thread Beachball Elimination**:
+      - Disabled libmpv's `ytdl` option (`mpv_set_option_string(mpv, "ytdl", "no")`). Setting this to "yes" previously triggered mpv's internal Lua hook which synchronously scanned system `PATH` and executed Python / yt-dlp binaries on player init and loadfile.
+      - Offloaded CoreAudio property listener registration in `AudioOutputRouteMonitor.shared.start()` to `DispatchQueue.global(qos: .utility)` to prevent synchronous IPC calls to `coreaudiod` from blocking the main thread.
+      - Offloaded `mpv_set_property_string` for proxy and pause state inside `loadFile` and `setupMPVGL` onto `DispatchQueue.global(qos: .userInitiated)` right alongside `command("loadfile")`, eliminating all synchronous lock contention on the main thread during stream startup.
+    - **Test Coverage & Verification**:
+      - Added unit tests for `AudioOutputRouteMonitor.shouldAutoPause` and torrent/HTTP streaming URL compatibility matching in `fluxTests.swift`.
+      - All 242 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`), ad-hoc signed, and running live.
 
 ---
 

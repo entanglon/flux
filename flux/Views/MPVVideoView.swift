@@ -26,14 +26,18 @@ final class AudioOutputRouteMonitor {
     }
 
     func start() {
-        lock.lock(); defer { lock.unlock() }
-        guard !started else { return }
-        started = true
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &addr, audioRouteListener, nil)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            guard !self.started else { return }
+            self.started = true
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListener(AudioObjectID(kAudioObjectSystemObject), &addr, audioRouteListener, nil)
+        }
     }
 }
 
@@ -1323,7 +1327,7 @@ final class MPVLayerView: NSView {
         
         // Pre-init options — only what's needed
         mpv_set_option_string(mpv, "terminal", "yes")
-        mpv_set_option_string(mpv, "ytdl", "yes")
+        mpv_set_option_string(mpv, "ytdl", "no")
         mpv_set_option_string(mpv, "volume-max", "200")
         mpv_set_option_string(mpv, "network-timeout", "45")
         mpv_set_option_string(mpv, "vd-lavc-dr", "no") // fixes mpv "stride > 0" assert crash on some 8K AV1 streams
@@ -1500,20 +1504,20 @@ final class MPVLayerView: NSView {
             pendingURL = nil
             pendingPaused = false
             print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
-            if let mpv = self.mpv {
-                let isLoopback = urlToLoad.host == "127.0.0.1" || urlToLoad.host == "localhost"
-                let selectedStream = PlayerManager.shared.currentSelectedStream
-                let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-                if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) {
+            let isLoopback = urlToLoad.host == "127.0.0.1" || urlToLoad.host == "localhost"
+            let selectedStream = PlayerManager.shared.currentSelectedStream
+            let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+            let proxyURL = (!isLoopback) ? StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) : nil
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self, let mpv = self.mpv else { return }
+                if let proxyURL = proxyURL {
                     print("[MPV] Routing pending stream through forward proxy: \(proxyURL)")
                     mpv_set_property_string(mpv, "http-proxy", proxyURL)
                 } else {
                     mpv_set_property_string(mpv, "http-proxy", "")
                 }
                 mpv_set_property_string(mpv, "pause", shouldPause ? "yes" : "no")
-            }
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.command("loadfile", urlToLoad.absoluteString)
+                self.command("loadfile", urlToLoad.absoluteString)
             }
         }
     }
@@ -1527,19 +1531,10 @@ final class MPVLayerView: NSView {
         reconnectTimestamps.removeAll()
         reconnectLock.unlock()
 
-        // Configure MPV forward proxy property dynamically for scoped direct HTTP streams (strictly bypass loopback)
-        if let mpv = self.mpv {
-            let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
-            let selectedStream = PlayerManager.shared.currentSelectedStream
-            let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-            if !isLoopback, let proxyURL = StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) {
-                print("[MPV] Routing stream through forward proxy: \(proxyURL)")
-                mpv_set_property_string(mpv, "http-proxy", proxyURL)
-            } else {
-                mpv_set_property_string(mpv, "http-proxy", "")
-            }
-            mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
-        }
+        let isLoopback = url.host == "127.0.0.1" || url.host == "localhost"
+        let selectedStream = PlayerManager.shared.currentSelectedStream
+        let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
+        let proxyURL = (!isLoopback) ? StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) : nil
 
         if mpvGL == nil {
             print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
@@ -1550,7 +1545,15 @@ final class MPVLayerView: NSView {
             pendingPaused = false
             print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.command("loadfile", url.absoluteString)
+                guard let self = self, let mpv = self.mpv else { return }
+                if let proxyURL = proxyURL {
+                    print("[MPV] Routing stream through forward proxy: \(proxyURL)")
+                    mpv_set_property_string(mpv, "http-proxy", proxyURL)
+                } else {
+                    mpv_set_property_string(mpv, "http-proxy", "")
+                }
+                mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
+                self.command("loadfile", url.absoluteString)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
