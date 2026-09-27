@@ -1086,6 +1086,113 @@ class MPVViewController: NSViewController {
 
 // MARK: - OpenGL View & MPV Backend
 // MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
+/// Pure color-pipeline decision logic (unit-tested in fluxTests).
+/// EDR routing keys on `maximumPotentialExtendedDynamicRangeColorComponentValue`:
+/// `currentEDR` only lifts above 1.0 WHILE HDR content is on screen, so gating
+/// the float16 framebuffer on it arrived too late — first HDR frames landed in
+/// an 8-bit SDR framebuffer (washed out). Potential-EDR > 1.0 means the panel
+/// CAN do EDR and the float16 pipeline must be created up front.
+enum MPVColorPipelinePolicy {
+    static func supportsEDR(maximumPotentialEDR: Double) -> Bool {
+        maximumPotentialEDR > 1.0
+    }
+
+    static func targetPrimaries(for sourcePrimaries: String) -> String? {
+        switch sourcePrimaries {
+        case "bt.2020": return "bt.2020"
+        case "display-p3", "dci-p3": return "display-p3"
+        default: return nil
+        }
+    }
+
+    static func targetTransferFunction(for sourceGamma: String) -> String? {
+        sourceGamma == "pq" || sourceGamma == "hlg" ? "pq" : nil
+    }
+
+    static func usesEDR(gamma: String, primaries: String, maximumPotentialEDR: Double) -> Bool {
+        targetTransferFunction(for: gamma) != nil
+            && targetPrimaries(for: primaries) != nil
+            && supportsEDR(maximumPotentialEDR: maximumPotentialEDR)
+    }
+
+    struct PipelineConfig: Equatable {
+        let targetTrc: String
+        let targetPrim: String
+        let targetPeak: String
+        let toneMapping: String
+        let hdrComputePeak: String
+        let videoOutputLevels: String
+        let usesDisplayICCProfile: Bool
+        let wantsEDR: Bool
+        let contentsFormat: CALayerContentsFormat
+        let colorSpaceName: CFString
+    }
+
+    static func resolvePipeline(
+        gamma: String,
+        primaries: String,
+        potentialEDR: Double,
+        currentEDR: Double = 1.0
+    ) -> PipelineConfig {
+        let isHDR = gamma == "pq" || gamma == "hlg"
+        let canDoEDR = usesEDR(gamma: gamma, primaries: primaries, maximumPotentialEDR: potentialEDR)
+        let outputPrimaries = targetPrimaries(for: primaries)
+        let outputTRC = targetTransferFunction(for: gamma)
+        let isP3 = outputPrimaries == "display-p3"
+
+        if canDoEDR {
+            let headroom = max(1.0, currentEDR > 1.0 ? currentEDR : potentialEDR)
+            let peak = max(200, min(1600, Int(headroom * 250)))
+            let csName: CFString = isP3 ? CGColorSpace.displayP3_PQ : CGColorSpace.itur_2100_PQ
+
+            return PipelineConfig(
+                targetTrc: outputTRC ?? "pq",
+                targetPrim: outputPrimaries ?? "bt.2020",
+                targetPeak: String(peak),
+                toneMapping: "auto",
+                hdrComputePeak: "auto",
+                videoOutputLevels: "auto",
+                usesDisplayICCProfile: false,
+                wantsEDR: true,
+                contentsFormat: .RGBA16Float,
+                colorSpaceName: csName
+            )
+        } else if isHDR {
+            // HDR content on a non-EDR panel: mpv tone-maps with its automatic
+            // defaults; the display ICC profile supplies the compositor-side
+            // correction so mpv and CA never double-manage color.
+            return PipelineConfig(
+                targetTrc: "auto",
+                targetPrim: "auto",
+                targetPeak: "auto",
+                toneMapping: "auto",
+                hdrComputePeak: "auto",
+                videoOutputLevels: "auto",
+                usesDisplayICCProfile: true,
+                wantsEDR: false,
+                contentsFormat: .RGBA8Uint,
+                colorSpaceName: CGColorSpace.sRGB
+            )
+        } else {
+            // SDR on SDR: leave all mpv color decisions automatic and correct
+            // only via the display ICC profile — overriding target-trc/prim here
+            // double-managed color against the compositor (washed out blacks).
+            return PipelineConfig(
+                targetTrc: "auto",
+                targetPrim: "auto",
+                targetPeak: "auto",
+                toneMapping: "auto",
+                hdrComputePeak: "auto",
+                videoOutputLevels: "auto",
+                usesDisplayICCProfile: true,
+                wantsEDR: false,
+                contentsFormat: .RGBA8Uint,
+                colorSpaceName: CGColorSpace.sRGB
+            )
+        }
+    }
+}
+
 final class MPVLayer: CAOpenGLLayer {
     weak var ownerView: MPVLayerView?
     
@@ -1118,9 +1225,8 @@ final class MPVLayer: CAOpenGLLayer {
             return (CGDisplayIDToOpenGLDisplayMask(id) & mask) != 0
         }) ?? NSScreen.main
         
-        let refEDR = targetScreen?.maximumReferenceExtendedDynamicRangeColorComponentValue ?? 0.0
-        let currentEDR = targetScreen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-        let useFloat16 = refEDR > 1.0 || currentEDR > 1.0
+        let potentialEDR = targetScreen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
+        let useFloat16 = MPVColorPipelinePolicy.supportsEDR(maximumPotentialEDR: Double(potentialEDR))
 
         let attributes: [CGLPixelFormatAttribute] = useFloat16
             ? [
@@ -1174,10 +1280,14 @@ final class MPVLayer: CAOpenGLLayer {
             owner.setupMPVGL(with: ctx)
         }
         
-        guard !owner.isCleaningUp, let mpvGL = owner.mpvGL else {
+        guard let mpvGL = owner.mpvGL else {
             glFlush()
             return
         }
+        
+        // Apply any pending display ICC profile on the CA render thread, inside
+        // the render context's own GL context (mpv requirement).
+        owner.applyPendingICCProfile(to: mpvGL)
         
         // Update render context on OpenGL thread with active context
         _ = mpv_render_context_update(mpvGL)
@@ -1256,6 +1366,13 @@ final class MPVLayerView: NSView {
     private let renderUpdateLock = NSLock()
     private var reconnectTimestamps: [CFAbsoluteTime] = []
     private let reconnectLock = NSLock()
+    /// Display ICC profile forwarding (see applyPendingICCProfile): written by
+    /// applyColorPipeline on the main thread, consumed by draw() on the CA
+    /// render thread once the mpv render context exists.
+    private let iccProfileLock = NSLock()
+    private var pendingICCProfileData: Data?
+    private var iccProfileGeneration: UInt64 = 0
+    private var attemptedICCProfileGeneration: UInt64 = 0
     
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1326,65 +1443,114 @@ final class MPVLayerView: NSView {
         let gamma = getPropertyString("video-params/gamma") ?? ""
         let primaries = getPropertyString("video-params/primaries") ?? ""
         let isHDR = gamma == "pq" || gamma == "hlg"
-        let key = "\(gamma)|\(primaries)"
+
+        let screen = window?.screen ?? NSScreen.main
+        let potentialEDR = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
+        let currentEDR = screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
+        let config = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: gamma,
+            primaries: primaries,
+            potentialEDR: Double(potentialEDR),
+            currentEDR: Double(currentEDR)
+        )
+
+        let screenNumber = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        let key = "\(gamma)|\(primaries)|\(screenNumber)|\(config.wantsEDR)|\(config.targetPeak)|\(config.targetTrc)|\(config.toneMapping)"
         guard key != lastPipelineKey else { return }
         lastPipelineKey = key
 
-        let screen = window?.screen ?? NSScreen.main
-        let refEDR = screen?.maximumReferenceExtendedDynamicRangeColorComponentValue ?? 0.0
-        let currentEDR = screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1.0
-        let potentialEDR = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
-        let canDoEDR = isHDR && (refEDR > 1.0 || currentEDR > 1.0)
+        let displayProfile = config.usesDisplayICCProfile ? displayICCProfile(for: screen) : nil
+        let iccProfileAuto = mpv_set_property_string(mpv, "icc-profile-auto", displayProfile == nil ? "no" : "yes")
+        _ = mpv_set_property_string(mpv, "icc-profile", "")
+        if iccProfileAuto < 0 {
+            print("[MPV] Failed to configure display ICC profile (error \(iccProfileAuto))")
+        }
+        setICCProfileForRendering(displayProfile?.data)
 
-        if canDoEDR {
-            // Calibrate target peak to display capability:
-            // 1.0 is SDR reference white (~100–250 nits).
-            // On MacBook Air M1 (potential EDR = 2.0), 2.0 * 250 = 500 nits (matches the 500-nit panel).
-            // On MacBook Pro Liquid Retina XDR (potential EDR = 3.2–4.0), matches 1000–1600 nits.
-            let headroom = max(1.0, currentEDR > 1.0 ? currentEDR : potentialEDR)
-            let peak = max(200, min(1600, Int(headroom * 250)))
+        _ = mpv_set_property_string(mpv, "video-output-levels", config.videoOutputLevels)
+        _ = mpv_set_property_string(mpv, "target-trc", config.targetTrc)
+        _ = mpv_set_property_string(mpv, "target-prim", config.targetPrim)
+        _ = mpv_set_property_string(mpv, "target-peak", config.targetPeak)
+        _ = mpv_set_property_string(mpv, "tone-mapping", config.toneMapping)
+        _ = mpv_set_property_string(mpv, "hdr-compute-peak", config.hdrComputePeak)
 
-            if gamma == "pq" {
-                mpv_set_property_string(mpv, "target-trc", "pq")
-                mpv_set_property_string(mpv, "target-prim", (primaries == "display-p3" || primaries == "dci-p3") ? "display-p3" : "bt.2020")
-            } else if gamma == "hlg" {
-                mpv_set_property_string(mpv, "target-trc", "hlg")
-                mpv_set_property_string(mpv, "target-prim", (primaries == "display-p3" || primaries == "dci-p3") ? "display-p3" : "bt.2020")
-            } else {
-                mpv_set_property_string(mpv, "target-trc", "auto")
-                mpv_set_property_string(mpv, "target-prim", "auto")
-            }
-
-            mpv_set_property_string(mpv, "target-peak", String(peak))
-            mpv_set_property_string(mpv, "tone-mapping", "auto")
-            mpv_set_property_string(mpv, "hdr-compute-peak", "yes")
-            print("[MPV] HDR EDR pipeline active (gamma=\(gamma), prim=\(primaries), peak=\(peak)nits)")
+        if config.wantsEDR {
+            print("[MPV] HDR EDR pipeline active (gamma=\(gamma), prim=\(config.targetPrim), peak=\(config.targetPeak)nits)")
+        } else if isHDR {
+            print("[MPV] HDR tone-mapping to SDR active (gamma=\(gamma), prim=\(config.targetPrim), algo=\(config.toneMapping))")
         } else {
-            for p in ["target-trc", "target-prim", "target-peak", "tone-mapping", "hdr-compute-peak"] {
-                mpv_set_property_string(mpv, p, "auto")
-            }
-            if isHDR {
-                print("[MPV] HDR tone-mapping to SDR active (gamma=\(gamma), prim=\(primaries))")
-            }
+            print("[MPV] SDR color pipeline active (trc=\(config.targetTrc), levels=\(config.videoOutputLevels))")
         }
 
+        let layerColorSpace: CGColorSpace?
+        if config.wantsEDR {
+            layerColorSpace = CGColorSpace(name: config.colorSpaceName)
+        } else if let displayProfile {
+            layerColorSpace = displayProfile.colorSpace
+        } else {
+            layerColorSpace = CGColorSpace(name: config.colorSpaceName)
+        }
         DispatchQueue.main.async { [mpvLayer] in
-            mpvLayer.wantsExtendedDynamicRangeContent = canDoEDR
-            mpvLayer.contentsFormat = canDoEDR ? .RGBA16Float : .RGBA8Uint
-            if canDoEDR {
-                switch (gamma, primaries) {
-                case ("hlg", "bt.2020"):
-                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
-                case ("hlg", _):
-                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3_HLG)
-                case (_, "display-p3"), (_, "dci-p3"):
-                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.displayP3_PQ)
-                default:
-                    mpvLayer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_PQ)
-                }
-            } else {
-                mpvLayer.colorspace = nil
+            mpvLayer.wantsExtendedDynamicRangeContent = config.wantsEDR
+            mpvLayer.contentsFormat = config.contentsFormat
+            mpvLayer.colorspace = layerColorSpace
+            mpvLayer.setNeedsDisplay()
+        }
+    }
+
+    private func displayICCProfile(for screen: NSScreen?) -> (data: Data, colorSpace: CGColorSpace)? {
+        guard let displayColorSpace = screen?.colorSpace?.cgColorSpace,
+              let profileData = displayColorSpace.copyICCData() as Data?,
+              !profileData.isEmpty else {
+            return nil
+        }
+
+        return (profileData, displayColorSpace)
+    }
+
+    private func setICCProfileForRendering(_ profileData: Data?) {
+        iccProfileLock.lock()
+        if pendingICCProfileData != profileData {
+            pendingICCProfileData = profileData
+            iccProfileGeneration &+= 1
+        }
+        iccProfileLock.unlock()
+    }
+
+    /// Applies the pending display ICC profile to the mpv render context.
+    /// Runs on the CA render thread inside draw() with that thread's context —
+    /// mpv_render_context_set_parameter requires the render context's GL context.
+    fileprivate func applyPendingICCProfile(to renderContext: OpaquePointer) {
+        iccProfileLock.lock()
+        let generation = iccProfileGeneration
+        guard generation != attemptedICCProfileGeneration else {
+            iccProfileLock.unlock()
+            return
+        }
+        let profileData = pendingICCProfileData
+        iccProfileLock.unlock()
+
+        let result: Int32
+        if let profileData, !profileData.isEmpty {
+            result = profileData.withUnsafeBytes { buffer in
+                guard let baseAddress = buffer.baseAddress else { return -1 }
+                var byteArray = mpv_byte_array(
+                    data: UnsafeMutableRawPointer(mutating: baseAddress),
+                    size: buffer.count
+                )
+                let parameter = mpv_render_param(type: MPV_RENDER_PARAM_ICC_PROFILE, data: &byteArray)
+                return mpv_render_context_set_parameter(renderContext, parameter)
             }
+        } else {
+            result = 0
+        }
+
+        iccProfileLock.lock()
+        attemptedICCProfileGeneration = max(attemptedICCProfileGeneration, generation)
+        iccProfileLock.unlock()
+
+        if result < 0 {
+            print("[MPV] Failed to apply display ICC profile to render context (error \(result))")
         }
     }
     
@@ -1594,6 +1760,12 @@ final class MPVLayerView: NSView {
         mpv_observe_property(mpv, 0, "track-list", MPV_FORMAT_NONE)
         
         // Only capture warnings and errors to minimize CPU and string allocations
+        // Color management defaults: ICC correction is enabled later by
+        // applyColorPipeline once the active display profile is known. Explicit
+        // "no"/"" here prevents libmpv from picking up a stale global config.
+        mpv_set_property_string(mpv, "icc-profile-auto", "no")
+        mpv_set_property_string(mpv, "icc-profile", "")
+        
         mpv_request_log_messages(mpv, "warn")
         
         callbackToken = MPVCallbackRegistry.register(self)

@@ -8,9 +8,105 @@
 import Testing
 import Foundation
 import CoreGraphics
+import QuartzCore
 @testable import flux
 
 struct fluxTests {
+
+    // MARK: - MPVColorPipelinePolicy Tests (washed-out playback fix)
+
+    @Test func hdrUsesPotentialEDRBeforeEDRContentIsActive() {
+        #expect(MPVColorPipelinePolicy.supportsEDR(maximumPotentialEDR: 2.0))
+        #expect(MPVColorPipelinePolicy.usesEDR(gamma: "pq", primaries: "bt.2020", maximumPotentialEDR: 2.0))
+        #expect(MPVColorPipelinePolicy.usesEDR(gamma: "hlg", primaries: "display-p3", maximumPotentialEDR: 2.0))
+        #expect(!MPVColorPipelinePolicy.usesEDR(gamma: "pq", primaries: "bt.2020", maximumPotentialEDR: 1.0))
+        #expect(!MPVColorPipelinePolicy.usesEDR(gamma: "bt.709", primaries: "bt.2020", maximumPotentialEDR: 2.0))
+    }
+
+    @Test func hdrOutputUsesPQTransferAndRecognizedPrimaries() {
+        #expect(MPVColorPipelinePolicy.targetTransferFunction(for: "pq") == "pq")
+        #expect(MPVColorPipelinePolicy.targetTransferFunction(for: "hlg") == "pq")
+        #expect(MPVColorPipelinePolicy.targetTransferFunction(for: "bt.709") == nil)
+        #expect(MPVColorPipelinePolicy.targetPrimaries(for: "bt.2020") == "bt.2020")
+        #expect(MPVColorPipelinePolicy.targetPrimaries(for: "display-p3") == "display-p3")
+        #expect(MPVColorPipelinePolicy.targetPrimaries(for: "dci-p3") == "display-p3")
+        #expect(MPVColorPipelinePolicy.targetPrimaries(for: "bt.709") == nil)
+    }
+
+    @Test func sdrColorPipelinePreservesMPVAutomaticColorDefaults() {
+        let config = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: "bt.709",
+            primaries: "bt.709",
+            potentialEDR: 2.0
+        )
+        #expect(config.videoOutputLevels == "auto")
+        #expect(config.targetTrc == "auto")
+        #expect(config.targetPrim == "auto")
+        #expect(config.targetPeak == "auto")
+        #expect(config.toneMapping == "auto")
+        #expect(config.hdrComputePeak == "auto")
+        #expect(!config.wantsEDR)
+        #expect(config.contentsFormat == .RGBA8Uint)
+        #expect(config.colorSpaceName == CGColorSpace.sRGB)
+    }
+
+    @Test func hdrEDRPipelineUsesPQFloat16AndTaggedDisplayColorSpace() {
+        let configBT2020 = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: "pq",
+            primaries: "bt.2020",
+            potentialEDR: 2.0
+        )
+        #expect(configBT2020.wantsEDR)
+        #expect(configBT2020.contentsFormat == .RGBA16Float)
+        #expect(configBT2020.colorSpaceName == CGColorSpace.itur_2100_PQ)
+        #expect(configBT2020.targetTrc == "pq")
+        #expect(configBT2020.targetPrim == "bt.2020")
+        #expect(configBT2020.videoOutputLevels == "auto")
+        #expect(configBT2020.hdrComputePeak == "auto")
+        #expect(!configBT2020.usesDisplayICCProfile)
+
+        let configP3 = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: "pq",
+            primaries: "display-p3",
+            potentialEDR: 3.2,
+            currentEDR: 3.2
+        )
+        #expect(configP3.wantsEDR)
+        #expect(configP3.contentsFormat == .RGBA16Float)
+        #expect(configP3.colorSpaceName == CGColorSpace.displayP3_PQ)
+        #expect(configP3.targetPrim == "display-p3")
+        #expect(configP3.targetPeak == "800")
+    }
+
+    @Test func hdrOnSDRDisplayPreservesMPVAutomaticToneMapping() {
+        let config = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: "pq",
+            primaries: "bt.2020",
+            potentialEDR: 1.0
+        )
+        #expect(!config.wantsEDR)
+        #expect(config.contentsFormat == .RGBA8Uint)
+        #expect(config.colorSpaceName == CGColorSpace.sRGB)
+        #expect(config.usesDisplayICCProfile)
+        #expect(config.toneMapping == "auto")
+        #expect(config.targetPeak == "auto")
+        #expect(config.targetTrc == "auto")
+        #expect(config.targetPrim == "auto")
+        #expect(config.hdrComputePeak == "auto")
+        #expect(config.videoOutputLevels == "auto")
+    }
+
+    @Test func sdrPipelineUsesDisplayICCProfile() {
+        let config = MPVColorPipelinePolicy.resolvePipeline(
+            gamma: "bt.709",
+            primaries: "bt.709",
+            potentialEDR: 1.0
+        )
+        #expect(config.usesDisplayICCProfile)
+        #expect(!config.wantsEDR)
+        #expect(config.targetTrc == "auto")
+        #expect(config.targetPrim == "auto")
+    }
 
     @Test func decodedImageCostUsesFourBytesPerPixel() {
         #expect(ImageInMemoryCache.decodedImageCost(width: 1920, height: 1080) == 8_294_400)
