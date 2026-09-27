@@ -167,9 +167,7 @@ final class PiPManager: ObservableObject {
         let itemID = PlayerManager.shared.currentItem?.id
         // Save progress — expanding continues the same content.
         performFullStop(saveProgress: true)
-        if pos > 0.5 {
-            PlayerManager.shared.pendingResumeTime = pos
-        }
+        PlayerManager.shared.endSession()
         if pos > 0.5 {
             PlayerManager.shared.pendingResumeTime = pos
         }
@@ -296,6 +294,7 @@ final class PiPManager: ObservableObject {
         mpvController?.onPlaybackError = nil
 
         let layer = hostedLayer
+        let controller = mpvController
         hostedLayer = nil
         hostedViewController = nil
         mpvController = nil
@@ -311,7 +310,8 @@ final class PiPManager: ObservableObject {
         panel = nil
         isActive = false
 
-        // Destroy the orphaned core with its layer.
+        // Destroy the orphaned core with its layer and reset controller state.
+        controller?.handleCoreDestroyed()
         layer?.cleanup()
     }
 

@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (12:47 PM IST)  
+**Updated**: September 27, 2026 (2:05 PM IST)  
 **Latest Git State**: 242/242 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -73,9 +73,20 @@
       - Root Cause: `DetailView.swift` previously passed `forceStreamPicker: !isFlux` on Play / Resume buttons even when `target.isResume == true` or `fromContinueWatching == true`. In `PlayerManager.play`, `if forceStreamPicker` completely bypassed the instant replay / cached stream reuse check, unconditionally presenting the stream picker for Non-Flux users.
       - Solution: Updated `DetailView.swift` to pass `forceStreamPicker: (!isFlux && !target.isResume)`, `forceStreamPicker: (!isFlux && !isInContinueWatching)`, and `forceStreamPicker: (!isFlux && !hasProgress)`. In Non-Flux Mode, resuming a title with progress or clicking from Continue Watching now auto-plays from the last healthy source immediately without prompting the stream picker, exactly like Stremio.
       - The stream picker is only presented in Non-Flux Mode for brand-new unwatched titles, or when explicitly requested via "Choose Stream Source…" in context menus.
-    - **Stream Probe Robustness & Accurate Player Loading State**:
-      - Updated `PlayerManager.verifyStreamURLHealth` to set standard browser `User-Agent` headers and support a fast Range `GET` fallback when CDNs return `405 Method Not Allowed` for `HEAD` requests.
-      - Removed premature `(!isFluxEnabled && playerManager.currentStreamURL == nil)` gate in `PlayerView.isPickerVisible`, allowing the loading overlay to display cleanly during instant replay resolution without flashing the stream picker.
+36. **MPV Core Lifetime, AppKit Lazy Loading & CAOpenGLLayer Thread-Safety Architecture**:
+    - **AppKit Lazy View Loading & IUO Crash Prevention**:
+      - Root Cause: In AppKit, `NSViewController.view` is loaded lazily on first access. When `MPVController.playerView = vc` was assigned in `makeNSViewController`, its `didSet` immediately flushed queued play commands (`flushPendingPlay(into:)`). Calling methods like `vc.play()` or `vc.setMute()` before `vc.view` was touched resulted in a crash trying to force-unwrap `var playerView: MPVLayerView!` which was still `nil`.
+      - Solution: In `makeNSViewController`, wired `vc.delegate = controller`, explicitly forced view initialization with `_ = vc.view`, and then linked `controller.playerView = vc`. Additionally, guarded all forwarding methods in `MPVViewController` (`play`, `pause`, `seek`, `setVolume`, `selectTrack`, etc.) with defensive `loadViewIfNeeded()`, guaranteeing `playerView` is never force-unwrapped while `nil`.
+    - **Core Liveness (`isCoreAlive`) & State Desynchronization Elimination**:
+      - Root Cause: `MPVController` is session-scoped, while the underlying `libmpv` C core has view/layer lifetime. When closing the player window or expanding from PiP, the C mpv core was destroyed, but `MPVController` retained `hasLoadedMedia = true` and `loadedURL = currentStreamURL`. When a new `PlayerView` mounted on instant replay, `PlayerView.onAppear` mistook the dead core for an active warm core and called `mpv.play()` (which only unpauses), leaving the player frozen at `00:00` indefinitely.
+      - Solution: Introduced `isCoreAlive` (`playerView?.playerView?.mpv != nil`) and `handleCoreDestroyed()` on `MPVController`. Added `onCoreDestroyed` closure to `MPVLayerView` invoked synchronously on teardown, resetting `hasLoadedMedia`, `loadedURL`, `pendingPlayURL`, `timePos`, and `duration`. Updated `PlayerView.onAppear` to require `mpv.isCoreAlive` before adopting a warm core, cleanly falling back to `mpv.play(url:)` when the core was freshly initialized.
+    - **CAOpenGLLayer Asynchronous Drawing Concurrency Hardening**:
+      - Root Cause: With `isAsynchronous = true`, `MPVLayer.draw(inCGLContext:)` executes on CoreAnimation's render thread. On teardown, freeing `mpvGL` before nilling `mpv` could trigger a fatal race condition if `draw` attempted to render with an invalid context.
+      - Solution: In `MPVLayerView.teardown()`, acquired `renderUpdateLock`, nilled `self.mpv` under the lock before calling `mpv_render_context_free(glCtx)`, and safely dispatched `mpv_terminate_destroy(handle)` to a background utility queue. Hardened `MPVLayer.canDraw` and `MPVLayer.draw` with `guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil`.
+    - **Event-Driven Reset of Switching File State**:
+      - Replaced arbitrary `asyncAfter(0.6s)` wall-clock timers with deterministic event-driven resets: `self.isIntentionallySwitchingFile = false` is now dispatched upon receiving `MPV_EVENT_START_FILE` or `MPV_EVENT_FILE_LOADED` from mpv's event loop.
+    - **PiP Session Lifecycle Integrity**:
+      - In `PiPManager.performFullStop`, called `controller?.handleCoreDestroyed()` to synchronize controller media state with the destroyed layer. In `expandToPlayer`, called `PlayerManager.shared.endSession()`, ensuring the reopened fullscreen player window acquires a fresh session controller rather than retaining a defunct PiP controller.
 
 ---
 
