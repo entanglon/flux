@@ -19,6 +19,16 @@
 4. Lock-order invariant if the direct path is ever revived: displayLock → CGLLockContext, strictly, in EVERY path including teardown and CA draw.
 5. User ground truth: beta 2 (`e89d160`) build installed on the same Mac plays replay perfectly. Everything that differs from it in the player path is suspect #1 — diff against it before inventing mechanisms.
 
+**CORRECTION OF THE RECORD — several commit messages from Sep 27 state UNVERIFIED conclusions as fact. Do not trust their claims; trust only the diag-log findings summarized above:**
+- `52de3fc` ("eliminate blank-video-on-replay") — did NOT eliminate it. The CGL pinning cache was inert.
+- `c81248f` / `0f8ed92` ("rebind" / "IINA-parity ... resolves replay") — did NOT resolve replay.
+- `07e4ffe` ("resolves replay black-video and Software-only decode") — did NOT resolve it.
+- `eaf1921` ("driven rendering") — display() ran on replay but canDraw was never polled; did not resolve.
+- `97ecc84` ("THE root-cause diff vs working beta 2, finally identified") — UNVERIFIED claim. Removing `.id(playbackSessionUUID)` is a plausible structural fix, but the user's subsequent test still failed, so it is NOT confirmed as the root cause.
+- `2df2794` + `b26dc25` (direct render + lock-order fix) — the direct render path froze first play (lock inversion, log-confirmed as mechanism), was reverted in `a51a227`.
+
+What IS verified (diag-log evidence, see above): replay sessions created a fresh core+layer, attached to playerWindow, identity OK — yet canDraw was never polled once, so no draw and no render context ever occurred. The freeze was a displayLock/CGL lock-order inversion (now rolled back). Everything beyond those facts in today's commit messages is hypothesis.
+
 **Recommended next approach (evidence-based, minimal)**: in the CURRENT HEAD state run one replay repro and read /tmp/flux_render_diag.log. With .id() removed, SwiftUI should NOT rebuild the view — if the log shows no new LAYER INIT on replay yet video is still black, the cause is no longer layer creation but the mpvGL/render-context binding surviving teardown of the OLD window (i.e. the view now persists but mpv was destroyed at close per PlayerView.onDisappear → beginSession hands a dead-ish core). The likely-correct minimal fix then: make PlayerWindowContainer's view persist across sessions AND stop tearing mpv down in onDisappear when the same window will be reused (beta-2 semantics: onDisappear teardown was paired with view destruction; without .id() the pairing broke). Do NOT re-add .id(), do NOT add direct rendering.
 
 ---
