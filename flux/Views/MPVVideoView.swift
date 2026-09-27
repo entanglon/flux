@@ -52,9 +52,11 @@ struct MPVVideoView: NSViewControllerRepresentable {
     
     func makeNSViewController(context: Context) -> MPVViewController {
         let vc: MPVViewController
-        if let existing = controller.playerView {
+        if let existing = controller.playerView, existing.isViewLoaded, existing.playerView.mpv != nil {
             // Adopted warm core from the detail-page prefetch — already paired
-            // with its controller and buffering the stream.
+            // with its controller and buffering the stream. A stale VC whose
+            // core was torn down (window closed / PiP expanded) is NOT adopted:
+            // it would mount black with controller state claiming media loaded.
             vc = existing
         } else {
             vc = MPVViewController()
@@ -68,7 +70,11 @@ struct MPVVideoView: NSViewControllerRepresentable {
     }
     
     func updateNSViewController(_ nsViewController: MPVViewController, context: Context) {
-        // Updates handled via controller
+        if nsViewController.delegate !== controller {
+            nsViewController.delegate = controller
+            controller.playerView = nsViewController
+            controller.flushPendingPlay(into: nsViewController)
+        }
     }
     
     static func dismantleNSViewController(_ nsViewController: MPVViewController, coordinator: Coordinator) {
@@ -1087,7 +1093,18 @@ class MPVViewController: NSViewController {
 // MARK: - OpenGL View & MPV Backend
 // MARK: - CAOpenGLLayer Subclass for Zero Main-Thread Hop Rendering
 final class MPVLayer: CAOpenGLLayer {
-    weak var ownerView: MPVLayerView?
+    /// Set (and left set) by MPVLayerView.attachMpvLayer() on the main thread.
+    /// CAOpenGLLayer requires the layer and view to share ONE pixel format and
+    /// ONE context for their entire lifetime — recreating either invalidates
+    /// the mpv render context (black video, audio keeps playing). All three
+    /// copyCGL* overrides therefore answer from this view-owned cache and the
+    /// view's contextReboundIfNeeded() rebinds mpvGL after any layer→view
+    /// re-attachment that swaps the underlying CGL context.
+    var ownerView: MPVLayerView? {
+        get { _ownerView }
+        set { _ownerView = newValue; newValue?.attachMpvLayer(self) }
+    }
+    private weak var _ownerView: MPVLayerView?
     
     override init() {
         super.init()
@@ -1108,6 +1125,16 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
+        if let pix = ownerView?.cglPixelFormat {
+            CGLRetainPixelFormat(pix)
+            return pix
+        }
+        return copyCGLPixelFormatBase(forDisplayMask: mask)
+    }
+    
+    /// The one-shot format construction (EDR/float16 detection per display).
+    /// Also used by MPVLayerView.attachMpvLayer to pin the format at bind time.
+    func copyCGLPixelFormatBase(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
         // Evaluate hardware reference EDR capability for the target display mask.
         // We check `maximumReferenceExtendedDynamicRangeColorComponentValue`,
         // which is > 1.0 strictly on true HDR/XDR panels (MacBook Pro Liquid Retina XDR, Pro Display XDR).
@@ -1147,13 +1174,17 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func copyCGLContext(forPixelFormat pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
+        if let ctx = ownerView?.cglContext {
+            CGLRetainContext(ctx)
+            return ctx
+        }
         var ctx: CGLContextObj?
         CGLCreateContext(pixelFormat, nil, &ctx)
         return ctx!
     }
     
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
-        guard let owner = ownerView, !owner.isCleaningUp else { return false }
+        guard let owner = ownerView, !owner.isCleaningUp, owner.canDrawIfMpvAlive else { return false }
         return owner.mpv != nil
     }
     
@@ -1169,6 +1200,11 @@ final class MPVLayer: CAOpenGLLayer {
             glFlush()
             return
         }
+        
+        // Defense-in-depth: if CA is drawing into a different CGL context than
+        // the pinned one (layer/window churn), rebind mpvGL to the live context
+        // instead of rendering into a stale one (black video, audio playing).
+        owner.contextReboundIfNeeded(to: ctx)
         
         if owner.mpvGL == nil {
             owner.setupMPVGL(with: ctx)
@@ -1229,6 +1265,8 @@ final class MPVLayer: CAOpenGLLayer {
 final class MPVLayerView: NSView {
     private(set) var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
+    private(set) var cglContext: CGLContextObj?
+    private(set) var cglPixelFormat: CGLPixelFormatObj?
     private var displayLink: CVDisplayLink?
     let mpvLayer = MPVLayer()
     
@@ -1262,6 +1300,41 @@ final class MPVLayerView: NSView {
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
         mpvLayer.ownerView = self
+        attachMpvLayer(mpvLayer)
+    }
+    
+    /// Pins ONE CGL pixel format for this view's entire lifetime, the moment
+    /// the backing layer is bound (before CA ever asks). CAOpenGLLayer must
+    /// never change pixel format or context mid-life: when a player window is
+    /// closed and a new one opened for a replay, CA re-queries copyCGL*
+    /// during re-compositing; without this pin it created a brand-new CGL
+    /// context while the mpv render context stayed attached to the old one —
+    /// frames rendered into a void → black video with audio still playing.
+    func attachMpvLayer(_ layer: MPVLayer) {
+        guard cglPixelFormat == nil else { return }
+        // Derive the display mask from the layer's current screen (falls back
+        // like copyCGLPixelFormat did) so HDR/EDR attributes match the panel.
+        // During init the view has no window yet; NSScreen.main's format is
+        // virtualized and works on any attached display.
+        let screen = window?.screen ?? NSScreen.main
+        var mask: UInt32 = 1
+        if let num = (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value {
+            mask = CGDisplayIDToOpenGLDisplayMask(num)
+        }
+        let pix = layer.copyCGLPixelFormatBase(forDisplayMask: mask)
+        cglPixelFormat = pix
+        CGLRetainPixelFormat(pix)
+        var ctx: CGLContextObj?
+        CGLCreateContext(pix, nil, &ctx)
+        guard let created = ctx else {
+            print("[MPV] Failed to create pinned CGL context — falling back to layer-managed context")
+            cglPixelFormat = nil
+            CGLReleasePixelFormat(pix)
+            return
+        }
+        cglContext = created
+        CGLRetainContext(created)
+        print("[MPV] Pinned CGL pixel format + context for view lifetime")
     }
     
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
@@ -1410,6 +1483,28 @@ final class MPVLayerView: NSView {
         // Handled via mpvGLUpdate callback
     }
     
+    /// Renders only while a live mpv core exists on this view.
+    var canDrawIfMpvAlive: Bool = true
+    
+    /// Called from MPVLayer.draw on the CA render thread with the context CA
+    /// is actually about to draw into. If that context differs from the one
+    /// the mpv render context was created with (window/layer churn across
+    /// replay sessions), the old mpvGL is freed and a new one is created
+    /// against the live context — self-healing black-video-on-replay.
+    func contextReboundIfNeeded(to ctx: CGLContextObj) {
+        if cglContext != ctx, mpvGL != nil, mpv != nil {
+            print("[MPV] GL context rebound detected (\(String(describing: cglContext)) → \(ctx)) — rebuilding mpv render context")
+            CGLSetCurrentContext(ctx)
+            let gl = mpvGL
+            mpvGL = nil
+            mpv_render_context_set_update_callback(gl, { _ in }, nil)
+            mpv_render_context_free(gl)
+            setupMPVGL(with: ctx)
+            cglContext = ctx
+            CGLRetainContext(ctx)
+        }
+    }
+    
     func teardown() {
         guard !isCleaningUp else { return }
         isCleaningUp = true
@@ -1429,6 +1524,10 @@ final class MPVLayerView: NSView {
             displayLink = nil
         }
         
+        // Stop the CA render thread from entering draw() while the core is
+        // being disassembled (isAsynchronous = true draws off-thread).
+        canDrawIfMpvAlive = false
+        
         renderUpdateLock.lock()
         let handle = self.mpv
         self.mpv = nil
@@ -1443,6 +1542,20 @@ final class MPVLayerView: NSView {
             mpv_set_wakeup_callback(handle, nil, nil)
             DispatchQueue.global(qos: .utility).async {
                 mpv_terminate_destroy(handle)
+            }
+        }
+        
+        // Release the pinned CGL objects on the main thread: the view is being
+        // destroyed, so the format/context must NOT survive for reuse.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if let ctx = self.cglContext {
+                CGLReleaseContext(ctx)
+                self.cglContext = nil
+            }
+            if let pix = self.cglPixelFormat {
+                CGLReleasePixelFormat(pix)
+                self.cglPixelFormat = nil
             }
         }
     }

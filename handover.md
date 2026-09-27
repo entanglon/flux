@@ -1,5 +1,5 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (2:05 PM IST)  
+**Updated**: September 27, 2026 (3:35 PM IST)  
 **Latest Git State**: 242/242 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
@@ -87,6 +87,22 @@
       - Replaced arbitrary `asyncAfter(0.6s)` wall-clock timers with deterministic event-driven resets: `self.isIntentionallySwitchingFile = false` is now dispatched upon receiving `MPV_EVENT_START_FILE` or `MPV_EVENT_FILE_LOADED` from mpv's event loop.
     - **PiP Session Lifecycle Integrity**:
       - In `PiPManager.performFullStop`, called `controller?.handleCoreDestroyed()` to synchronize controller media state with the destroyed layer. In `expandToPlayer`, called `PlayerManager.shared.endSession()`, ensuring the reopened fullscreen player window acquires a fresh session controller rather than retaining a defunct PiP controller.
+
+37. **Blank Video On Replay (Audio Playing) — CGL Context Lifetime Resolution**:
+    - **Symptom**: First play of a title works perfectly. Exit the player, play the same title again (instant-replay path): audio plays but the player surface stays black/blank forever. No recovery, no error.
+    - **Root Cause (CGL Context Re-creation vs mpv Render Context Binding)**:
+      - `MPVLayerView` builds its render pipeline lazily on the CA render thread: the first `MPVLayer.draw(inCGLContext:)` calls `setupMPVGL(with: ctx)` which creates the mpv render context **bound to that specific CGLContextObj**.
+      - `CAOpenGLLayer` does NOT guarantee context stability across layer lifecycle churn. When the player window is closed and a replay opens a new window (or a warm-core host window hands the view to the player window), CA re-runs its layer setup and queries `copyCGLPixelFormat`/`copyCGLContext` again. The original overrides created a **brand-new pixel format and CGL context on every query**.
+      - Result on replay: CA composites the layer through a NEW CGL context, but `mpvGL` (mpv's render context) remains bound to the OLD context — mpv decodes and renders every frame into an orphaned context that CA never composites. Audio path is unaffected → classic "sound playing, black video".
+      - Antigravity had started this fix (uncommitted diff: reading `ownerView?.cglPixelFormat` / `ownerView?.cglContext` inside the copy overrides) but the cache was **never populated anywhere**, so the fix was inert. This session completed it.
+    - **Solution (One Context For The Layer's Lifetime + Self-Healing Rebind)**:
+      - **Pinned CGL pair at bind time**: `MPVLayerView.attachMpvLayer(_:)` (called from view `init` and from `MPVLayer.ownerView` didSet) creates ONE `CGLPixelFormatObj` (via the extracted `MPVLayer.copyCGLPixelFormatBase`, preserving the EDR/float16 panel detection) and ONE `CGLContextObj`, retaining both. All three `copyCGLPixelFormat`/`copyCGLContext`/`canDraw`/`draw` paths now answer from this pinned pair — CA can re-query as often as it likes, it always gets the same context mpvGL was built with.
+      - **Self-healing rebind (`contextReboundIfNeeded(to:)`)**: defense-in-depth executed from `draw` on the CA render thread. If CA ever presents a context different from the pinned one (window moves to another display re-creating surfaces, external layer churn, future refactor regressing the pin), the stale mpv render context is freed and rebuilt against the live context instead of silently rendering into a void. This guarantees the black-video failure mode can never persist even if CA breaks the pin.
+      - **Render-thread teardown fence (`canDrawIfMpvAlive`)**: with `isAsynchronous = true`, `draw` executes off-thread. `teardown()` now flips `canDrawIfMpvAlive = false` BEFORE freeing `mpvGL`, so `canDraw` returns false and the CA render thread can never re-enter `draw` mid-teardown and resurrect a render context on a dying view (the inverse of the blank-video bug, and a crash class).
+      - **Safe teardown of pinned objects**: `teardown()` releases the pinned context/pixel format (retained at creation) asynchronously on the main thread — the view is being destroyed, nothing may reuse them.
+      - **Corpse-guard in `makeNSViewController`**: warm-core adoption now requires `existing.isViewLoaded && existing.playerView.mpv != nil`. A view controller whose mpv core was already torn down (closed window / PiP expand) is never adopted; a fresh `MPVViewController` is mounted instead. Combined with `handleCoreDestroyed()` (item 36), controller state and core liveness can no longer disagree at mount time.
+    - **Why This Also Protects First-Play**: the pin happens in `init`, so cold starts behave identically to before (one format, one context, one mpvGL). The rebind path only activates when CA actually swaps contexts, which previously manifested as silent black video.
+    - **Verification**: `xcodebuild build` succeeded; full Swift Testing run `242 tests in 9 suites passed` (Swift Testing reports `Executed 0 tests` under the legacy XCTest grep — use the `Test run with N tests` line).
 
 ---
 
