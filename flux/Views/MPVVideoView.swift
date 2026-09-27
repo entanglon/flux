@@ -1421,16 +1421,28 @@ final class MPVLayer: CAOpenGLLayer {
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
+        guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil else {
+            return
+        }
+        // DEADLOCK FIX — global lock order is displayLock -> CGL context lock.
+        // The direct-render path (renderFrameNow) takes displayLock first and
+        // only then CGLLockContext; CA's draw callback previously did the
+        // opposite (CGL first, then displayLock), so both paths could hold one
+        // lock and wait forever on the other — that was the hard app freeze.
+        // Take displayLock BEFORE touching the context and keep the CGL lock
+        // scoped entirely inside it.
+        owner.displayLock.lock()
+        defer { owner.displayLock.unlock() }
+        
         if ownerView?.didLogFirstDraw != true {
             ownerView?.didLogFirstDraw = true
             fluxDiag("DRAW first draw on layer \(ObjectIdentifier(self).hashValue), ctx \(ptrId(ctx)), ownerView \(ownerView.map { ObjectIdentifier($0).hashValue } ?? 0)")
         }
-        guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil else {
-            if ownerView?.didLogFirstDraw == true, ownerView?.mpv == nil {
-                fluxDiag("DRAW skipped: owner.mpv nil (ctx \(ptrId(ctx)))")
-            }
+        
+        guard !owner.isCleaningUp, owner.mpv != nil else {
             return
         }
+        
         CGLSetCurrentContext(ctx)
         CGLLockContext(ctx)
         defer { CGLUnlockContext(ctx) }
@@ -1444,11 +1456,8 @@ final class MPVLayer: CAOpenGLLayer {
         glGetIntegerv(GLenum(GL_DRAW_FRAMEBUFFER_BINDING), &drawFBO)
         var dims: [GLint] = [0, 0, 0, 0]
         glGetIntegerv(GLenum(GL_VIEWPORT), &dims)
-        
-        // Serialize every mpv_render_* call (render.h contract; teardown on the
-        // main thread also takes this lock before freeing the context).
-        owner.displayLock.lock()
-        defer { owner.displayLock.unlock() }
+
+
         
         if !owner.didEverDraw {
             owner.didEverDraw = true
@@ -1794,6 +1803,9 @@ final class MPVLayerView: NSView {
     /// Direct render into the pinned CGL context — no CA canDraw/draw cycle.
     /// Serialized with teardown and any residual CA-driven draws via displayLock;
     /// render.h-compliant (same context the render context was created with).
+    /// NOTE: displayLock is taken FIRST and the CGL lock strictly inside it —
+    /// the global lock order (see draw()). Also verify render context AFTER
+    /// taking displayLock so no CA draw can interleave.
     func renderFrameNow() {
         displayLock.lock()
         defer { displayLock.unlock() }
