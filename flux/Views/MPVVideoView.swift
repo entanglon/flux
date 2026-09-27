@@ -1346,9 +1346,27 @@ final class MPVLayer: CAOpenGLLayer {
         return context
     }
     
+    private var didLogFirstCanDraw = false
+    private var didLogFirstCanDrawTrue = false
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
-        guard let owner = ownerView, !owner.isCleaningUp else { return false }
-        return owner.mpv != nil
+        guard let owner = ownerView else {
+            if !didLogFirstCanDraw {
+                didLogFirstCanDraw = true
+                fluxDiag("CANDRAW polled: ownerView NIL (layer \(ObjectIdentifier(self).hashValue))")
+            }
+            return false
+        }
+        if !didLogFirstCanDraw {
+            didLogFirstCanDraw = true
+            fluxDiag("CANDRAW first poll: view \(ObjectIdentifier(owner).hashValue), cleaningUp \(owner.isCleaningUp), mpv \(owner.mpv != nil)")
+        }
+        if owner.isCleaningUp { return false }
+        let alive = owner.mpv != nil
+        if alive && !didLogFirstCanDrawTrue {
+            didLogFirstCanDrawTrue = true
+            fluxDiag("CANDRAW first TRUE — draw should follow (view \(ObjectIdentifier(owner).hashValue), ctx \(ptrId(ctx)))")
+        }
+        return alive
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
@@ -1497,6 +1515,7 @@ final class MPVLayerView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
     
     override func makeBackingLayer() -> CALayer {
+        fluxDiag("BACKING LAYER requested for view \(ObjectIdentifier(self).hashValue) — returning mpvLayer \(ObjectIdentifier(mpvLayer).hashValue), ownerView wired: \(mpvLayer.ownerView != nil)")
         return mpvLayer
     }
     
@@ -1519,6 +1538,13 @@ final class MPVLayerView: NSView {
     
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        let attachDesc: String
+        if let w = window {
+            attachDesc = "ATTACHED window \(w.identifier?.rawValue ?? "unnamed")"
+        } else {
+            attachDesc = "DETACHED"
+        }
+        fluxDiag("VIEW didMoveToWindow \(attachDesc), view \(ObjectIdentifier(self).hashValue)")
         let scale = window?.backingScaleFactor ?? 2.0
         lastBackingScale = scale
         mpvLayer.contentsScale = scale
