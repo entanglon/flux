@@ -1238,13 +1238,21 @@ final class MPVLayer: CAOpenGLLayer {
     weak var ownerView: MPVLayerView?
     fileprivate let cglPixelFormat: CGLPixelFormatObj
     fileprivate let cglContext: CGLContextObj
+    /// IINA parity: rendering is DRIVEN, not polled. With isAsynchronous = true,
+    /// CA autonomously polls canDraw — and that polling silently stops after a
+    /// SwiftUI attach/detach/re-attach during window swap (log-verified: the
+    /// replay session's layer was never polled again → no draw → no render
+    /// context → black video + Software decode forever). Instead, mpv's
+    /// render-update callback drives update() → display() on this queue,
+    /// exactly like IINA's mpvGLQueue.
+    fileprivate let mpvGLQueue = DispatchQueue(label: "flux.mpvgl.render", qos: .userInteractive)
     
     override init() {
         cglPixelFormat = MPVLayer.createPixelFormat()
         cglContext = MPVLayer.createContext(cglPixelFormat)
         super.init()
-        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
-        fluxDiag("LAYER INIT \(ObjectIdentifier(self).hashValue), pinned ctx \(ptrId(cglContext))")
+        self.isAsynchronous = false
+        fluxDiag("LAYER INIT \(ObjectIdentifier(self).hashValue), pinned ctx \(ptrId(cglContext)), async=false (driven)")
         self.contentsFormat = .RGBA8Uint
         self.needsDisplayOnBoundsChange = true
         self.backgroundColor = NSColor.black.cgColor
@@ -1259,7 +1267,7 @@ final class MPVLayer: CAOpenGLLayer {
         cglPixelFormat = previous.cglPixelFormat
         cglContext = previous.cglContext
         super.init(layer: layer)
-        self.isAsynchronous = previous.isAsynchronous
+        self.isAsynchronous = false
         self.contentsFormat = previous.contentsFormat
         self.wantsExtendedDynamicRangeContent = previous.wantsExtendedDynamicRangeContent
         self.ownerView = previous.ownerView
@@ -1276,6 +1284,36 @@ final class MPVLayer: CAOpenGLLayer {
     
     override func copyCGLContext(forPixelFormat pf: CGLPixelFormatObj) -> CGLContextObj {
         cglContext
+    }
+    
+    // MARK: - IINA-parity driven rendering
+    
+    /// Called by mpv's render-update callback (and on attachment changes).
+    /// Schedules display() on the render queue. IINA `update(force:)` parity.
+    func requestRender() {
+        mpvGLQueue.async { [weak self] in
+            guard let self = self, !self.isCleaningUpLayer else { return }
+            self.display()
+        }
+    }
+    
+    /// Non-atomic flag mirrored from the view's cleanup state (set before the
+    /// queue captures self, read on the queue).
+    fileprivate var isCleaningUpLayer = false
+    
+    /// IINA `display()` override parity: explicit CATransaction so the implicit
+    /// transaction CA would create on a non-main thread is properly flushed.
+    /// Without this, off-main-thread display() transactions silently never hit
+    /// the compositor.
+    override func display() {
+        if Thread.isMainThread {
+            super.display()
+        } else {
+            CATransaction.begin()
+            super.display()
+            CATransaction.commit()
+        }
+        CATransaction.flush()
     }
     
     // MARK: - Core OpenGL Context and Pixel Format (IINA parity)
@@ -1545,6 +1583,13 @@ final class MPVLayerView: NSView {
             attachDesc = "DETACHED"
         }
         fluxDiag("VIEW didMoveToWindow \(attachDesc), view \(ObjectIdentifier(self).hashValue)")
+        // IINA parity: on every attachment, render the current frame NOW from
+        // the render queue. This guarantees the layer's GL pipeline boots (and
+        // the render context gets created) even when CA's async polling state
+        // is lost across the attach/detach/re-attach dance.
+        if window != nil {
+            mpvLayer.requestRender()
+        }
         let scale = window?.backingScaleFactor ?? 2.0
         lastBackingScale = scale
         mpvLayer.contentsScale = scale
@@ -1694,21 +1739,12 @@ final class MPVLayerView: NSView {
     }
     
     func mpvRenderUpdate() {
-        renderUpdateLock.lock()
-        if isRenderUpdateScheduled {
-            renderUpdateLock.unlock()
-            return
-        }
-        isRenderUpdateScheduled = true
-        renderUpdateLock.unlock()
-        
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.renderUpdateLock.lock()
-            self.isRenderUpdateScheduled = false
-            self.renderUpdateLock.unlock()
-            self.mpvLayer.setNeedsDisplay()
-        }
+        // IINA parity: drive the layer directly from mpv's update callback.
+        // The old path (main-async → setNeedsDisplay → wait for CA's async poll)
+        // depends on CA's polling state surviving the attach/detach dance —
+        // which the replay log proved it does not. display() on the render
+        // queue renders a frame NOW, no CA cooperation required.
+        mpvLayer.requestRender()
     }
     
     private func displayLinkFired() {
@@ -1734,6 +1770,10 @@ final class MPVLayerView: NSView {
             CVDisplayLinkStop(link)
             displayLink = nil
         }
+        
+        // Signal the render queue to stop scheduling work for this dying view
+        // BEFORE freeing the render context (queue closure checks this flag).
+        mpvLayer.isCleaningUpLayer = true
         
         renderUpdateLock.lock()
         let handle = self.mpv
