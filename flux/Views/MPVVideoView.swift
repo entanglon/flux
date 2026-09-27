@@ -1289,16 +1289,19 @@ final class MPVLayer: CAOpenGLLayer {
     // MARK: - IINA-parity driven rendering
     
     /// Called by mpv's render-update callback (and on attachment changes).
-    /// Schedules display() on the render queue. IINA `update(force:)` parity.
-    /// CRITICAL: a CAOpenGLLayer's display() only runs the canDraw/draw cycle
-    /// when the layer is marked dirty — a clean layer's display() silently
-    /// no-ops (log-proven: session-2 display() calls never reached canDraw).
-    /// setNeedsDisplay() first makes every requestRender() deterministic.
+    ///
+    /// LOG-PROVEN FINDING: after a SwiftUI attach/detach/re-attach window swap,
+    /// CAOpenGLLayer's canDraw/draw cycle is never invoked again — not by CA's
+    /// async poll, not by setNeedsDisplay()+display(). The layer stays the
+    /// view's backing layer (identity verified) yet CA refuses to drive it.
+    /// So we bypass CA's draw cycle entirely: render the current mpv frame
+    /// DIRECTLY into our pinned CGL context from the render queue. The layer's
+    /// surface is composited by CA as usual — we only stop depending on CA to
+    /// invoke the draw callback.
     func requestRender() {
         mpvGLQueue.async { [weak self] in
             guard let self = self, !self.isCleaningUpLayer else { return }
-            self.setNeedsDisplay()
-            self.display()
+            self.ownerView?.renderFrameNow()
         }
     }
     
@@ -1786,6 +1789,71 @@ final class MPVLayerView: NSView {
     
     private func displayLinkFired() {
         // Handled via mpvGLUpdate callback
+    }
+    
+    /// Direct render into the pinned CGL context — no CA canDraw/draw cycle.
+    /// Serialized with teardown and any residual CA-driven draws via displayLock;
+    /// render.h-compliant (same context the render context was created with).
+    func renderFrameNow() {
+        displayLock.lock()
+        defer { displayLock.unlock() }
+        guard !isCleaningUp, mpv != nil else { return }
+        
+        let ctx = mpvLayer.cglContext
+        if mpvGL == nil || mpvGLCreationContext != ctx {
+            setupMPVGL(with: ctx)
+        }
+        guard let gl = mpvGL else {
+            fluxDiag("RENDER-NOW skipped: no render context (view \(ObjectIdentifier(self).hashValue))")
+            return
+        }
+        
+        CGLSetCurrentContext(ctx)
+        CGLLockContext(ctx)
+        defer { CGLUnlockContext(ctx) }
+        
+        applyPendingICCProfile(to: gl)
+        _ = mpv_render_context_update(gl)
+        
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        let w = Int32(bounds.width * scale)
+        let h = Int32(bounds.height * scale)
+        guard w > 0 && h > 0 else {
+            fluxDiag("RENDER-NOW skipped: zero-size (view \(ObjectIdentifier(self).hashValue), bounds \(bounds.size))")
+            return
+        }
+        glViewport(0, 0, w, h)
+        
+        var drawFBO: GLint = 0
+        glGetIntegerv(GLenum(GL_DRAW_FRAMEBUFFER_BINDING), &drawFBO)
+        if drawFBO == 0 { drawFBO = 1 } // IINA fallback: default framebuffer alias
+        
+        var flipY: Int32 = 1
+        var depth: Int32 = 8
+        var fbo = mpv_opengl_fbo(fbo: drawFBO, w: w, h: h, internal_format: 0)
+        withUnsafeMutablePointer(to: &fbo) { fboPtr in
+            withUnsafeMutablePointer(to: &flipY) { flipPtr in
+                withUnsafeMutablePointer(to: &depth) { depthPtr in
+                    var params = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_DEPTH, data: depthPtr),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil)
+                    ]
+                    let result = mpv_render_context_render(gl, &params)
+                    if result >= 0 {
+                        mpv_render_context_report_swap(gl)
+                        if !didEverDraw {
+                            didEverDraw = true
+                            fluxDiag("PIPELINE BOOTSTRAP COMPLETE via DIRECT render (view \(ObjectIdentifier(self).hashValue), ctx \(ptrId(ctx)))")
+                        }
+                    } else {
+                        fluxDiag("RENDER-NOW mpv_render_context_render FAILED res=\(result)")
+                    }
+                }
+            }
+        }
+        glFlush()
     }
     
     func teardown() {
