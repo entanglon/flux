@@ -1278,6 +1278,12 @@ final class MPVLayer: CAOpenGLLayer {
         
         if owner.mpvGL == nil {
             owner.setupMPVGL(with: ctx)
+        } else if owner.mpvGLCreationContext != ctx {
+            // View moved between windows (e.g. warm-core host → player window):
+            // CA created a new GL context for this window, so the existing
+            // render context is bound to a dead context. Rebuild it here on the
+            // CA render thread with the context we are actually drawing into.
+            owner.rebuildRenderContext(for: ctx)
         }
         
         guard let mpvGL = owner.mpvGL else {
@@ -1605,6 +1611,7 @@ final class MPVLayerView: NSView {
             mpv_render_context_free(glCtx)
             self.mpvGL = nil
         }
+        mpvGLCreationContext = nil
         if let handle = handle {
             mpv_set_wakeup_callback(handle, nil, nil)
             DispatchQueue.global(qos: .utility).async {
@@ -1775,6 +1782,7 @@ final class MPVLayerView: NSView {
     
     func setupMPVGL(with ctx: CGLContextObj) {
         guard mpvGL == nil, mpv != nil else { return }
+        mpvGLCreationContext = ctx
         CGLSetCurrentContext(ctx)
         
         let getProcAddress: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? = { _, name in
@@ -1808,6 +1816,27 @@ final class MPVLayerView: NSView {
     }
     
     private var isIntentionallySwitchingFile = false
+    /// The CGL context the mpv render context was created against. When the
+    /// view moves between windows (warm-core host → player window), CA issues
+    /// a NEW context for the new window; the old render context keeps
+    /// rendering into the dead one — black video, audio only, hwdec demoted
+    /// to Software (CPU) because GL interop can never complete.
+    fileprivate var mpvGLCreationContext: CGLContextObj?
+    
+    /// Rebinds the mpv render context to the CGL context CA is actually
+    /// drawing with. Called from draw() on the CA render thread when a
+    /// context change is detected (window reparenting / display move).
+    fileprivate func rebuildRenderContext(for ctx: CGLContextObj) {
+        guard !isCleaningUp, mpv != nil else { return }
+        CGLSetCurrentContext(ctx)
+        if let old = mpvGL {
+            mpvGL = nil
+            mpv_render_context_set_update_callback(old, { _ in }, nil)
+            mpv_render_context_free(old)
+        }
+        setupMPVGL(with: ctx)
+        print("[MPV] Render context rebound to active window context — VideoToolbox interop restored")
+    }
 
     func loadFile(_ url: URL, paused: Bool = false) {
         print("[MPV] loadFile called: \(url.absoluteString) (paused: \(paused))")
