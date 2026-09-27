@@ -57,8 +57,10 @@ struct MPVVideoView: NSViewControllerRepresentable {
             // with its controller and buffering the stream. A stale VC whose
             // core was torn down (window closed / PiP expanded) is NOT adopted:
             // it would mount black with controller state claiming media loaded.
+            print("[MPVView] makeNSViewController: ADOPTING existing live core (view: \(existing.playerView))")
             vc = existing
         } else {
+            print("[MPVView] makeNSViewController: building FRESH core (had: \(controller.playerView != nil ? "dead/unloaded VC" : "nil"))")
             vc = MPVViewController()
             vc.delegate = controller
             _ = vc.view // Force loadView + viewDidLoad with delegate wired
@@ -958,6 +960,7 @@ class MPVViewController: NSViewController {
         super.viewDidLoad()
         self.playerView.setupContext()
         self.playerView.setupMpv()
+        print("[MPVView] viewDidLoad: mpv core \(self.playerView.mpv != nil ? "CREATED" : "FAILED TO CREATE")")
         
         self.playerView.onCoreDestroyed = { [weak self] in
             self?.delegate?.handleCoreDestroyed()
@@ -1129,7 +1132,9 @@ final class MPVLayer: CAOpenGLLayer {
             CGLRetainPixelFormat(pix)
             return pix
         }
-        return copyCGLPixelFormatBase(forDisplayMask: mask)
+        let fresh = copyCGLPixelFormatBase(forDisplayMask: mask)
+        print("[MPV] ⚠️ copyCGLPixelFormat missed pin cache (owner: \(String(describing: ownerView))) → fresh \(fresh)")
+        return fresh
     }
     
     /// The one-shot format construction (EDR/float16 detection per display).
@@ -1180,12 +1185,18 @@ final class MPVLayer: CAOpenGLLayer {
         }
         var ctx: CGLContextObj?
         CGLCreateContext(pixelFormat, nil, &ctx)
+        print("[MPV] ⚠️ copyCGLContext missed pin cache → fresh \(String(describing: ctx))")
         return ctx!
     }
     
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
         guard let owner = ownerView, !owner.isCleaningUp, owner.canDrawIfMpvAlive else { return false }
-        return owner.mpv != nil
+        let alive = owner.mpv != nil
+        if alive && !owner.didLogFirstCanDraw {
+            owner.didLogFirstCanDraw = true
+            print("[MPV] canDraw first TRUE (draw ctx: \(ctx), pinned: \(String(describing: owner.cglContext)))")
+        }
+        return alive
     }
     
     override func draw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
@@ -1199,6 +1210,11 @@ final class MPVLayer: CAOpenGLLayer {
         guard !owner.isCleaningUp, owner.mpv != nil else {
             glFlush()
             return
+        }
+        
+        if !owner.didLogFirstDraw {
+            owner.didLogFirstDraw = true
+            print("[MPV] first draw (draw ctx: \(ctx), pinned: \(String(describing: owner.cglContext)), size: \(bounds.size))")
         }
         
         // Defense-in-depth: if CA is drawing into a different CGL context than
@@ -1294,6 +1310,9 @@ final class MPVLayerView: NSView {
     private let renderUpdateLock = NSLock()
     private var reconnectTimestamps: [CFAbsoluteTime] = []
     private let reconnectLock = NSLock()
+    /// One-shot diagnostics for the render pipeline bring-up (replay regressions).
+    fileprivate var didLogFirstCanDraw = false
+    fileprivate var didLogFirstDraw = false
     
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1334,7 +1353,7 @@ final class MPVLayerView: NSView {
         }
         cglContext = created
         CGLRetainContext(created)
-        print("[MPV] Pinned CGL pixel format + context for view lifetime")
+        print("[MPV] Pinned CGL pixel format \(pix) + context \(created) for view lifetime")
     }
     
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }

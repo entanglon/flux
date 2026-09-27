@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (3:35 PM IST)  
-**Latest Git State**: 242/242 Unit Tests Passing (100%)  
+**Updated**: September 27, 2026 (3:50 PM IST)  
+**Latest Git State**: 242/242 Unit Tests Passing (100%) — ⚠️ Item 38 OPEN: replay regression, see section 38 before touching MPVVideoView.swift  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
@@ -103,6 +103,39 @@
       - **Corpse-guard in `makeNSViewController`**: warm-core adoption now requires `existing.isViewLoaded && existing.playerView.mpv != nil`. A view controller whose mpv core was already torn down (closed window / PiP expand) is never adopted; a fresh `MPVViewController` is mounted instead. Combined with `handleCoreDestroyed()` (item 36), controller state and core liveness can no longer disagree at mount time.
     - **Why This Also Protects First-Play**: the pin happens in `init`, so cold starts behave identically to before (one format, one context, one mpvGL). The rebind path only activates when CA actually swaps contexts, which previously manifested as silent black video.
     - **Verification**: `xcodebuild build` succeeded; full Swift Testing run `242 tests in 9 suites passed` (Swift Testing reports `Executed 0 tests` under the legacy XCTest grep — use the `Test run with N tests` line).
+
+38. **⚠️ UNRESOLVED — REGRESSION OPEN FOR NEXT SESSION (Gemini in Xcode)**:
+    - **Commit Under Test**: `52de3fc` (item 37's CGL pinning + rebind + teardown fence + corpse-guard).
+    - **Status**: FAILED user acceptance testing. Commit `52de3fc` is currently checked out and built. If bisecting, revert the `flux/Views/MPVVideoView.swift` hunks of `52de3fc` first — they are the only behavioral change (handover.md hunks are docs-only).
+    - **Exact Repro (user-confirmed, 2026-09-27 ~3:36 PM IST)**:
+      1. Launch app → play *Reacher* → plays perfectly first time.
+      2. Close the player and immediately play *Reacher* again → instant-replay path engages → **player hangs on the loading screen forever. No video, no audio.**
+      3. Copying the stream link (player context menu → Copy Stream Link) and opening it in IINA plays instantly — **the stream URL is healthy; the app's player is broken.**
+      4. After the hang, ANY other title also fails to play properly — either stuck loading or blank video with audio.
+    - **What Was Verified Healthy**: the mpv core is alive and the loadfile command is issued — media demonstrably reaches mpv's demuxer (previous session's symptom was audio-plays-video-blank, which requires a live, playing core; the current hang is the same broken pipeline WITHOUT audio reaching output). All controller/queue lifecycle fixes from items 34–36 are believed intact. **The defect is in the rendering/compositing bring-up path in `MPVVideoView.swift` — mpv plays into a pipeline whose CAOpenGLLayer never composites, and PlayerView's buffering overlay (which gates on `mpv.isPlaying && mpv.timePos` advancing) stays up.**
+    - **Suspicion Ranking For Next Session**:
+      1. `MPVLayerView.attachMpvLayer(_:)` (added in 52de3fc): runs during `MPVLayerView.init(frame:)`, BEFORE the view has a window. If `CGLCreateContext(pix, nil, &ctx)` returns nil on some display configs, the fallback sets `cglPixelFormat = nil` — which silently DEFEATS the pin, but ALSO means `copyCGLPixelFormat`/`copyCGLContext` fall through to the fresh-creation path with the `⚠️ missed pin cache` log. **CHECK THE LOGS for `⚠️ missed pin cache` — if present, the pin never engages and the original black-video root cause is still live, now compounded.**
+      2. `MPVLayer.ownerView` didSet → `newValue?.attachMpvLayer(self)`: this creates the context at layer-init time. If CA later disposes the layer's original context (e.g. the layer is re-created via `init(layer:)` during view reparenting) but the VIEW keeps the pinned pair, the pin may now be pointing at a context CA no longer uses — the opposite of the intended fix. The `contextReboundIfNeeded(to:)` path handles a *different* context being drawn into, but only fires from `draw()`, which never fires if `canDraw` is false.
+      3. `canDrawIfMpvAlive` teardown fence: if `teardown()` runs (window close) while a NEW session is starting on the SAME controller (instant-replay fast path — `beginSession()` returns the same controller, window is torn down and rebuilt), the fence stays `false` for the fresh core if the new core's view was already registered before teardown's async release ran. Verify: does instant-replay create a fresh `MPVLayerView` per session, or reuse the old one via the corpse-guard's `existing.isViewLoaded` check?
+    - **Diagnostic Instrumentation Already In Place (uncommitted or committed in next commit — DO NOT REMOVE)**: `MPVVideoView.swift` now has one-shot logs at every decision point:
+      - `makeNSViewController: ADOPTING existing live core` vs `building FRESH core (had: ...)`
+      - `viewDidLoad: mpv core CREATED` / `FAILED TO CREATE`
+      - `Pinned CGL pixel format ... + context ... for view lifetime` (from `attachMpvLayer`)
+      - `⚠️ copyCGLPixelFormat missed pin cache` / `⚠️ copyCGLContext missed pin cache` (pin defeated — see suspicion #1)
+      - `canDraw first TRUE (draw ctx: ..., pinned: ...)` — first time CA asks if it can draw
+      - `first draw (draw ctx: ..., pinned: ..., size: ...)` — first actual composite
+      - `GL context rebound detected (... → ...)` — rebind path engaged
+    - **How To Capture Logs**: `print()` goes to stdout, not the unified log. Launch the binary directly:
+      ```bash
+      $HOME/Library/Developer/Xcode/DerivedData/flux-*/Build/Products/Debug/flux.app/Contents/MacOS/flux > /tmp/flux_stdout.log 2>&1 &
+      ```
+      Repro the bug, then `grep -E "MPVView|Pinned|canDraw|first draw|rebound|missed pin" /tmp/flux_stdout.log`.
+    - **Diagnostic Data That Was Inconclusive This Session**: stdout capture was set up (`/tmp/flux_stdout.log`) but the user ran the UI manually without the agent driving it — the capture held only Stremio-server startup lines (no player events reached it before the session ended). The instrumentation above is live in the binary; the NEXT repro will produce the full decision trace. Do NOT re-instrument — just launch, repro, and read.
+    - **Prior Sessions' Confirmed Baseline (still true, do not regress)**:
+      - First play always works.
+      - Second play (instant-replay, cached URL verified in ~40ms) is the failure point.
+      - Stream URL is always healthy (IINA plays it instantly).
+      - If loadfile is confirmed issued and mpv's `time-pos` advances, the defect is 100% in `MPVLayer`/`MPVLayerView`/CA compositing, NOT in `PlayerManager`/`MPVController` queueing.
 
 ---
 
