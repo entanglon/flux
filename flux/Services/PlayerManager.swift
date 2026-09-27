@@ -553,6 +553,7 @@ class PlayerManager: ObservableObject {
     /// MANUAL MODE CONTRACT: when the user explicitly picks a source, NOTHING may
     /// switch away from it — no racing, no auto-fallback. Failures surface to the user.
     var isManualSelection = false
+    @Published var playbackSessionUUID = UUID()
     
     // Track current episode
     var currentSeason: Int?
@@ -595,22 +596,16 @@ class PlayerManager: ObservableObject {
         guard let item = currentItem, let url = currentStreamURL else { return }
         hasConfirmedPlaybackSuccess = true
 
-        let isLocal = (url.host == "127.0.0.1" || url.host == "localhost")
-        let isRemoteHttp = !isLocal && (url.scheme == "http" || url.scheme == "https")
-        let hasQueryToken = (url.query?.contains("token") == true || url.query?.contains("expires") == true || url.query?.contains("exp=") == true || url.query?.contains("sig=") == true)
-
         let isEpisodic = item.isSeries || currentSeason != nil || currentEpisode != nil
         let key = isEpisodic ? "\(item.id):\(currentSeason ?? 1):\(currentEpisode ?? 1)" : "\(item.id)"
 
-        // In-memory cache for instant replay during active session (avoid caching ephemeral expired HTTP tokens)
-        if !hasQueryToken {
-            lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date(), stream: currentSelectedStream)
-            print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
-        }
+        // In-memory cache for instant replay during active session
+        lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date(), stream: currentSelectedStream)
+        print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
 
         let hash = currentSelectedStream?.isTorrent == true ? torrentHash(currentSelectedStream!) : nil
         var historyItem = item
-        historyItem.lastStreamURL = (isRemoteHttp && hasQueryToken) ? nil : url
+        historyItem.lastStreamURL = url
         historyItem.lastTorrentInfoHash = hash
         historyItem.lastFileIndex = currentSelectedStream?.fileIdx
         historyItem.lastStreamSource = currentSelectedStream?.source
@@ -629,7 +624,7 @@ class PlayerManager: ObservableObject {
             episodeImage: self.currentEpisodeImage,
             playbackPosition: initialPos,
             playbackDuration: initialDur,
-            streamURL: (isRemoteHttp && hasQueryToken) ? nil : url,
+            streamURL: url,
             torrentInfoHash: hash,
             fileIndex: currentSelectedStream?.fileIdx,
             streamSource: currentSelectedStream?.source,
@@ -932,6 +927,7 @@ class PlayerManager: ObservableObject {
             return
         }
         pruneSessionCaches()
+        self.playbackSessionUUID = UUID()
         // USER-initiated playback while a PiP session floats: same title =
         // expand (resume at the floating position); different title = tear the
         // floating session down first. Auto-advance skips this — the floating

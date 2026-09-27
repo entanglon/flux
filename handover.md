@@ -39,6 +39,18 @@
       - Added unit tests for `AudioOutputRouteMonitor.shouldAutoPause` and torrent/HTTP streaming URL compatibility matching in `fluxTests.swift`.
       - All 242 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`), ad-hoc signed, and running live.
 
+33. **Zombie Player Window Resurrection & Signed Stream URL Cache Fix**:
+    - **Eradication of Zombie Player Window**:
+      - Root Cause: `PlayerWindowRouter.openPlayerWindow` previously searched `NSApp.windows` for any window with title "player" or identifier "playerWindow", calling `makeKeyAndOrderFront` on it instead of routing through SwiftUI's `openWindow(id: "player", value: itemID)`.
+      - When double-Esc closed the window via `window.close()`, AppKit ordered it out, but the closed zombie `NSWindow` instance lingered in `NSApp.windows`. Clicking a title on Continue Watching re-activated this dead window with dead state (`isClosingPlayer = true`, nilled key monitors, stopped mpv), resulting in a blank screen and broken Esc key behavior (which fell back to AppKit's default fullscreen exit into windowed mode).
+      - Solution: Removed the AppKit window search in `PlayerWindowRouter.openPlayerWindow` to strictly dispatch via SwiftUI's `openWindow(id: "player", value: itemID)`. Added `dismissWindow(id: "player")` to `closePlayer()` in `PlayerView.swift`.
+      - Keyed `PlayerView(item: item)` in `PlayerWindowContainer` (`fluxApp.swift`) with `.id(playerManager.playbackSessionUUID)`, guaranteeing a completely fresh view instance, fresh `@State`, active event monitors, and clean lifecycle on every play invocation.
+    - **Signed Token & Debrid Stream URL Caching (HTTP + P2P)**:
+      - Root Cause: In `PlayerManager.confirmPlaybackSuccess`, a filter checked `url.query?.contains("sig=")`, `contains("token")`, `contains("exp")`, etc., and set `historyItem.lastStreamURL = nil` while skipping `lastPlayedStreams[key] = CachedStream(...)`.
+      - This intentionally discarded stream URLs from hosters like PenguPlay (which sign URLs with `?psig=...`), causing titles to have no saved stream and forcing full scraper re-fetching on replay.
+      - Solution: Removed query token restrictions. Both direct HTTP streams (signed or unsigned) and local P2P torrent streams (`http://127.0.0.1:11470/{hash}/{fileIdx}`) are now reliably cached in `lastPlayedStreams` and persisted in `UserDataService` history. On replay, `verifyStreamURLHealth` validates if the URL is still alive; if valid, playback starts instantly; if expired, it seamlessly falls back to scraping.
+
+
 ---
 
 ---

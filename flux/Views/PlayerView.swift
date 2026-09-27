@@ -65,6 +65,7 @@ struct PlayerView: View {
     @State private var isWatchingCreditsCleanly = false
     @State private var suggestionsScrollTargetIndex: Int = 0
     @Environment(\.dismiss) private var dismiss // Add dismiss environment
+    @Environment(\.dismissWindow) private var dismissWindow
     var item: MediaItem? // Optional item to play
 
     private var activeItem: MediaItem? {
@@ -1687,10 +1688,11 @@ struct PlayerView: View {
         let windowToClose = hostWindow
         windowToClose?.identifier = nil
 
+        dismissWindow(id: "player")
+        dismiss()
         if let window = windowToClose {
             window.close()
         }
-        dismiss()
         playerManager.close()
     }
 

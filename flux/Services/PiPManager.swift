@@ -9,19 +9,12 @@ enum PlayerWindowRouter {
 
     @MainActor
     static func openPlayerWindow(itemID: MediaItem.ID, openWindow: OpenWindowAction? = nil) {
-        if let existing = NSApp.windows.first(where: {
-            $0.identifier?.rawValue == "playerWindow" || $0.title.lowercased().contains("player")
-        }) {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
         if let openWindow = openWindow {
             openWindow(id: "player", value: itemID)
-        } else {
-            openPlayer?(itemID)
+        } else if let openPlayer = openPlayer {
+            openPlayer(itemID)
         }
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
