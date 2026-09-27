@@ -1607,6 +1607,15 @@ final class MPVLayerView: NSView {
         // bounded recovery ladder: once ANY draw succeeds, the render context
         // exists and mpv's update callbacks drive frames forever after.
         if window != nil {
+            // Decisive identity probe: is OUR mpvLayer still the view's backing
+            // layer after the attach/detach dance? If AppKit swapped in an
+            // auto-generated backing layer, our layer (and mpvGL) is orphaned —
+            // driven display() calls go to a layer that is never composited.
+            if let backing = layer, backing !== mpvLayer {
+                fluxDiag("⚠️ BACKING LAYER SWAPPED: view \(ObjectIdentifier(self).hashValue) now backed by foreign layer \(ObjectIdentifier(backing).hashValue); our mpvLayer \(ObjectIdentifier(mpvLayer).hashValue) is ORPHANED")
+            } else {
+                fluxDiag("BACKING LAYER IDENTITY OK (mpvLayer still backing view \(ObjectIdentifier(self).hashValue))")
+            }
             mpvLayer.requestRender()
             for delay in [0.1, 0.3, 0.8, 1.5, 3.0] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in

@@ -3,8 +3,8 @@ import Combine
 import Darwin
 
 /// Global atexit handler — must be a free function (no captures) for C function pointer.
-private func fluxEngineAtexit() {
-    let pid = _fluxEnginePID
+private func stremioServerAtexit() {
+    let pid = _serverProcessPID
     guard pid > 0 else { return }
     kill(pid, SIGTERM)
     usleep(200_000)
@@ -12,13 +12,12 @@ private func fluxEngineAtexit() {
 }
 
 /// File-level PID storage for the atexit handler (C function pointer can't capture).
-private var _fluxEnginePID: Int32 = 0
+private var _serverProcessPID: Int32 = 0
 
-/// Manages Flux's own Stremio streaming server (server.js / FluxEngine) instance.
-/// - Downloads server.js from Stremio's CDN on first run if no binary sidecar exists.
-/// - Bundles FluxEngine (high-performance pure-Go drop-in built on anacrolix/torrent).
+/// Manages Flux's own Stremio streaming server (official Node.js server.js) instance.
+/// - Downloads server.js from Stremio's CDN on first run if missing.
 /// - Runs under Flux's own APP_PATH with Stremio's Ultra-Fast BitTorrent profile.
-/// - Discovers the actual port (FluxEngine binds explicitly, server.js self-increments on conflict).
+/// - Discovers the actual port (server.js self-increments on conflict).
 ///
 /// Torrent playback protocol (same as the real Stremio client):
 ///   1. GET /{infoHash}/create?torrent={magnet}   → registers the torrent in the engine
@@ -55,7 +54,6 @@ class StremioServerManager: ObservableObject {
     }
     private let registrationsLock = NSLock()
     private var activeRegistrations: [String: ActiveRegistration] = [:]
-    private var engineIsFluxEngine = false
 
     /// Live statistics returned by the streaming server for active torrents.
     struct TorrentStats: Decodable {
@@ -371,16 +369,6 @@ class StremioServerManager: ObservableObject {
 
     /// Bundled Go engine (stremio-server-go fork). Ensures the exec bit survived
     /// the resource-copy step, then returns its path.
-    private func bundledFluxEnginePath() -> String? {
-        guard let url = Bundle.main.url(forResource: "FluxEngine", withExtension: nil) else { return nil }
-        let path = url.path
-        guard FileManager.default.fileExists(atPath: path) else { return nil }
-        if !FileManager.default.isExecutableFile(atPath: path) {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
-        }
-        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
-    }
-
     func stopServer() {
         // Tell the engine to drop all torrents before killing it
         if isRunning { removeAllTorrents() }
@@ -393,15 +381,6 @@ class StremioServerManager: ObservableObject {
         }
         process = nil
         isRunning = false
-
-        // Safety net: kill ALL FluxEngine processes so orphans can't pile up
-        let pkill = Process()
-        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        pkill.arguments = ["-f", "FluxEngine"]
-        pkill.standardOutput = FileHandle.nullDevice
-        pkill.standardError = FileHandle.nullDevice
-        try? pkill.run()
-        pkill.waitUntilExit()
     }
 
     // MARK: - Startup
@@ -506,7 +485,6 @@ class StremioServerManager: ObservableObject {
             task.arguments = [serverJSPath]
             env["HTTP_PORT"] = String(startPort)
             env["NO_CORS"] = "1"
-            engineIsFluxEngine = false
             print("[StremioServer] Launching official Stremio server.js via node \(nodePath) targeting port \(startPort)")
         }
         task.environment = env
@@ -514,7 +492,7 @@ class StremioServerManager: ObservableObject {
         do {
             try task.run()
             self.process = task
-            _fluxEnginePID = task.processIdentifier
+            _serverProcessPID = task.processIdentifier
             StremioServerManager.registerAtexit()
         } catch {
             print("[StremioServer] Launch failed: \(error.localizedDescription)")
@@ -718,11 +696,11 @@ class StremioServerManager: ObservableObject {
     private static func registerAtexit() {
         guard !atexitRegistered else { return }
         atexitRegistered = true
-        atexit(fluxEngineAtexit)
+        atexit(stremioServerAtexit)
     }
 
-    /// Kill ALL FluxEngine orphans on disk — called once at startup to clean up
-    /// any leftover processes from previous crashes.
+    /// Kill orphaned legacy FluxEngine processes on disk — called once at
+    /// startup to clean up leftovers from builds that shipped the Go engine.
     static func killOrphanedEngines() {
         let pkill = Process()
         pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
