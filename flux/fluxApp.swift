@@ -266,8 +266,20 @@ private struct PlayerWindowContainer: View {
     var body: some View {
         Group {
             if let item = retainedItem ?? playerManager.currentItem {
+                // NO .id(playbackSessionUUID) here — beta 2 parity. Keying the
+                // view by session UUID forces SwiftUI to destroy and rebuild
+                // the entire view tree (including the CAOpenGLLayer with the
+                // attached mpv render context) on every replay, INSIDE the
+                // still-alive player window. A freshly created CAOpenGLLayer in
+                // a live window is never driven by CA again (log-verified:
+                // canDraw never polled → no draw → no render context → black
+                // video, Software decode). Beta 2 reused the same view/layer
+                // across replays and merely called loadfile on the same core —
+                // which is exactly why its replay worked. The session
+                // controller handoff (beginSession/acquireSessionController)
+                // still routes a fresh or reused core through the surviving
+                // representable via updateNSViewController.
                 PlayerView(item: item)
-                    .id(playerManager.playbackSessionUUID)
                     .environmentObject(playerManager)
             } else {
                 Color.black
