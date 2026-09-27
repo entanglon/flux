@@ -1306,6 +1306,7 @@ final class MPVLayer: CAOpenGLLayer {
     /// Without this, off-main-thread display() transactions silently never hit
     /// the compositor.
     override func display() {
+        fluxDiag("DISPLAY override entered (layer \(ObjectIdentifier(self).hashValue))")
         if Thread.isMainThread {
             super.display()
         } else {
@@ -1437,6 +1438,11 @@ final class MPVLayer: CAOpenGLLayer {
         owner.displayLock.lock()
         defer { owner.displayLock.unlock() }
         
+        if !owner.didEverDraw {
+            owner.didEverDraw = true
+            fluxDiag("PIPELINE BOOTSTRAP COMPLETE — first successful draw committed (view \(ObjectIdentifier(owner).hashValue))")
+        }
+        
         guard !owner.isCleaningUp, owner.mpv != nil else {
             return
         }
@@ -1530,6 +1536,9 @@ final class MPVLayerView: NSView {
     private let reconnectLock = NSLock()
     /// One-shot first-draw diagnostic flag.
     var didLogFirstDraw = false
+    /// Set once the first successful draw(inCGLContext:) completes — stops the
+    /// attachment bootstrap ladder and lets mpv callbacks own rendering.
+    var didEverDraw = false
     /// IINA parity: every mpv_render_* call (draw on the CA render thread,
     /// render-context free during teardown) is serialized through this
     /// recursive lock. render.h: only one mpv_render_* call at a time per
@@ -1584,11 +1593,21 @@ final class MPVLayerView: NSView {
         }
         fluxDiag("VIEW didMoveToWindow \(attachDesc), view \(ObjectIdentifier(self).hashValue)")
         // IINA parity: on every attachment, render the current frame NOW from
-        // the render queue. This guarantees the layer's GL pipeline boots (and
-        // the render context gets created) even when CA's async polling state
-        // is lost across the attach/detach/re-attach dance.
+        // the render queue. The immediate kick can be eaten while the previous
+        // player window is still mid-teardown (log-verified), so schedule a
+        // bounded recovery ladder: once ANY draw succeeds, the render context
+        // exists and mpv's update callbacks drive frames forever after.
         if window != nil {
             mpvLayer.requestRender()
+            for delay in [0.1, 0.3, 0.8, 1.5, 3.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self = self, self.window != nil, !self.isCleaningUp else { return }
+                    if !self.didEverDraw {
+                        fluxDiag("BOOTSTRAP kick at +\(delay)s (view \(ObjectIdentifier(self).hashValue))")
+                        self.mpvLayer.requestRender()
+                    }
+                }
+            }
         }
         let scale = window?.backingScaleFactor ?? 2.0
         lastBackingScale = scale
