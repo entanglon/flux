@@ -1,8 +1,32 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 26, 2026 (2:55 PM IST)  
+**Updated**: September 27, 2026 (12:22 PM IST)  
 **Latest Git State**: 240/240 Unit Tests Passing (100%)  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
+---
+
+## 1. Executive Summary for Antigravity Sessions
+---
+31. **Player Window Teardown, Double-Esc Exit, Buffering Overlay & Startup Beachball Resolution**:
+    - **Clean Direct Window Teardown (Apple TV Parity)**:
+      - Removed `window.toggleFullScreen(nil)` and the `0.45s` delay from `closePlayer()` in `PlayerView.swift`.
+      - On macOS, calling `[NSWindow close]` while an animated space transition was underway was rejected by AppKit, leaving the window stranded on the desktop in windowed mode.
+      - Calling `window.close()` directly on the host window along with SwiftUI's `dismiss()` now closes and destroys the player window immediately and cleanly from both fullscreen and windowed modes.
+    - **Eliminated Spontaneous Playback Restart on Teardown**:
+      - Disarmed `mpv.onPlaybackError = nil` and cancelled all active watchdog/countdown tasks (`playbackStartTask`, `bufferingGraceTask`, `midPlaybackStallWatchdogTask`, `cancelUpNextCountdown()`) in `closePlayer()` and `onDisappear`.
+      - Prevents closed network sockets from triggering `onPlaybackError`, which previously invoked `advanceToStandbyFallback()` and restarted playback from `0:00`.
+    - **Eliminated Permanent Buffering Logo Overlay**:
+      - Gated both `logoBufferingView` and `midPlaybackLogoBufferingView` with `!isClosingPlayer`.
+      - Added strict `playerManager.currentStreamURL != nil` requirement to `midPlaybackLogoBufferingView`, preventing `(!hasStartedPlayback && hasEverStartedPlayback)` from latching true when no stream is loaded.
+    - **Eliminated Startup Beachball Cursor (Spinning Wheel)**:
+      - In `MPVVideoView.swift:initializeGLContext()`, offloaded the deferred `command("loadfile", urlToLoad.absoluteString)` to `DispatchQueue.global(qos: .userInitiated).async`.
+      - Prevents `mpv_command` from blocking the AppKit main runloop on initial socket connection, eliminating the 1–3s UI freeze and spinning wheel cursor.
+    - **View State Isolation & Key Monitor Re-attachment**:
+      - Applied `.id(item.id)` to `PlayerView(item: item)` in `PlayerWindowContainer` (`fluxApp.swift`) ensuring fresh `@State` and controllers per playback session.
+      - Reset `isClosingPlayer = false` on `.onAppear` and guaranteed `PlayerWindowAccessor` re-attaches `PlayerKeyMonitor` if it was ever nilled.
+    - **Verified Stability**: All 240 unit tests passing cleanly across 9 test suites (`** TEST SUCCEEDED **`), codesigned ad-hoc.
+
+---
 
 ---
 
@@ -578,21 +602,15 @@ When continuing work in Antigravity:
 
 ---
 
-## 8. Immediate Focus & Known Issues for Next Session
+## 8. Completed Priorities & Status
 
-### Issue 18: Player Behavioral Malfunctions & App-Wide Performance Degradation [ACTIVE]
-- **Symptom**: User reported that while streaming/playback works via the official Stremio engine, the player itself is not functioning properly (controls, lifecycle, or state behavior) and the overall app performance is degraded.
-- **Investigative Vectors & Priority Fixes for Next Session**:
-  1. **`isClosingPlayer` / State Latching on Player Re-Use**:
-     - In `flux/Views/PlayerView.swift`, `@State private var isClosingPlayer = false` was introduced to guard teardowns. If SwiftUI reuses the player window or view instance without full destruction, `isClosingPlayer` latches permanently to `true`.
-     - When latched, subsequent attempts to exit via `closePlayer()` fail at `guard !isClosingPlayer else { return }`, key monitors remain stopped, and watch progress is not saved.
-     - *Fix to verify*: Reset `isClosingPlayer = false` in `PlayerView.onAppear` and inside `.onChange(of: activeItem?.id)`.
-  2. **`PlayerWindowContainer` Window Lifecycle vs. State Isolation**:
-     - `PlayerWindowContainer` in `flux/fluxApp.swift` caches `@State private var retainedItem: MediaItem?` to prevent the `FocusStoreList` crash when `currentItem = nil` was set.
-     - However, retaining the item across sessions might prevent `PlayerView` from cleanly re-initializing its `@StateObject private var mpv = MPVController()` and internal controllers when switching titles or re-opening the window.
-     - *Fix to verify*: Provide an explicit identity key such as `.id(item.id)` on `PlayerView` so that a new `PlayerView` instance is cleanly mounted per item, while keeping `currentItem = nil` guarded until after window deallocation.
-  3. **Main-Thread Hitching & Background Resource Contention**:
-     - Check if background tasks in `PlayerView` (e.g. `loadingTimer = Timer.publish(every: 0.5, ...)`, freeze watchdogs, or `startTorrentStatsPolling`) continue running when the player window is closed or hidden.
-     - Audit `MPVVideoView` OpenGL teardown (`dismantleNSViewController`) to ensure `CAOpenGLLayer` and `mpv_handle` contexts release resources without lingering memory or GPU pipeline contention.
-     - Inspect `StremioServerManager` disk cache evictions (`evictCacheIfNeeded`) to ensure filesystem operations are debounced and never contend with UI responsiveness.
+### Issue 18: Player Window Teardown, Double-Esc Exit, Buffering Overlay & Startup Beachball [RESOLVED]
+- **Symptom**: User reported that when in fullscreen, pressing Esc once showed the exit prompt, but pressing Esc again exited fullscreen mode into windowed mode on desktop rather than closing the player window. Re-entering fullscreen left the buffering logo bar permanently stuck on screen, the Esc key became completely unresponsive, playback restarted on its own, and the cursor showed a spinning beachball wheel on startup.
+- **Root Causes & Verified Fixes**:
+  1. **Direct Window Teardown (Apple TV Parity)**: Removed `window.toggleFullScreen(nil)` and the 0.45s delay in `closePlayer()`. AppKit was rejecting `window.close()` during the active space transition. Calling `window.close()` directly on the host window with `dismiss()` now closes and destroys the player window immediately and cleanly from both fullscreen and windowed modes.
+  2. **Eliminated Teardown Playback Restart**: Disarmed `mpv.onPlaybackError = nil` and cancelled all active watchdog/countdown tasks in `closePlayer()` and `onDisappear`. Prevents closed network sockets from triggering `onPlaybackError` and restarting playback on another stream.
+  3. **Eliminated Permanent Buffering Logo**: Gated `logoBufferingView` and `midPlaybackLogoBufferingView` with `!isClosingPlayer` and `playerManager.currentStreamURL != nil`.
+  4. **Eliminated Startup Beachball**: Dispatched deferred `command("loadfile", urlToLoad.absoluteString)` in `MPVVideoView.initializeGLContext()` to a background queue (`userInitiated`), eliminating main-thread demuxer blocking.
+  5. **View State Isolation & Key Monitor Re-attachment**: Applied `.id(item.id)` to `PlayerView(item: item)` in `PlayerWindowContainer` (`fluxApp.swift`), reset `isClosingPlayer = false` in `onAppear`, and re-attached `PlayerKeyMonitor` if nil.
+- **Verification**: 240/240 unit tests passing, ad-hoc codesigned, build successful.
 

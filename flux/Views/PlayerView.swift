@@ -118,7 +118,7 @@ struct PlayerView: View {
             
             // 2. Initial Buffer Loading Screen: in Flux Mode, display IMMEDIATELY on click
             // without waiting for stream resolution, preventing any blank screen or picker flashes.
-            if isInitialLoading && playerManager.errorMessage == nil && !isPickerVisible && (playerManager.currentStreamURL != nil || (isFluxEnabled && !playerManager.isManualSelection)) {
+            if !isClosingPlayer && isInitialLoading && playerManager.errorMessage == nil && !isPickerVisible && (playerManager.currentStreamURL != nil || (isFluxEnabled && !playerManager.isManualSelection)) {
                 logoBufferingView
                     .transition(.opacity)
                     .zIndex(10)
@@ -126,7 +126,7 @@ struct PlayerView: View {
             
             // 3. Mid-Playback Buffering (Logo buffer bar over the paused video frame).
             // Gated on sustainedBuffering or mid-stream reconnects/fallbacks after initial start.
-            if sustainedBuffering || (!hasStartedPlayback && hasEverStartedPlayback) {
+            if !isClosingPlayer && playerManager.currentStreamURL != nil && (sustainedBuffering || (!hasStartedPlayback && hasEverStartedPlayback)) {
                 midPlaybackLogoBufferingView
             }
 
@@ -161,7 +161,7 @@ struct PlayerView: View {
         }
         .background(
             PlayerWindowAccessor { window in
-                if self.hostWindow !== window {
+                if self.hostWindow !== window || self.keyMonitor == nil {
                     self.hostWindow = window
                     window.identifier = NSUserInterfaceItemIdentifier("playerWindow")
                     self.setupContextMenuMonitor(for: window)
@@ -296,6 +296,7 @@ struct PlayerView: View {
             return .ignored
         }
         .onAppear {
+            isClosingPlayer = false
             SleepAssertionManager.shared.playerDidOpen()
             mpv.resetVolumeBoostIfNeeded()
             mpv.onPlaybackError = {
@@ -322,7 +323,14 @@ struct PlayerView: View {
             exitWarningTask?.cancel()
             exitWarningTask = nil
             showExitWarning = false
+            playbackStartTask?.cancel()
+            playbackStartTask = nil
+            bufferingGraceTask?.cancel()
+            bufferingGraceTask = nil
+            midPlaybackStallWatchdogTask?.cancel()
+            midPlaybackStallWatchdogTask = nil
             cancelUpNextCountdown()
+            mpv.onPlaybackError = nil
             contextMenuMonitor?.stop()
             contextMenuMonitor = nil
             keyMonitor?.stop()
@@ -1650,6 +1658,17 @@ struct PlayerView: View {
         exitWarningTask?.cancel()
         exitWarningTask = nil
         showExitWarning = false
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        bufferingGraceTask?.cancel()
+        bufferingGraceTask = nil
+        midPlaybackStallWatchdogTask?.cancel()
+        midPlaybackStallWatchdogTask = nil
+        cancelUpNextCountdown()
+
+        // Disarm error handler so closed socket on server teardown never restarts playback
+        mpv.onPlaybackError = nil
+
         if mpv.duration > 0 && mpv.timePos > 0 {
             playerManager.updateWatchProgress(time: mpv.timePos, duration: mpv.duration, isLightweightTick: false)
         }
@@ -1668,21 +1687,11 @@ struct PlayerView: View {
         let windowToClose = hostWindow
         windowToClose?.identifier = nil
 
-        if let window = windowToClose, window.styleMask.contains(.fullScreen) {
-            window.toggleFullScreen(nil)
-            // Allow AppKit space transition to complete smoothly before closing the window
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                window.close()
-                self.playerManager.close()
-            }
-        } else {
-            if let window = windowToClose {
-                window.close()
-            } else {
-                dismiss()
-            }
-            playerManager.close()
+        if let window = windowToClose {
+            window.close()
         }
+        dismiss()
+        playerManager.close()
     }
 
     private func setupKeyMonitor(for window: NSWindow) {

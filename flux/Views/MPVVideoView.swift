@@ -1512,7 +1512,9 @@ final class MPVLayerView: NSView {
                 }
                 mpv_set_property_string(mpv, "pause", shouldPause ? "yes" : "no")
             }
-            command("loadfile", urlToLoad.absoluteString)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.command("loadfile", urlToLoad.absoluteString)
+            }
         }
     }
     

@@ -267,6 +267,7 @@ private struct PlayerWindowContainer: View {
         Group {
             if let item = retainedItem ?? playerManager.currentItem {
                 PlayerView(item: item)
+                    .id(item.id)
                     .environmentObject(playerManager)
             } else {
                 Color.black
