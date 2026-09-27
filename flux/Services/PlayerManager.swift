@@ -1044,10 +1044,12 @@ class PlayerManager: ObservableObject {
             self.currentStreamURL = nil
             self.currentSelectedStream = nil
             self.sessionController?.stop()
+            self.isLoading = false
         } else {
             self.forceStreamPicker = false
             self.isManualSelection = false
             self.isStreamPickerPresented = false
+            self.isLoading = true
         }
 
         // Only clear streams if we don't already have pre-fetched streams for this playback key
@@ -1278,11 +1280,23 @@ class PlayerManager: ObservableObject {
         guard url.scheme == "http" || url.scheme == "https" else { return true }
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
-        request.timeoutInterval = 1.8
+        request.timeoutInterval = 2.5
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse {
-                return (200...399).contains(http.statusCode) || http.statusCode == 405
+                if (200...399).contains(http.statusCode) { return true }
+                if http.statusCode == 405 {
+                    var getReq = URLRequest(url: url)
+                    getReq.httpMethod = "GET"
+                    getReq.timeoutInterval = 2.5
+                    getReq.setValue("bytes=0-1024", forHTTPHeaderField: "Range")
+                    getReq.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+                    let (_, getResp) = try await URLSession.shared.data(for: getReq)
+                    if let getHttp = getResp as? HTTPURLResponse {
+                        return (200...399).contains(getHttp.statusCode)
+                    }
+                }
             }
             return false
         } catch {

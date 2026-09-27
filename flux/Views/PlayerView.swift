@@ -93,8 +93,7 @@ struct PlayerView: View {
     private var isPickerVisible: Bool {
         showManualStreamPicker ||
         playerManager.forceStreamPicker ||
-        playerManager.isStreamPickerPresented ||
-        (!isFluxEnabled && playerManager.currentStreamURL == nil)
+        playerManager.isStreamPickerPresented
     }
 
     private func dismissStreamPicker() {

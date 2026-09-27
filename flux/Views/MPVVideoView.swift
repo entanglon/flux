@@ -1146,8 +1146,6 @@ final class MPVLayer: CAOpenGLLayer {
 final class MPVLayerView: NSView {
     private(set) var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
-    private var pendingURL: URL?
-    private var pendingPaused: Bool = false
     private var displayLink: CVDisplayLink?
     let mpvLayer = MPVLayer()
     
@@ -1545,29 +1543,6 @@ final class MPVLayerView: NSView {
         
         mpv_render_context_set_update_callback(mpvGL, mpvGLUpdate, UnsafeMutableRawPointer(bitPattern: UInt(callbackToken)))
         setupDisplayLink()
-        
-        if let pending = pendingURL {
-            let urlToLoad = pending
-            let shouldPause = pendingPaused
-            pendingURL = nil
-            pendingPaused = false
-            print("[MPV] Context ready! Now loading pending URL: \(urlToLoad.lastPathComponent) (paused: \(shouldPause))")
-            let isLoopback = urlToLoad.host == "127.0.0.1" || urlToLoad.host == "localhost"
-            let selectedStream = PlayerManager.shared.currentSelectedStream
-            let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
-            let proxyURL = (!isLoopback) ? StreamRouteProxyManager.shared.mpvHttpProxy(for: urlToLoad, title: streamTitle) : nil
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self, let mpv = self.mpv else { return }
-                if let proxyURL = proxyURL {
-                    print("[MPV] Routing pending stream through forward proxy: \(proxyURL)")
-                    mpv_set_property_string(mpv, "http-proxy", proxyURL)
-                } else {
-                    mpv_set_property_string(mpv, "http-proxy", "")
-                }
-                mpv_set_property_string(mpv, "pause", shouldPause ? "yes" : "no")
-                self.command("loadfile", urlToLoad.absoluteString)
-            }
-        }
     }
     
     private var isIntentionallySwitchingFile = false
@@ -1584,28 +1559,17 @@ final class MPVLayerView: NSView {
         let streamTitle = selectedStream?.cleanTitle ?? selectedStream?.title
         let proxyURL = (!isLoopback) ? StreamRouteProxyManager.shared.mpvHttpProxy(for: url, title: streamTitle) : nil
 
-        if mpvGL == nil {
-            print("[MPV] Deferring loadFile until render context is initialized: \(url.lastPathComponent) (paused: \(paused))")
-            pendingURL = url
-            pendingPaused = paused
-            DispatchQueue.main.async { [weak self] in
-                self?.mpvLayer.setNeedsDisplay()
+        print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self, let mpv = self.mpv else { return }
+            if let proxyURL = proxyURL {
+                print("[MPV] Routing stream through forward proxy: \(proxyURL)")
+                mpv_set_property_string(mpv, "http-proxy", proxyURL)
+            } else {
+                mpv_set_property_string(mpv, "http-proxy", "")
             }
-        } else {
-            pendingURL = nil
-            pendingPaused = false
-            print("[MPV] Executing loadfile command for: \(url.lastPathComponent) (paused: \(paused))")
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self, let mpv = self.mpv else { return }
-                if let proxyURL = proxyURL {
-                    print("[MPV] Routing stream through forward proxy: \(proxyURL)")
-                    mpv_set_property_string(mpv, "http-proxy", proxyURL)
-                } else {
-                    mpv_set_property_string(mpv, "http-proxy", "")
-                }
-                mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
-                self.command("loadfile", url.absoluteString)
-            }
+            mpv_set_property_string(mpv, "pause", paused ? "yes" : "no")
+            self.command("loadfile", url.absoluteString)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.isIntentionallySwitchingFile = false

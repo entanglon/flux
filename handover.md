@@ -64,6 +64,18 @@
       - Added `mpvLayer.setNeedsDisplay()` to `viewDidMoveToWindow()` and `loadFile` (when `mpvGL == nil`) in `MPVLayerView`, ensuring CoreAnimation immediately schedules the OpenGL context creation and frame rendering.
       - Strictened `PlayerView.onAppear` warm-core adoption check to `mpv.hasLoadedMedia && mpv.loadedURL != nil && mpv.loadedURL == playerManager.currentStreamURL`, and armed `pendingResumeTime = resumePos` in `PlayerManager.play` so saved watch positions seek automatically.
 
+35. **Instant Replay Pipeline Unblocking & Auto-Play from Last Source for Non-Flux Mode**:
+    - **libmpv `loadFile` Deferral Elimination**:
+      - Root Cause: In `MPVVideoView.swift:MPVLayerView.loadFile`, issuing `command("loadfile", url.absoluteString)` to mpv was gated on `if mpvGL != nil`. When `mpvGL == nil` (a fresh, cold player instance), it deferred the command to `pendingURL` and requested a redraw.
+      - However, mpv core does not require an active OpenGL render context (`mpv_render_context`) to begin socket connection, HTTP handshake, and demuxing. By deferring `loadfile`, mpv never received the URL, produced no video frames, and never triggered `mpvGLUpdate`, causing an infinite buffering loop.
+      - Solution: Removed the `mpvGL == nil` deferral in `loadFile`. `command("loadfile", url.absoluteString)` is now dispatched directly on `DispatchQueue.global(qos: .userInitiated).async` immediately upon invocation. mpv demuxes in parallel while CAOpenGLLayer initializes `mpvGL`.
+    - **Auto-Play from Last Source in Non-Flux Mode (Stremio Parity)**:
+      - Root Cause: `DetailView.swift` previously passed `forceStreamPicker: !isFlux` on Play / Resume buttons even when `target.isResume == true` or `fromContinueWatching == true`. In `PlayerManager.play`, `if forceStreamPicker` completely bypassed the instant replay / cached stream reuse check, unconditionally presenting the stream picker for Non-Flux users.
+      - Solution: Updated `DetailView.swift` to pass `forceStreamPicker: (!isFlux && !target.isResume)`, `forceStreamPicker: (!isFlux && !isInContinueWatching)`, and `forceStreamPicker: (!isFlux && !hasProgress)`. In Non-Flux Mode, resuming a title with progress or clicking from Continue Watching now auto-plays from the last healthy source immediately without prompting the stream picker, exactly like Stremio.
+      - The stream picker is only presented in Non-Flux Mode for brand-new unwatched titles, or when explicitly requested via "Choose Stream Source…" in context menus.
+    - **Stream Probe Robustness & Accurate Player Loading State**:
+      - Updated `PlayerManager.verifyStreamURLHealth` to set standard browser `User-Agent` headers and support a fast Range `GET` fallback when CDNs return `405 Method Not Allowed` for `HEAD` requests.
+      - Removed premature `(!isFluxEnabled && playerManager.currentStreamURL == nil)` gate in `PlayerView.isPickerVisible`, allowing the loading overlay to display cleanly during instant replay resolution without flashing the stream picker.
 
 ---
 
