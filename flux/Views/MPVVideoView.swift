@@ -1290,9 +1290,14 @@ final class MPVLayer: CAOpenGLLayer {
     
     /// Called by mpv's render-update callback (and on attachment changes).
     /// Schedules display() on the render queue. IINA `update(force:)` parity.
+    /// CRITICAL: a CAOpenGLLayer's display() only runs the canDraw/draw cycle
+    /// when the layer is marked dirty — a clean layer's display() silently
+    /// no-ops (log-proven: session-2 display() calls never reached canDraw).
+    /// setNeedsDisplay() first makes every requestRender() deterministic.
     func requestRender() {
         mpvGLQueue.async { [weak self] in
             guard let self = self, !self.isCleaningUpLayer else { return }
+            self.setNeedsDisplay()
             self.display()
         }
     }
@@ -1300,13 +1305,17 @@ final class MPVLayer: CAOpenGLLayer {
     /// Non-atomic flag mirrored from the view's cleanup state (set before the
     /// queue captures self, read on the queue).
     fileprivate var isCleaningUpLayer = false
+    fileprivate var didLogDisplayEntry = false
     
     /// IINA `display()` override parity: explicit CATransaction so the implicit
     /// transaction CA would create on a non-main thread is properly flushed.
     /// Without this, off-main-thread display() transactions silently never hit
     /// the compositor.
     override func display() {
-        fluxDiag("DISPLAY override entered (layer \(ObjectIdentifier(self).hashValue))")
+        if !didLogDisplayEntry {
+            didLogDisplayEntry = true
+            fluxDiag("DISPLAY first entry (layer \(ObjectIdentifier(self).hashValue))")
+        }
         if Thread.isMainThread {
             super.display()
         } else {
