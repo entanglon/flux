@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 27, 2026 (8:50 PM IST)  
-**Latest Git State**: 240/240 Unit Tests Passing — **PLAYER RESTORED TO LAST-KNOWN-GOOD BASELINE `f971e1f`**  
+**Updated**: September 28, 2026 (00:35 IST)  
+**Latest Git State**: 248/248 Unit Tests Passing — **PLAYER REPLAY FIXED (user-verified) · GO ENGINE FULLY REMOVED · MANDATORY PLAYER RECHECK SCHEDULED — see the resolved section below**  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
@@ -8,9 +8,47 @@
 ## 1. Executive Summary for Antigravity Sessions
 ---
 
-**⚠️ SESSION POST-MORTEM (Sep 27, late evening) — READ BEFORE TOUCHING THE PLAYER**
+**✅ RESOLVED (Sep 27 late night, verified by user): replay black-screen bug is FIXED. MANDATORY PLAYER RECHECK SCHEDULED — read this before touching the player.**
 
-**Current HEAD state**: `a51a227` — MPVVideoView.swift is at `960007e` (IINA-parity layer, driven display, bootstrap ladder, NO direct render), fluxApp.swift carries the beta-2 view-reuse fix (`97ecc84`, `.id(playbackSessionUUID)` removed from PlayerWindowContainer), Go engine deleted from repo. Build clean, 248/248 tests. **Known state: first play works, replay = black video + audio + Software decode, no freeze.** Do not "fix forward" — read this first.
+**Status**: The user reports first play AND replay now work perfectly (video renders, hardware decode holds). The fix had already landed in git before the user's successful test; WHICH commit flipped the behavior on the user's machine is unproven because a stale DerivedData build may have been running during earlier tests (see Stale-Build Trap below). The recheck protocol below is therefore mandatory before any further player work.
+
+**The fix (what is actually in the tree at HEAD `a3f0268`)**:
+1. `97ecc84` — removed `.id(playerManager.playbackSessionUUID)` from PlayerWindowContainer (`fluxApp.swift`). THE structural fix: SwiftUI no longer rebuilds the view tree — including the CAOpenGLLayer carrying the mpv render context — inside the still-alive player window on replay. Beta-2 semantics restored: same window, same view, same layer, same core; a replay is just a loadfile.
+2. `07e4ffe` — `acquireSessionController()` no longer reparents the warm core's live GL view across windows (mpv render.h: every mpv_render_* call must run on the same CGL context the render context was created with). The warm core's value (primed swarm, server-side cache) is preserved by transferring torrent ownership; a fresh window-native core mounts (~1s local re-demux cost).
+3. `a51a227` — the direct-render experiment (`2df2794`/`b26dc25`) was rolled back; `MPVVideoView.swift` is byte-identical to `960007e` (IINA-parity layer: one pinned CGL pixel format + context created in init, shadow-copy carry-over, recursive displayLock, driven display() with explicit CATransaction+flush, bootstrap ladder).
+
+**Root cause of the black replay, in plain language (both mechanisms, both now permanently closed)**:
+- A CAOpenGLLayer created AFTER its window is already compositing is never driven by CA again (diag-log verified: canDraw polled 0 times on replay while display() was entered dozens of times). A new canvas nailed into a live window = nobody ever paints it = black surface; audio keeps playing because audio needs no GL surface; mpv silently demotes hwdec to Software (CPU) when it sees no render surface.
+- Separately, moving a live mpv render context between windows orphans it (context-identity violation) — same symptom via a different door.
+
+**⚠️ MANDATORY RECHECK — next session, before ANY player change. Run the full protocol once and confirm every step:**
+1. First play of a title → video renders, hwdec = VideoToolbox (NOT "Software (CPU)").
+2. Close player, replay the SAME title from DetailView / Continue Watching → fast start, video renders.
+3. Play a DIFFERENT title, close, replay it → same result.
+4. Verify the instant-replay source cache fires: first play must log `[PlayerManager] 💾 Positive playback confirmed`, the replay must log `[PlayerManager] Active Stream Session Healthy` (HTTP) or `Active Torrent Stream Session Fresh` (torrent). If a replay instead does a full re-scrape, check whether the entry point passed `forceStreamPicker` — Non-Flux Mode detail-button replays bypass the cache BY DESIGN (c744e79 semantics: picker first).
+5. PiP enter/exit handoff, next-episode auto-transition, double-esc exit still work.
+6. If anything regresses: read `/tmp/flux_render_diag.log` (unbuffered file logger; `print()` under stdout redirect block-buffers and silently eats captures). NOTE: diagnostics are STILL IN THE TREE (fluxDiag in MPVVideoView.swift, `/tmp/flux_audio_diag.log` writing in PlayerView.swift `confirmPlaybackStarted`) — strip them only AFTER the recheck confirms stability.
+
+**Full app audit (Sep 28, HEAD `a3f0268`) — nothing was lost to the restores**:
+- `PlayerView.swift`, `PiPManager.swift`, `DetailView.swift` are BYTE-IDENTICAL to `b77904d`, which already contains ALL Sep-27 morning work: zombie-window fix, `pendingPlayURL`/`flushPendingPlay` queueing, `isCoreAlive`/`handleCoreDestroyed`, `bd7ef31` exit fixes, `c744e79` non-Flux last-source autoplay, `a14a80b` un-gating, `16098d5` zombie window + signed-URL cache. ALL RETAINED.
+- `MPVVideoView.swift` is byte-identical to `960007e`.
+- The entire broken→working player delta is exactly three things: `fluxApp.swift` (.id removed), `PlayerManager.acquireSessionController` (fresh-core policy), and the pre-existing IINA-parity MPVVideoView. No other player file changed.
+- Source caching (instant replay) was never touched by any restore and is fully intact, exactly as designed: `confirmPlaybackSuccess()` saves `lastPlayedStreams[key]` + `historyItem.lastStreamURL` after ≥1.0s of real playback (fired from `PlayerView.handleTimePosChange`); `play()` checks the cache → HEAD health probe (`verifyStreamURLHealth`, 2.5s timeout, 405→ranged-GET fallback) → loads the cached URL directly; `close()` preserves `lastPlayedStreams` for the session. The URL is persisted to PocketBase history (`lastStreamURL`) but the fast path reads the in-memory session cache first — never a DB round-trip at play time.
+- Go engine removal COMPLETED (`3464e16` + `a3f0268`): binary deleted from repo AND disk (`flux/Engine/` gone), the unused `StreamingError.torrentEngineOffline` case and 10 "Embedded Go (FluxEngine)" translation-table entries stripped. Only intentional remnants: `killStaleEngines` pkill of orphaned legacy "FluxEngine" processes from older installs. Torrent streaming runs exclusively on the official Stremio Node.js server.js.
+- 248/248 tests pass (9 suites), including the 6 MPVColorPipelinePolicy tests.
+
+**Stale-Build Trap (how this appeared to "fix itself")**: Xcode can keep running an older installed build if a newer build was not actually (re)installed and relaunched — a landed fix can appear to appear "by magic", or appear to not work at all, regardless of code. RULE: after building, always launch the freshly-built binary directly from DerivedData; when a test result contradicts the code's known behavior, suspect the build first, the code second.
+
+**Player rules going forward (supersede the era-specific rules in items 39–40)**:
+1. NEVER re-add `.id(playbackSessionUUID)` (or any per-session identity modifier) to PlayerWindowContainer.
+2. NEVER reparent a live GL view / mpv render context across windows.
+3. If the direct-render path is ever revived: global lock order displayLock → CGLLockContext, strictly, in EVERY path including teardown and CA draw.
+4. One change at a time to player files; test first-play + replay after each; commit per verified fix.
+5. Commit messages must not state unverified conclusions as fact (see `d81b8dd` correction-of-the-record).
+
+---
+
+**HISTORICAL — the Sep 27 late-evening post-mortem that produced the verified findings below (its "known state" line is now outdated; the findings and lock-order invariant stand):**
 
 **What the day established (all log-verified via /tmp/flux_render_diag.log unbuffered file logger — `print()` block-buffers under redirect, that's why earlier captures looked empty):**
 1. THE structural diff vs working beta 2 (`e89d160`): `16098d5` (13:04 Sep 27) added `.id(playerManager.playbackSessionUUID)` to PlayerWindowContainer's PlayerView. That keying forced a full view-tree rebuild per replay INSIDE the live window → new CAOpenGLLayer born in an already-compositing window → CA never polls its canDraw again (diagnostics: canDraw polled 0 times on replay, dozens of display() entries) → render context never created → mpv drops all video frames, hwdec demotes to Software. Beta 2 reused view/layer/core and just called loadfile. That .id() was removed in `97ecc84`.
@@ -29,7 +67,7 @@
 
 What IS verified (diag-log evidence, see above): replay sessions created a fresh core+layer, attached to playerWindow, identity OK — yet canDraw was never polled once, so no draw and no render context ever occurred. The freeze was a displayLock/CGL lock-order inversion (now rolled back). Everything beyond those facts in today's commit messages is hypothesis.
 
-**Recommended next approach (evidence-based, minimal)**: in the CURRENT HEAD state run one replay repro and read /tmp/flux_render_diag.log. With .id() removed, SwiftUI should NOT rebuild the view — if the log shows no new LAYER INIT on replay yet video is still black, the cause is no longer layer creation but the mpvGL/render-context binding surviving teardown of the OLD window (i.e. the view now persists but mpv was destroyed at close per PlayerView.onDisappear → beginSession hands a dead-ish core). The likely-correct minimal fix then: make PlayerWindowContainer's view persist across sessions AND stop tearing mpv down in onDisappear when the same window will be reused (beta-2 semantics: onDisappear teardown was paired with view destruction; without .id() the pairing broke). Do NOT re-add .id(), do NOT add direct rendering.
+**Recommended next approach (EPOCH — WRITTEN BEFORE THE FIX WAS CONFIRMED; the replay bug has since been resolved by the .id() removal + fresh-core policy; do not follow this paragraph, see the RESOLVED section at the top)**: in the CURRENT HEAD state run one replay repro and read /tmp/flux_render_diag.log. With .id() removed, SwiftUI should NOT rebuild the view — if the log shows no new LAYER INIT on replay yet video is still black, the cause is no longer layer creation but the mpvGL/render-context binding surviving teardown of the OLD window (i.e. the view now persists but mpv was destroyed at close per PlayerView.onDisappear → beginSession hands a dead-ish core). The likely-correct minimal fix then: make PlayerWindowContainer's view persist across sessions AND stop tearing mpv down in onDisappear when the same window will be reused (beta-2 semantics: onDisappear teardown was paired with view destruction; without .id() the pairing broke). Do NOT re-add .id(), do NOT add direct rendering.
 
 ---
 
