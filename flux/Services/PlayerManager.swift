@@ -459,33 +459,36 @@ class PlayerManager: ObservableObject {
         }
     }
 
-    /// Hands the warm core to a newly-opened player window (nil → build fresh).
-    /// Only adopted when the resolved URL matches what play() actually picked —
-    /// an Instant-Replay hit uses a different source and must NOT adopt.
-    /// A nil currentStreamURL (fast-path hasn't landed yet) adopts OPTIMISTICALLY:
-    /// the fast-path sets the very same URL moments later.
+    /// Hands a session controller to a newly-opened player window (always fresh).
+    ///
+    /// IINA-architecture alignment: NEVER move a live CAOpenGLLayer/NSView
+    /// between windows. mpv's render.h requires every mpv_render_* call to run
+    /// on "the same OpenGL context as the mpv_render_context was created with",
+    /// and reparenting the warm core's view out of its invisible host window
+    /// invalidates that context identity (CA issues a new context for the new
+    /// window) — video rendered into an orphaned context: black surface, audio
+    /// only, hwdec silently demoted to Software (CPU). IINA reuses ONE layer in
+    /// ONE window for the life of the app; the pre-beta2 Flux behavior (fresh
+    /// core per player window) is the same principle.
+    ///
+    /// The warm core's value does NOT live in its mpv core: the resolved URL,
+    /// the primed torrent swarm, and the server-side disk cache all live in the
+    /// Stremio server. So replay keeps all of that by transferring torrent
+    /// ownership to the session, then destroys the host-window core and mounts
+    /// a fresh, window-native one. Cost vs adoption: ~1s of local re-demux —
+    /// versus a permanently broken render surface.
     func acquireSessionController() -> MPVController {
-        if let core = warmCore,
-           let item = currentItem,
-           core.key == prefetchKey(for: item, season: currentSeason, episode: currentEpisode),
-           currentStreamURL == nil || core.url.absoluteString == currentStreamURL?.absoluteString {
-            print("[PlayerManager] ⚡ Adopting warm mpv core — playback ready")
-            let controller = core.controller
-            core.hostWindow?.orderOut(nil)
+        if let core = warmCore {
+            print("[PlayerManager] ⚡ Warm core primed — keeping server-side cache, mounting fresh window-native playback core")
             if let s = core.stream {
                 self.currentSelectedStream = s
             }
-            warmCore = nil
-            warmCoreDiscardTask?.cancel()
-            warmCoreDiscardTask = nil
-            // The warm core is now the active playback core. Transfer torrent
-            // ownership so close/fallback cleans it up as a normal stream.
+            // Transfer torrent ownership so discardWarmCore() does NOT evict
+            // the primed swarm/cache the fresh core is about to reuse.
             if let hash = prefetchTorrentHash {
                 activeTorrentHash = hash
                 prefetchTorrentHash = nil
             }
-            controller.playerView?.setMute(false)
-            return controller
         }
         discardWarmCore()
         return MPVController()
