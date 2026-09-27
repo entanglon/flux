@@ -1193,69 +1193,128 @@ enum MPVColorPipelinePolicy {
     }
 }
 
+/// OpenGL layer for MPVLayerView — structured to mirror IINA's ViewLayer
+/// (iina/iina, develop branch), the most battle-tested CAOpenGLLayer+libmpv
+/// implementation on macOS. Non-negotiable invariants taken from IINA + the
+/// mpv render.h contract:
+///   1. ONE CGL pixel format and ONE CGL context are created in init and
+///      returned verbatim from copyCGLPixelFormat/copyCGLContext forever —
+///      including in shadow copies (init(layer:), which CA creates on
+///      contentsScale changes). render.h: every mpv_render_* call must use
+///      "the same OpenGL context as the mpv_render_context was created with;
+///      otherwise undefined behavior will occur."
+///   2. All mpv_render_* calls are serialized through the owner view's
+///      recursive displayLock (render.h: only one at a time per context).
+///   3. draw() renders into the ACTUAL GL viewport/draw-FBO that CA reports,
+///      not a bounds×scale recomputation.
 final class MPVLayer: CAOpenGLLayer {
     weak var ownerView: MPVLayerView?
+    fileprivate let cglPixelFormat: CGLPixelFormatObj
+    fileprivate let cglContext: CGLContextObj
     
     override init() {
+        cglPixelFormat = MPVLayer.createPixelFormat()
+        cglContext = MPVLayer.createContext(cglPixelFormat)
         super.init()
         self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
         self.contentsFormat = .RGBA8Uint
+        self.needsDisplayOnBoundsChange = true
+        self.backgroundColor = NSColor.black.cgColor
     }
     
+    /// CA shadow-copy initializer (fired on contentsScale changes / layer
+    /// copying). IINA's comment: this is exactly where a naive CAOpenGLLayer
+    /// subclass silently loses its context — the copy MUST carry the same
+    /// pixel format and context, or mpv ends up rendering into an orphan.
     override init(layer: Any) {
+        let previous = layer as! MPVLayer
+        cglPixelFormat = previous.cglPixelFormat
+        cglContext = previous.cglContext
         super.init(layer: layer)
-        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
-        self.contentsFormat = .RGBA8Uint
+        self.isAsynchronous = previous.isAsynchronous
+        self.contentsFormat = previous.contentsFormat
+        self.wantsExtendedDynamicRangeContent = previous.wantsExtendedDynamicRangeContent
+        self.ownerView = previous.ownerView
     }
     
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        self.isAsynchronous = true // DIAG-A/B(Sep13-render): revert Sep-6 flip, test main-thread-starvation hypothesis
-        self.contentsFormat = .RGBA8Uint
+        fatalError("init(coder:) not supported")
     }
     
     override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
-        // Evaluate hardware reference EDR capability for the target display mask.
-        // We check `maximumReferenceExtendedDynamicRangeColorComponentValue`,
-        // which is > 1.0 strictly on true HDR/XDR panels (MacBook Pro Liquid Retina XDR, Pro Display XDR).
-        // Standard SDR panels (MacBook Air, external sRGB monitors) report reference EDR 0.0,
-        // and must use standard 32-bit RGBA pixel format to avoid lifted blacks and washed out colors.
-        let targetScreen = NSScreen.screens.first(where: {
-            guard let id = ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { return false }
-            return (CGDisplayIDToOpenGLDisplayMask(id) & mask) != 0
-        }) ?? NSScreen.main
-        
-        let potentialEDR = targetScreen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
-        let useFloat16 = MPVColorPipelinePolicy.supportsEDR(maximumPotentialEDR: Double(potentialEDR))
-
-        let attributes: [CGLPixelFormatAttribute] = useFloat16
-            ? [
-                kCGLPFAAccelerated,
-                kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(kCGLOGLPVersion_3_2_Core.rawValue)),
-                kCGLPFADoubleBuffer,
-                kCGLPFAColorFloat,
-                kCGLPFAColorSize, CGLPixelFormatAttribute(64),
-                kCGLPFADepthSize, CGLPixelFormatAttribute(24),
-                CGLPixelFormatAttribute(0)
-            ]
-            : [
-                kCGLPFAAccelerated,
-                kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(kCGLOGLPVersion_3_2_Core.rawValue)),
-                kCGLPFADoubleBuffer,
-                kCGLPFAColorSize, CGLPixelFormatAttribute(32),
-                kCGLPFADepthSize, CGLPixelFormatAttribute(24),
-                CGLPixelFormatAttribute(0)
-            ]
-        var pix: CGLPixelFormatObj?
-        var npix: GLint = 0
-        CGLChoosePixelFormat(attributes, &pix, &npix)
-        return pix!
+        cglPixelFormat
     }
     
-    override func copyCGLContext(forPixelFormat pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
+    override func copyCGLContext(forPixelFormat pf: CGLPixelFormatObj) -> CGLContextObj {
+        cglContext
+    }
+    
+    // MARK: - Core OpenGL Context and Pixel Format (IINA parity)
+    
+    /// Display-agnostic pixel format with graceful attribute fallback, mirroring
+    /// IINA's findPixelFormat: try the richest attribute set first (float16
+    /// framebuffer on EDR-capable panels), then progressively simpler ones, and
+    /// finally a legacy-profile variant for picky drivers. Never force-unwraps.
+    fileprivate static func createPixelFormat() -> CGLPixelFormatObj {
+        let useFloat16 = MPVColorPipelinePolicy.supportsEDR(
+            maximumPotentialEDR: Double(NSScreen.main?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0)
+        )
+        
+        func attributes(profile: CGLOpenGLProfile, float16: Bool) -> [CGLPixelFormatAttribute] {
+            var attrs: [CGLPixelFormatAttribute] = [
+                kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(UInt32(profile.rawValue)),
+                kCGLPFAAccelerated,
+                kCGLPFADoubleBuffer,
+                kCGLPFAAllowOfflineRenderers
+            ]
+            if float16 {
+                attrs += [kCGLPFAColorFloat, kCGLPFAColorSize, CGLPixelFormatAttribute(64)]
+            } else {
+                attrs += [kCGLPFAColorSize, CGLPixelFormatAttribute(32)]
+            }
+            attrs += [kCGLPFADepthSize, CGLPixelFormatAttribute(24), CGLPixelFormatAttribute(0)]
+            return attrs
+        }
+        
+        var attempts: [[CGLPixelFormatAttribute]] = []
+        if useFloat16 {
+            attempts.append(attributes(profile: kCGLOGLPVersion_3_2_Core, float16: true))
+        }
+        attempts.append(attributes(profile: kCGLOGLPVersion_3_2_Core, float16: false))
+        attempts.append(attributes(profile: kCGLOGLPVersion_Legacy, float16: false))
+        
+        for attrs in attempts {
+            var pix: CGLPixelFormatObj?
+            var npix: GLint = 0
+            if CGLChoosePixelFormat(attrs, &pix, &npix) == kCGLNoError, let chosen = pix {
+                return chosen
+            }
+        }
+        
+        // Last resort: bare minimum accelerated format.
+        var pix: CGLPixelFormatObj?
+        var npix: GLint = 0
+        let minimal: [CGLPixelFormatAttribute] = [
+            kCGLPFAAccelerated,
+            kCGLPFADoubleBuffer,
+            CGLPixelFormatAttribute(0)
+        ]
+        CGLChoosePixelFormat(minimal, &pix, &npix)
+        if let chosen = pix { return chosen }
+        fatalError("MPVLayer: cannot create any CGL pixel format")
+    }
+    
+    fileprivate static func createContext(_ pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
         var ctx: CGLContextObj?
         CGLCreateContext(pixelFormat, nil, &ctx)
-        return ctx!
+        guard let context = ctx else {
+            fatalError("MPVLayer: cannot create CGL context")
+        }
+        // IINA parity: sync to vertical retrace + enable multi-threaded GL engine.
+        var swap: GLint = 1
+        CGLSetParameter(context, kCGLCPSwapInterval, &swap)
+        CGLEnable(context, kCGLCEMPEngine)
+        return context
     }
     
     override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
@@ -1263,7 +1322,7 @@ final class MPVLayer: CAOpenGLLayer {
         return owner.mpv != nil
     }
     
-    override func draw(inCGLContext ctx: CGLContextObj, pixelFormat: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
+    override func draw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
         guard let owner = ownerView, !owner.isCleaningUp, owner.mpv != nil else {
             return
         }
@@ -1271,23 +1330,36 @@ final class MPVLayer: CAOpenGLLayer {
         CGLLockContext(ctx)
         defer { CGLUnlockContext(ctx) }
         
+        // IINA parity: clear first so a skipped render shows clean black.
+        glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
+        
+        // Render into the framebuffer/viewport CA actually gave us (IINA reads
+        // these instead of recomputing bounds × contentsScale).
+        var drawFBO: GLint = 0
+        glGetIntegerv(GLenum(GL_DRAW_FRAMEBUFFER_BINDING), &drawFBO)
+        var dims: [GLint] = [0, 0, 0, 0]
+        glGetIntegerv(GLenum(GL_VIEWPORT), &dims)
+        
+        // Serialize every mpv_render_* call (render.h contract; teardown on the
+        // main thread also takes this lock before freeing the context).
+        owner.displayLock.lock()
+        defer { owner.displayLock.unlock() }
+        
         guard !owner.isCleaningUp, owner.mpv != nil else {
-            glFlush()
             return
         }
         
         if owner.mpvGL == nil {
             owner.setupMPVGL(with: ctx)
         } else if owner.mpvGLCreationContext != ctx {
-            // View moved between windows (e.g. warm-core host → player window):
-            // CA created a new GL context for this window, so the existing
-            // render context is bound to a dead context. Rebuild it here on the
-            // CA render thread with the context we are actually drawing into.
+            // Belt-and-braces: with the IINA-parity fixed context above this
+            // should never fire, but if CA ever hands us a different context
+            // the render context must be rebuilt against it — rendering into a
+            // stale context is the black-video/software-decode failure mode.
             owner.rebuildRenderContext(for: ctx)
         }
         
         guard let mpvGL = owner.mpvGL else {
-            glFlush()
             return
         }
         
@@ -1298,19 +1370,10 @@ final class MPVLayer: CAOpenGLLayer {
         // Update render context on OpenGL thread with active context
         _ = mpv_render_context_update(mpvGL)
         
-        let scale = contentsScale
-        let w = Int32(bounds.width * scale)
-        let h = Int32(bounds.height * scale)
-        
-        guard w > 0 && h > 0 else {
+        guard dims[2] > 0 && dims[3] > 0 else {
             glFlush()
             return
         }
-        
-        glViewport(0, 0, GLsizei(w), GLsizei(h))
-        
-        var currentFBO: GLint = 0
-        glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &currentFBO)
         
         var flipY: Int32 = 1
         // Dynamic depth for dithering:
@@ -1318,7 +1381,7 @@ final class MPVLayer: CAOpenGLLayer {
         // When rendering SDR content (or on an SDR screen), report 8-bit depth so mpv's
         // active fruit / Floyd-Steinberg dithering runs, eliminating banding on 8-bit panels.
         var depth: Int32 = self.wantsExtendedDynamicRangeContent ? 16 : 8
-        var fbo = mpv_opengl_fbo(fbo: currentFBO, w: w, h: h, internal_format: 0)
+        var fbo = mpv_opengl_fbo(fbo: drawFBO != 0 ? drawFBO : 1, w: dims[2], h: dims[3], internal_format: 0)
         
         withUnsafeMutablePointer(to: &fbo) { fboPtr in
             withUnsafeMutablePointer(to: &flipY) { flipPtr in
@@ -1372,6 +1435,11 @@ final class MPVLayerView: NSView {
     private let renderUpdateLock = NSLock()
     private var reconnectTimestamps: [CFAbsoluteTime] = []
     private let reconnectLock = NSLock()
+    /// IINA parity: every mpv_render_* call (draw on the CA render thread,
+    /// render-context free during teardown) is serialized through this
+    /// recursive lock. render.h: only one mpv_render_* call at a time per
+    /// context. Recursive because CA can re-enter display() during draw.
+    let displayLock = NSRecursiveLock()
     /// Display ICC profile forwarding (see applyPendingICCProfile): written by
     /// applyColorPipeline on the main thread, consumed by draw() on the CA
     /// render thread once the mpv render context exists.
@@ -1605,6 +1673,12 @@ final class MPVLayerView: NSView {
         let handle = self.mpv
         self.mpv = nil
         renderUpdateLock.unlock()
+        
+        // IINA parity: serialize with draw() — the CA render thread may be
+        // inside draw()/mpv_render_* right now; this lock makes it finish
+        // before the render context is freed under its feet.
+        displayLock.lock()
+        defer { displayLock.unlock() }
         
         if let glCtx = self.mpvGL {
             mpv_render_context_set_update_callback(glCtx, { _ in }, nil)
