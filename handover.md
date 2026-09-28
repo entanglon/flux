@@ -1,6 +1,6 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 28, 2026 (00:35 IST)  
-**Latest Git State**: 248/248 Unit Tests Passing — **PLAYER REPLAY FIXED (user-verified) · GO ENGINE FULLY REMOVED · MANDATORY PLAYER RECHECK SCHEDULED — see the resolved section below**  
+**Updated**: September 28, 2026 (afternoon)  
+**Latest Git State**: 248/248 Unit Tests Passing — **PLAYER REPLAY FIXED (user-verified) · MANDATORY RECHECK COMPLETED (passed, log-verified) · GO ENGINE REMOVED · MPV-NATIVE-FIRST FALLBACK POLICY LANDED & SHIPPED IN BETA 3 — see the resolved section below**  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
@@ -45,6 +45,27 @@
 3. If the direct-render path is ever revived: global lock order displayLock → CGLLockContext, strictly, in EVERY path including teardown and CA draw.
 4. One change at a time to player files; test first-play + replay after each; commit per verified fix.
 5. Commit messages must not state unverified conclusions as fact (see `d81b8dd` correction-of-the-record).
+
+---
+
+**SEP 28 AFTERNOON SESSION (post-recheck) — MANDATORY RECHECK COMPLETED ✅ AND THE FALLBACK POLICY REWRITTEN (mpv-native-first), SHIPPED AS 1.0.0-beta.3:**
+
+1. **Recheck result (user-tested, log-verified)**: first play + replay + different-title replay all clean; render diag showed exactly one layer/core init per session with no churn — the replay fix is CONFIRMED. This closes the mandatory-recheck item; diagnostics (fluxDiag in MPVVideoView.swift, /tmp/flux_audio_diag.log writer in PlayerView) may be stripped in a future session once further stability is observed.
+2. **The Sept 28 "source-change storm" post-mortem (flushed-trace evidence, not inference)**: user saw a source die, then 5–6 rapid source swaps each delivering ~10–15s. Root causes: (a) the reconnect-storm detector ADVANCED the source mid-mpv-recovery (fighting mpv's own reconnect engine); (b) all standby fallbacks were 127.0.0.1 local sources with equally dead upstreams; (c) fallbacks restarted from 0:00; (d) pengu.uk — the only direct host, verified-good 2 minutes earlier — was probe-struck for the whole session.
+3. **NEW POLICY — mpv-native-first fallback layer stack (supersedes any older timing rules)**:
+   - L0: mpv owns transport recovery (`reconnect=1, reconnect_streamed=1, reconnect_on_network_error=1, reconnect_on_http_error=5xx`, ≤5s backoff, UNLIMITED attempts). The app must NEVER pre-empt this. The reconnect-storm detector now LOGS ONLY ("riding it out"), never advances.
+   - L1: mpv gives up → END_FILE(reason ERROR) → instant advance. PRIMARY path, zero timers.
+   - L2: premature EOF → position saved + Reconnect offered.
+   - L3: THE ONLY app timer in mid-playback: 30s last-resort stall ceiling (was 18s; mpv has no "gave up on infinite stall" event — this single backstop is legitimate).
+   - L4: app source-choice intelligence (legitimately app territory): fallbacks RESUME the freshest position (`lastStartupTimePos` >0.5s else `sessionMaxPosition` → `pendingResumeTime`); known-dead sources are SKIPPED unless they delivered ≥1s playback this session (`fallbackEligibleVerifiedURLs/Hosts` seeded in confirmPlaybackSuccess — recovered hosts get retried); bounded rescue retry (≤2) of a previously-verified source before surrendering to the picker; throttle 0.8→1.2s.
+   - Startup-phase watchdogs (14s direct / 20s proxied / 35s torrent connect; 8s slow-source; 10s byte-stall) are UNCHANGED — pre-playback source selection is app territory by design.
+   - Flush-trace verified in production: both advance types fired exactly per policy (one mpv 403-error hop, one 10s startup zero-byte hop), position carried across both, zero mid-playback timers, no storm.
+4. **Winner freshness probe (raceBestStream)**: before committing the auto-play winner, its PLAYABLE (proxied) URL is HEAD-probed (2.5s); on failure the best surviving ranked HTTP candidate is probed and promoted. Kills the guaranteed 403 hop from expired signed URLs (psig=...) on replays. Torrents skip the probe (engine reports its own failure). Requires StreamProxyManager running (probe needs the local proxy to add Origin/Referer headers).
+5. **Replay cache/filter fix (isSavedURLCompatible)**: loopback URLs are no longer auto-classified as torrent — port 51547 (StreamProxy) entries are unwrapped via ?url= and classified by the REAL target host; port 11470 (Stremio engine) remains torrent. Before this, proxied-HTTP replays were rejected by the 'http' source filter and the instant-replay cache NEVER engaged ("Saved session is incompatible...").
+6. **⚠️ LAUNCH GOTCHA (cost us an hour)**: backgrounded launches (`nohup … &`) get killed ~4s in by macOS Automatic Termination (TAL) — "No windows open yet" → exit handler. It looks like a crash but isn't. ALWAYS launch via `open -a <DerivedData>/Debug/flux.app --stdout /tmp/flux_stdout.log --stderr /tmp/flux_stdout.log`. print() only flushes on graceful quit (Cmd+Q / osascript quit) — but the unbuffered /tmp/flux_render_diag.log and /tmp/flux_audio_diag.log are readable while running.
+7. **P2P cache (answered, no work needed)**: the Stremio server.js owns piece-level disk caching (5GB configured at startup, default is 50MB) and survives restarts; Flux only re-registers via trackCreate + polls stats. Eviction + swarm health remain physics, same as Stremio.
+8. **Released 1.0.0-beta.3** (CURRENT_PROJECT_VERSION 3): two DMGs (macOS26+, macOS15+), Sparkle-signed appcast entries, GitHub release v1.0.0-beta.3. Release notes list: mpv-native-first fallback policy, resume-position-on-fallback, smart fallback ordering with dead-source skipping, replay cache fix, pre-flight source probe.
+9. **Known-open (non-blocking)**: ~54 commits were pushed to origin this session (was machine-local before); FluxImageCache `writeDBwithCachedResponse insert SQL stmnt. is nil` console spam is uninvestigated (cosmetic); scratch/ag-player-session-20260927.patch salvage ideas partially absorbed (event-driven isIntentionallySwitchingFile reset landed earlier; load-request diagnostic IDs NOT ported).
 
 ---
 
