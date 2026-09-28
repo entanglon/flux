@@ -553,6 +553,14 @@ class PlayerManager: ObservableObject {
     /// cascading silently and hand control back to the user (stream picker).
     private let maxAutoFallbacks = 5
     private var consecutiveFallbacks = 0
+
+    /// Session-scoped memory of sources that achieved ≥1s of real playback
+    /// (URLs and origin hosts). Exempts them from dead-strikes so a recovered
+    /// host can be retried instead of being skipped for the rest of the session.
+    private var fallbackEligibleVerifiedURLs: Set<String> = []
+    private var fallbackEligibleVerifiedHosts: Set<String> = []
+    /// Bounded retries of previously-verified sources after fallback exhaustion.
+    private var rescueAttempts = 0
     /// MANUAL MODE CONTRACT: when the user explicitly picks a source, NOTHING may
     /// switch away from it — no racing, no auto-fallback. Failures surface to the user.
     var isManualSelection = false
@@ -605,6 +613,17 @@ class PlayerManager: ObservableObject {
         // In-memory cache for instant replay during active session
         lastPlayedStreams[key] = CachedStream(url: url, timestamp: Date(), stream: currentSelectedStream)
         print("[PlayerManager] 💾 Positive playback confirmed (>=1s) — saved instant replay for \(key)")
+
+        // Fallback memory: a source that genuinely played is exempt from
+        // health-probe demotion for this session. A later transient collapse
+        // (dead origin that recovers minutes later) must not permanently strike
+        // the only direct host in the pool — the source-change storm of
+        // 2026-09-28 cycled every local fallback while the proven host sat
+        // probe-dead and un-retryable.
+        fallbackEligibleVerifiedURLs.insert(url.absoluteString)
+        if let host = currentSelectedStream?.url.host, !host.isEmpty {
+            fallbackEligibleVerifiedHosts.insert(host)
+        }
 
         let hash = currentSelectedStream?.isTorrent == true ? torrentHash(currentSelectedStream!) : nil
         var historyItem = item
@@ -1038,6 +1057,9 @@ class PlayerManager: ObservableObject {
         self.startupWatchdogTask = nil
         self.autoPlayRaceTask?.cancel()
         self.autoPlayRaceTask = nil
+        self.fallbackEligibleVerifiedURLs.removeAll()
+        self.fallbackEligibleVerifiedHosts.removeAll()
+        self.rescueAttempts = 0
         if forceStreamPicker {
             self.forceStreamPicker = true
             self.isManualSelection = true
@@ -1108,14 +1130,32 @@ class PlayerManager: ObservableObject {
 
             let sourceMode = UserDefaults.standard.string(forKey: UserDefaults.Key.streamingSourceMode) ?? "both"
 
-            // Helper to verify that saved URL matches the user's active streaming filter
+            // Helper to verify that saved URL matches the user's active streaming filter.
+            // Loopback URLs are NOT automatically torrents: StreamProxyManager (:51547)
+            // serves direct-HTTP streams through 127.0.0.1 with the real target in
+            // ?url=, while the Stremio engine (:11470) serves torrent content. The
+            // 2026-09-28 trace showed proxied HTTP replays being misclassified as
+            // torrent and rejected in 'http' mode — the cache was never consulted.
             func isSavedURLCompatible(_ url: URL, hash: String?) -> Bool {
-                let isTorrent = (hash != nil && !hash!.isEmpty) ||
-                                (url.host == "127.0.0.1" || url.host == "localhost") ||
-                                url.scheme == "magnet" ||
-                                url.absoluteString.contains("xt=urn:btih:")
-                if sourceMode == "http" && isTorrent { return false }
-                if sourceMode == "torrent" && !isTorrent { return false }
+                let str = url.absoluteString
+                if url.scheme == "magnet" || str.contains("xt=urn:btih:") { return sourceMode != "http" }
+                var targetHost: String? = url.host
+                if url.host == "127.0.0.1" || url.host == "localhost" {
+                    if url.port == Int(StreamProxyManager.shared.port),
+                       let comp = URLComponents(string: str),
+                       let targetString = comp.queryItems?.first(where: { $0.name == "url" })?.value,
+                       let target = URL(string: targetString) {
+                        // Local proxy carrying a direct-HTTP target — unwrap it.
+                        targetHost = target.host
+                    } else {
+                        // Stremio engine endpoint — torrent content.
+                        targetHost = nil
+                    }
+                }
+                // Direct HTTP host (possibly the unwrapped proxy target) = HTTP stream.
+                let looksTorrent = (hash != nil && !hash!.isEmpty) || targetHost == nil
+                if sourceMode == "http" && looksTorrent { return false }
+                if sourceMode == "torrent" && !looksTorrent { return false }
                 return true
             }
 
@@ -1800,7 +1840,7 @@ class PlayerManager: ObservableObject {
 
         guard let firstPass = primary else { return nil }
 
-        let winnerCandidate: Stream
+        var winnerCandidate: Stream
         let finalStandby: [Stream]
 
         if wasRankedByAI {
@@ -1852,6 +1892,39 @@ class PlayerManager: ObservableObject {
         if isPickerStillActive {
             print("[PlayerManager] Stream picker active; discarding race winner.")
             return nil
+        }
+
+        // Freshness gate (mpv-native-first compatible): an expired signed URL
+        // fails on the very first byte (HTTP 403 → mpv END_FILE ERROR), which
+        // used to guarantee one wasted load + fallback hop on every replay
+        // (2026-09-28 flushed trace). Probe the winner's playable URL once;
+        // if it is dead, promote the best surviving ranked alternative.
+        // Torrents are skipped — the engine resolves swarms and reports its
+        // own failure through TorrentResolutionResult.
+        if !winnerCandidate.isTorrent {
+            let probeTarget = self.getPlayableURL(for: winnerCandidate)
+            let routesThroughProxy = StreamRouteProxyManager.shared.shouldProxy(stream: winnerCandidate)
+                || (winnerCandidate.proxyHeaders?.isEmpty == false)
+                || probeTarget.host == "127.0.0.1"
+            if routesThroughProxy {
+                if !StreamProxyManager.shared.isRunning { StreamProxyManager.shared.start() }
+                if StreamProxyManager.shared.isRunning {
+                    let winnerAlive = await self.verifyStreamURLHealth(probeTarget)
+                    if !winnerAlive {
+                        print("[PlayerManager] 🩺 Winner probe FAILED (dead/expired URL) — promoting next ranked candidate.")
+                        Logger.stream.error("Winner probe failed for \(winnerCandidate.source, privacy: .public); promoting alternate.")
+                        let ranked = [firstPass] + fallbacks
+                        for alt in ranked.dropFirst() where alt.stableKey != winnerCandidate.stableKey {
+                            if alt.isTorrent { continue }
+                            if await self.verifyStreamURLHealth(self.getPlayableURL(for: alt)) {
+                                print("[PlayerManager] 🩺 Promoted \(alt.cleanTitle) (\(alt.source)) after winner probe failure.")
+                                winnerCandidate = alt
+                                break
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         print("[PlayerManager] ⚡ Flux Mode selected best candidate: \(winnerCandidate.cleanTitle) (\(winnerCandidate.quality)) via \(winnerCandidate.source)")
@@ -2310,17 +2383,63 @@ class PlayerManager: ObservableObject {
         fallbackThrottleTask?.cancel()
         fallbackThrottleTask = nil
 
+        // Resume continuity: fallbacks previously restarted from 0:00. Carry the
+        // freshest known position (0.5s-cadence mpv sample, else the 5s progress
+        // high-water mark) so a mid-playback source switch continues seamlessly.
+        let freshestPos = lastStartupTimePos > 0.5 ? lastStartupTimePos : sessionMaxPosition
+        if freshestPos > 0.5 {
+            print("[PlayerManager] ⏩ Fallback will resume from \(Int(freshestPos))s (previously restarted from 0:00)")
+            pendingResumeTime = freshestPos
+        }
+
+        // Skip sources already proven dead this session (failed probe / dead
+        // torrent hash), unless they once delivered real playback — a verified
+        // source gets another chance because transient outages recover. The
+        // 2026-09-28 storm burned 5+ consecutive local fallbacks with dead
+        // upstreams; skipping known-dead candidates prevents that cascade.
+        standbyFallbacks.removeAll { candidate in
+            if candidate.stableKey == currentSelectedStream?.stableKey { return false }
+            guard let probe = probeStatus[candidate.stableKey], !probe.ok else { return false }
+            if fallbackEligibleVerifiedURLs.contains(candidate.url.absoluteString)
+                || fallbackEligibleVerifiedHosts.contains(candidate.url.host?.lowercased() ?? "") {
+                return false
+            }
+            if candidate.isTorrent, let hash = torrentHash(candidate), recentlyDeadHashes[hash] == nil {
+                return false
+            }
+            return true
+        }
+
+        // All fallbacks exhausted: if a source that previously played ≥1s was
+        // struck earlier this session, give it ONE more chance before handing
+        // control back (origin outages often recover within minutes). Bounded
+        // by rescueAttempts so two half-dead sources cannot ping-pong forever.
         guard !standbyFallbacks.isEmpty else {
+            if rescueAttempts < 2,
+               let rescue = availableStreams.first(where: { stream in
+                   guard stream.stableKey != currentSelectedStream?.stableKey else { return false }
+                   let struck = probeStatus[stream.stableKey].map { !$0.ok } ?? false
+                   guard struck else { return false }
+                   return fallbackEligibleVerifiedURLs.contains(stream.url.absoluteString)
+                       || fallbackEligibleVerifiedHosts.contains(stream.url.host?.lowercased() ?? "")
+               }) {
+                rescueAttempts += 1
+                print("[PlayerManager] ♻️ Fallbacks exhausted — retrying previously-verified source \(rescue.cleanTitle) (\(rescueAttempts)/2) before giving up.")
+                probeStatus.removeValue(forKey: rescue.stableKey)
+                if let hash = torrentHash(rescue) { recentlyDeadHashes.removeValue(forKey: hash) }
+                attemptStream(rescue)
+                return
+            }
             print("[PlayerManager] No standby fallbacks remaining — falling back to standard next stream.")
             tryNextStream()
             return
         }
 
         let timeSinceLast = Date().timeIntervalSince(lastFallbackAttemptDate)
-        if timeSinceLast < 0.8 {
+        if timeSinceLast < 1.2 {
             print("[PlayerManager] ⏳ Fallback throttled (occurred within \(String(format: "%.2f", timeSinceLast))s) — scheduling smooth transition...")
             fallbackThrottleTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 600_000_000)
+                try? await Task.sleep(nanoseconds: 900_000_000)
                 guard !Task.isCancelled, let self = self else { return }
                 self.advanceToStandbyFallback()
             }

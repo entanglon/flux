@@ -2365,11 +2365,17 @@ final class MPVLayerView: NSView {
                             }
                             self.reconnectLock.unlock()
 
+                            // mpv-native-first policy: reconnect attempts ARE mpv doing
+                            // its job (reconnect_on_network_error, ≤5s backoff, unlimited
+                            // retries). Advancing the source mid-recovery fought the
+                            // engine and caused the 2026-09-28 source-change storm. We
+                            // log for diagnostics only; the ONLY mid-playback exits are
+                            // mpv's own END_FILE(ERROR) event or the single 30s
+                            // last-resort stall ceiling in PlayerView.
                             if isStorm {
                                 DispatchQueue.main.async { [weak self] in
                                     guard let self = self, !self.isCleaningUp, self.mpv != nil else { return }
-                                    Logger.player.error("🚨 Mid-playback reconnect storm detected in mpv (\(lowerText.prefix(80), privacy: .public)). Advancing to fallback stream...")
-                                    PlayerManager.shared.handleStreamFailure(reason: "Stream connection dropped repeatedly during playback")
+                                    Logger.player.error("🔁 mpv is reconnecting repeatedly (\(lowerText.prefix(80), privacy: .public)) — riding it out per mpv-native-first policy; no source advance.")
                                 }
                             }
                         }

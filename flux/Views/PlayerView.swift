@@ -439,14 +439,20 @@ struct PlayerView: View {
                     await MainActor.run { sustainedBuffering = true }
                 }
 
-                // Mid-playback stall watchdog: if stalled for 18s without resuming, auto-advance or alert
+                // Mid-playback stall ceiling (the ONLY app timer in mid-playback):
+                // mpv-native-first policy — mpv owns transport recovery (unlimited
+                // reconnects with ≤5s backoff), so we wait a generous 30s of truly
+                // stalled buffering before the last-resort advance. mpv has no
+                // "gave up on infinite stall" event (paused-for-cache never errors),
+                // which is why exactly one backstop exists. All other exits are
+                // mpv-native: END_FILE(ERROR), premature-EOF.
                 midPlaybackStallWatchdogTask = Task {
-                    try? await Task.sleep(nanoseconds: 18_000_000_000)
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
                         guard isMidPlaybackBuffering && sustainedBuffering && !mpv.isUserPaused else { return }
                         if !playerManager.isManualSelection && !playerManager.standbyFallbacks.isEmpty {
-                            print("[PlayerView] Mid-playback stall exceeded 18s — auto-advancing to standby fallback...")
+                            print("[PlayerView] Mid-playback stall exceeded 30s (last-resort ceiling) — auto-advancing to standby fallback...")
                             playerManager.advanceToStandbyFallback()
                         } else {
                             playerManager.errorMessage = "Connection lost during playback. Tap to reconnect or choose another source.".localized
