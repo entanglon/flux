@@ -20,7 +20,7 @@ fi
 # Detect beta vs stable from project.pbxproj
 BUNDLE_ID=$(grep -o 'PRODUCT_BUNDLE_IDENTIFIER = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
 DISPLAY_NAME=$(grep -o 'INFOPLIST_KEY_CFBundleDisplayName = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/INFOPLIST_KEY_CFBundleDisplayName = //;s/;//;s/"//g')
-VERSION=$(grep -o 'MARKETING_VERSION = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/MARKETING_VERSION = //;s/;//')
+VERSION=$(grep -o 'MARKETING_VERSION = [^;]*' "$PROJECT_ROOT/flux.xcodeproj/project.pbxproj" | head -1 | sed 's/MARKETING_VERSION = //;s/;//;s/"//g')
 
 if [[ "$BUNDLE_ID" == *"beta"* ]]; then
   IS_BETA=true

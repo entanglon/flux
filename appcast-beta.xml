@@ -7,6 +7,107 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <description>Beta updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
         <item>
+        <title>Flux (beta) 1.0.0-beta.3</title>
+        <sparkle:releaseNotes><![CDATA[
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    color-scheme: dark light;
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --text-primary: #F0F3F6;
+    --text-secondary: #9DA7B3;
+    --accent: #58A6FF;
+    --accent-bg: rgba(88, 166, 255, 0.12);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --card-bg: rgba(0, 0, 0, 0.03);
+      --card-border: rgba(0, 0, 0, 0.08);
+      --text-primary: #1F2328;
+      --text-secondary: #57606A;
+      --accent: #0969DA;
+      --accent-bg: rgba(9, 105, 218, 0.1);
+    }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    background: transparent;
+    margin: 0;
+    padding: 10px 14px 20px 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .header-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .version-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 11px 13px;
+    margin-bottom: 10px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+  .card-header .icon {
+    margin-right: 7px;
+    font-size: 14px;
+  }
+  ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+  }
+  li {
+    margin-bottom: 4px;
+  }
+  li strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+</style>
+<div class="header-card"><div class="version-title">Flux 1.0.0-beta.3</div><div class="badge">Beta Release</div></div><div class="card"><div class="card-header">Smarter, mpv-Native Fallback Engine</div><div class="feature-item"><span class="feature-label">Rides Out Reconnects:</span> the player engine now owns connection recovery end-to-end; sources are no longer swapped while mpv is actively reconnecting.</div><div class="feature-item"><span class="feature-label">One Last-Resort Ceiling:</span> a stalled source is abandoned only after a generous 30s — everything else waits for the engine’s own verdict.</div></div><div class="card"><div class="card-header">Resume Playback After Source Changes</div><div class="feature-item"><span class="feature-label">No More 0:00 Restarts:</span> when a dying source forces a switch, playback continues near your exact position on the new source.</div><div class="feature-item"><span class="feature-label">Seamless Handoff:</span> position is carried through the mpv-native fallback path for both direct and proxied streams.</div></div><div class="card"><div class="card-header">Verified-Source Memory &amp; Smart Fallback Ordering</div><div class="feature-item"><span class="feature-label">Dead-Source Skipping:</span> sources that failed this session are passed over instead of being cycled through one by one.</div><div class="feature-item"><span class="feature-label">Recovered-Host Rescue:</span> a source that played successfully earlier gets another chance if the fallback pool runs dry — transient outages no longer cascade.</div></div><div class="card"><div class="card-header">Instant Replay Cache for Proxied HTTP</div><div class="feature-item"><span class="feature-label">Cache Now Engages Everywhere:</span> fixed a filter mismatch that skipped the instant-replay cache for proxied HTTP sources in “HTTP only” mode.</div><div class="feature-item"><span class="feature-label">Health-Verified Fast Start:</span> replays resume immediately from the cached source after a quick liveness probe.</div></div><div class="card"><div class="card-header">Pre-Flight Source Probe</div><div class="feature-item"><span class="feature-label">Expired URLs Caught Early:</span> the auto-selected source is verified before playback starts, so stale signed links no longer cost a failed load.</div><div class="feature-item"><span class="feature-label">Automatic Promotion:</span> if the winner is dead, the next best ranked source is promoted instantly.</div></div><div class="card"><div class="card-header">Engine Cleanup</div><div class="feature-item"><span class="feature-label">Slimmer Torrent Stack:</span> the embedded Go engine is fully removed; torrent streaming runs exclusively on the official Stremio server.</div></div>
+]]></sparkle:releaseNotes>
+        <pubDate>Mon, 28 Sep 2026 13:17:19 +0530</pubDate>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.3/Flux-beta-1.0.0-beta.3-macOS26+.dmg" length="37843984" sparkle:version="3" sparkle:shortVersionString="1.0.0-beta.3" sparkle:edSignature="oJMzyfnT3ZEsy9idG1Mu/BGXK7qBmuvwYqPquhTM6FvhEC3ovC3nktVMHsiTBKDD8fnDgniJLnKy9s6tL7/RCg==" type="application/octet-stream"></enclosure>
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.3/Flux-beta-1.0.0-beta.3-macOS15+.dmg" length="37964332" sparkle:version="3" sparkle:shortVersionString="1.0.0-beta.3" sparkle:edSignature="i2wdXNhcC6005sKjvzPNOA92CRpBPh2Uu2cA6xasawfJ1o31Kc/dBwMNqL65iYmZlou+tUn/MwarJTElXD97DA==" type="application/octet-stream"></enclosure>
+    </item>
+    <item>
             <title>Flux (beta) 1.0.0-beta.2</title>
             <sparkle:releaseNotes><![CDATA[
 <!DOCTYPE html>
@@ -174,7 +275,4 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0-beta.1/Flux-beta-1.0.0-beta.1-macOS26+.dmg" length="45743386" sparkle:version="1" sparkle:shortVersionString="1.0.0-beta.1" sparkle:edSignature="3MQ0x39gfNNvmcLSqN++3ToWXR+AVb0HAePJBjQoY4lHj2xoZy88un/qauLR8Qij8FDhoOgOFXWhaXPN+CtaDg==" type="application/octet-stream"></enclosure>
         </item>
     </channel>
-</rss><!-- sparkle-signatures:
-edSignature: AUBhqSQJePJMLhI8j0hGObfylyt3hJKyAYw86UulgTE5clqnlEvBrLtbnJPwzpUW1iOWODFecypmnntOaVorDg==
-length: 7600
--->
+</rss>
