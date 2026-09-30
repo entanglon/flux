@@ -59,6 +59,7 @@ struct PlayerView: View {
     @State private var upNextSecondsRemaining: Int = 60
     @State private var upNextTotalDuration: Double = 60.0
     @State private var upNextTimerTask: Task<Void, Never>? = nil
+    @State private var isTransitioningEpisode = false
     @State private var movieSuggestions: [MediaItem] = []
     @State private var isLoadingSuggestions = false
     @State private var isMovieSuggestionsDismissed = false
@@ -359,10 +360,10 @@ struct PlayerView: View {
                 updateFrozenWatchdog()
                 self.confirmPlaybackStarted()
 
-                if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible,
-                   playerManager.nextReleasedEpisodeInfo != nil,
+                if autoPlayNextEnabled, !autoPlayCancelled, !isPickerVisible, !isTransitioningEpisode,
+                   let next = playerManager.nextReleasedEpisodeInfo,
                    mpv.duration > 0, (mpv.duration - mpv.timePos) <= 1.0 {
-                    transitionToNextEpisode()
+                    transitionToNextEpisode(targetSeason: next.season, targetEpisode: next.episode)
                 }
 
                 let drops = mpv.playerView?.playerView?.getPropertyInt("frame-drop-count") ?? -1
@@ -519,6 +520,7 @@ struct PlayerView: View {
         isMovieSuggestionsDismissed = false
         suggestionsScrollTargetIndex = 0
         autoPlayCancelled = false
+        isTransitioningEpisode = false
         hasStartedPlayback = false
         lastDropCount = -1
         lastVoDelayed = -1
@@ -652,7 +654,7 @@ struct PlayerView: View {
             let autoplay = autoPlayNextEnabled
             let cancelled = autoPlayCancelled
             let picker = isPickerVisible
-            if let media = current, let s = playerManager.currentSeason, let e = playerManager.currentEpisode {
+            if !isTransitioningEpisode, let media = current, let s = playerManager.currentSeason, let e = playerManager.currentEpisode {
                 Task { @MainActor in
                     await playerManager.completeEpisode(item: media, season: s, episode: e, duration: duration, autoplay: autoplay, cancelled: cancelled, pickerVisible: picker)
                 }
@@ -1043,6 +1045,7 @@ struct PlayerView: View {
     }
 
     private var shouldShowUpNextCard: Bool {
+        guard !isTransitioningEpisode else { return false }
         // Air-gated: unaired episodes are never offered, here or anywhere else.
         guard playerManager.nextReleasedEpisodeInfo != nil,
               let current = activeItem,
@@ -1185,7 +1188,7 @@ struct PlayerView: View {
                     // Action Controls: Big Primary "Play Next" Button + Watch Credits
                     HStack(spacing: 10) {
                         Button {
-                            transitionToNextEpisode()
+                            transitionToNextEpisode(targetSeason: season, targetEpisode: episode)
                         } label: {
                             HStack(spacing: 8) {
                                 // Circular Animated Timer
@@ -1268,7 +1271,7 @@ struct PlayerView: View {
                 guard !Task.isCancelled else { return }
                 upNextSecondsRemaining -= 1
             }
-            guard !Task.isCancelled, shouldShowUpNextCard else { return }
+            guard !Task.isCancelled, shouldShowUpNextCard, !isTransitioningEpisode else { return }
             transitionToNextEpisode()
         }
     }
@@ -1278,8 +1281,11 @@ struct PlayerView: View {
         upNextTimerTask = nil
     }
 
-    private func transitionToNextEpisode() {
-        guard let next = playerManager.nextReleasedEpisodeInfo else { return }
+    private func transitionToNextEpisode(targetSeason: Int? = nil, targetEpisode: Int? = nil) {
+        guard !isTransitioningEpisode else { return }
+        let target = (targetSeason != nil && targetEpisode != nil) ? (season: targetSeason!, episode: targetEpisode!) : playerManager.nextReleasedEpisodeInfo
+        guard let next = target else { return }
+        isTransitioningEpisode = true
         print("[PlayerView] Transitioning to next episode: S\(next.season):E\(next.episode)")
         cancelUpNextCountdown()
         autoPlayCancelled = false
@@ -1287,7 +1293,12 @@ struct PlayerView: View {
         hasStartedPlayback = false
         hasEverStartedPlayback = false
         mpv.stop()
-        playerManager.playNextEpisode()
+        playerManager.playNextEpisode(targetSeason: next.season, targetEpisode: next.episode)
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            isTransitioningEpisode = false
+        }
     }
 
     // MARK: - Movie End-of-Playback Suggestions Rail

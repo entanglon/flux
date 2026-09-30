@@ -603,6 +603,41 @@ struct fluxTests {
         #expect(isTorrentURL(remoteHttpURL, hash: "0123456789abcdef0123456789abcdef01234567") == true)
         #expect(isTorrentURL(remoteHttpURL, hash: nil) == false)
     }
+
+    @Test func reacherSeasonPackResolvesTargetEpisodeCorrectly() {
+        let files = [
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Reacher.S01E04.1080p.WEB-DL.mkv", length: 2_100_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Reacher.S01E05.1080p.WEB-DL.mkv", length: 2_200_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Reacher.S01E06.1080p.WEB-DL.mkv", length: 2_150_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Reacher.S01E07.1080p.WEB-DL.mkv", length: 2_300_000_000),
+            PlayerManager.TorrentCreateResponse.FileEntry(name: "Reacher.S01E06.en.srt", length: 45_000)
+        ]
+
+        let selectedE5 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 5)
+        #expect(selectedE5 == 1)
+
+        let selectedE6 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 6)
+        #expect(selectedE6 == 2)
+
+        let selectedE7 = PlayerManager.findBestVideoFileIndex(files: files, targetSeason: 1, targetEpisode: 7)
+        #expect(selectedE7 == 3)
+    }
+
+    @Test @MainActor func playNextEpisodeExplicitTargetCommitsTargetParameters() {
+        let item = MediaItem(
+            seed: "tt9288030",
+            title: "Reacher",
+            category: "series"
+        )
+        PlayerManager.shared.play(item, season: 1, episode: 5, startFromBeginning: true)
+        #expect(PlayerManager.shared.currentEpisode == 5)
+        #expect(PlayerManager.shared.pendingResumeTime == nil)
+
+        // Advance explicitly to Episode 6
+        PlayerManager.shared.playNextEpisode(targetSeason: 1, targetEpisode: 6)
+        #expect(PlayerManager.shared.currentEpisode == 6)
+        #expect(PlayerManager.shared.pendingResumeTime == nil)
+    }
 }
 
 

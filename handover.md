@@ -1,11 +1,30 @@
 # Flux Project Handover & Session Summary
-**Updated**: September 28, 2026 (afternoon)  
-**Latest Git State**: 248/248 Unit Tests Passing — **PLAYER REPLAY FIXED (user-verified) · MANDATORY RECHECK COMPLETED (passed, log-verified) · GO ENGINE REMOVED · MPV-NATIVE-FIRST FALLBACK POLICY LANDED & SHIPPED IN BETA 3 — see the resolved section below**  
+**Updated**: September 30, 2026 (morning)  
+**Latest Git State**: 250/250 Unit Tests Passing — **STARTUP WATCHDOG HEADROOM EXPANDED · EPISODE SKIPPING & POSITION LEAK RESOLVED · EPISODE TRANSITION DEBOUNCED & LOCKED · TARGETED EPISODE ADVANCE VERIFIED**  
 **Target Platform**: macOS 14.0+ (Universal / Apple Silicon arm64)  
 **Xcode Target**: `flux` (Scheme: `flux`, Test Plan: `fluxTests`)  
 ---
 
 ## 1. Executive Summary for Antigravity Sessions
+---
+
+**✅ RESOLVED (Sep 30 morning): Episode skipping / jumping bug (e.g. Ep 5 -> Ep 7) and premature stream startup fallback.**
+
+1. **Stream Startup Grace & Watchdog Relaxation**:
+   - `armStartupWatchdog`: Relaxed direct HTTP `slowLimit` from 8.0s → 15.0s, lowered `slowMediaFloor` from 1.5s → 0.8s, increased `connectTimeout` from 14.0s → 20.0s, and `stallTimeout` from 10.0s → 14.0s. Proxied HTTP connectTimeout increased to 25.0s (slowLimit 20.0s). P2P torrent swarms increased to 40.0s connectTimeout (45.0s slowLimit).
+   - Prevents streams from being aborted right as TLS negotiation and moov header demuxing complete (~6–8s).
+2. **Residual Position Leak Elimination (`sessionMaxPosition`)**:
+   - In `PlayerManager.play()`, explicitly initialize `sessionMaxPosition = resumePos ?? 0.0` and update `currentTrackingEpisodeKey`.
+   - In `PlayerManager.advanceToStandbyFallback()`, guarded position inheritance: fallback only inherits `sessionMaxPosition` if `hasPlaybackStarted && isSameEpisode`. During initial startup before playback begins, it never inherits the prior episode's ~3,000s duration mark.
+   - Prevents the next episode from seeking to 3,000s (near the end) and instantly triggering the Up Next prompt or EOF for the subsequent episode.
+3. **Episode Transition Synchronization & Locking**:
+   - Added `isTransitioningEpisode` state guard in `PlayerView.swift` to debounce transition triggers, immediately dismiss `shouldShowUpNextCard`, and prevent overlapping calls from `loadingTimer`, EOF handlers, countdown timers, and button double-clicks.
+   - `upNextCard` button and `loadingTimer` pass explicit `targetSeason` and `targetEpisode` to `playNextEpisode(targetSeason:targetEpisode:)`, guaranteeing that the exact episode displayed on the card is what plays.
+   - `completeEpisode` now explicitly passes `startFromBeginning: true` on auto-advance.
+4. **Season Pack File Index Safety**:
+   - In `resolveTorrentStream`, when `stream.isSeasonPack == true`, `findBestVideoFileIndex` is always executed for `targetSeason` and `targetEpisode` so a new episode does not inherit a stale file index.
+5. **Unit Tests Passing**: 250/250 unit tests across 9 suites (added `reacherSeasonPackResolvesTargetEpisodeCorrectly` and `playNextEpisodeExplicitTargetCommitsTargetParameters`).
+
 ---
 
 **✅ RESOLVED (Sep 27 late night, verified by user): replay black-screen bug is FIXED. MANDATORY PLAYER RECHECK SCHEDULED — read this before touching the player.**

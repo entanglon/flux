@@ -916,12 +916,12 @@ class PlayerManager: ObservableObject {
             if let data = result.data,
                let createResp = try? JSONDecoder().decode(TorrentCreateResponse.self, from: data),
                let files = createResp.files, !files.isEmpty {
-                if resolvedIdx == nil {
+                if resolvedIdx == nil || stream.isSeasonPack {
                     resolvedIdx = Self.findBestVideoFileIndex(
                         files: files,
                         targetSeason: targetSeason,
                         targetEpisode: targetEpisode
-                    )
+                    ) ?? resolvedIdx
                 }
             }
             print("[PlayerManager] Torrent created on server: \(hash.prefix(12))… (fileIdx: \(resolvedIdx ?? 0))")
@@ -1035,6 +1035,9 @@ class PlayerManager: ObservableObject {
             attemptedAdvances.removeAll()
             lastCompletedEpisodeKey = episodeKey
         }
+        self.currentTrackingEpisodeKey = episodeKey
+        self.sessionMaxPosition = resumePos ?? 0.0
+        self.sessionMaxProgress = 0.0
         self.errorMessage = nil
         self.currentSelectedStream = nil
         self.hasConfirmedPlaybackSuccess = false
@@ -2213,7 +2216,7 @@ class PlayerManager: ObservableObject {
         slowStartStrikes = 0
 
         let isProxiedHTTP = !stream.isTorrent && StreamRouteProxyManager.shared.shouldProxy(stream: stream)
-        let connectTimeout: TimeInterval = stream.isTorrent ? 35.0 : (isProxiedHTTP ? 20.0 : 14.0)
+        let connectTimeout: TimeInterval = stream.isTorrent ? 40.0 : (isProxiedHTTP ? 25.0 : 20.0)
         print("[PlayerManager] ⏱️ Armed startup stall watchdog for \(stream.cleanTitle) (\(stream.quality)): connect timeout \(Int(connectTimeout))s")
         let startedAt = Date()
         startupWatchdogTask = Task { [weak self] in
@@ -2235,12 +2238,12 @@ class PlayerManager: ObservableObject {
                     // Slow-delivery / dead-origin detection — runs for BOTH
                     // zero-telemetry (dead origin: proxy accepted the socket,
                     // upstream never sent a byte) and trickling sources.
-                    // For HTTP streams, 8s is plenty for CDN response.
-                    // For P2P swarms, allow 30s for DHT peer discovery, tracker
+                    // For HTTP streams, 15s gives ample time for TLS negotiation and initial demuxing.
+                    // For P2P swarms, allow 45s for DHT peer discovery, tracker
                     // announces, piece bitfield handshake, and initial moov/header priming.
                     let isProxiedHTTP = !stream.isTorrent && StreamRouteProxyManager.shared.shouldProxy(stream: stream)
-                    let slowLimit: TimeInterval = stream.isTorrent ? 35.0 : (isProxiedHTTP ? 14.0 : 8.0)
-                    let slowMediaFloor: Double = stream.isTorrent ? 1.0 : 1.5
+                    let slowLimit: TimeInterval = stream.isTorrent ? 45.0 : (isProxiedHTTP ? 20.0 : 15.0)
+                    let slowMediaFloor: Double = stream.isTorrent ? 1.0 : 0.8
 
                     // For torrents: check if the swarm is actively receiving data
                     let isTorrentDownloading: Bool
@@ -2262,7 +2265,7 @@ class PlayerManager: ObservableObject {
                     // If bytes have started flowing (telemetry received for this session):
                     if let lastProgress = self.lastTelemetryProgressTime, lastProgress >= startedAt {
                         let stallDuration = Date().timeIntervalSince(lastProgress)
-                        let stallTimeout: TimeInterval = stream.isTorrent ? 25.0 : 10.0
+                        let stallTimeout: TimeInterval = stream.isTorrent ? 25.0 : 14.0
                         if stallDuration >= stallTimeout {
                             print("[PlayerManager] ⏱️ Stream stall detected (zero bytes for \(Int(stallDuration))s). Auto-advancing to standby fallback...")
                             self.advanceToStandbyFallback()
@@ -2383,13 +2386,17 @@ class PlayerManager: ObservableObject {
         fallbackThrottleTask?.cancel()
         fallbackThrottleTask = nil
 
-        // Resume continuity: fallbacks previously restarted from 0:00. Carry the
-        // freshest known position (0.5s-cadence mpv sample, else the 5s progress
-        // high-water mark) so a mid-playback source switch continues seamlessly.
-        let freshestPos = lastStartupTimePos > 0.5 ? lastStartupTimePos : sessionMaxPosition
-        if freshestPos > 0.5 {
-            print("[PlayerManager] ⏩ Fallback will resume from \(Int(freshestPos))s (previously restarted from 0:00)")
-            pendingResumeTime = freshestPos
+        // Resume continuity: fallbacks carry the freshest known position for a mid-playback
+        // source switch. During startup phase (before playback actually started), fallbacks
+        // must NEVER pull from a prior episode's sessionMaxPosition.
+        let currentEpKey = "\(currentItem?.id ?? ""):\(currentSeason ?? -1):\(currentEpisode ?? -1)"
+        let isSameEpisode = (currentTrackingEpisodeKey == currentEpKey)
+        if hasPlaybackStarted && isSameEpisode {
+            let freshestPos = lastStartupTimePos > 0.5 ? lastStartupTimePos : sessionMaxPosition
+            if freshestPos > 0.5 {
+                print("[PlayerManager] ⏩ Fallback will resume from \(Int(freshestPos))s (mid-playback)")
+                pendingResumeTime = freshestPos
+            }
         }
 
         // Skip sources already proven dead this session (failed probe / dead
@@ -2688,7 +2695,7 @@ class PlayerManager: ObservableObject {
         if autoplay && !cancelled && !pickerVisible {
             // Play explicitly with resolved values (never recompute-and-diverge).
             let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage
-            self.play(item, season: next.season, episode: next.episode, episodeImage: nextImage, isAutoAdvance: true)
+            self.play(item, season: next.season, episode: next.episode, episodeImage: nextImage, isAutoAdvance: true, startFromBeginning: true)
             return
         }
         if let stored = UserDataService.shared.getHistoryItem(for: item),
@@ -2957,17 +2964,28 @@ class PlayerManager: ObservableObject {
         }
     }
     
-    func playNextEpisode() {
+    func playNextEpisode(targetSeason: Int? = nil, targetEpisode: Int? = nil) {
         // Air-gated: never offer or auto-play an episode known to be unaired.
-        guard let next = nextReleasedEpisodeInfo, let item = currentItem else { return }
-        print("[PlayerManager] ⚡ Playing Next Episode: S\(next.season):E\(next.episode)")
+        guard let item = currentItem else { return }
+        let nextS: Int
+        let nextE: Int
+        if let ts = targetSeason, let te = targetEpisode {
+            nextS = ts
+            nextE = te
+        } else if let next = nextReleasedEpisodeInfo {
+            nextS = next.season
+            nextE = next.episode
+        } else {
+            return
+        }
+        print("[PlayerManager] ⚡ Playing Next Episode: S\(nextS):E\(nextE)")
         
         let nextImage = self.nextEpisode?.stillURL ?? self.currentEpisodeImage
         
         self.play(
             item,
-            season: next.season,
-            episode: next.episode,
+            season: nextS,
+            episode: nextE,
             episodeImage: nextImage,
             isAutoAdvance: true,
             startFromBeginning: true
