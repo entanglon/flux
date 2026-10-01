@@ -11,7 +11,7 @@
 [![Engine](https://img.shields.io/badge/player-libmpv-purple?style=flat-square)](https://mpv.io)
 [![Languages](https://img.shields.io/badge/languages-10%20Supported-brightgreen?style=flat-square)](flux/Services/LanguageManager.swift)
 [![Updates](https://img.shields.io/badge/OTA%20Updates-Sparkle%202-green?style=flat-square)](https://sparkle-project.org)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-blue?style=flat-square)](LICENSE)
 [![Beta](https://img.shields.io/badge/status-beta-yellow?style=flat-square)](https://github.com/entanglon/flux/releases)
 
 *Crafted by [Entanglon](https://entanglon.pages.dev)*
@@ -163,4 +163,6 @@ Flux is a media player frontend designed to organize, display, and play media fi
 
 ## 📄 License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
+Flux is free and open-source software distributed under the **GNU General Public License v3.0 (GPLv3)**. See [LICENSE](LICENSE) for details.
+
+The "Flux" name, logos, and artwork are trademarks and intellectual property of Entanglon (reserved under GPLv3 Section 7(e)).
