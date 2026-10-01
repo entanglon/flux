@@ -425,9 +425,9 @@ struct UserDataServiceTests {
         AuthManager.shared.signOut()
         #expect(ProfileManager.shared.profiles.isEmpty)
 
-        ProfileManager.shared.ensureDefaultProfile(name: "Zainul")
+        ProfileManager.shared.ensureDefaultProfile(name: "PrimaryUser")
         #expect(ProfileManager.shared.currentProfile != nil)
-        #expect(ProfileManager.shared.currentProfile?.name == "Zainul")
+        #expect(ProfileManager.shared.currentProfile?.name == "PrimaryUser")
         #expect(ProfileManager.shared.profiles.count == 2)
         #expect(ProfileManager.shared.profiles.contains(where: { $0.isKids }))
 
