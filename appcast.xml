@@ -1,33 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
     <channel>
         <title>Flux Updates</title>
         <link>https://raw.githubusercontent.com/entanglon/flux/main/appcast.xml</link>
         <description>Over-the-air updates for Flux for macOS by Entanglon.</description>
         <language>en</language>
-        <!-- Flagship: macOS 26+ (Native Apple Liquid Glass) -->
+        <!-- Universal: macOS 15.0+ through macOS 26+ -->
         <item>
-            <title>Flux 1.0 (macOS 26+ Liquid Glass)</title>
-            <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <pubDate>Sun, 13 Sep 2026 09:20:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux-1.0.0-macOS26+.dmg"
-                       length="45813524"
-                       sparkle:version="1"
-                       sparkle:shortVersionString="1.0"
-                       type="application/octet-stream" />
-        </item>
-        <!-- Legacy: macOS 15+ (Translucent Vibrancy Material Fallback) -->
-        <item>
-            <title>Flux 1.0 (macOS 15 Legacy)</title>
+            <title>Flux 1.0 (Universal macOS Release)</title>
             <sparkle:releaseNotesLink>https://github.com/entanglon/flux/releases/tag/v1.0.0</sparkle:releaseNotesLink>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <pubDate>Sun, 13 Sep 2026 09:20:00 +0000</pubDate>
-            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux-1.0.0-macOS15+.dmg"
-                       length="45962338"
-                       sparkle:version="1"
-                       sparkle:shortVersionString="1.0"
-                       type="application/octet-stream" />
+            <enclosure url="https://github.com/entanglon/flux/releases/download/v1.0.0/Flux-1.0.0.dmg" length="45813524" sparkle:version="1" sparkle:shortVersionString="1.0" type="application/octet-stream"></enclosure>
         </item>
     </channel>
-</rss>
+</rss><!-- sparkle-signatures:
+edSignature: fThASAui52z8XoBUPpyJHbkFYLKZPzq0TP3LJ4m+SIRL6WRTUoE18Bi4sTLcQlaTtTQNW3Q8s49ATqL5/NlLDA==
+length: 1332
+-->

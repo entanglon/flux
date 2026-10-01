@@ -2,10 +2,9 @@
 set -euo pipefail
 
 # ==============================================================================
-# Flux Dual-Release Build & Package Script
+# Flux Universal Release Build & Package Script
 # Produces:
-#   1. Flux.dmg / Flux-beta.dmg  -> macOS 26.0+ (Native Apple Liquid Glass)
-#   2. Flux-macOS15.dmg / Flux-beta-macOS15.dmg  -> macOS 15.0+ (Vibrancy Fallback)
+#   Flux.dmg / Flux-beta.dmg -> Universal macOS 15.0+ / 26+ binary
 # ==============================================================================
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,67 +36,15 @@ fi
 echo "==> Detected: $DISPLAY_NAME ($BUNDLE_ID) v$VERSION"
 echo "==> DMG prefix: $DMG_PREFIX"
 
-build_macos26() {
-  echo "==> [1/2] Building $APP_NAME (macOS 26+ Liquid Glass Edition)..."
-  local SYMROOT="$BUILD_ROOT/macos26"
+build_release() {
+  echo "==> Building $APP_NAME Universal Release (macOS 15.0+ / 26+)..."
+  local SYMROOT="$BUILD_ROOT/release"
   rm -rf "$SYMROOT"
   
   xcodebuild -scheme flux \
     -configuration Release \
     -destination 'platform=macOS' \
-    MACOSX_DEPLOYMENT_TARGET=26.1 \
-    CODE_SIGN_ALLOWED=YES \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGN_REQUIRED=NO \
-    CODE_SIGN_ENTITLEMENTS="" \
-    SYMROOT="$SYMROOT" \
-    build
-
-  local APP_PATH="$SYMROOT/Release/flux.app"
-  local STAGING_DIR="/tmp/flux-dmg-staging-26"
-  local OUTPUT_DMG="$PROJECT_ROOT/${DMG_PREFIX}-${VERSION}-macOS26+.dmg"
-
-  echo "==> Packaging $OUTPUT_DMG..."
-  rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
-  mkdir -p "$STAGING_DIR"
-  cp -R "$APP_PATH" "$STAGING_DIR/$APP_NAME.app"
-
-  # Set the correct app name
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $APP_NAME" "$STAGING_DIR/$APP_NAME.app/Contents/Info.plist"
-  xattr -cr "$STAGING_DIR/$APP_NAME.app"
-  codesign --force --deep --options runtime --entitlements "$PROJECT_ROOT/flux/flux.entitlements" --sign - "$STAGING_DIR/$APP_NAME.app"
-
-  # NOTE: Removed auto-install to /Applications for OTA testing
-  # Use: cp -R "$STAGING_DIR/$APP_NAME.app" "/Applications/$APP_NAME.app" to install manually
-
-  "$CREATE_DMG" \
-    --volname "$VOL_NAME" \
-    --volicon "$STAGING_DIR/$APP_NAME.app/Contents/Resources/AppIcon.icns" \
-    --window-pos 200 120 \
-    --window-size 540 380 \
-    --icon-size 128 \
-    --icon "$APP_NAME.app" 140 180 \
-    --hide-extension "$APP_NAME.app" \
-    --app-drop-link 400 180 \
-    --overwrite \
-    "$OUTPUT_DMG" \
-    "$STAGING_DIR"
-
-  rm -rf "$STAGING_DIR"
-  echo "==> Done: $OUTPUT_DMG"
-}
-
-build_macos15() {
-  echo "==> [2/2] Building $APP_NAME Legacy (macOS 15+ Edition)..."
-  local SYMROOT="$BUILD_ROOT/macos15"
-  rm -rf "$SYMROOT"
-
-  xcodebuild -scheme flux \
-    -configuration Release \
-    -destination 'platform=macOS' \
     MACOSX_DEPLOYMENT_TARGET=15.0 \
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS="FLUX_LEGACY" \
     CODE_SIGN_ALLOWED=YES \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGN_REQUIRED=NO \
@@ -106,8 +53,8 @@ build_macos15() {
     build
 
   local APP_PATH="$SYMROOT/Release/flux.app"
-  local STAGING_DIR="/tmp/flux-dmg-staging-15"
-  local OUTPUT_DMG="$PROJECT_ROOT/${DMG_PREFIX}-${VERSION}-macOS15+.dmg"
+  local STAGING_DIR="/tmp/flux-dmg-staging"
+  local OUTPUT_DMG="$PROJECT_ROOT/${DMG_PREFIX}-${VERSION}.dmg"
 
   echo "==> Packaging $OUTPUT_DMG..."
   rm -rf "$STAGING_DIR" "$OUTPUT_DMG"
@@ -137,29 +84,12 @@ build_macos15() {
   echo "==> Done: $OUTPUT_DMG"
 }
 
-MODE="${1:---all}"
-
-case "$MODE" in
-  --macos26)
-    build_macos26
-    ;;
-  --macos15|--legacy)
-    build_macos15
-    ;;
-  --all)
-    build_macos26
-    build_macos15
-    ;;
-  *)
-    echo "Usage: $0 [--macos26 | --macos15 | --all]"
-    exit 1
-    ;;
-esac
+build_release
 
 echo ""
 echo "=================================================="
 echo "Artifacts Built Successfully:"
-for DMG in "$PROJECT_ROOT"/${DMG_PREFIX}-${VERSION}-macOS*.dmg; do
+for DMG in "$PROJECT_ROOT"/${DMG_PREFIX}-${VERSION}*.dmg; do
   if [ -f "$DMG" ]; then
     echo "  - $(basename "$DMG") ($(du -h "$DMG" | cut -f1))"
     shasum -a 256 "$DMG"

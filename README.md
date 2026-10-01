@@ -35,12 +35,8 @@
 ### Direct Download
 Grab the latest **beta release** (`.dmg`) from the [Releases](https://github.com/entanglon/flux/releases) page. Drag `Flux.app` to your `/Applications` folder.
 
-### 📦 Which File Should I Download?
-
-| Asset | Target OS | Description |
-| :--- | :--- | :--- |
-| **`Flux-1.0.0-macOS26+.dmg`** | **macOS 26.1+** | Flagship edition featuring modern Liquid Glass UI. |
-| **`Flux-1.0.0-macOS15+.dmg`** | **macOS 15.0+** | Legacy vibrancy fallback edition for macOS Sequoia and earlier. |
+### 📦 Universal Compatibility
+A single universal binary (`Flux-*.dmg`) runs across all supported Macs (macOS 15.0+ through macOS 26+). Flux dynamically engages Apple's native Liquid Glass on macOS 26+ while providing seamless vibrancy material rendering on macOS 15.
 
 ### First Launch on macOS (Gatekeeper)
 Because Flux is distributed independently outside the Mac App Store without an Apple Developer ID notarization certificate, macOS Gatekeeper may present a security alert on first launch (*"Flux cannot be opened because Apple cannot check it for malicious software"*).
