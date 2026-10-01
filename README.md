@@ -154,10 +154,12 @@ If you encounter any issues, please report them on the [Issue Tracker](https://g
 
 ## ⚖️ Legal & Disclaimer
 
-Flux is a media player frontend designed to organize, display, and play media files and streams provided by the user. 
+Flux is an open-source media player frontend designed to organize, display, and play media files and streams provided by the user. 
 - Flux does **not** host, index, scrape, cache, or distribute any copyrighted media or pirated content.
 - Third-party addons are installed solely at the discretion and direction of the end user.
 - Flux is distributed in good faith under the principle of substantial non-infringing use.
+
+For the full legal notice and third-party terms, see [DISCLAIMER.md](DISCLAIMER.md).
 
 ---
 
